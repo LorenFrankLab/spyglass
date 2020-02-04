@@ -6,7 +6,7 @@ setuptools.setup(
     author="Eric Denovellis",
     author_email="eric.denovellis@ucsf.edu",
     description="NWB helper code for Loren Frank's lab at UCSF",
-    url="https://bitbucket.org/franklab/franklabnwb",
+    url="https://github.com/LorenFrankLab/nwb_datajoint",
     packages=setuptools.find_packages(),
     install_requires=[
         'pynwb',
