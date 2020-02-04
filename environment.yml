@@ -1,0 +1,27 @@
+name: nwb_datajoint
+channels:
+- defaults
+- conda-forge
+- edeno
+- franklab
+dependencies:
+- "python>=3.6"
+- pynwb
+- matplotlib
+- pandas
+- networkx
+- datajoint
+- python-dateutil
+- ipywidgets
+- nodejs
+- jupyter
+- jupyterlab
+- nb_conda
+- setuptools
+- pytest
+- pytest-cov
+- coveralls
+- pip
+- pip:
+  - python-intervals
+  - filterframework_to_nwb
