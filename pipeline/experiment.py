@@ -118,6 +118,7 @@ class ProbeInsertion(dj.Manual):
 @schema
 class LFP(dj.Imported):
     definition = """
+    -> Session
     -> ProbeInsertion
     ---
     lfp_timestamps          : blob@lfp_store
