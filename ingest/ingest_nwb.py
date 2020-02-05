@@ -17,18 +17,19 @@ def main():
             load_namespaces=True) as io:
         nwbfile = io.read()
 
+        # Experimenter Info
         experiment.Lab.insert1(
             (nwbfile.lab, nwbfile.institution), skip_duplicates=True)
         experiment.Experimenter.insert1(
             (nwbfile.experimenter), skip_duplicates=True)
 
+        # Subject Info
         subj = nwbfile.subject.fields
-
         subj['subject_description'] = subj.pop('description')
         subj.pop('weight')
-
         experiment.Subject.insert1(subj)
 
+        # Session Info
         experiment.Session.insert1(
             (nwbfile.subject.subject_id,
              nwbfile.session_id,
@@ -36,6 +37,7 @@ def main():
              nwbfile.experiment_description)
         )
 
+        # Probe Info
         probe_insertions = [
             dict(subject_id=nwbfile.subject.subject_id,
                  session_id=nwbfile.session_id,
@@ -45,6 +47,7 @@ def main():
         experiment.ProbeInsertion.insert(
             probe_insertions, skip_duplicates=True)
 
+        # LFP Info
         lfp_dict = nwbfile.acquisition['LFP']['electrical_series'].fields
 
         lfp_entry = {f'lfp_{key_name}': value
@@ -58,6 +61,7 @@ def main():
                                    allow_direct_insert=True,
                                    skip_duplicates=True)
 
+        # LFP data
         lfp_data = np.array(lfp_dict['data'])
         lfp_electrode_table = (
             nwbfile.acquisition['LFP']['electrical_series']
