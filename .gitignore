@@ -135,3 +135,5 @@ dmypy.json
 
 *.nwb
 *.DS_Store
+
+temp_nwb/*
