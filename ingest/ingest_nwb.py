@@ -40,7 +40,7 @@ def main():
             dict(subject_id=nwbfile.subject.subject_id,
                  session_id=nwbfile.session_id,
                  insertion_number=int(series['group_name']))
-            for id, series in nwbfile.ec_electrodes.to_dataframe().iterrows()]
+            for _, series in nwbfile.ec_electrodes.to_dataframe().iterrows()]
 
         experiment.ProbeInsertion.insert(
             probe_insertions, skip_duplicates=True)
