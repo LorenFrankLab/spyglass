@@ -13,7 +13,7 @@
     "display.width": 14,
     "display.show_tuple_count": true,
     "database.use_tls": null,
-    "enable_python_native_blobs": false,
+    "enable_python_native_blobs": true,
     "database.prefix": null,
     "stores": {
         "lfp_store": {
