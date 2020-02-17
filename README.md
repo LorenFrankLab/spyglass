@@ -13,4 +13,4 @@
 
 Note that there are two branches:
 + `master`: datajoint and nwb work using the path file store.
-+ `object-ids`: datajoint and nwb work using object ids.
++ `use-object-ids`: datajoint and nwb work using object ids.
