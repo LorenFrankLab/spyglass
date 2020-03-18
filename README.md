@@ -11,7 +11,7 @@
 7. Start jupyter lab ```jupyter lab```
 8. open `notebooks/run_pipeline.ipynb`
 
-Note that there are two branches:
+Note that there are three branches:
 + `master`: datajoint and nwb work using the path file store.
 + `use-object-ids`: datajoint and nwb work using object ids.
 + `develop`: Loren's datajoint code.
