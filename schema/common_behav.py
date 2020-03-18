@@ -35,7 +35,7 @@ class Position(dj.Imported):
 
         except:
             print('Error in Position: no Behavior module found in {}\n'.format(
-                nwb_file_name))
+                  key['nwb_file_name']))
             return
         key['nwb_object_id'] = -1
         # this is created when we populate the Task schema
@@ -68,7 +68,7 @@ class HeadDir(dj.Imported):
 
         except:
             print('Error in HeadDir: no Behavior module found in {}\n'.format(
-                nwb_file_name))
+                  key['nwb_file_name']))
             return
         key['nwb_object_id'] = -1
         # this is created when we populate the Task schema
@@ -101,7 +101,7 @@ class Speed(dj.Imported):
 
         except:
             print('Error in Speed: no Behavior module found in {}\n'.format(
-                nwb_file_name))
+                  key['nwb_file_name']))
             return
         key['nwb_object_id'] = -1
         # this is created when we populate the Task schema
@@ -134,7 +134,7 @@ class LinPos(dj.Imported):
 
         except:
             print('Error in LinPos: no Behavior module found in {}\n'.format(
-                nwb_file_name))
+                  key['nwb_file_name']))
             return
         key['nwb_object_id'] = -1
         # this is created when we populate the Task schema

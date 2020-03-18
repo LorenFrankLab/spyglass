@@ -65,7 +65,8 @@ class TaskEpoch(dj.Imported):
         try:
             apparatus_mod = nwbf.get_processing_module("Apparatus")
         except:
-            print('No Apparatus module found in {}\n'.format(nwb_file_name))
+            print('No Apparatus module found in {}\n'.format(
+                key['nwb_file_name']))
             return
 
         epochs = nwbf.epochs.to_dataframe()
