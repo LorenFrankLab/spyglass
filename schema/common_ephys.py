@@ -1,47 +1,43 @@
-import datajoint as dj
-
-#import common_device
-import common_session 
-import common_region 
-import common_interval 
-import pynwb
 import numpy as np
+import pynwb
 
-#[device,session,region,device,interval]
+import common_interval
+import common_region
+import common_session
+import datajoint as dj
 
 schema = dj.schema('common_ephys')
 
 
 @schema
 class ElectrodeConfig(dj.Imported):
-    definition = """                                                                             
-    -> common_session.Session                                                                         
+    definition = """
+    -> common_session.Session
     """
 
-
     class ElectrodeGroup(dj.Part):
-        definition = """                                                                         
-        # grouping of electrodes corresponding to a physical probe                                       
-        -> master                                                                                
-        electrode_group_name: varchar(80)  # electrode group name from NWBFile                   
-        ---                                                                                      
-        -> common_region.BrainRegion                                                                    
-        -> common_device.Device                                                                      
+        definition = """
+        # grouping of electrodes corresponding to a physical probe
+        -> master
+        electrode_group_name: varchar(80)  # electrode group name from NWBFile
+        ---
+        -> common_region.BrainRegion
+        -> common_device.Device
         description: varchar(80) # description of electrode group
-        target_hemisphere: enum('Right','Left')                               
+        target_hemisphere: enum('Right','Left')
         """
 
     class Electrode(dj.Part):
-        definition = """                                                                         
-        -> master.ElectrodeGroup                                                                 
-        electrode_id: int               # the unique number for this electrode  
+        definition = """
+        -> master.ElectrodeGroup
+        electrode_id: int               # the unique number for this electrode
         label='': varchar(80)           # unique label for each contact
-        ---                                                                                      
-        -> common_device.Probe.Electrode                                                                   
-        -> common_region.BrainRegion                                                                            
-        x=NULL: float                   # the x coordinate of the electrode position in the brain   
-        y=NULL: float                   # the y coordinate of the electrode position in the brain   
-        z=NULL: float                   # the z coordinate of the electrode position in the brain   
+        ---
+        -> common_device.Probe.Electrode
+        -> common_region.BrainRegion
+        x=NULL: float                   # the x coordinate of the electrode position in the brain
+        y=NULL: float                   # the y coordinate of the electrode position in the brain
+        z=NULL: float                   # the z coordinate of the electrode position in the brain
         filtering: varchar(200)         # description of the signal filtering
         impedance=null: float                # electrode impedance
         bad_chan: enum("True","False")       # if electrode is 'good' or 'bad' as observed during recording
@@ -52,14 +48,15 @@ class ElectrodeConfig(dj.Imported):
         """
 
     def make(self, key):
-        #insert the session identifier (the name of the nwb file)
+        # insert the session identifier (the name of the nwb file)
         self.insert1(key)
         # now open the NWB file and fill in the groups
         try:
             io = pynwb.NWBHDF5IO(key['nwb_file_name'], mode='r')
             nwbf = io.read()
         except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(key['nwb_file_name']))
+            print('Error: nwbfile {} cannot be opened for reading\n'.format(
+                key['nwb_file_name']))
             return
 
         egroups = list(nwbf.electrode_groups.keys())
@@ -87,8 +84,9 @@ class ElectrodeConfig(dj.Imported):
             # get the device name
             devices = list(nwbf.devices.keys())
             for d in devices:
-                 if nwbf.devices[d] == electrode_group.device:
-                    eg_dict['device_name'] = d # this will match the entry in the device schema
+                if nwbf.devices[d] == electrode_group.device:
+                    # this will match the entry in the device schema
+                    eg_dict['device_name'] = d
                     break
             ElectrodeConfig.ElectrodeGroup.insert1(eg_dict)
 
@@ -101,7 +99,7 @@ class ElectrodeConfig(dj.Imported):
             elect_dict['electrode_group_name'] = electrodes.iloc[elect]['group_name']
             elect_dict['electrode_id'] = elect
 
-            #FIX to get electrode information properly from input or NWB file. Label may not exist, so we should
+            # FIX to get electrode information properly from input or NWB file. Label may not exist, so we should
             # check that and use and empty string if not.
             elect_dict['label'] = ''
             elect_dict['probe_type'] = 'tetrode'
@@ -122,13 +120,12 @@ class ElectrodeConfig(dj.Imported):
 
             elect_dict['filtering'] = electrodes.iloc[elect]['filtering']
             elect_dict['impedance'] = electrodes.iloc[elect]['imp']
-            #FIX so we can have an NAN value
-            #if elect_dict['impedance'] == nan:
+            # FIX so we can have an NAN value
+            # if elect_dict['impedance'] == nan:
             elect_dict['impedance'] = -1
             ElectrodeConfig.Electrode.insert1(elect_dict)
-        #close the file
+        # close the file
         io.close()
-
 
 
 @schema
@@ -140,7 +137,7 @@ class Units(dj.Imported):
     -> ElectrodeConfig.ElectrodeGroup
     -> common_interval.IntervalList
     cluster_name: varchar(80)   # the name for this cluster (e.g. t5 c4)
-    nwb_object_id: int      # the object_id for the spikes; once the object is loaded, use obj.get_unit_spike_times 
+    nwb_object_id: int      # the object_id for the spikes; once the object is loaded, use obj.get_unit_spike_times
     """
 
     # should this use the file pointer instead?
@@ -152,7 +149,8 @@ class Units(dj.Imported):
             io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
             nwbf = io.read()
         except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(nwb_file_name))
+            print('Error: nwbfile {} cannot be opened for reading\n'.format(
+                nwb_file_name))
             return
 
         interval_list_dict = dict()
@@ -161,9 +159,12 @@ class Units(dj.Imported):
         units = nwbf.units.to_dataframe()
         for unum in range(len(units)):
             # for each unit we first need to an an interval list for this unit
-            interval_list_dict['interval_name'] = 'unit {} interval list'.format(unum)
-            interval_list_dict['valid_times'] = np.asarray(units.iloc[unum]['obs_intervals'])
-            common_interval.IntervalList.insert1(interval_list_dict, skip_duplicates=True)
+            interval_list_dict['interval_name'] = 'unit {} interval list'.format(
+                unum)
+            interval_list_dict['valid_times'] = np.asarray(
+                units.iloc[unum]['obs_intervals'])
+            common_interval.IntervalList.insert1(
+                interval_list_dict, skip_duplicates=True)
             try:
                 key['unit_id'] = units.iloc[unum]['id']
             except:
@@ -174,8 +175,9 @@ class Units(dj.Imported):
             key['interval_name'] = interval_list_dict['interval_name']
             key['cluster_name'] = units.iloc[unum]['cluster_name']
             #key['spike_times'] = np.asarray(units.iloc[unum]['spike_times'])
-            key['nwb_object_id'] = -1 #FIX
+            key['nwb_object_id'] = -1  # FIX
             self.insert1(key)
+
 
 @schema
 class Raw(dj.Imported):
@@ -191,6 +193,7 @@ class Raw(dj.Imported):
     description: varchar(80)
     """
 
+
 @schema
 class LFP(dj.Computed):
     definition = """
@@ -203,6 +206,7 @@ class LFP(dj.Computed):
     sampling_rate: float # the sampling rate, in HZ
     """
 
+
 @schema
 class DecompSeries(dj.Computed):
     definition = """
@@ -211,9 +215,9 @@ class DecompSeries(dj.Computed):
     -> ElectrodeConfig.Electrode
     ---
     -> common_interval.IntervalList
-    nwb_object_id: int  # the NWB object ID for loading this object from the file   
+    nwb_object_id: int  # the NWB object ID for loading this object from the file
     sampling_rate: float                                # Sampling rate, in Hz
     metric: enum("phase","amplitude","power")  # Metric represented in data
     comments: varchar(80)
-    description: varchar(80)    
+    description: varchar(80)
     """

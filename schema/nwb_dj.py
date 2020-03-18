@@ -1,21 +1,19 @@
 # pipeline to populate a schema from an NWB file
 
-import datajoint as dj
-import common_session
-import common_subject
-import common_ephys
-import common_device
-import common_lab
-import common_task
-import common_behav
 import pynwb
 
+import common_behav
+import common_device
+import common_ephys
+import common_lab
+import common_session
+import common_subject
+import common_task
+import datajoint as dj
 import franklabnwb
 
-
-import numpy as np
-
 conn = dj.conn()
+
 
 def NWBPopulate(file_names):
 
@@ -28,7 +26,8 @@ def NWBPopulate(file_names):
             io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
             nwbf = io.read()
         except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(nwb_file_name))
+            print('Error: nwbfile {} cannot be opened for reading\n'.format(
+                nwb_file_name))
             print(io.read())
             continue
 
@@ -42,17 +41,17 @@ def NWBPopulate(file_names):
         """
         NWBFile
         """
-        if {'nwb_file_name' : nwb_file_name} not in common_session.Nwbfile():
-            common_session.Nwbfile.insert1(dict(nwb_file_name = nwb_file_name))
+        if {'nwb_file_name': nwb_file_name} not in common_session.Nwbfile():
+            common_session.Nwbfile.insert1(dict(nwb_file_name=nwb_file_name))
 
         """
         Subject
-        
-        ADD date_of_birth when NWB bug fixed 
+
+        ADD date_of_birth when NWB bug fixed
         """
         sub = nwbf.subject
         # check to see if the subject has been added to the table aready
-        if {'subject_id':sub.subject_id} not in common_subject.Subject():
+        if {'subject_id': sub.subject_id} not in common_subject.Subject():
             subject_dict = dict()
             subject_dict['subject_id'] = sub.subject_id
             if sub.age == None:
@@ -71,9 +70,9 @@ def NWBPopulate(file_names):
         devices = list(nwbf.devices.keys())
         device_dict = dict()
         for d in devices:
-            if {'device_name' : d} not in common_device.Device():
+            if {'device_name': d} not in common_device.Device():
                 # FIX: we need to get the right fields in the NWB device for this schema
-                #device.Device.insert1(dict(device_name=d))
+                # device.Device.insert1(dict(device_name=d))
                 device_dict['device_name'] = d
                 device_dict['system'] = 'SpikeGadgets'
                 device_dict['amplifier'] = 'Other'
@@ -84,17 +83,18 @@ def NWBPopulate(file_names):
         Institution
         """
         if {'institution_name': nwbf.institution} not in common_lab.Institution():
-            common_lab.Institution.insert1(dict(institution_name=nwbf.institution))
+            common_lab.Institution.insert1(
+                dict(institution_name=nwbf.institution))
 
         """
         Lab
         """
-        if {'lab_name':nwbf.lab} not in common_lab.Lab():
+        if {'lab_name': nwbf.lab} not in common_lab.Lab():
             common_lab.Lab.insert1(dict(lab_name=nwbf.lab))
 
         """
-        Task and Apparatus Information structures. 
-        These hold general information not specific to any one epoch. Specific information is added in task.Task 
+        Task and Apparatus Information structures.
+        These hold general information not specific to any one epoch. Specific information is added in task.Task
         """
         task_dict = dict()
         task_mod = []
@@ -140,7 +140,7 @@ def NWBPopulate(file_names):
 
         # populate the electrode configuration table for this session
         common_ephys.ElectrodeConfig.populate()
-        #ephys.Units.populate()
+        # ephys.Units.populate()
 
         # populate the behavioral variables. Note that this has to be done after task.TaskEpoch
         common_behav.Position.populate()
@@ -149,8 +149,3 @@ def NWBPopulate(file_names):
         common_behav.LinPos.populate()
 
         io.close()
-
-
-
-
-

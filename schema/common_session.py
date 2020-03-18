@@ -1,14 +1,15 @@
-import datajoint as dj
-import common_lab
-import common_subject
-import common_device
-
 # we need to include pynwb and the franklab NWB namespace to be able to open the file
 import pynwb
+
+import common_device
+import common_lab
+import common_subject
+import datajoint as dj
 
 [common_lab, common_subject, common_device]
 
 schema = dj.schema("common_session")
+
 
 @schema
 class Nwbfile(dj.Manual):
@@ -44,7 +45,8 @@ class Session(dj.Imported):
             io = pynwb.NWBHDF5IO(key['nwb_file_name'], mode='r')
             nwbf = io.read()
         except:
-            print('Error in Session: nwbfile {} cannot be opened for reading\n'.format(key['nwb_file_name']))
+            print('Error in Session: nwbfile {} cannot be opened for reading\n'.format(
+                key['nwb_file_name']))
             print(io.read())
             return
 
@@ -62,14 +64,17 @@ class Session(dj.Imported):
         # insert the devices
         devices = list(nwbf.devices.keys())
         for d in devices:
-            Session.DataAcqDevice.insert1(dict(nwb_file_name=key['nwb_file_name'], device_name=d), skip_duplicates=True)
+            Session.DataAcqDevice.insert1(
+                dict(nwb_file_name=key['nwb_file_name'], device_name=d), skip_duplicates=True)
         io.close()
+
 
 @schema
 class ExperimenterList(dj.Imported):
     definition = """
     -> Session
     """
+
     class Experimenter(dj.Part):
         definition = """
         -> ExperimenterList
@@ -82,7 +87,8 @@ class ExperimenterList(dj.Imported):
             io = pynwb.NWBHDF5IO(key['nwb_file_name'], mode='r')
             nwbf = io.read()
         except:
-            print('Error in Experimenter: nwbfile {} cannot be opened for reading\n'.format(key['nwb_file_name']))
+            print('Error in Experimenter: nwbfile {} cannot be opened for reading\n'.format(
+                key['nwb_file_name']))
             print(io.read())
             return
 
@@ -96,12 +102,11 @@ class ExperimenterList(dj.Imported):
                     labmember_dict['first_name'] = names[0]
                     labmember_dict['last_name'] = names[1]
                 else:
-                    print('Warning: experimenter {} does not seem to have a first and last name'.format(e))
+                    print(
+                        'Warning: experimenter {} does not seem to have a first and last name'.format(e))
                     labmember_dict['first_name'] = 'unknown'
                     labmember_dict['last_name'] = 'unknown'
                 common_lab.LabMember.insert1(labmember_dict)
             # now insert the experimenter, which is a combination of the nwbfile and the name
             key['lab_member_name'] = e
             ExperimenterList.Experimenter.insert1(key)
-
-
