@@ -54,7 +54,7 @@ def NWBPopulate(file_names):
         if {'subject_id': sub.subject_id} not in common_subject.Subject():
             subject_dict = dict()
             subject_dict['subject_id'] = sub.subject_id
-            if sub.age == None:
+            if sub.age is None:
                 subject_dict['age'] = 'unknown'
 
             subject_dict['description'] = sub.description
