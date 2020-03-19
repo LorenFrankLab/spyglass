@@ -2,8 +2,9 @@ import datajoint as dj
 
 #import common_device
 import common_session 
-import common_region 
-import common_interval 
+import common_region
+import common_interval
+import common_device
 import pynwb
 import numpy as np
 
@@ -44,7 +45,7 @@ class ElectrodeConfig(dj.Imported):
         z=NULL: float                   # the z coordinate of the electrode position in the brain   
         filtering: varchar(200)         # description of the signal filtering
         impedance=null: float                # electrode impedance
-        bad_chan: enum("True","False")       # if electrode is 'good' or 'bad' as observed during recording
+        good_chan: enum("True","False")      # if electrode is 'good' or 'bad' as observed during recording
         x_warped=NULL: float                 # x coordinate of electrode position warped to common template brain
         y_warped=NULL: float                 # y coordinate of electrode position warped to common template brain
         z_warped=NULL: float                 # z coordinate of electrode position warped to common template brain

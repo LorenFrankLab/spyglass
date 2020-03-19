@@ -5,7 +5,6 @@ import common_device as device
 schema = dj.schema('franklab')
 
 def add_probes():
-    print('testing')
     probetype_dict = dict()
     # add a tetrode probe type
     probetype_dict['probe_type'] = 'tetrode'
