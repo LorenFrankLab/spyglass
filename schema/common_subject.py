@@ -1,5 +1,6 @@
-#Test of automatic datajoint schema generation from NWB file
+# Test of automatic datajoint schema generation from NWB file
 import datajoint as dj
+
 schema = dj.schema("common_subject")
 
 

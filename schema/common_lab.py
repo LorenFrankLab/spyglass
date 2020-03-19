@@ -24,10 +24,7 @@ class Institution(dj.Manual):
 
 @schema
 class Lab(dj.Manual):
-     definition = """
+    definition = """
     lab_name: varchar(80)
     ---
     """
-
-
-

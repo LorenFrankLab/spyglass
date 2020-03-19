@@ -1,9 +1,9 @@
-import datajoint as dj
 import common_session
+import datajoint as dj
 
 schema = dj.schema('common_interval')
 
-#define the schema for intervals
+# define the schema for intervals
 @schema
 class IntervalList(dj.Manual):
     definition = """
