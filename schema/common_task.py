@@ -5,22 +5,48 @@ import pynwb
 import common_interval
 import common_session
 import datajoint as dj
-import franklabnwb
+import franklab_nwb_extensions.fl_extension as fl_extension
 
 schema = dj.schema("common_task", locals())
 [common_session, common_interval]
 
 
 @schema
-class ApparatusInfo(dj.Manual):
+class Apparatus(dj.Manual):
     definition = """
      apparatus_name: varchar(80)
      """
-    # If we're going to use we will need to add specific apparatus information (cad files?)
 
+    def insert_from_nwb(self, nwb_file_name):
+        try:
+            io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+            nwbf = io.read()
+        except:
+            print('Error: nwbfile {} cannot be opened for reading\n'.format(
+                nwb_file_name))
+            print(io.read())
+            io.close()
+            return
+        # If we're going to use we will need to add specific apparatus information (cad files?)
+        apparatus_dict = dict()
+        apparatus_mod = []
+        try:
+            apparatus_mod = nwbf.get_processing_module("Apparatus")
+        except:
+            print('No Apparatus module found in {}\n'.format(nwb_file_name))
+        if apparatus_mod != []:
+            for d in apparatus_mod.data_interfaces:
+                if type(apparatus_mod[d]) == franklabnwb.fl_extension.Apparatus:
+                    # see this Apparaus if is already in the database
+                    if {'apparatus_name': d} not in common_task.ApparatusInfo():
+                        apparatus_dict['apparatus_name'] = d
+                        common_task.ApparatusInfo.insert1(apparatus_dict)
+                    else:
+                        print('Skipping apparatus {}; already in schema\n'.format(d))
+        io.close()
 
 @schema
-class TaskInfo(dj.Manual):
+class Task(dj.Manual):
     definition = """
      task_name: varchar(80)
      ---
@@ -28,12 +54,37 @@ class TaskInfo(dj.Manual):
      task_subtype='': varchar(80)
      """
 
+    def insert_from_nwb(self, nwb_file_name):
+        try:
+            io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+            nwbf = io.read()
+        except:
+            print('Error: nwbfile {} cannot be opened for reading\n'.format(
+                nwb_file_name))
+            print(io.read())
+            io.close()
+            return
 
-@schema
-class ApparatusInfo(dj.Manual):
-    definition = """
-     apparatus_name: varchar(80)
-     """
+        task_dict = dict()
+        task_mod = []
+        try:
+            task_mod = nwbf.get_processing_module("Task")
+        except:
+            print('No Task module found in {}\n'.format(nwb_file_name))
+        if task_mod != []:
+            for d in task_mod.data_interfaces:
+                if type(task_mod[d]) == fl_extension.Task:
+                    # see this task if is already in the database
+                    if {'task_name': d} not in self:
+                        # FIX task type and subtype would need to be in the NWB file
+                        task_dict['task_name'] = d
+                        task_dict['task_type'] = ''
+                        task_dict['task_subtype'] = ''
+                        common_task.TaskInfo.insert1(task_dict)
+                    else:
+                        print('Skipping task {}; already in schema\n'.format(d))
+        io.close()
+
 
 
 @schema

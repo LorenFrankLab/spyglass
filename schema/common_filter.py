@@ -12,10 +12,14 @@ class Filter(dj.Imported):
     filter_samp_freq: int       # sampling frequency
     ---
     filter_comments: varchar(255)   # comments about the filter
-    filter_numerator: blob          # numpy array containing the filter numerator (b)
-    filter_denominator: blob        # numpy array containing filter denominator (a)                                                  
+    filter_left_stop=0: float         # highest frequency for stop band for high pass side of filter
+    filter_left_pass=0: float         # lowest frequency for pass band of high pass side of filter
+    filter_right_stop=0: float         # highest frequency for stop band for low pass side of filter
+    filter_right_pass=0: float         # lowest frequency for pass band of low pass side of filter
+    filter_b: blob                  # numpy array containing the filter numerator 
+    filter_a: blob                  # numpy array containing filter denominator                                                   
     """
 
     def zpk(self):
         # return the zeros, poles, and gain for the filter
-        return signal.tf2zpk(filter_numerator, filter_denominator)
+        return signal.tf2zpk(self.filter_b, self.filter_a)

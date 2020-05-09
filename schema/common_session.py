@@ -54,11 +54,15 @@ class Session(dj.Imported):
         key['subject_id'] = nwbf.subject.subject_id
         key['institution_name'] = nwbf.institution
         key['lab_name'] = nwbf.lab
+        # Remove when bug fixed: session_id can be empty in current version
         key['session_id'] = nwbf.session_id
+        if (key['session_id'] == None):
+            key['session_id'] = 'tmp_id'
         key['session_description'] = nwbf.session_description
         key['session_start_time'] = nwbf.session_start_time
         key['experiment_description'] = nwbf.experiment_description
         key['timestamps_reference_time'] = nwbf.timestamps_reference_time
+        print(key)
         self.insert1(key)
 
         # insert the devices

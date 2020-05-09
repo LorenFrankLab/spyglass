@@ -1,10 +1,10 @@
 import datajoint as dj
 
-#import common_device
-import common_session 
+import common_session
 import common_region
 import common_interval
 import common_device
+import common_filter
 import pynwb
 
 schema = dj.schema('common_ephys')
@@ -198,13 +198,24 @@ class Raw(dj.Imported):
 @schema
 class LFP(dj.Computed):
     definition = """
-    -> common_session.Session
-    -> ElectrodeConfig.Electrode
+    -> Raw
     ref_elect: int  # the reference electrode used for this LFP trace, -1 for none
     ---
     -> common_interval.IntervalList
-    nwb_object_id: int  # the NWB object ID for loading this object from the file
+    -> common_filter.Filter
+    nwb_object_id: varchar(255)  # the NWB object ID for loading this object from the file
     sampling_rate: float # the sampling rate, in HZ
+    """
+
+@schema
+class LFPBand(dj.Computed):
+    definition = """
+    -> LFP
+    freq_min: int       #high pass frequency
+    freq_max: int       #low pass frequency
+    ---
+    -> common_interval.IntervalList
+    -> common_filter.Filter
     """
 
 
@@ -213,10 +224,10 @@ class DecompSeries(dj.Computed):
     definition = """
     # Raw power timeseries data
     -> common_session.Session
-    -> ElectrodeConfig.Electrode
+    -> LFP
     ---
     -> common_interval.IntervalList
-    nwb_object_id: int  # the NWB object ID for loading this object from the file
+    nwb_object_id: varchar(255)  # the NWB object ID for loading this object from the file
     sampling_rate: float                                # Sampling rate, in Hz
     metric: enum("phase","amplitude","power")  # Metric represented in data
     comments: varchar(80)
