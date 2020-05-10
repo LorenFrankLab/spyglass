@@ -5,6 +5,7 @@ import pynwb
 import common_interval
 import common_session
 import datajoint as dj
+import nwb_helper_fn as nh
 import franklab_nwb_extensions.fl_extension as fl_extension
 
 schema = dj.schema("common_task", locals())
@@ -13,6 +14,7 @@ schema = dj.schema("common_task", locals())
 
 @schema
 class Apparatus(dj.Manual):
+# NOTE: this needs to be updated once we figure out how we're going to define the apparatus
     definition = """
      apparatus_name: varchar(80)
      """
@@ -50,8 +52,10 @@ class Task(dj.Manual):
     definition = """
      task_name: varchar(80)
      ---
-     task_type='': varchar(80)
-     task_subtype='': varchar(80)
+     task_description='':   varchar(255)  # description of this task
+     task_type='': varchar(80)  # type of task
+     task_subtype='': varchar(80) # subtype of task
+     nwb_object_id='': varchar(255)  #the NWB object identifier for a class that describes this task
      """
 
     def insert_from_nwb(self, nwb_file_name):
@@ -66,23 +70,23 @@ class Task(dj.Manual):
             return
 
         task_dict = dict()
-        task_mod = []
-        try:
-            task_mod = nwbf.get_processing_module("Task")
-        except:
-            print('No Task module found in {}\n'.format(nwb_file_name))
-        if task_mod != []:
-            for d in task_mod.data_interfaces:
-                if type(task_mod[d]) == fl_extension.Task:
-                    # see this task if is already in the database
-                    if {'task_name': d} not in self:
-                        # FIX task type and subtype would need to be in the NWB file
-                        task_dict['task_name'] = d
-                        task_dict['task_type'] = ''
-                        task_dict['task_subtype'] = ''
-                        common_task.TaskInfo.insert1(task_dict)
-                    else:
-                        print('Skipping task {}; already in schema\n'.format(d))
+        #search through he processing modules to see if we can find a behavior module. This should probably be a
+        # general function
+        task_interface = nh.get_data_interface(nwbf, 'task')
+        if task_interface is not None:
+            # check the datatype
+            if task_interface.data_type == 'DynamicTable':
+                taskdf = task_interface.to_dataframe()
+                # go through the rows of the dataframe and add the task if it doesn't exist
+                for task_entry in taskdf.iterrows():
+                    task_dict['task_name'] = task_entry[1].task_name
+                    task_dict['task_description'] = task_entry[1].task_description
+                    # FIX if types are defined and NWB object exist
+                    task_dict['task_type'] = ''
+                    task_dict['task_subtype'] = ''
+                    task_dict['nwb_object_id'] = ''
+                    self.insert1(task_dict, skip_duplicates='True')
+
         io.close()
 
 
@@ -94,8 +98,8 @@ class TaskEpoch(dj.Imported):
      ->common_session.Session
      epoch: int  #the session epoch for this task and apparatus(0 based)
      ---
-     -> TaskInfo
-     -> ApparatusInfo
+     -> Task
+     -> Apparatus
      -> common_interval.IntervalList
      task_object_id: int # TO BE converted an NWB datatype when available
      apparatus_object_id: int # TO BE converted an NWB datatype when available
@@ -110,7 +114,6 @@ class TaskEpoch(dj.Imported):
         except:
             print('Error in Task: nwbfile {} cannot be opened for reading\n'.format(
                 key['nwb_file_name']))
-            print(io.read())
             return
         # start by inserting the Apparati from the nwb file. The ApparatusInfo schema will already have been populated
         try:

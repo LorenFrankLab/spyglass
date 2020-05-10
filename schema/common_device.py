@@ -54,13 +54,13 @@ class Probe(dj.Manual):
     ---
     probe_description: varchar(80)  # description of this probe
     num_shanks: int                 # number of shanks on this device
-    contact_side_numbering: enum('True', 'False')   # electrode numbers from contact side of the device
+    contact_side_numbering: enum('T', 'F') # electrode numbers from contact side of the device
     """
 
     class Shank(dj.Part):
         definition = """
         -> master
-        shank_num: int              # shank number within probe
+        probe_shank: int              # shank number within probe
         """
 
     class Electrode(dj.Part):
@@ -94,16 +94,33 @@ class Probe(dj.Manual):
         for d in nwbf.devices:
             if probe_re.search(d):
                 p = nwbf.devices[d]
-                print(p)
                 # add this probe if it's not already here
                 if {'probe_type': nwbf.devices[d].probe_type} not in self:
                     print("adding probe type:", nwbf.devices[d].probe_type)
                     probe_dict['probe_type'] = p.probe_type
                     probe_dict['probe_description'] = p.probe_description
                     probe_dict['num_shanks'] = len(p.shanks)
-                    probe_dict['contact_side_numbering'] = p.contact_side_numbering
+                    probe_dict['contact_side_numbering'] = 'T' if p.contact_side_numbering else 'F'
                     self.insert1(probe_dict)
-                    # TO DO: INSERT SHANKS AND ELECTRODE
 
+                # TEMPORARY HACK: insert shanks and channels for 128 channel probe
 
-        io.close()
+                    self.Shank.insert1(['128c-4s8mm6cm-20um-40um-sl', 0])
+                    self.Shank.insert1(['128c-4s8mm6cm-20um-40um-sl', 1])
+                    self.Shank.insert1(['128c-4s8mm6cm-20um-40um-sl', 2])
+                    self.Shank.insert1(['128c-4s8mm6cm-20um-40um-sl', 3])
+
+                    for i in range(32):
+                        self.Electrode.insert1(
+                            [['128c-4s8mm6cm-20um-40um-sl'], 0, i, 20, 0, 0, 0], replace=True)
+                    for i in range(32,64):
+                        self.Electrode.insert1(
+                            [['128c-4s8mm6cm-20um-40um-sl'], 1, i, 20, 0, 0, 0], replace=True)
+                    for i in range(64,96):
+                        self.Electrode.insert1(
+                            [['128c-4s8mm6cm-20um-40um-sl'], 2, i, 20, 0, 0, 0], replace=True)
+                    for i in range(96,128):
+                        self.Electrode.insert1(
+                            [['128c-4s8mm6cm-20um-40um-sl'], 3, i, 20, 0, 0, 0], replace=True)
+
+                    io.close()

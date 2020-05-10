@@ -1,9 +1,11 @@
 
 import pynwb
+import numpy as np
 
 import common_interval
 import common_session
 import datajoint as dj
+import nwb_helper_fn as nh
 
 [common_session, common_interval]
 
@@ -11,11 +13,11 @@ schema = dj.schema('common_behav')
 
 
 @schema
-class Position(dj.Imported):
+class RawPosition(dj.Imported):
     definition = """
     -> common_session.Session
     ---
-    nwb_object_id: int  # the object id of the data in the NWB file
+    nwb_object_id: varchar(80)            # the object id of the data in the NWB file
     -> common_interval.IntervalList       # the list of intervals for this object
     """
 
@@ -28,19 +30,37 @@ class Position(dj.Imported):
                 key['nwb_file_name']))
             print(io.read())
             return
-        # position data is stored in the Behavior module
-        try:
-            behav_mod = nwbf.get_processing_module("Behavior")
-            pos = behav_mod.data_interfaces['Position']
 
-        except:
-            print('Error in Position: no Behavior module found in {}\n'.format(
-                  key['nwb_file_name']))
+        # Get the position data. FIX: change Position to position when name changed or fix helper function to allow
+        # upper or lower case
+        position = nh.get_data_interface(nwbf, 'position')
+        if position is None:
+            position = nh.get_data_interface(nwbf, 'Position')
+
+        if position is not None:
+            pos_interval_name = 'pos valid times'
+            # get the valid intervals for the position data
+            p = position.get_spatial_series()
+            timestamps = np.asarray(p.timestamps)
+            # estimate the sampling rate
+            sampling_rate = nh.estimate_sampling_rate(timestamps)
+            # add the valid intervals to the Interval list
+            interval_dict = dict()
+            interval_dict['nwb_file_name'] = key['nwb_file_name']
+            interval_dict['interval_name'] = pos_interval_name
+            interval_dict['valid_times'] = nh.get_valid_intervals(timestamps, sampling_rate, 2, 0)
+            common_interval.IntervalList.insert1(interval_dict)
+
+            key['nwb_object_id'] = position.object_id
+            # this is created when we populate the Task schema
+            key['interval_name'] = pos_interval_name
+            self.insert1(key)
+
+        else:
+            print('No position data interface found in  {}\n'.format(key['nwb_file_name']))
             return
-        key['nwb_object_id'] = -1
-        # this is created when we populate the Task schema
-        key['interval_name'] = 'task epochs'
-        self.insert1(key)
+
+
 
 
 @schema

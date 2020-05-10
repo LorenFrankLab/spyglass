@@ -6,6 +6,7 @@ import common_interval
 import common_device
 import common_filter
 import pynwb
+import re
 
 schema = dj.schema('common_ephys')
 
@@ -23,7 +24,7 @@ class ElectrodeConfig(dj.Imported):
         electrode_group_name: varchar(80)  # electrode group name from NWBFile
         ---
         -> common_region.BrainRegion
-        -> common_device.Device
+        -> common_device.Probe
         description: varchar(80) # description of electrode group
         target_hemisphere: enum('Right','Left')
         """
@@ -32,7 +33,7 @@ class ElectrodeConfig(dj.Imported):
         definition = """
         -> master.ElectrodeGroup
         electrode_id: int               # the unique number for this electrode
-        label='': varchar(80)           # unique label for each contact
+        name='': varchar(80)           # unique label for each contact
         ---
         -> common_device.Probe.Electrode
         -> common_region.BrainRegion
@@ -41,7 +42,7 @@ class ElectrodeConfig(dj.Imported):
         z=NULL: float                   # the z coordinate of the electrode position in the brain
         filtering: varchar(200)         # description of the signal filtering
         impedance=null: float                # electrode impedance
-        good_chan: enum("True","False")      # if electrode is 'good' or 'bad' as observed during recording
+        bad_channel: enum("True","False")      # if electrode is 'good' or 'bad' as observed during recording
         x_warped=NULL: float                 # x coordinate of electrode position warped to common template brain
         y_warped=NULL: float                 # y coordinate of electrode position warped to common template brain
         z_warped=NULL: float                 # z coordinate of electrode position warped to common template brain
@@ -82,48 +83,50 @@ class ElectrodeConfig(dj.Imported):
             region_id_dict = query.fetch1()
             eg_dict['region_id'] = region_id_dict['region_id']
             eg_dict['description'] = electrode_group.description
-            # get the device name
-            devices = list(nwbf.devices.keys())
-            for d in devices:
-                if nwbf.devices[d] == electrode_group.device:
-                    # this will match the entry in the device schema
-                    eg_dict['device_name'] = d
-                    break
+            # the following should probably be a function that returns the probe devices from the file
+            probe_re = re.compile("probe")
+            for d in nwbf.devices:
+                if probe_re.search(d):
+                    if nwbf.devices[d] == electrode_group.device:
+                        # this will match the entry in the device schema
+                        eg_dict['probe_type'] = electrode_group.device.probe_type
+                        break
             ElectrodeConfig.ElectrodeGroup.insert1(eg_dict)
 
         # now create the table of electrodes
         elect_dict = dict()
         electrodes = nwbf.electrodes.to_dataframe()
         elect_dict['nwb_file_name'] = key['nwb_file_name']
-        for elect in range(len(electrodes)):
-            # there is probably a more elegant way to do this
-            elect_dict['electrode_group_name'] = electrodes.iloc[elect]['group_name']
-            elect_dict['electrode_id'] = elect
+
+        # Below it would be better to find the mapping between  nwbf.electrodes.colnames and the schema fields and
+        # where possible, assign automatically. It would also help to be robust to missing fields and have them
+        # assigned as empty if they don't exist in the nwb file in case people are not using our extensions.
+
+        for elect in electrodes.iterrows():
+            elect_dict['electrode_group_name'] = elect[1].group_name
+            # not certain that the assignment below is correct; needs to be checked.
+            elect_dict['electrode_id'] = elect[0]
 
             # FIX to get electrode information properly from input or NWB file. Label may not exist, so we should
             # check that and use and empty string if not.
-            elect_dict['label'] = ''
-            elect_dict['probe_type'] = 'tetrode'
-            elect_dict['shank_num'] = 0
-            elect_dict['probe_electrode'] = 0
+            elect_dict['name'] = str(elect[0])
+            elect_dict['probe_type'] = elect[1].group.device.probe_type
+            elect_dict['probe_shank'] = elect[1].probe_shank
+            # change below when extension name is changed and bug is fixed in fldatamigration
+            elect_dict['probe_electrode'] = elect[1].probe_channel % 128
 
+            elect_dict['bad_channel'] = 'True' if elect[1].bad_channel else 'False'
             elect_dict['region_id'] = eg_dict['region_id']
-            # elect_dict['x'] = electrodes.iloc[elect]['x']
-            # elect_dict['y'] = electrodes.iloc[elect]['y']
-            # elect_dict['z'] = electrodes.iloc[elect]['z']
-            elect_dict['x'] = 0
-            elect_dict['y'] = 0
-            elect_dict['z'] = 0
+            elect_dict['x'] = elect[1].x
+            elect_dict['y'] = elect[1].y
+            elect_dict['z'] = elect[1].z
             elect_dict['x_warped'] = 0
             elect_dict['y_warped'] = 0
             elect_dict['z_warped'] = 0
             elect_dict['contacts'] = ''
+            elect_dict['filtering'] = elect[1].filtering
+            elect_dict['impedance'] = elect[1].imp
 
-            elect_dict['filtering'] = electrodes.iloc[elect]['filtering']
-            elect_dict['impedance'] = electrodes.iloc[elect]['imp']
-            # FIX so we can have an NAN value
-            # if elect_dict['impedance'] == nan:
-            elect_dict['impedance'] = -1
             ElectrodeConfig.Electrode.insert1(elect_dict)
         # close the file
         io.close()

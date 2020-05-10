@@ -62,7 +62,6 @@ class Session(dj.Imported):
         key['session_start_time'] = nwbf.session_start_time
         key['experiment_description'] = nwbf.experiment_description
         key['timestamps_reference_time'] = nwbf.timestamps_reference_time
-        print(key)
         self.insert1(key)
 
         # insert the devices
@@ -93,7 +92,6 @@ class ExperimenterList(dj.Imported):
         except:
             print('Error in Experimenter: nwbfile {} cannot be opened for reading\n'.format(
                 key['nwb_file_name']))
-            print(io.read())
             return
 
         for e in nwbf.experimenter:

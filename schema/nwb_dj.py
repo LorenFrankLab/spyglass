@@ -19,7 +19,7 @@ conn = dj.conn()
 
 def NWBPopulate(file_names):
 
-    print('file names:', file_names)
+    #print('file names:', file_names)
 
     # CHANGE per object when object_ids are implemented in the NWB file
     default_nwb_object_id = 0
@@ -82,7 +82,7 @@ def NWBPopulate(file_names):
         # ephys.Units.populate()
 
         # populate the behavioral variables. Note that this has to be done after task.TaskEpoch
-        common_behav.Position.populate()
+        common_behav.RawPosition.populate()
         common_behav.HeadDir.populate()
         common_behav.Speed.populate()
         common_behav.LinPos.populate()
