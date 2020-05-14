@@ -43,13 +43,14 @@ class RawPosition(dj.Imported):
             p = position.get_spatial_series()
             timestamps = np.asarray(p.timestamps)
             # estimate the sampling rate
-            sampling_rate = nh.estimate_sampling_rate(timestamps)
+            sampling_rate = nh.estimate_sampling_rate(timestamps, 1.75)
+            print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
             # add the valid intervals to the Interval list
             interval_dict = dict()
             interval_dict['nwb_file_name'] = key['nwb_file_name']
             interval_dict['interval_name'] = pos_interval_name
-            interval_dict['valid_times'] = nh.get_valid_intervals(timestamps, sampling_rate, 2, 0)
-            common_interval.IntervalList.insert1(interval_dict)
+            interval_dict['valid_times'] = nh.get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
+            common_interval.IntervalList.insert1(interval_dict, skip_duplicates="True")
 
             key['nwb_object_id'] = position.object_id
             # this is created when we populate the Task schema

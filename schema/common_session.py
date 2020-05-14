@@ -16,6 +16,7 @@ class Nwbfile(dj.Manual):
     definition = """
     nwb_file_name: varchar(80)
     ---
+    nwb_raw_file_name: varchar(80) # The name of the NWB file with the raw ephys data
     """
 
 
@@ -65,10 +66,12 @@ class Session(dj.Imported):
         self.insert1(key)
 
         # insert the devices
+        ''' Uncomment when devices correct 
         devices = list(nwbf.devices.keys())
         for d in devices:
             Session.DataAcqDevice.insert1(
                 dict(nwb_file_name=key['nwb_file_name'], device_name=d), skip_duplicates=True)
+        '''
         io.close()
 
 

@@ -7,6 +7,8 @@ import common_device
 import common_filter
 import pynwb
 import re
+import numpy as np
+import nwb_helper_fn as nh
 
 schema = dj.schema('common_ephys')
 
@@ -33,10 +35,10 @@ class ElectrodeConfig(dj.Imported):
         definition = """
         -> master.ElectrodeGroup
         electrode_id: int               # the unique number for this electrode
-        name='': varchar(80)           # unique label for each contact
         ---
         -> common_device.Probe.Electrode
         -> common_region.BrainRegion
+        name='': varchar(80)           # unique label for each contact
         x=NULL: float                   # the x coordinate of the electrode position in the brain
         y=NULL: float                   # the y coordinate of the electrode position in the brain
         z=NULL: float                   # the z coordinate of the electrode position in the brain
@@ -158,7 +160,6 @@ class Units(dj.Imported):
             return
 
         interval_list_dict = dict()
-        print('nwb_file_name:', nwb_file_name)
         interval_list_dict['nwb_file_name'] = nwb_file_name
         units = nwbf.units.to_dataframe()
         for unum in range(len(units)):
@@ -188,37 +189,121 @@ class Raw(dj.Imported):
     definition = """
     # Raw voltage timeseries data, electricalSeries in NWB
     -> common_session.Session
-    -> ElectrodeConfig.Electrode
     ---
     -> common_interval.IntervalList
-    nwb_object_id: int  # the NWB object ID for loading this object from the file
-    sampling_rate: float                            # Sampling rate, in Hz
+    nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
+    sampling_rate: float                            # Sampling rate calculated from data, in Hz
     comments: varchar(80)
     description: varchar(80)
     """
+
+    def make(self, key):
+        # get the NWB file name from this session
+        nwb_file_name = key['nwb_file_name']
+
+        try:
+            io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+            nwbf = io.read()
+        except:
+            print('Error: nwbfile {} cannot be opened for reading\n'.format(
+                nwb_file_name))
+            return
+        raw_interval_name = "raw data valid times"
+        # get the acquisition object
+        rawdata = nwbf.get_acquisition()
+        # get the list of valid times given the specified sampling rate.
+        interval_dict = dict()
+        interval_dict['nwb_file_name'] = key['nwb_file_name']
+        interval_dict['interval_name'] = raw_interval_name
+        # FIX: change resolution to rate once corrected in NWB file
+        interval_dict['valid_times'] = nh.get_valid_intervals(np.asarray(rawdata.timestamps), rawdata.resolution,
+                                                              1.75, 0)
+        common_interval.IntervalList.insert1(interval_dict, skip_duplicates="True")
+
+        # now insert each of the electrodes as an individual row, but with the same nwb_object_id
+        key['nwb_object_id'] = rawdata.object_id
+        # change 1000 to 1.5 when times are fixed for continuous data
+        key['sampling_rate'] = nh.estimate_sampling_rate(np.asarray(rawdata.timestamps), 1000)
+        key['interval_name'] = raw_interval_name
+        key['comments'] = rawdata.comments
+        key['description'] = rawdata.description
+        self.insert1(key, skip_duplicates='True')
+
+
+
+@schema
+class LFPElectrode(dj.Manual):
+    definition = """
+     -> ElectrodeConfig.Electrode
+     ---
+     use_for_lfp = 'False': enum('True', 'False')
+     """
+
+    def set_lfp_elect(self, electrode_list):
+        # TO DO: do this in a better way
+        all_electrodes = ElectrodeConfig.Electrode.fetch(as_dict=True)
+        primary_key = ElectrodeConfig.Electrode.primary_key
+        for e in all_electrodes:
+            use_for_lfp = 'True' if e['electrode_id'] in electrode_list else 'False'
+            # create a dictionary so we can insert new elects
+            lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
+            lfpelectdict['use_for_lfp'] = use_for_lfp
+            self.insert1(lfpelectdict, replace='True')
+
+
 
 
 @schema
 class LFP(dj.Computed):
     definition = """
     -> Raw
-    ref_elect: int  # the reference electrode used for this LFP trace, -1 for none
+    -> LFPElectrode
     ---
     -> common_interval.IntervalList
     -> common_filter.Filter
-    nwb_object_id: varchar(255)  # the NWB object ID for loading this object from the file
+    nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
     sampling_rate: float # the sampling rate, in HZ
+    """
+    @property
+    def key_source(self):
+        # get a list of the sessions for which we want to compute the LFP
+        return common_session.Session()
+
+    def make(self, key):
+        rawdata = (Raw & key).fetch(as_dict="True")[0]
+        # get the LFP filter that matches the raw data
+        filter = common_filter.Filter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
+                                                                                  np.round(rawdata['sampling_rate'])}
+        if len(filter) == 0:
+            print('Error in LFP: no filter found with data sampling rate of', np.round(rawdata['sampling_rate']))
+            return None
+
+        # get the list of selected LFP Channels from LFPElectrode
+        electrode_keys = (LFPElectrode & key & {'use_for_lfp' : 'True'}).fetch('KEY')
+        electrode_id_list = [d['electrode_id'] for d in electrode_keys]
+
+        # calculate the size of the output data
+        common_filter.filtered_data_size()
+
+
+
+
+@schema
+class LFPBandParameters(dj.Manual):
+    definition = """
+    -> LFP
+    ---
+    -> common_filter.Filter # the filter to be used for this LFP Band 
     """
 
 @schema
 class LFPBand(dj.Computed):
     definition = """
-    -> LFP
-    freq_min: int       #high pass frequency
-    freq_max: int       #low pass frequency
+    -> LFPBandParameters
     ---
     -> common_interval.IntervalList
-    -> common_filter.Filter
+    nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
+    sampling_rate: float # the sampling rate, in HZ
     """
 
 

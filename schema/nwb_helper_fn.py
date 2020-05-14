@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 #NWB helper functions for finding processing modules and data interfaces
 
@@ -15,16 +16,17 @@ def get_data_interface(nwbf, data_interface_name):
         else:
             return None
 
-def estimate_sampling_rate(timestamps):
+def estimate_sampling_rate(timestamps, multiplier):
     '''Estimate the sampling rate given a list of timestamps. Assumes that the most common temporal differences
-       between timestamps approximate the sampling rate
+       between timestamps approximate the sampling rate. Note that this can fail for very high sampling rates and
+       irregular timestamps
     :param timestamps: 1D numpy array (list of timestamps)
     :return: estimated_rate: float
     '''
 
     #approach:
     # 1. use a box car smoother and a histogram to get the modal value
-    # 2. identify adjacent samples as those that have a time difference < 1.5 the modal value
+    # 2. identify adjacent samples as those that have a time difference < the multiplier * the modal value
     # 3. average the time differences between adjacent samples
     sample_diff = np.diff(timestamps[~np.isnan(timestamps)])
     nsmooth = 10
@@ -33,8 +35,9 @@ def estimate_sampling_rate(timestamps):
     # we histogram with 100 bins out to 3 * mean, which should be fine for any reasonable number of samples
     hist, bins = np.histogram(smooth_diff, bins=100, range=[0, 3 * np.mean(smooth_diff)])
     mode = bins[np.where(hist == np.max(hist))]
-    adjacent = sample_diff < mode * 1.5
-    return np.mean(sample_diff[adjacent])
+
+    adjacent = sample_diff < mode[0] * multiplier
+    return np.round(1.0 / np.mean(sample_diff[adjacent]))
 
 
 def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len):
@@ -69,5 +72,6 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
     valid_intervals = (valid_times[:,1] - valid_times[:,0]) > min_valid_len
 
     return valid_times[valid_intervals,:]
+
 
 

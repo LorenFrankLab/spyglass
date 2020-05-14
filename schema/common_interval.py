@@ -12,3 +12,5 @@ class IntervalList(dj.Manual):
     ---
     valid_times: longblob # 2D numpy array with start and end times for each interval
     """
+
+    # ADD export to NWB function to save relevant intervals in an NWB file
