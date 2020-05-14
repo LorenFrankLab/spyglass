@@ -3,6 +3,7 @@
 This is under development and not ready for general use.
 
 Old code for importing older Frank Lab data is in the develop branch
+
 Newer code for importing from new NWB data files is in the develop_nwbraw branch
 
 ## Setup
