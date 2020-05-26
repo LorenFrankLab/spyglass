@@ -4,6 +4,7 @@ import pynwb
 
 import common_behav
 import common_device
+import common_interval
 import common_ephys
 import common_lab
 import common_session
@@ -28,12 +29,13 @@ def NWBPopulate(file_names):
     for nwb_raw_file_name in file_names:
         try:
             io = pynwb.NWBHDF5IO(nwb_raw_file_name, mode='r')
-            nwb_raw_f = io.read()
         except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(
-                nwb_raw_file_name))
+            print('Error: nwbfile {} cannot be opened for reading\n'.format(nwb_raw_file_name))
             print(io.read())
             continue
+        finally:
+            io.close()
+
 
         print('Importing NWB file', nwb_raw_file_name)
 
@@ -51,6 +53,7 @@ def NWBPopulate(file_names):
 
         nwb_file_name = os.path.splitext(nwb_raw_file_name)[0] + '_pp.nwb'
         if not os.path.exists(nwb_file_name):
+            print('Copying file; this step will be removed once NWB export functionality works')
             shutil.copyfile(nwb_raw_file_name, nwb_file_name)
 
         io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
@@ -63,9 +66,7 @@ def NWBPopulate(file_names):
         common_lab.Institution.insert1(
             dict(institution_name=nwbf.institution), skip_duplicates=True)
         common_lab.Lab.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)
-
         io.close()
-
         """
         NWBFile
         """
@@ -83,16 +84,17 @@ def NWBPopulate(file_names):
         common_device.Device().insert_from_nwb(nwb_file_name)
         common_device.Probe().insert_from_nwb(nwb_file_name)
 
-
-
         """
         Task and Apparatus Information structures.
         These hold general information not specific to any one epoch. Specific information is added in task.TaskEpoch
         """
         common_task.Task().insert_from_nwb(nwb_file_name)
-        #common_task.Apparatus().insert_from_nwb(nwb_file_name)
+        # common_task.Apparatus().insert_from_nwb(nwb_file_name)
+        common_interval.IntervalList().insert_from_nwb(nwb_file_name)
 
         # now that those schema are updated, we can call the populate method for the rest of the schema
+
+
         common_session.Session.populate()
         common_session.ExperimenterList.populate()
         common_task.TaskEpoch.populate()
@@ -104,8 +106,11 @@ def NWBPopulate(file_names):
 
         # populate the behavioral variables. Note that this has to be done after task.TaskEpoch
         common_behav.RawPosition.populate()
-        #common_behav.HeadDir.populate()
-        #common_behav.Speed.populate()
-        #common_behav.LinPos.populate()
+        # common_behav.HeadDir.populate()
+        # common_behav.Speed.populate()
+        # common_behav.LinPos.populate()
 
-        io.close()
+
+
+
+

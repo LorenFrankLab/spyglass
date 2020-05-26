@@ -1,5 +1,6 @@
 # we need to include pynwb and the franklab NWB namespace to be able to open the file
 import pynwb
+import os
 
 import common_device
 import common_lab
@@ -18,6 +19,49 @@ class Nwbfile(dj.Manual):
     ---
     nwb_raw_file_name: varchar(80) # The name of the NWB file with the raw ephys data
     """
+
+@schema
+class LinkedNwbfile(dj.Manual):
+    definition = """
+    -> Nwbfile              
+    linked_file_name: varchar(80)  # the name of each linked file
+    """
+
+    def __init__(self, *args):
+        # do your custom stuff here
+        super().__init__(*args)  # call the base implementation
+
+
+    def create(self, nwb_file_name):
+        # open the main NWB file, create a copy, write out the copy to disk and return the name of the new file
+        in_io  = pynwb.NWBHDF5IO(nwb_file_name, 'r')
+        nwbf_in = in_io.read()
+        nwbf_out = nwbf_in.copy()
+
+        key = dict()
+        key['nwb_file_name'] = nwb_file_name
+        # get the current number of linked files
+        #n_linked_files = len((LinkedNwbfile() & {'nwb_file_name' : nwb_file_name}).fetch())
+        # name the file, adding the number of links with preceeding zeros
+
+        # the init function is called everytime this object is accessed by DataJoint, so to set a variable we have to
+        # do it here.
+
+        n_linked_files = len(LinkedNwbfile())
+        nwb_out_file_name = os.path.splitext(nwb_file_name)[0] + str(n_linked_files).zfill(8) + '.nwb'
+        key['linked_file_name'] = nwb_out_file_name
+
+        # write the linked file
+        print(f'writing new NWB file {nwb_out_file_name}')
+        with pynwb.NWBHDF5IO(nwb_out_file_name, 'a', manager=in_io.manager) as io:
+            io.write(nwbf_out)
+
+        in_io.close()
+        # insert the key into the Linked File table
+        self.insert1(key)
+        print('inserted file')
+
+        return nwb_out_file_name
 
 
 @schema
@@ -49,6 +93,7 @@ class Session(dj.Imported):
             print('Error in Session: nwbfile {} cannot be opened for reading\n'.format(
                 key['nwb_file_name']))
             print(io.read())
+            io.close()
             return
 
         # populate the Session with information from the file
@@ -95,6 +140,7 @@ class ExperimenterList(dj.Imported):
         except:
             print('Error in Experimenter: nwbfile {} cannot be opened for reading\n'.format(
                 key['nwb_file_name']))
+            io.close()
             return
 
         for e in nwbf.experimenter:
@@ -115,3 +161,4 @@ class ExperimenterList(dj.Imported):
             # now insert the experimenter, which is a combination of the nwbfile and the name
             key['lab_member_name'] = e
             ExperimenterList.Experimenter.insert1(key)
+        io.close()
