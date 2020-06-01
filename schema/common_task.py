@@ -92,7 +92,7 @@ class Task(dj.Manual):
 
 
 @schema
-class TaskEpoch(dj.Imported):
+class TaskEpoch(dj.Manual):
     # Tasks, apparatus, session and time intervals
     definition = """
      ->common_session.Session
@@ -101,12 +101,16 @@ class TaskEpoch(dj.Imported):
      -> Task
      -> Apparatus
      -> common_interval.IntervalList
-     task_object_id: int # TO BE converted an NWB datatype when available
-     apparatus_object_id: int # TO BE converted an NWB datatype when available
      exposure: int # the number of this exposure to the apparatus and task
      """
 
-    def make(self, key):
+    def insert_from_nwb(self, nwb_file_name):
+        '''
+        Inserts Task epochs from the nwb file's epochs object. Currently assumes fields named epoch, exposure,
+        task_name, and apparatus_name. Not currently working with raw NWB files
+        :param nwb_file_name:
+        :return: None
+        '''
         # load up the NWB file and insert information for each of the task epochs
         try:
             io = pynwb.NWBHDF5IO(key['nwb_file_name'], mode='r')

@@ -5,6 +5,8 @@ import scipy.signal as signal
 import numpy as np
 import ghostipy as gsp
 import matplotlib.pyplot as plt
+import uuid
+import h5py as h5
 from hdmf.common.table import DynamicTableRegion
 
 schema = dj.schema('common_filter')
@@ -86,7 +88,8 @@ class FirFilter(dj.Manual):
             filterdict['filter_high_stop'] = band_edges[3]
 
         filterdict['filter_band_edges'] = np.asarray(band_edges)
-        filterdict['filter_coeff'] = gsp.firdesign(numtaps, band_edges, desired, fs=fs, p=p)
+        # create 1d array for coefficients
+        filterdict['filter_coeff'] = np.array(gsp.firdesign(numtaps, band_edges, desired, fs=fs, p=p), ndmin=1)
         # add this filter to the table
         self.insert1(filterdict, replace="True")
 
@@ -223,6 +226,92 @@ class FirFilter(dj.Manual):
 
         # Get the object ID for the filtered data and add an entry to the
         #return nwbf.
+
+    def filter_data_hdf5(self, file_path, timestamps, data, filter_coeff, valid_times, electrodes,
+                        decimation):
+        """
+        :param file_path: str   location for saving the timestamps and filtered data
+        :param timestamps: numpy array with list of timestamps for data
+        :param data: original data array
+        :param filter_coeff: numpy array with filter coefficients for FIR filter
+        :param valid_times: 2D numpy array with start and stop times of intervals to be filtered
+        :param electrodes: list of electrodes to filter
+        :param decimation: decimation factor
+        :return: hdf5_file_name - the file name for the hdf5 file with the filtered data and timestamps in it
+
+        This function takes data and timestamps from an NWB electrical series and filters them using the ghostipy
+        package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
+        created and linked to the original NWB file using common_session.LinkedNwbfile.create()
+        """
+
+        n_dim = len(data.shape)
+        n_samples = len(timestamps)
+        # find the
+        time_axis = 0 if data.shape[0] == n_samples else 1
+        electrode_axis = 1 - time_axis
+        input_dim_restrictions = [None] * n_dim
+        input_dim_restrictions[electrode_axis] = np.s_[electrodes]
+
+        indices = []
+        output_shape_list = [0] * n_dim
+        output_shape_list[electrode_axis] = len(electrodes)
+        output_offsets = [0]
+
+        filter_delay = calc_filter_delay(filter_coeff)
+        for a_start, a_stop in valid_times:
+            frm, to = np.searchsorted(timestamps, (a_start, a_stop))
+            if to > n_samples:
+                to = n_samples
+
+            indices.append((frm, to))
+            shape, dtype = gsp.filter_data_fir(data,
+                                               filter_coeff,
+                                               axis=time_axis,
+                                               input_index_bounds=[frm, to],
+                                               output_index_bounds=[filter_delay, filter_delay + to - frm],
+                                               describe_dims=True,
+                                               ds=decimation,
+                                               input_dim_restrictions=input_dim_restrictions)
+            output_offsets.append(output_offsets[-1] + shape[time_axis])
+            output_shape_list[time_axis] += shape[time_axis]
+
+        # create a unique filename for these data
+        new_filepath = file_path +  uuid.uuid4().hex + '.hdf5'
+        with h5.File(new_filepath, 'w') as outfile:
+
+            filtered_data = outfile.create_dataset('filtered_data',
+                                          shape=tuple(output_shape_list),
+                                          dtype=data.dtype)
+            filtered_data.attrs['electrode_ids'] = electrodes
+            new_timestamps = outfile.create_dataset('timestamps',
+                                      shape=(output_shape_list[time_axis], ),
+                                      dtype=timestamps.dtype)
+
+            indices = np.array(indices, ndmin=2)
+
+            # Filter and write the output dataset
+            ts_offset = 0
+
+            for ii, (start, stop) in enumerate(indices):
+                extracted_ts = timestamps[start:stop:decimation]
+
+                #print(f"Diffs {np.diff(extracted_ts)}")
+                new_timestamps[ts_offset:ts_offset + len(extracted_ts)] = extracted_ts
+                ts_offset += len(extracted_ts)
+
+                # filter data
+                gsp.filter_data_fir(data,
+                                    filter_coeff,
+                                    axis=time_axis,
+                                    input_index_bounds=[start, stop],
+                                    output_index_bounds=[filter_delay, filter_delay + stop - start],
+                                    ds=decimation,
+                                    input_dim_restrictions=input_dim_restrictions,
+                                    outarray=filtered_data,
+                                    output_offset=output_offsets[ii])
+            return new_filepath
+
+
 
     def filter_data(self, timestamps, data, filter_coeff, valid_times, electrodes,
                         decimation):

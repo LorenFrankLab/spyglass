@@ -5,17 +5,22 @@ import common_region
 import common_interval
 import common_device
 import common_filter
+import spikeinterface as si
 import pynwb
 import re
 import numpy as np
 import json
+import h5py as h5
 import nwb_helper_fn as nh
+import dj_helper_fn as dh
+
+
 
 schema = dj.schema('common_ephys')
 
 
 @schema
-class ElectrodeConfig(dj.Imported):
+class ElectrodeConfig(dj.Manual):
     definition = """
     -> common_session.Session
     """
@@ -34,12 +39,14 @@ class ElectrodeConfig(dj.Imported):
 
     class Electrode(dj.Part):
         definition = """
-        -> master.ElectrodeGroup
+        -> master
         electrode_id: int               # the unique number for this electrode
         ---
+        -> master.ElectrodeGroup
         -> common_device.Probe.Electrode
         -> common_region.BrainRegion
         name='': varchar(80)           # unique label for each contact
+        original_reference_electrode=-1: int # the configured reference electrode for this electrode 
         x=NULL: float                   # the x coordinate of the electrode position in the brain
         y=NULL: float                   # the y coordinate of the electrode position in the brain
         z=NULL: float                   # the z coordinate of the electrode position in the brain
@@ -52,7 +59,14 @@ class ElectrodeConfig(dj.Imported):
         contacts: varchar(80)           # label of electrode contacts used for a bipolar signal -- current workaround
         """
 
-    def make(self, key):
+    def insert_from_nwb(self, nwb_file_name):
+        '''
+        Insert Electrode groups and electrodes from the NWB file.
+        :param nwb_file_name: string - name of NWB file
+        :return: None
+        '''
+        key = dict()
+        key['nwb_file_name'] = nwb_file_name
         # insert the session identifier (the name of the nwb file)
         self.insert1(key)
         # now open the NWB file and fill in the groups
@@ -106,10 +120,10 @@ class ElectrodeConfig(dj.Imported):
         # assigned as empty if they don't exist in the nwb file in case people are not using our extensions.
 
         for elect in electrodes.iterrows():
-            elect_dict['electrode_group_name'] = elect[1].group_name
             # not certain that the assignment below is correct; needs to be checked.
             elect_dict['electrode_id'] = elect[0]
 
+            elect_dict['electrode_group_name'] = elect[1].group_name
             # FIX to get electrode information properly from input or NWB file. Label may not exist, so we should
             # check that and use and empty string if not.
             elect_dict['name'] = str(elect[0])
@@ -129,52 +143,125 @@ class ElectrodeConfig(dj.Imported):
             elect_dict['contacts'] = ''
             elect_dict['filtering'] = elect[1].filtering
             elect_dict['impedance'] = elect[1].imp
+            try:
+                elect_dict['original_reference_electrode'] = elect[1].ref_elect
+            except:
+                elect_dict['original_reference_electrode'] = -1
+
             ElectrodeConfig.Electrode.insert1(elect_dict)
         # close the file
         io.close()
 
 @schema
-class SpikeSortingGroup(dj.Manual):
+class ElectrodeSortingInfo(dj.Manual):
     definition = """
      -> ElectrodeConfig.Electrode
      ---
      sort_group=-1: int  # the number of the sorting group for this electrode
-     """
-    def set_by_electrode_group(self, nwb_file_name):
+     reference_electrode=-1: int  # the electrode to use for reference. -1: no reference, -2: common median 
+    """
+    def __init__(self, *args):
+        # do your custom stuff here
+        super().__init__(*args)  # call the base implementation
+
+    def initialize(self, nwb_file_name):
         '''
-        :param: nwb_file_name - the name of the nwb whose electrodes should be put into sorting groups
+        Initialize the entries for the specified nwb file with the default values
+        :param nwb_file_name:
         :return: None
-        Assign groups to all non-bad channel electrodes based on their electrode group and probe:
+        '''
+        # add entries with default values for all fields
+        electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}) \
+            .fetch()
+        electrode_sorting_info = electrodes[['nwb_file_name', 'electrode_id']]
+        self.insert(electrode_sorting_info)
+
+    def set_group_by_shank(self, nwb_file_name):
+        '''
+        :param: nwb_file_name - the name of the NWB file whose electrodes should be put into sorting groups
+        :return: None
+        Assign groups to all non-bad channel electrodes based on their shank:
         Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a single group
         Electrodes from probes with multiple shanks (e.g. polymer probes) are placed in one group per shank
         '''
         # get the electrodes from this NWB file
         electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name' : nwb_file_name} & {'bad_channel' : 'False'}) \
             .fetch()
+        # get the current sorting info
+        elect_sort_info  = (ElectrodeSortingInfo() & {'nwb_file_name' : nwb_file_name}).fetch()
+        # if the current sorting info exists,
         # get a list of the electrode groups
         e_groups = np.unique(electrodes['electrode_group_name'])
         sort_group = 0
-        elect_dict = dict()
-        elect_dict['nwb_file_name'] = nwb_file_name
         for e_group in e_groups:
-            elect_dict['electrode_group_name'] = e_group
             # for each electrode group, get a list of the unique shank numbers
             shank_list = np.unique(electrodes['probe_shank'][electrodes['electrode_group_name'] == e_group])
             # get the indices of all electrodes in for this group / shank and set their sorting group
             for shank in shank_list:
                 shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
                                                                         electrodes['probe_shank'] == shank)]
-                 # create a 2d array for these electrodes
-                sort_insert = list()
+                 # create list of schema entries for insertion
+                new_group = list()
                 for elect in shank_elect:
-                    sort_insert.append([nwb_file_name, e_group, elect, sort_group])
-                self.insert(sort_insert, replace="True")
+                    new_group.append([elect, sort_group])
+                # get the new replacement entries for the table
+                self.insert(dh.replace(elect_sort_info, new_group, 'electrode_id', 'sort_group'),replace="True")
                 sort_group += 1
+
+    def set_group_by_electrode_group(self, nwb_file_name):
+        '''
+        :param: nwb_file_name - the name of the nwb whose electrodes should be put into sorting groups
+        :return: None
+        Assign groups to all non-bad channel electrodes based on their electrode group:
+        '''
+        # get the electrodes from this NWB file
+        electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}) \
+            .fetch()
+        e_groups = np.unique(electrodes['electrode_group_name'])
+        # get the current sorting info
+        elect_sort_info  = (ElectrodeSortingInfo() & {'nwb_file_name' : nwb_file_name}).fetch()
+        sort_group = 0
+        for e_group in e_groups:
+            # get the indices of all electrodes in for this group / shank and set their sorting group
+            eg_elect = electrodes['electrode_id'][electrodes['electrode_group_name'] == e_group]
+            new_group = list()
+            for elect in eg_elect:
+                new_group.append([ elect, sort_group])
+            self.insert(dh.replace(elect_sort_info, new_group, 'electrode_id', 'sort_group'), replace="True")
+            sort_group += 1
+
+    def set_reference_from_electrodes(self, nwb_file_name):
+        '''
+        Set the reference electrode from the original reference from the acquisition system
+        :param: nwb_file_name - The name of the NWB file whose electrodes' references should be updated
+        :return: Null
+        '''
+        # get the electrodes from this NWB file
+        electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}) \
+            .fetch()
+        # get the current reference info
+        elect_ref_info  = (ElectrodeSortingInfo() & {'nwb_file_name' : nwb_file_name}).fetch()
+
+        ref_elect = []
+        for elect in electrodes:
+            ref_elect.append([elect['electrode_id'], elect['original_reference_electrode']])
+        self.insert(dh.replace(elect_ref_info, ref_elect, 'electrode_id', 'reference_electrode'), replace="True")
+
+    def set_reference_from_list(self, nwb_file_name, elect_ref_list):
+        '''
+        Set the reference electrode from a list containing electrodes and reference electrodes
+        :param: elect_ref_list - 2D array or list where each row is [electrode_id reference_electrode]
+        :param: nwb_file_name - The name of the NWB file whose electrodes' references should be updated
+        :return: Null
+        '''
+        # get the current reference info
+        elect_ref_info = (ElectrodeSortingInfo() & {'nwb_file_name': nwb_file_name}).fetch()
+        self.insert(dh.replace(elect_ref_info, elect_ref_list, 'electrode_id', 'reference_electrode'), replace="True")
 
     def write_prb(self, nwb_file_name, prb_file_name):
         '''
         Writes a prb file containing informaiton on the sorting groups and their geometry for use with the
-        SpikeInterface package. See the SpikeInterface documentation for details on prb file formats
+        SpikeInterface package. See the SpikeInterface documentation for details on prb file format.
         :param nwb_file_name: the name of the nwb file for the session you wish to use
         :param prb_file_name: the name of the output prb file
         :return: None
@@ -191,10 +278,12 @@ class SpikeSortingGroup(dj.Manual):
         # Get the list of electrodes and their sort groups
         sort_electrodes = (SpikeSortingGroup() & {'nwb_file_name': nwb_file_name}).fetch()
         sort_groups = np.unique(sort_electrodes['sort_group']).tolist()
+        max_group = int(np.max(np.asarray(sort_groups)))
         electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name': nwb_file_name}).fetch()
         # get the relative x and y positions of each electrode in each probe.
 
         for sort_group in sort_groups:
+            print(sort_group)
             channel_group[sort_group] = dict()
             channel_group[sort_group]['channels'] = sort_electrodes['electrode_id'][sort_electrodes['sort_group'] ==
                                                                              sort_group].tolist()
@@ -207,18 +296,76 @@ class SpikeSortingGroup(dj.Manual):
                     'rel_x','rel_y')
                 rel_x = float(rel_x)
                 rel_y = float(rel_y)
-                geometry.append([rel_x + sort_group, rel_y])
+                geometry.append([rel_x, rel_y])
                 label.append(str(electrode_id))
             channel_group[sort_group]['geometry'] = geometry
             channel_group[sort_group]['label'] = label
-        prbf.write('channel_groups = ')
-        prbf.write(json.dumps(channel_group))
-
+        # write the prf file in their odd format
+        prbf.write('channel_groups = {\n')
+        for group in channel_group.keys():
+            prbf.write(f'    {int(group)}:\n')
+            prbf.write('        {\n')
+            for field in channel_group[group]:
+                prbf.write("          '{}': ".format(field))
+                prbf.write(json.dumps(channel_group[group][field]) + ',\n')
+            if int(group) != max_group:
+                prbf.write('        },\n')
+            else:
+                prbf.write('        }\n')
+        prbf.write('    }\n')
         prbf.close()
+        # use the spikeinterface function to write the prb file
 
+@schema
+class SpikeSorter(dj.Manual):
+    definition = """
+    sorter_name: varchar(80) # the name of the spike sorting algorithm
+    """
+    def insert_from_spikeinterface(self):
+        '''
+        Add each of the sorters from spikeinterface.sorters 
+        :return: None
+        '''
+        self.delete()
+        sorters = si.sorters.available_sorters()
+        for sorter in sorters:
+            self.insert1({'sorter_name' : sorter}, replace="True")
 
+@schema
+class SpikeSorterParameters(dj.Manual):
+    definition = """
+    -> SpikeSorter 
+    parameter_set_name: varchar(80) # label for this set of parameters
+    ---
+    parameter_dict: blob # dictionary of parameter names and values
+    """
 
+    def insert_from_spikeinterface(self):
+        '''
+        Add each of the default parameter dictionaries from spikeinterface.sorters
+        :return: None
+        '''
+        sorters = si.sorters.available_sorters()
+        # check to see that the sorter is listed in the SpikeSorter schema
+        sort_param_dict = dict()
+        sort_param_dict['parameter_set_name'] = 'default'
+        for sorter in sorters:
+            if len((SpikeSorter() & {'sorter_name' : sorter}).fetch()):
+                sort_param_dict['sorter_name'] = sorter
+                sort_param_dict['parameter_dict'] = si.sorters.get_default_params(sorter)
+                self.insert1(sort_param_dict, replace="True")
+            else:
+                print(f'Error in SpikeSorterParameter: sorter {sorter} not in SpikeSorter schema')
+                continue
 
+@schema
+class SpikeSort(dj.Manual):
+    definition = """
+    -> common_session.Session
+    -> SpikeSorterParameters 
+    ---
+    nwb_object_id: varchar(256) # the NWB object holding information about this sort. 
+    """
 
 
 
@@ -273,7 +420,7 @@ class Units(dj.Imported):
 
 
 @schema
-class Raw(dj.Imported):
+class Raw(dj.Manual):
     definition = """
     # Raw voltage timeseries data, electricalSeries in NWB
     -> common_session.Session
@@ -284,10 +431,20 @@ class Raw(dj.Imported):
     comments: varchar(80)
     description: varchar(80)
     """
+    def __init__(self, *args):
+        # do your custom stuff here
+        super().__init__(*args)  # call the base implementation
 
-    def make(self, key):
+    def insert_from_nwb(self, nwb_file_name):
+        '''
+        Insert the nwb object and interval information for the raw electrophysiological data in the NWB file.
+        Assumes the data are returned by nwbf.get_acquisition()
+        :param nwb_file_name:
+        :return:
+        '''
         # get the NWB file name from this session
-        nwb_file_name = key['nwb_file_name']
+        key = dict()
+        key['nwb_file_name'] = nwb_file_name
 
         try:
             io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
@@ -322,8 +479,10 @@ class Raw(dj.Imported):
         # return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
         # so we can modify the other one.
         nwb_file_name = key['nwb_file_name']
-        with pynwb.NWBHDF5IO(nwb_file_name, mode='r') as io:
-            nwbf = io.read()
+
+        # TO DO: This likely leaves the io object in place and the file open. Fix
+        io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+        nwbf = io.read()
         # get the object id
         nwb_object_id = (self & {'nwb_file_name' : key['nwb_file_name']}).fetch1('nwb_object_id')
         return nwbf.objects[nwb_object_id]
@@ -370,29 +529,97 @@ class LFP(dj.Computed):
         # get the NWB object with the data; FIX: change to fetch with additional infrastructure
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_name = (Raw() & key).fetch1('sampling_rate', 'interval_name')
+        key['interval_name'] = interval_name
         sampling_rate = int(np.round(sampling_rate))
+        key['sampling_rate'] = sampling_rate
 
+
+        # TEMPORARY HARD CODED FILTERED DATA PATH
+        filtered_data_path = '/data/nwb_builder_test_data/filtered_data/'
+        nwb_file_name = key['nwb_file_name']
         #target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
         valid_times = (common_interval.IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,
                                                           'interval_name': interval_name}).fetch1('valid_times')
+        #TEMPORARY TEST
+        valid_times = np.delete(valid_times, (1,2,3,4), axis=0)
+        valid_times[0,1] = valid_times[0,0] + 100
+        print(valid_times)
+
         # get the LFP filter that matches the raw data
-        filter_coeff = (common_filter.FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
-                                                                                  sampling_rate}).fetch1('filter_coeff')
+        filter = (common_filter.FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
+                                                                                  sampling_rate}).fetch(as_dict=True)
+
+        # there should only be one filter that matches, so we take the first of the dictionaries
+        key['filter_name'] = filter[0]['filter_name']
+        key['filter_sampling_rate'] = filter[0]['filter_sampling_rate']
+
+        filter_coeff = filter[0]['filter_coeff']
         if len(filter_coeff) == 0:
             print(f'Error in LFP: no filter found with data sampling rate of {sampling_rate}')
             return None
+
 
         # get the list of selected LFP Channels from LFPElectrode
         electrode_keys = (LFPElectrode & key & {'use_for_lfp' : 'True'}).fetch('KEY')
         electrode_id_list = list(k['electrode_id'] for k in electrode_keys)
 
-        # get the filename for the linked file that will store the data
+        #TO DO: go back to filter_data_nwb when appending multiple times to NWB files is fixed.
+
+        """
         nwb_out_file_name = common_session.LinkedNwbfile().create(key['nwb_file_name'])
         print(f'output file name {nwb_out_file_name}')
+
         common_filter.FirFilter().filter_data_nwb(nwb_out_file_name, rawdata.timestamps, rawdata.data,
-                                               filter_coeff, valid_times, electrode_id_list, decimation)
+                                                  filter_coeff, valid_times, electrode_id_list, decimation)
+        """
+        h5file_name = common_filter.FirFilter().filter_data_hdf5(filtered_data_path, rawdata.timestamps,
+                                                                    rawdata.data, filter_coeff, valid_times,
+                                                                               electrode_id_list, decimation)
+
+        # create a linked NWB file with a new electrical series and link these new data to it. This is TEMPORARY
+        linked_file_name = common_session.LinkedNwbfile().get_name_without_create(nwb_file_name)
+
+        key['linked_file_name'] = linked_file_name
+        io_in = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+        nwbf = io_in.read()
+        nwbf_out = nwbf.copy()
+        electrode_table_region = nwbf_out.create_electrode_table_region(electrode_id_list,
+                                                                        'filtered electrode table')
+        print('past append')
+
+        # open the hdf5 file and get the datasets from it
+        with h5.File(h5file_name, 'r') as infile:
+            filtered_data = infile.get('filtered_data')
+            timestamps = infile.get('timestamps')
+
+            # FIX: name needs to be unique
+            es = pynwb.ecephys.ElectricalSeries('filtered data', filtered_data, electrode_table_region,
+                                                timestamps=timestamps)
+            nwbf_out.add_analysis(es)
+            print(f'writing new NWB file {linked_file_name}')
+            with pynwb.NWBHDF5IO(linked_file_name, mode='a', manager=io_in.manager) as io:
+                # FIX: name needs to be unique
+                es = pynwb.ecephys.ElectricalSeries('filtered data', filtered_data, electrode_table_region,
+                                                    timestamps=timestamps)
+                nwbf_out.add_acquisition(es)
+                print(nwbf_out.get_acquisition('filtered data'))
+                io.write(nwbf_out)
+                key['nwb_object_id'] = es.object_id
+
+            io_in.close()
+        # loop through all of the electrodes and insert a row for each one
+        for electrode in electrode_id_list:
+            key['electrode_id'] = electrode
+            print(key)
+            self.insert1(key)
+
+
+
+
+
+
 
 
 
@@ -409,7 +636,7 @@ class LFPBandElectrode(dj.Manual):
 @schema
 class LFPBand(dj.Computed):
     definition = """
-    -> LFPBandParameters
+    -> LFPBandElectrode
     ---
     -> LFP
     -> common_interval.IntervalList

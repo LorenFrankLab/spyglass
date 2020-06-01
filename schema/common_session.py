@@ -33,7 +33,12 @@ class LinkedNwbfile(dj.Manual):
 
 
     def create(self, nwb_file_name):
-        # open the main NWB file, create a copy, write out the copy to disk and return the name of the new file
+        '''
+        Opens the input NWB file, creates a copy, writes out the copy to disk and return the name of the new file
+        :param nwb_file_name:
+        :return: linked_file_name - the name of the linked file
+        '''
+        #
         in_io  = pynwb.NWBHDF5IO(nwb_file_name, 'r')
         nwbf_in = in_io.read()
         nwbf_out = nwbf_in.copy()
@@ -62,6 +67,22 @@ class LinkedNwbfile(dj.Manual):
         print('inserted file')
 
         return nwb_out_file_name
+
+    def get_name_without_create(self, nwb_file_name):
+        '''
+        Returns the name of a new NWB linked NWB file and adds it to the table but does NOT create it. This is
+        currently necessary because of a bug in the HDMF library that prevents multiple appends to an NWB file and
+        should be removed when that bug is fixed.
+        :param nwb_file_name:
+        :return: linked_file_name - the name of the file that can be linked
+        '''
+        key = dict()
+        key['nwb_file_name'] = nwb_file_name
+        n_linked_files = len(LinkedNwbfile())
+        linked_file_name = os.path.splitext(nwb_file_name)[0] + str(n_linked_files).zfill(8) + '.nwb'
+        key['linked_file_name'] = linked_file_name
+        self.insert1(key)
+        return linked_file_name
 
 
 @schema

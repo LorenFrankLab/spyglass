@@ -90,18 +90,21 @@ def NWBPopulate(file_names):
         """
         common_task.Task().insert_from_nwb(nwb_file_name)
         # common_task.Apparatus().insert_from_nwb(nwb_file_name)
-        common_interval.IntervalList().insert_from_nwb(nwb_file_name)
-
-        # now that those schema are updated, we can call the populate method for the rest of the schema
 
 
+        # now that those schema are updated, we can populate the Session and Experimenter lists and then insert the
+        # rest of the schema
         common_session.Session.populate()
         common_session.ExperimenterList.populate()
-        common_task.TaskEpoch.populate()
 
+        common_interval.IntervalList().insert_from_nwb(nwb_file_name)
         # populate the electrode configuration table for this session
-        common_ephys.ElectrodeConfig.populate()
-        common_ephys.Raw.populate()
+        common_ephys.ElectrodeConfig().insert_from_nwb(nwb_file_name)
+        common_ephys.Raw().insert_from_nwb(nwb_file_name)
+
+        #common_task.TaskEpoch.insert_from_nwb(nwb_file_name)
+
+
         # ephys.Units.populate()
 
         # populate the behavioral variables. Note that this has to be done after task.TaskEpoch
