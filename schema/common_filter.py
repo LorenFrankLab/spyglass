@@ -19,10 +19,10 @@ class FirFilter(dj.Manual):
     filter_sampling_rate: int       # sampling rate for this filter
     ---
     filter_type: enum('lowpass', 'highpass', 'bandpass')
-    filter_low_stop=0: float         # highest frequency for stop band for high pass side of filter
-    filter_low_pass=0: float         # lowest frequency for pass band of high pass side of filter
-    filter_high_pass=0: float         # highest frequency for pass band for low pass side of filter
-    filter_high_stop=0: float         # lowest frequency for stop band of low pass side of filter
+    filter_low_stop=0: float         # lowest frequency for stop band for low frequency side of filter
+    filter_low_pass=0: float         # lowest frequency for pass band of low frequency side of filter
+    filter_high_pass=0: float         # highest frequency for pass band for high frequency side of filter
+    filter_high_stop=0: float         # highest frequency for stop band of high frequency side of filter
     filter_comments: varchar(255)   # comments about the filter
     filter_band_edges: blob         # numpy array containing the filter bands (redundant with individual parameters)
     filter_coeff: blob               # numpy array containing the filter coefficients 
@@ -70,16 +70,16 @@ class FirFilter(dj.Manual):
         # set the desired frequency response
         if filter_type == 'lowpass':
             desired = [1, 0]
-            filterdict['filter_low_stop'] = -1
-            filterdict['filter_low_pass'] = -1
+            filterdict['filter_low_stop'] =  0
+            filterdict['filter_low_pass'] =  0
             filterdict['filter_high_pass'] = band_edges[0]
             filterdict['filter_high_stop'] = band_edges[1]
         elif filter_type == 'highpass':
             desired = [0, 1]
             filterdict['filter_low_stop'] = band_edges[0]
             filterdict['filter_low_pass'] = band_edges[1]
-            filterdict['filter_high_pass'] = -1
-            filterdict['filter_high_stop'] = -1
+            filterdict['filter_high_pass'] = 0
+            filterdict['filter_high_stop'] = 0
         else:
             desired = [0, 1, 1, 0]
             filterdict['filter_low_stop'] = band_edges[0]

@@ -492,28 +492,33 @@ class Raw(dj.Manual):
 class LFPElectrode(dj.Manual):
     definition = """
      -> ElectrodeConfig.Electrode
-     ---
-     use_for_lfp = 'False': enum('True', 'False')
      """
 
-    def set_lfp_elect(self, electrode_list):
+    def set_lfp_elect(self, nwb_file_name, electrode_list):
+        '''
+        Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
+        :param nwb_file_name: string - the name of the nwb file for the desired session
+        :param electrode_list: list of electrodes to be used for LFP
+        :return:
+        '''
+        # remove the electrodes
+        (LFPElectrode() & {'nwb_file_name' : nwb_file_name}).delete()
         # TO DO: do this in a better way
         all_electrodes = ElectrodeConfig.Electrode.fetch(as_dict=True)
         primary_key = ElectrodeConfig.Electrode.primary_key
         for e in all_electrodes:
-            use_for_lfp = 'True' if e['electrode_id'] in electrode_list else 'False'
             # create a dictionary so we can insert new elects
-            lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
-            lfpelectdict['use_for_lfp'] = use_for_lfp
-            self.insert1(lfpelectdict, replace='True')
+            if e['electrode_id'] in electrode_list:
+                lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
+                self.insert1(lfpelectdict, replace='True')
 
 
 @schema
 class LFP(dj.Computed):
     definition = """
-    -> Raw                                  # the Raw data this LFP is computed from
     -> LFPElectrode                         # the LFP electrodes selected
     ---
+    -> Raw                                  # the Raw data this LFP is computed from
     -> common_session.LinkedNwbfile    # the linked file the LFP data is stored in
     -> common_interval.IntervalList         # the valid intervals for the data
     -> common_filter.FirFilter                 # the filter used for the data
@@ -526,7 +531,7 @@ class LFP(dj.Computed):
         return common_session.Session()
 
     def make(self, key):
-        # get the NWB object with the data; FIX: change to fetch with additional infrastructure
+       # get the NWB object with the data; FIX: change to fetch with additional infrastructure
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_name = (Raw() & key).fetch1('sampling_rate', 'interval_name')
         key['interval_name'] = interval_name
@@ -542,11 +547,11 @@ class LFP(dj.Computed):
 
         valid_times = (common_interval.IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,
                                                           'interval_name': interval_name}).fetch1('valid_times')
-        #TEMPORARY TEST
-        valid_times = np.delete(valid_times, (1,2,3,4), axis=0)
-        valid_times[0,1] = valid_times[0,0] + 100
-        print(valid_times)
 
+
+        # TEMPORARY:
+        valid_times = np.delete(valid_times, [1, 2, 3, 4], 0)
+        valid_times[0,1] = valid_times[0,0] + 10
         # get the LFP filter that matches the raw data
         filter = (common_filter.FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
                                                                                   sampling_rate}).fetch(as_dict=True)
@@ -562,7 +567,7 @@ class LFP(dj.Computed):
 
 
         # get the list of selected LFP Channels from LFPElectrode
-        electrode_keys = (LFPElectrode & key & {'use_for_lfp' : 'True'}).fetch('KEY')
+        electrode_keys = (LFPElectrode & key).fetch('KEY')
         electrode_id_list = list(k['electrode_id'] for k in electrode_keys)
 
         #TO DO: go back to filter_data_nwb when appending multiple times to NWB files is fixed.
@@ -594,17 +599,12 @@ class LFP(dj.Computed):
             filtered_data = infile.get('filtered_data')
             timestamps = infile.get('timestamps')
 
-            # FIX: name needs to be unique
-            es = pynwb.ecephys.ElectricalSeries('filtered data', filtered_data, electrode_table_region,
-                                                timestamps=timestamps)
-            nwbf_out.add_analysis(es)
+            lfp_description = f'LFP {filter[0]["filter_low_pass"]} Hz to {filter[0]["filter_high_pass"]} Hz '
             print(f'writing new NWB file {linked_file_name}')
             with pynwb.NWBHDF5IO(linked_file_name, mode='a', manager=io_in.manager) as io:
-                # FIX: name needs to be unique
-                es = pynwb.ecephys.ElectricalSeries('filtered data', filtered_data, electrode_table_region,
-                                                    timestamps=timestamps)
-                nwbf_out.add_acquisition(es)
-                print(nwbf_out.get_acquisition('filtered data'))
+                es = pynwb.ecephys.ElectricalSeries('LFP', filtered_data, electrode_table_region,
+                                                    timestamps=timestamps, description=lfp_description)
+                nwbf_out.add_analysis(es)
                 io.write(nwbf_out)
                 key['nwb_object_id'] = es.object_id
 
@@ -614,13 +614,6 @@ class LFP(dj.Computed):
             key['electrode_id'] = electrode
             print(key)
             self.insert1(key)
-
-
-
-
-
-
-
 
 
 @schema
