@@ -122,7 +122,6 @@ class ElectrodeConfig(dj.Manual):
         for elect in electrodes.iterrows():
             # not certain that the assignment below is correct; needs to be checked.
             elect_dict['electrode_id'] = elect[0]
-
             elect_dict['electrode_group_name'] = elect[1].group_name
             # FIX to get electrode information properly from input or NWB file. Label may not exist, so we should
             # check that and use and empty string if not.
@@ -174,7 +173,8 @@ class ElectrodeSortingInfo(dj.Manual):
         electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}) \
             .fetch()
         electrode_sorting_info = electrodes[['nwb_file_name', 'electrode_id']]
-        self.insert(electrode_sorting_info)
+        self.insert(electrode_sorting_info, replace="True")
+
 
     def set_group_by_shank(self, nwb_file_name):
         '''
@@ -189,6 +189,8 @@ class ElectrodeSortingInfo(dj.Manual):
             .fetch()
         # get the current sorting info
         elect_sort_info  = (ElectrodeSortingInfo() & {'nwb_file_name' : nwb_file_name}).fetch()
+        if not len(elect_sort_info):
+            print('Error in ElectrodeSortingInfo.set_group_by_shank: no sorting information found. Try initialize()')
         # if the current sorting info exists,
         # get a list of the electrode groups
         e_groups = np.unique(electrodes['electrode_group_name'])
@@ -276,14 +278,13 @@ class ElectrodeSortingInfo(dj.Manual):
         # create the channel_groups dictiorary
         channel_group = dict()
         # Get the list of electrodes and their sort groups
-        sort_electrodes = (SpikeSortingGroup() & {'nwb_file_name': nwb_file_name}).fetch()
+        sort_electrodes = (ElectrodeSortingInfo() & {'nwb_file_name': nwb_file_name}).fetch()
         sort_groups = np.unique(sort_electrodes['sort_group']).tolist()
         max_group = int(np.max(np.asarray(sort_groups)))
         electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name': nwb_file_name}).fetch()
         # get the relative x and y positions of each electrode in each probe.
 
         for sort_group in sort_groups:
-            print(sort_group)
             channel_group[sort_group] = dict()
             channel_group[sort_group]['channels'] = sort_electrodes['electrode_id'][sort_electrodes['sort_group'] ==
                                                                              sort_group].tolist()
@@ -547,11 +548,6 @@ class LFP(dj.Computed):
 
         valid_times = (common_interval.IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,
                                                           'interval_name': interval_name}).fetch1('valid_times')
-
-
-        # TEMPORARY:
-        valid_times = np.delete(valid_times, [1, 2, 3, 4], 0)
-        valid_times[0,1] = valid_times[0,0] + 10
         # get the LFP filter that matches the raw data
         filter = (common_filter.FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
                                                                                   sampling_rate}).fetch(as_dict=True)
@@ -587,9 +583,13 @@ class LFP(dj.Computed):
         linked_file_name = common_session.LinkedNwbfile().get_name_without_create(nwb_file_name)
 
         key['linked_file_name'] = linked_file_name
+        key['linked_file_location'] = linked_file_name
+
         io_in = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
         nwbf = io_in.read()
         nwbf_out = nwbf.copy()
+
+       #FIX to be indeces into electrodes, not electrode_ids
         electrode_table_region = nwbf_out.create_electrode_table_region(electrode_id_list,
                                                                         'filtered electrode table')
         print('past append')

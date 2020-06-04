@@ -2,10 +2,13 @@
 import pynwb
 import os
 
+import datajoint as dj
 import common_device
 import common_lab
 import common_subject
-import datajoint as dj
+import shutil
+
+
 
 [common_lab, common_subject, common_device]
 
@@ -15,16 +18,41 @@ schema = dj.schema("common_session")
 @schema
 class Nwbfile(dj.Manual):
     definition = """
-    nwb_file_name: varchar(80)
+    nwb_file_name: varchar(255) # the name of the nwb file (same as nwb_file_location)
     ---
+    nwb_file_location: filepath@local  # the datajoint managed location of the NWB file
     nwb_raw_file_name: varchar(80) # The name of the NWB file with the raw ephys data
     """
+    def insert_nwb_file(self, nwb_raw_file_name):
+        '''
+        Creates a copy of the raw NWB file without the raw data and then adds that file name to the schema while
+        as the basis of analyses.
+        :param nwb_raw_file_name: string - the name of the nwb file with raw data
+        :return: nwb_file_name: string - the full path  of the copied field
+        '''
+        nwb_file_root_name, ext  = os.path.splitext(os.path.basename(nwb_raw_file_name))
+        nwb_file_name = os.path.join(dj.config['stores']['local']['location'], nwb_file_root_name+'_pp.nwb')
+        # TO DO: Create a copy of the NWB file, removing the electrical series object and replacing it with a link to
+        # the raw file
+
+        # TEMPORARY HACK: create a copy of the original file:
+        if not os.path.exists(nwb_file_name):
+            print('Copying file; this step will be removed once NWB export functionality works')
+            shutil.copyfile(nwb_raw_file_name, nwb_file_name)
+        key = dict()
+        key['nwb_file_name'] = nwb_file_name
+        key['nwb_file_location'] = nwb_file_name
+        key['nwb_raw_file_name'] = nwb_raw_file_name
+        self.insert1(key, skip_duplicates="True")
+
 
 @schema
 class LinkedNwbfile(dj.Manual):
     definition = """
     -> Nwbfile              
-    linked_file_name: varchar(80)  # the name of each linked file
+    linked_file_name: varchar(255) # the name of the linked file
+    ---
+    linked_file_location: filepath@local  # the datajoint managed location of the linked file
     """
 
     def __init__(self, *args):
@@ -55,7 +83,7 @@ class LinkedNwbfile(dj.Manual):
         n_linked_files = len(LinkedNwbfile())
         nwb_out_file_name = os.path.splitext(nwb_file_name)[0] + str(n_linked_files).zfill(8) + '.nwb'
         key['linked_file_name'] = nwb_out_file_name
-
+        key['linked_file_location'] = nwb_out_file_name
         # write the linked file
         print(f'writing new NWB file {nwb_out_file_name}')
         with pynwb.NWBHDF5IO(nwb_out_file_name, 'a', manager=in_io.manager) as io:

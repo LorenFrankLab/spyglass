@@ -11,9 +11,9 @@ import common_session
 import common_subject
 import common_task
 import datajoint as dj
-import os
-import shutil
-import ndx_fl_novela.probe
+
+import ndx_franklab_novela.probe
+
 
 import franklab_nwb_extensions.fl_extension as fl_extension
 
@@ -27,17 +27,12 @@ def NWBPopulate(file_names):
     # CHANGE per object when object_ids are implemented in the NWB file
     default_nwb_object_id = 0
     for nwb_raw_file_name in file_names:
-        try:
-            io = pynwb.NWBHDF5IO(nwb_raw_file_name, mode='r')
-        except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(nwb_raw_file_name))
-            print(io.read())
-            continue
-        finally:
-            io.close()
-
-
-        print('Importing NWB file', nwb_raw_file_name)
+        # datajoint has to compute the full hash of the file to tell if it is a duplicate, so we skip the file if it
+        # exists
+        if not len((common_session.Nwbfile() & {'nwb_raw_file_name' : nwb_raw_file_name}).fetch('nwb_file_name')):
+            common_session.Nwbfile().insert_nwb_file(nwb_raw_file_name)
+        # get the name of the linked file
+        nwb_file_name = (common_session.Nwbfile() & {'nwb_raw_file_name' : nwb_raw_file_name}).fetch1('nwb_file_name')
 
         ''' UNCOMMENT AND FIX when NWB export functionality works. 
         # start by making a copy of the file. Eventually this should have everything EXCEPT the e-series, but
@@ -51,27 +46,18 @@ def NWBPopulate(file_names):
         '''
         #TEMPORARY HACK: create a copy of the original file:
 
-        nwb_file_name = os.path.splitext(nwb_raw_file_name)[0] + '_pp.nwb'
-        if not os.path.exists(nwb_file_name):
-            print('Copying file; this step will be removed once NWB export functionality works')
-            shutil.copyfile(nwb_raw_file_name, nwb_file_name)
-
-        io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-        nwbf = io.read()
-
+        # nwb_file_name = os.path.splitext(nwb_raw_file_name)[0] + '_pp.nwb'
+        # if not os.path.exists(nwb_file_name):
+        #     print('Copying file; this step will be removed once NWB export functionality works')
+        #     shutil.copyfile(nwb_raw_file_name, nwb_file_name)
+        #
         # FIX: create insert_from_nwb method for Institution and Lab
         """
-        Institution and Lab
+        Institution, Lab, and Experimenter
         """
-        common_lab.Institution.insert1(
-            dict(institution_name=nwbf.institution), skip_duplicates=True)
-        common_lab.Lab.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)
-        io.close()
-        """
-        NWBFile
-        """
-        common_session.Nwbfile.insert1(dict(nwb_file_name=nwb_file_name, nwb_raw_file_name=nwb_raw_file_name),
-                                       skip_duplicates=True)
+        common_lab.Institution().insert_from_nwb(nwb_file_name)
+        common_lab.Lab().insert_from_nwb(nwb_file_name)
+        common_lab.LabMember().insert_from_nwb(nwb_file_name)
 
         """
         Subject

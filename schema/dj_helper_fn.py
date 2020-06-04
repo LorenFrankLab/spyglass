@@ -15,6 +15,7 @@ def replace(original_table, new_values, key_column, replace_column):
     '''
     # sort the new values so we can use search sorted
     new_values = np.sort(new_values,0)
+
     replace_ind = np.searchsorted(original_table[key_column], new_values[:,0])
     # check to make sure the indeces agree
     if not np.array_equiv(original_table[key_column][replace_ind], new_values[:,0]):
