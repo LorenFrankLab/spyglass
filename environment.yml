@@ -22,7 +22,7 @@ dependencies:
 - pytest
 - pytest-cov
 - coveralls
+- ghostipy
 - pip
 - pip:
   - python-intervals
-  - filterframework_to_nwb
