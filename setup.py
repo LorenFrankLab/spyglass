@@ -3,7 +3,7 @@ import setuptools
 setuptools.setup(
     name="nwb_datajoint",
     version="0.1.0",
-    author="Eric Denovellis",
+    author="Loren Frank, Eric Denovellis",
     author_email="eric.denovellis@ucsf.edu",
     description="NWB helper code for Loren Frank's lab at UCSF",
     url="https://github.com/LorenFrankLab/nwb_datajoint",
