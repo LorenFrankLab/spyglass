@@ -1,4 +1,4 @@
-name: nwb_datajoint
+name: nwb_datajoint_test
 channels:
 - defaults
 - conda-forge
@@ -25,4 +25,5 @@ dependencies:
 - pip
 - pip:
   - python-intervals
-  - filterframework_to_nwb
+  - ghostipy
+  - spikeinterface
