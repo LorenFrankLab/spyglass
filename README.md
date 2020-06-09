@@ -1,10 +1,5 @@
 # nwb_datajoint
 
-Old code for importing older Frank Lab data is in the develop branch
-
-Newer code for importing from new NWB data files is in the master and
-develop_nwbraw branches
-
 ## Setup 
 to date notebooks 
 1. Clone repository
