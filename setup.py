@@ -18,6 +18,8 @@ setuptools.setup(
         'numpy',
         'scipy',
         'python-dateutil',
-        'datajoint'
+        'datajoint',
+        'ghostipy',
+        'kachery==0.6.1'
     ],
 )

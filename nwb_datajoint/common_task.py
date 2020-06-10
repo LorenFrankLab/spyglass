@@ -8,7 +8,7 @@ import nwb_datajoint.common_behav as common_behav
 import nwb_datajoint.nwb_helper_fn as nh
 
 import datajoint as dj
-import franklabnwb.fl_extension as fl_extension
+# import franklabnwb.fl_extension as fl_extension
 
 
 schema = dj.schema("common_task", locals())

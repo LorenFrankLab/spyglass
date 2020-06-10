@@ -473,6 +473,7 @@ class Raw(dj.Manual):
             self.insert1(key, skip_duplicates='True')
         except:
             print(f'Error: Raw data import from nwbfile {nwb_file_name} failed; file may not exist.')
+            raise
         finally:
             io.close()
 
@@ -520,7 +521,7 @@ class LFP(dj.Computed):
     -> LFPElectrode                         # the LFP electrodes selected
     ---
     -> Raw                                  # the Raw data this LFP is computed from
-    -> common_session.LinkedNwbfile    # the linked file the LFP data is stored in
+    -> common_session.Session    # the linked session the LFP data is stored in
     -> common_interval.IntervalList         # the valid intervals for the data
     -> common_filter.FirFilter                 # the filter used for the data
     nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the linked file
@@ -580,10 +581,10 @@ class LFP(dj.Computed):
                                                                                electrode_id_list, decimation)
 
         # create a linked NWB file with a new electrical series and link these new data to it. This is TEMPORARY
-        linked_file_name = common_session.LinkedNwbfile().get_name_without_create(nwb_file_name)
+        # linked_file_name = common_session.Nwbfile().get_name_without_create(nwb_file_name)
 
-        key['linked_file_name'] = linked_file_name
-        key['linked_file_location'] = linked_file_name
+        # key['linked_file_name'] = linked_file_name
+        # key['linked_file_location'] = linked_file_name
 
         io_in = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
         nwbf = io_in.read()

@@ -1,122 +1,22 @@
 # we need to include pynwb and the franklab NWB namespace to be able to open the file
 import pynwb
-import os
 
 import datajoint as dj
 import nwb_datajoint.common_device as common_device
 import nwb_datajoint.common_lab as common_lab
 import nwb_datajoint.common_subject as common_subject
-import shutil
 
+import pynwb
 
-
-[common_lab, common_subject, common_device]
+# [common_lab, common_subject, common_device]
 
 schema = dj.schema("common_session")
 
-
 @schema
-class Nwbfile(dj.Manual):
+class Session(dj.Manual):
     definition = """
-    nwb_file_name: varchar(255) # the name of the nwb file (same as nwb_file_location)
-    ---
-    nwb_file_location: filepath@local  # the datajoint managed location of the NWB file
-    nwb_raw_file_name: varchar(80) # The name of the NWB file with the raw ephys data
-    """
-    def insert_nwb_file(self, nwb_raw_file_name):
-        '''
-        Creates a copy of the raw NWB file without the raw data and then adds that file name to the schema while
-        as the basis of analyses.
-        :param nwb_raw_file_name: string - the name of the nwb file with raw data
-        :return: nwb_file_name: string - the full path  of the copied field
-        '''
-        nwb_file_root_name, ext  = os.path.splitext(os.path.basename(nwb_raw_file_name))
-        nwb_file_name = os.path.join(dj.config['stores']['local']['location'], nwb_file_root_name+'_pp.nwb')
-        # TO DO: Create a copy of the NWB file, removing the electrical series object and replacing it with a link to
-        # the raw file
-
-        # TEMPORARY HACK: create a copy of the original file:
-        if not os.path.exists(nwb_file_name):
-            print('Copying file; this step will be removed once NWB export functionality works')
-            shutil.copyfile(nwb_raw_file_name, nwb_file_name)
-        key = dict()
-        key['nwb_file_name'] = nwb_file_name
-        key['nwb_file_location'] = nwb_file_name
-        key['nwb_raw_file_name'] = nwb_raw_file_name
-        self.insert1(key, skip_duplicates="True")
-
-
-@schema
-class LinkedNwbfile(dj.Manual):
-    definition = """
-    -> Nwbfile              
-    linked_file_name: varchar(255) # the name of the linked file
-    ---
-    linked_file_location: filepath@local  # the datajoint managed location of the linked file
-    """
-
-    def __init__(self, *args):
-        # do your custom stuff here
-        super().__init__(*args)  # call the base implementation
-
-
-    def create(self, nwb_file_name):
-        '''
-        Opens the input NWB file, creates a copy, writes out the copy to disk and return the name of the new file
-        :param nwb_file_name:
-        :return: linked_file_name - the name of the linked file
-        '''
-        #
-        in_io  = pynwb.NWBHDF5IO(nwb_file_name, 'r')
-        nwbf_in = in_io.read()
-        nwbf_out = nwbf_in.copy()
-
-        key = dict()
-        key['nwb_file_name'] = nwb_file_name
-        # get the current number of linked files
-        #n_linked_files = len((LinkedNwbfile() & {'nwb_file_name' : nwb_file_name}).fetch())
-        # name the file, adding the number of links with preceeding zeros
-
-        # the init function is called everytime this object is accessed by DataJoint, so to set a variable we have to
-        # do it here.
-
-        n_linked_files = len(LinkedNwbfile())
-        nwb_out_file_name = os.path.splitext(nwb_file_name)[0] + str(n_linked_files).zfill(8) + '.nwb'
-        key['linked_file_name'] = nwb_out_file_name
-        key['linked_file_location'] = nwb_out_file_name
-        # write the linked file
-        print(f'writing new NWB file {nwb_out_file_name}')
-        with pynwb.NWBHDF5IO(nwb_out_file_name, 'a', manager=in_io.manager) as io:
-            io.write(nwbf_out)
-
-        in_io.close()
-        # insert the key into the Linked File table
-        self.insert1(key)
-        print('inserted file')
-
-        return nwb_out_file_name
-
-    def get_name_without_create(self, nwb_file_name):
-        '''
-        Returns the name of a new NWB linked NWB file and adds it to the table but does NOT create it. This is
-        currently necessary because of a bug in the HDMF library that prevents multiple appends to an NWB file and
-        should be removed when that bug is fixed.
-        :param nwb_file_name:
-        :return: linked_file_name - the name of the file that can be linked
-        '''
-        key = dict()
-        key['nwb_file_name'] = nwb_file_name
-        n_linked_files = len(LinkedNwbfile())
-        linked_file_name = os.path.splitext(nwb_file_name)[0] + str(n_linked_files).zfill(8) + '.nwb'
-        key['linked_file_name'] = linked_file_name
-        self.insert1(key)
-        return linked_file_name
-
-
-@schema
-class Session(dj.Imported):
-    definition = """
-    -> Nwbfile
+    nwb_file_name: varchar(80) # The name of the NWB file with the raw ephys data
+    nwb_file_sha1: varchar(40) # SHA-1 hash of the raw NWB file    ---    
     ---
     -> common_subject.Subject
     -> common_lab.Institution
@@ -134,16 +34,29 @@ class Session(dj.Imported):
         -> common_device.Device
         """
 
-    def make(self, key):
-        try:
-            io = pynwb.NWBHDF5IO(key['nwb_file_name'], mode='r')
-            nwbf = io.read()
-        except:
-            print('Error in Session: nwbfile {} cannot be opened for reading\n'.format(
-                key['nwb_file_name']))
-            print(io.read())
-            io.close()
-            return
+    def insert_from_nwb(self, nwb_file_name, nwb_file_sha1):
+        key = dict(
+            nwb_file_name=nwb_file_name,
+            nwb_file_sha1=nwb_file_sha1
+        )
+
+        io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+        nwbf = io.read()
+
+        devices = list(nwbf.devices.keys())
+        device_dict = dict()
+        for d in devices:
+            # note that at present we skip the header_device from trodes rec files. We could add it in if at some
+            # point we felt it was needed.
+            if (d == 'data_acq_device'):
+                # FIX: we need to get the right fields in the NWB device for this schema
+                # device.Device.insert1(dict(device_name=d))
+                device_dict['device_name'] = d
+                device_dict['system'] = d.system
+                device_dict['amplifier'] = d.amplifier
+                device_dict['adc_circuit'] = d.circuit
+                common_device.Device.insert1(device_dict, skip_duplicates=True)
+        io.close()
 
         # populate the Session with information from the file
         key['subject_id'] = nwbf.subject.subject_id
@@ -157,7 +70,7 @@ class Session(dj.Imported):
         key['session_start_time'] = nwbf.session_start_time
         key['experiment_description'] = nwbf.experiment_description
         key['timestamps_reference_time'] = nwbf.timestamps_reference_time
-        self.insert1(key)
+        self.insert1(key, skip_duplicates=True)
 
         # insert the devices
         ''' Uncomment when devices correct 

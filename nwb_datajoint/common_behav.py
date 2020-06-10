@@ -48,6 +48,7 @@ class RawPosition(dj.Imported):
             # add the valid intervals to the Interval list
             interval_dict = dict()
             interval_dict['nwb_file_name'] = key['nwb_file_name']
+            interval_dict['nwb_file_sha1'] = key['nwb_file_sha1']
             interval_dict['interval_name'] = pos_interval_name
             interval_dict['valid_times'] = nh.get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
             common_interval.IntervalList.insert1(interval_dict, skip_duplicates="True")
