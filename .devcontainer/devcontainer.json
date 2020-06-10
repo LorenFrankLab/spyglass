@@ -1,0 +1,46 @@
+{
+	"name": "Python 3 - Anaconda",
+	"context": "..",
+	"dockerFile": "Dockerfile",
+
+	// Set *default* container specific settings.json values on container create.
+	"settings": { 
+		"terminal.integrated.shell.linux": "/bin/bash",
+		"python.pythonPath": "/opt/conda/bin/python",
+		"python.linting.enabled": true,
+		"python.linting.pylintEnabled": true,
+		"python.linting.pylintPath": "/opt/conda/bin/pylint"
+	},
+
+	// Add the IDs of extensions you want installed when the container is created.
+	"extensions": [
+		"ms-python.python",
+		"ms-pyright.pyright",
+		"eamodio.gitlens",
+		"njpwerner.autodocstring",
+		"stkb.rewrap",
+		"ryanluker.vscode-coverage-gutters",
+		"github.vscode-pull-request-github"
+	],
+
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+
+	// Use 'postCreateCommand' to run commands after the container is created.
+	"postCreateCommand": ".devcontainer/post_create.sh",
+
+	"mounts": [
+		"source=${localWorkspaceFolder}/devel/data,target=/data,type=bind,consistency=delegated"
+	],
+
+	"containerEnv": {
+		"KACHERY_STORAGE_DIR": "/data/kachery-storage"
+	},
+
+	"runArgs": [
+		"--net=host"
+	],
+
+	// Uncomment to connect as a non-root user. See https://aka.ms/vscode-remote/containers/non-root.
+	"remoteUser": "vscode"
+}
