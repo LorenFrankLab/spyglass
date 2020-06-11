@@ -1,6 +1,5 @@
-import nwb_datajoint.common_session as common_session
+from .common_session import Session
 import datajoint as dj
-import pynwb
 import numpy as np
 
 schema = dj.schema('common_interval')
@@ -9,26 +8,19 @@ schema = dj.schema('common_interval')
 @schema
 class IntervalList(dj.Manual):
     definition = """
-    -> common_session.Session
+    -> Session
     interval_name: varchar(200) #descriptive name of this interval list
     ---
     valid_times: longblob # 2D numpy array with start and end times for each interval
     """
 
-    def insert_from_nwb(self, nwb_file_name):
+    def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
         '''
+        :param nwbf:
         :param nwb_file_name:
         :return: None
         Adds each of the entries in the nwb epochs table to the Interval list
         '''
-        try:
-            io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-            nwbf = io.read()
-        except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(nwb_raw_file_name))
-            io.close()
-            return None
-
         epochs = nwbf.epochs.to_dataframe()
         epoch_dict = dict()
         epoch_dict['nwb_file_name'] = nwb_file_name

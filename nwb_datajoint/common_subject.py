@@ -6,7 +6,7 @@ schema = dj.schema("common_subject")
 
 
 @schema
-class Subject(dj.Manual):
+class Subject(dj.Imported):
     definition = """
     subject_id: varchar(80)
     ---
@@ -20,16 +20,7 @@ class Subject(dj.Manual):
     def __init__(self, *args):
         super().__init__(*args)  # call the base implementation
 
-    def insert_from_nwb(self, nwb_file_name):
-        try:
-            io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-            nwbf = io.read()
-        except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(
-                nwb_file_name))
-            print(io.read())
-            io.close()
-            return
+    def insert_from_nwbfile(self, nwbf):
         #get the subject information and create a dictionary from it
         sub = nwbf.subject
         subject_dict = dict()
@@ -47,6 +38,5 @@ class Subject(dj.Manual):
         subject_dict['sex'] = sex
         subject_dict['species'] = sub.species
         self.insert1(subject_dict,skip_duplicates=True)
-        io.close()
 
 
