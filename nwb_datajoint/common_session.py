@@ -1,8 +1,15 @@
 import datajoint as dj
+import pynwb
 
+from .common_nwbfile import Nwbfile
 from .common_lab import LabMember
+from .common_lab import Lab, Institution, LabMember
+from .common_subject import Subject
+from .common_device import Device
+from .common_device import Probe
 
-# [common_lab, common_subject, common_device]
+# So that linters don't complain that these are unused
+used = [Nwbfile, Subject, Institution, Lab, LabMember, Device]
 
 schema = dj.schema("common_session")
 
@@ -11,9 +18,9 @@ class Session(dj.Imported):
     definition = """
     -> Nwbfile
     ---
-    -> common_subject.Subject
-    -> common_lab.Institution
-    -> common_lab.Lab
+    -> Subject
+    -> Institution
+    -> Lab
     session_id: varchar(80)
     session_description: varchar(80)
     session_start_time: datetime
@@ -24,60 +31,73 @@ class Session(dj.Imported):
     class DataAcqDevice(dj.Part):
         definition = """
         -> Session
-        -> common_device.Device
+        -> Device
+        """
+    
+    class Experimenter(dj.Part):
+        definition = """
+        -> Session
+        -> LabMember
         """
 
-    def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
-        key = dict(
-            nwb_file_name=nwb_file_name
-        )
+    def make(self, key):
+        nwb_file_name = key['nwb_file_name']
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
+            nwbf = io.read()
+            print('Institution...')
+            Institution().insert_from_nwbfile(nwbf)
+            print('Lab...')
+            Lab().insert_from_nwbfile(nwbf)
+            print('LabMember...')
+            LabMember().insert_from_nwbfile(nwbf)
 
-        # populate the Session with information from the file
-        key['subject_id'] = nwbf.subject.subject_id
-        key['institution_name'] = nwbf.institution
-        key['lab_name'] = nwbf.lab
-        # Remove when bug fixed: session_id can be empty in current version
-        key['session_id'] = nwbf.session_id
-        if (key['session_id'] == None):
-            key['session_id'] = 'tmp_id'
-        key['session_description'] = nwbf.session_description
-        key['session_start_time'] = nwbf.session_start_time
-        key['experiment_description'] = nwbf.experiment_description
-        key['timestamps_reference_time'] = nwbf.timestamps_reference_time
-        self.insert1(key, skip_duplicates=True)
+            print('Subject...')
+            Subject().insert_from_nwbfile(nwbf)
 
-        ExperimenterList().insert1(dict(nwb_file_name=nwb_file_name))
-        for e in nwbf.experimenter:
-            # check to see if the experimenter is in the lab member list, and if not add her / him
-            if {'lab_member_name': e} not in LabMember():
-                names = [x.strip() for x in e.split(' ')]
-                labmember_dict = dict()
-                labmember_dict['lab_member_name'] = e
-                if len(names) == 2:
-                    labmember_dict['first_name'] = names[0]
-                    labmember_dict['last_name'] = names[1]
-                else:
-                    print(
-                        'Warning: experimenter {} does not seem to have a first and last name'.format(e))
-                    labmember_dict['first_name'] = 'unknown'
-                    labmember_dict['last_name'] = 'unknown'
-                LabMember().insert1(labmember_dict)
-            # now insert the experimenter, which is a combination of the nwbfile and the name
-            key['lab_member_name'] = e
-            Experimenter().insert1(dict(
-                nwb_file_name=nwb_file_name,
-                lab_member_name=e
-            ))
+            print('Device...')
+            device_name = Device().insert_from_nwbfile(nwbf)
+            print('Probe...')
+            Probe().insert_from_nwbfile(nwbf)
 
-@schema
-class Experimenter(dj.Imported):
-    definition = """
-    -> ExperimenterList
-    -> common_lab.LabMember
-    """
+            self.insert1({
+                'nwb_file_name': nwb_file_name,
+                'subject_id': nwbf.subject.subject_id,
+                'institution_name': nwbf.institution,
+                'lab_name': nwbf.lab,
+                'session_id': nwbf.session_id if nwbf.session_id is not None else 'tmp_id',
+                'session_description': nwbf.session_description,
+                'session_start_time': nwbf.session_start_time,
+                'timestamps_reference_time': nwbf.timestamps_reference_time,
+                'experiment_description': nwbf.experiment_description
+            }, skip_duplicates=True)
 
-@schema
-class ExperimenterList(dj.Imported):
-    definition = """
-    -> Session
-    """
+            for e in nwbf.experimenter:
+                # check to see if the experimenter is in the lab member list, and if not add her / him
+                if {'lab_member_name': e} not in LabMember():
+                    names = [x.strip() for x in e.split(' ')]
+                    labmember_dict = dict()
+                    labmember_dict['lab_member_name'] = e
+                    if len(names) == 2:
+                        labmember_dict['first_name'] = names[0]
+                        labmember_dict['last_name'] = names[1]
+                    else:
+                        print(
+                            'Warning: experimenter {} does not seem to have a first and last name'.format(e))
+                        labmember_dict['first_name'] = 'unknown'
+                        labmember_dict['last_name'] = 'unknown'
+                    LabMember().insert1(labmember_dict)
+                # now insert the experimenter, which is a combination of the nwbfile and the name
+                key['lab_member_name'] = e
+                Session.Experimenter.insert1({
+                    'nwb_file_name': nwb_file_name,
+                    'lab_member_name': e
+                }, skip_duplicates=True)
+            
+            if device_name is not None:
+                Session.DataAcqDevice.insert1({
+                    'nwb_file_name': nwb_file_name,
+                    'device_name': device_name
+                }, skip_duplicates=True)
+            else:
+                print('WARNING: unable to get device for session.')

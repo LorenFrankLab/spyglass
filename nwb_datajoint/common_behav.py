@@ -2,12 +2,13 @@
 import pynwb
 import numpy as np
 
-import nwb_datajoint.common_interval as common_interval
-import nwb_datajoint.common_session as common_session
+from .common_session import Session
+from .common_interval import IntervalList
 import datajoint as dj
 import nwb_datajoint.nwb_helper_fn as nh
 
-[common_session, common_interval]
+# so the linter does not complain about unused variables
+used = [Session]
 
 schema = dj.schema('common_behav')
 
@@ -15,10 +16,10 @@ schema = dj.schema('common_behav')
 @schema
 class RawPosition(dj.Imported):
     definition = """
-    -> common_session.Session
+    -> Session
     ---
     nwb_object_id: varchar(80)            # the object id of the data in the NWB file
-    -> common_interval.IntervalList       # the list of intervals for this object
+    -> IntervalList       # the list of intervals for this object
     """
 
     def make(self, key):
@@ -51,7 +52,7 @@ class RawPosition(dj.Imported):
             interval_dict['nwb_file_sha1'] = key['nwb_file_sha1']
             interval_dict['interval_name'] = pos_interval_name
             interval_dict['valid_times'] = nh.get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
-            common_interval.IntervalList.insert1(interval_dict, skip_duplicates="True")
+            common_interval.IntervalList.insert1(interval_dict, skip_duplicates=True)
 
             key['nwb_object_id'] = position.object_id
             # this is created when we populate the Task schema
@@ -68,10 +69,10 @@ class RawPosition(dj.Imported):
 @schema
 class HeadDir(dj.Imported):
     definition = """
-    -> common_session.Session
+    -> Session
     ---
     nwb_object_id: int  # the object id of the data in the NWB file
-    -> common_interval.IntervalList       # the list of intervals for this object
+    -> IntervalList       # the list of intervals for this object
     """
 
     def make(self, key):
@@ -101,10 +102,10 @@ class HeadDir(dj.Imported):
 @schema
 class Speed(dj.Imported):
     definition = """
-    -> common_session.Session
+    -> Session
     ---
     nwb_object_id: int  # the object id of the data in the NWB file
-    -> common_interval.IntervalList       # the list of intervals for this object
+    -> IntervalList       # the list of intervals for this object
     """
 
     def make(self, key):
@@ -134,10 +135,10 @@ class Speed(dj.Imported):
 @schema
 class LinPos(dj.Imported):
     definition = """
-    -> common_session.Session
+    -> Session
     ---
     nwb_object_id: int  # the object id of the data in the NWB file
-    -> common_interval.IntervalList       # the list of intervals for this object
+    -> IntervalList       # the list of intervals for this object
     """
 
     def make(self, key):

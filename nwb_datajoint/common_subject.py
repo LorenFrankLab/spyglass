@@ -6,7 +6,7 @@ schema = dj.schema("common_subject")
 
 
 @schema
-class Subject(dj.Imported):
+class Subject(dj.Lookup):
     definition = """
     subject_id: varchar(80)
     ---

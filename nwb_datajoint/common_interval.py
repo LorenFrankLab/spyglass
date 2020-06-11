@@ -2,6 +2,8 @@ from .common_session import Session
 import datajoint as dj
 import numpy as np
 
+used = [Session]
+
 schema = dj.schema('common_interval')
 
 # define the schema for intervals
@@ -27,7 +29,7 @@ class IntervalList(dj.Manual):
         for e in epochs.iterrows():
             epoch_dict['interval_name'] = e[1].tags[0]
             epoch_dict['valid_times'] = np.asarray([[e[1].start_time, e[1].stop_time]])
-            self.insert1(epoch_dict, skip_duplicates="True")
+            self.insert1(epoch_dict, skip_duplicates=True)
 
 
     # FIX: ADD export to NWB function to save relevant intervals in an NWB file

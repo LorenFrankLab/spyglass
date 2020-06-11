@@ -16,10 +16,11 @@ if 'DJ_DATABASE_PASSWORD' in os.environ:
 import nwb_datajoint as nwb_dj
 
 def main():
-  nwb_raw_file_name = '/data/nwb_builder_test_data/beans20190718.nwb'
+  nwb_raw_file_name = 'nwb_builder_test_data/beans20190718.nwb'
   # nwb_raw_file_name = '/data/nwb_builder_test_data/beans20190718ex.nwb'
 
-  nwb_dj.NWBPopulate([nwb_raw_file_name]) 
+  os.environ['NWB_DATAJOINT_BASE_DIR'] = '/data'
+  nwb_dj.insert_sessions([nwb_raw_file_name]) 
 
 if __name__ == '__main__':
     main()

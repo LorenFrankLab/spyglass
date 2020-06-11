@@ -1,10 +1,11 @@
 import datajoint as dj
 
-import nwb_datajoint.common_session as common_session
-import nwb_datajoint.common_region as common_region
-import nwb_datajoint.common_interval as common_interval
-import nwb_datajoint.common_device as common_device
-import nwb_datajoint.common_filter as common_filter
+from .common_session import Session
+from .common_region import BrainRegion
+from .common_device import Probe
+from .common_interval import IntervalList
+from .common_filter import FirFilter
+
 import spikeinterface as si
 import pynwb
 import re
@@ -14,7 +15,7 @@ import h5py as h5
 import nwb_datajoint.nwb_helper_fn as nh
 import nwb_datajoint.dj_helper_fn as dh
 
-
+used = [Session, BrainRegion, Probe, IntervalList, FirFilter]
 
 schema = dj.schema('common_ephys')
 
@@ -22,7 +23,7 @@ schema = dj.schema('common_ephys')
 @schema
 class ElectrodeConfig(dj.Manual):
     definition = """
-    -> common_session.Session
+    -> Session
     """
 
     class ElectrodeGroup(dj.Part):
@@ -31,8 +32,8 @@ class ElectrodeConfig(dj.Manual):
         -> master
         electrode_group_name: varchar(80)  # electrode group name from NWBFile
         ---
-        -> common_region.BrainRegion
-        -> common_device.Probe
+        -> BrainRegion
+        -> Probe
         description: varchar(80) # description of electrode group
         target_hemisphere: enum('Right','Left')
         """
@@ -43,8 +44,8 @@ class ElectrodeConfig(dj.Manual):
         electrode_id: int               # the unique number for this electrode
         ---
         -> master.ElectrodeGroup
-        -> common_device.Probe.Electrode
-        -> common_region.BrainRegion
+        -> Probe.Electrode
+        -> BrainRegion
         name='': varchar(80)           # unique label for each contact
         original_reference_electrode=-1: int # the configured reference electrode for this electrode 
         x=NULL: float                   # the x coordinate of the electrode position in the brain
@@ -59,7 +60,7 @@ class ElectrodeConfig(dj.Manual):
         contacts: varchar(80)           # label of electrode contacts used for a bipolar signal -- current workaround
         """
 
-    def insert_from_nwb(self, nwb_file_name):
+    def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
         '''
         Insert Electrode groups and electrodes from the NWB file.
         :param nwb_file_name: string - name of NWB file
@@ -68,16 +69,8 @@ class ElectrodeConfig(dj.Manual):
         key = dict()
         key['nwb_file_name'] = nwb_file_name
         # insert the session identifier (the name of the nwb file)
-        self.insert1(key, skip_duplicates="True")
-        # now open the NWB file and fill in the groups
-        try:
-            io = pynwb.NWBHDF5IO(key['nwb_file_name'], mode='r')
-            nwbf = io.read()
-        except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(
-                key['nwb_file_name']))
-            return
-
+        self.insert1(key, skip_duplicates=True)
+        # now fill in the groups
         egroups = list(nwbf.electrode_groups.keys())
         eg_dict = dict()
         eg_dict['nwb_file_name'] = key['nwb_file_name']
@@ -91,11 +84,11 @@ class ElectrodeConfig(dj.Manual):
             region_dict['region_name'] = electrode_group.location
             region_dict['subregion_name'] = ''
             region_dict['subsubregion_name'] = ''
-            query = common_region.BrainRegion & region_dict
+            query = BrainRegion & region_dict
             if len(query) == 0:
                 # this region isn't in the list, so add it
-                common_region.BrainRegion.insert1(region_dict)
-                query = common_region.BrainRegion & region_dict
+                BrainRegion.insert1(region_dict)
+                query = BrainRegion & region_dict
                 # we also need to get the region_id for this new region or find the right region_id
             region_id_dict = query.fetch1()
             eg_dict['region_id'] = region_id_dict['region_id']
@@ -108,7 +101,7 @@ class ElectrodeConfig(dj.Manual):
                         # this will match the entry in the device schema
                         eg_dict['probe_type'] = electrode_group.device.probe_type
                         break
-            ElectrodeConfig.ElectrodeGroup.insert1(eg_dict, skip_duplicates="True")
+            ElectrodeConfig.ElectrodeGroup.insert1(eg_dict, skip_duplicates=True)
 
         # now create the table of electrodes
         elect_dict = dict()
@@ -147,9 +140,7 @@ class ElectrodeConfig(dj.Manual):
             except:
                 elect_dict['original_reference_electrode'] = -1
 
-            ElectrodeConfig.Electrode.insert1(elect_dict, skip_duplicates="True")
-        # close the file
-        io.close()
+            ElectrodeConfig.Electrode.insert1(elect_dict, skip_duplicates=True)
 
 @schema
 class ElectrodeSortingInfo(dj.Manual):
@@ -362,7 +353,7 @@ class SpikeSorterParameters(dj.Manual):
 @schema
 class SpikeSort(dj.Manual):
     definition = """
-    -> common_session.Session
+    -> Session
     -> SpikeSorterParameters 
     ---
     nwb_object_id: varchar(256) # the NWB object holding information about this sort. 
@@ -373,11 +364,11 @@ class SpikeSort(dj.Manual):
 @schema
 class Units(dj.Imported):
     definition = """
-    -> common_session.Session
+    -> Session
     unit_id: int # unique identifier for this unit in this session
     ---
     -> ElectrodeConfig.ElectrodeGroup
-    -> common_interval.IntervalList
+    -> IntervalList
     cluster_name: varchar(80)   # the name for this cluster (e.g. t5 c4)
     nwb_object_id: int      # the object_id for the spikes; once the object is loaded, use obj.get_unit_spike_times
     """
@@ -424,9 +415,9 @@ class Units(dj.Imported):
 class Raw(dj.Manual):
     definition = """
     # Raw voltage timeseries data, electricalSeries in NWB
-    -> common_session.Session
+    -> Session
     ---
-    -> common_interval.IntervalList
+    -> IntervalList
     nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
     sampling_rate: float                            # Sampling rate calculated from data, in Hz
     comments: varchar(80)
@@ -460,7 +451,7 @@ class Raw(dj.Manual):
             interval_dict['interval_name'] = raw_interval_name
             interval_dict['valid_times'] = nh.get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
                                                                   1.75, 0)
-            common_interval.IntervalList.insert1(interval_dict, skip_duplicates="True")
+            common_interval.IntervalList.insert1(interval_dict, skip_duplicates=True)
 
             # now insert each of the electrodes as an individual row, but with the same nwb_object_id
             key['nwb_object_id'] = rawdata.object_id
@@ -521,9 +512,9 @@ class LFP(dj.Computed):
     -> LFPElectrode                         # the LFP electrodes selected
     ---
     -> Raw                                  # the Raw data this LFP is computed from
-    -> common_session.Session    # the linked session the LFP data is stored in
-    -> common_interval.IntervalList         # the valid intervals for the data
-    -> common_filter.FirFilter                 # the filter used for the data
+    -> Session    # the linked session the LFP data is stored in
+    -> IntervalList         # the valid intervals for the data
+    -> FirFilter                 # the filter used for the data
     nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the linked file
     sampling_rate: float # the sampling rate, in HZ
     """
@@ -623,7 +614,7 @@ class LFPBandElectrode(dj.Manual):
     -> LFPElectrode
     ---
     reference_electrode=-1: int     # The reference electrode to use. -1 for none
-    -> common_filter.FirFilter # the filter to be used for this LFP Band 
+    -> FirFilter # the filter to be used for this LFP Band 
     use_for_band = 'False': enum('True', 'False') # True if this electrode should be filtered in this band
     """
 
@@ -633,7 +624,7 @@ class LFPBand(dj.Computed):
     -> LFPBandElectrode
     ---
     -> LFP
-    -> common_interval.IntervalList
+    -> IntervalList
     nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
     sampling_rate: float # the sampling rate, in HZ
     """
@@ -643,10 +634,10 @@ class LFPBand(dj.Computed):
 class DecompSeries(dj.Computed):
     definition = """
     # Raw power timeseries data
-    -> common_session.Session
+    -> Session
     -> LFP
     ---
-    -> common_interval.IntervalList
+    -> IntervalList
     nwb_object_id: varchar(255)  # the NWB object ID for loading this object from the file
     sampling_rate: float                                # Sampling rate, in Hz
     metric: enum("phase","amplitude","power")  # Metric represented in data

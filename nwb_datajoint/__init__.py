@@ -12,5 +12,6 @@ from .common_sensors import Sensor
 from .common_session import Session
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
+from .common_nwbfile import Nwbfile
 
-from .insert_session import insert_session
+from .insert_sessions import insert_sessions

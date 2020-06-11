@@ -1,5 +1,5 @@
 import datajoint as dj
-import nwb_datajoint.common_session as common_session
+from .common_session import Session
 
 schema = dj.schema("common_dio", locals())
 
@@ -7,7 +7,7 @@ schema = dj.schema("common_dio", locals())
 @schema
 class Digitalio(dj.Manual):
     definition = """
-    -> common_session.Session()
+    -> Session
     dio_label: varchar(80)  # the label for this digital IO port
     ---
     input_port: enum('True', 'False') # is this an input port

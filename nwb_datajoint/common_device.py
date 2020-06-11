@@ -6,7 +6,7 @@ schema = dj.schema("common_device", locals())
 
 
 @schema
-class Device(dj.Imported):
+class Device(dj.Lookup):
     definition = """
     device_name: varchar(80)
     ---
@@ -33,10 +33,12 @@ class Device(dj.Imported):
                 device_dict['amplifier'] = d.amplifier
                 device_dict['adc_circuit'] = d.circuit
                 self.insert1(device_dict, skip_duplicates=True)
+                return d
+            
 
 
 @schema
-class Probe(dj.Imported):
+class Probe(dj.Manual):
     definition = """
     probe_type: varchar(80)
     ---
