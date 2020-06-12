@@ -7,7 +7,7 @@ import ghostipy as gsp
 import matplotlib.pyplot as plt
 import uuid
 import h5py as h5
-from hdmf.common.table import DynamicTableRegion
+# from hdmf.common.table import DynamicTableRegion
 
 schema = dj.schema('common_filter')
 
@@ -60,6 +60,9 @@ class FirFilter(dj.Manual):
                 return None
             # the transition width is the mean of the widths of left and right transition regions
             tw = ((band_edges[1] - band_edges[0]) + (band_edges[3] - band_edges[2])) / 2.0
+        
+        else:
+            raise Exception(f'Unexpected filter type: {filter_type}')
 
         numtaps = gsp.estimate_taps(fs, tw)
         filterdict = dict()

@@ -4,7 +4,8 @@
 import datajoint as dj
 from .common_session import Session
 from .common_interval import IntervalList
-import pynwb
+
+used = [Session, IntervalList]
 
 schema = dj.schema('common_sensors')
 

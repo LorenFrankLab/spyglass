@@ -1,12 +1,11 @@
 import datajoint as dj
-import pynwb
 import re
 
 schema = dj.schema("common_device", locals())
 
 
 @schema
-class Device(dj.Lookup):
+class Device(dj.Manual):
     definition = """
     device_name: varchar(80)
     ---
@@ -33,7 +32,6 @@ class Device(dj.Lookup):
                 device_dict['amplifier'] = d.amplifier
                 device_dict['adc_circuit'] = d.circuit
                 self.insert1(device_dict, skip_duplicates=True)
-                return d
             
 
 
@@ -90,7 +88,7 @@ class Probe(dj.Manual):
                     for s_num in p.shanks:
                         shank = p.shanks[s_num]
                         shank_dict['probe_shank'] = int(shank.name)
-                        self.Shank.insert1(shank_dict)
+                        Probe().Shank().insert1(shank_dict)
                         elect_dict['probe_shank'] = shank_dict['probe_shank']
                         # FIX name when fixed
                         # go through the electrodes and add each one to the Electrode table

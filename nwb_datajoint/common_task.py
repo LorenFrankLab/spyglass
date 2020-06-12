@@ -1,10 +1,11 @@
 # Test of automatic datajoint schema generation from NWB file
 import numpy as np
-import pynwb
 
 from .common_session import Session
 from .common_interval import IntervalList
 from .nwb_helper_fn import get_data_interface
+
+used = [Session, IntervalList]
 
 import datajoint as dj
 # import franklabnwb.fl_extension as fl_extension
@@ -14,7 +15,7 @@ schema = dj.schema("common_task", locals())
 
 
 @schema
-class Apparatus(dj.Imported):
+class Apparatus(dj.Manual):
 # NOTE: this needs to be updated once we figure out how we're going to define the apparatus
     definition = """
      apparatus_name: varchar(80)
@@ -27,7 +28,7 @@ class Apparatus(dj.Imported):
         try:
             apparatus_mod = nwbf.get_processing_module("Apparatus")
         except:
-            print('No Apparatus module found in {}\n'.format(nwb_file_name))
+            print('No Apparatus module found in NWB file')
             return
         if apparatus_mod != []:
             for d in apparatus_mod.data_interfaces:
@@ -74,7 +75,7 @@ class Task(dj.Manual):
 
 
 @schema
-class TaskEpoch(dj.Imported):
+class TaskEpoch(dj.Manual):
     # Tasks, apparatus, session and time intervals
     definition = """
      -> Session

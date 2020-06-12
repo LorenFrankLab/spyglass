@@ -1,12 +1,11 @@
 # Test of automatic datajoint schema generation from NWB file
 import datajoint as dj
-import pynwb
 
 schema = dj.schema("common_subject")
 
 
 @schema
-class Subject(dj.Lookup):
+class Subject(dj.Manual):
     definition = """
     subject_id: varchar(80)
     ---

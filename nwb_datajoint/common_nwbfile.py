@@ -1,3 +1,4 @@
+from .storage_dirs import check_env
 import os
 import datajoint as dj
 
@@ -12,16 +13,15 @@ class Nwbfile(dj.Manual):
     ---
     nwb_file_sha1: varchar(40)
     """
-    def insert_from_file_name(self, nwb_file_name):
-        '''
-        Insert NWB file from file name (relative path)
-        :param nwb_file_name:
-        :param base_dir:
-        :return: None
-        '''
+    def insert_from_relative_file_name(self, nwb_file_name):
+        """Insert a new session from an existing nwb file.
+
+        Args:
+            nwb_file_name (str): Relative path to the nwb file
+        """
+        check_env()
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         assert os.path.exists(nwb_file_abspath), f'File does not exist: {nwb_file_abspath}'
-        assert os.getenv('KACHERY_STORAGE_DIR', None), 'You must set the KACHERY_STORAGE_DIR environment variable.'
 
         print('Computing SHA-1 and storing in kachery...')
         with ka.config(use_hard_links=True):

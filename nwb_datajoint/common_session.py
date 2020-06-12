@@ -2,7 +2,6 @@ import datajoint as dj
 import pynwb
 
 from .common_nwbfile import Nwbfile
-from .common_lab import LabMember
 from .common_lab import Lab, Institution, LabMember
 from .common_subject import Subject
 from .common_device import Device
@@ -28,19 +27,12 @@ class Session(dj.Imported):
     experiment_description: varchar(80)
     """
 
-    class DataAcqDevice(dj.Part):
-        definition = """
-        -> Session
-        -> Device
-        """
-    
-    class Experimenter(dj.Part):
-        definition = """
-        -> Session
-        -> LabMember
-        """
-
     def make(self, key):
+        # These imports must go here to avoid cyclic dependencies
+        from .common_task import Task, TaskEpoch
+        from .common_interval import IntervalList
+        from .common_ephys import Unit
+
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
@@ -56,7 +48,7 @@ class Session(dj.Imported):
             Subject().insert_from_nwbfile(nwbf)
 
             print('Device...')
-            device_name = Device().insert_from_nwbfile(nwbf)
+            Device().insert_from_nwbfile(nwbf)
             print('Probe...')
             Probe().insert_from_nwbfile(nwbf)
 
@@ -72,6 +64,41 @@ class Session(dj.Imported):
                 'experiment_description': nwbf.experiment_description
             }, skip_duplicates=True)
 
+            #     """
+            #     Task and Apparatus Information structures.
+            #     These hold general information not specific to any one epoch. Specific information is added in task.TaskEpoch
+            #     """
+            print('Task...')
+            Task().insert_from_nwbfile(nwbf)
+            print('Task Epoch...')
+            TaskEpoch().insert_from_nwbfile(nwbf)
+            print('Skipping Apparatus for now...')
+            # Apparatus().insert_from_nwbfile(nwbf)
+
+            print('IntervalList...')
+            IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
+
+            print('Unit...')
+            Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
+
+@schema
+class ExperimenterList(dj.Imported):
+    definition = """
+    -> Session
+    """
+
+    class Experimenter(dj.Part):
+        definition = """
+        -> ExperimenterList
+        -> LabMember
+        """
+
+    def make(self, key):
+        nwb_file_name = key['nwb_file_name']
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        ExperimenterList().insert1({'nwb_file_name': nwb_file_name}, skip_duplicates=True)
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
+            nwbf = io.read()
             for e in nwbf.experimenter:
                 # check to see if the experimenter is in the lab member list, and if not add her / him
                 if {'lab_member_name': e} not in LabMember():
@@ -88,16 +115,7 @@ class Session(dj.Imported):
                         labmember_dict['last_name'] = 'unknown'
                     LabMember().insert1(labmember_dict)
                 # now insert the experimenter, which is a combination of the nwbfile and the name
-                key['lab_member_name'] = e
-                Session.Experimenter.insert1({
+                ExperimenterList().Experimenter().insert1({
                     'nwb_file_name': nwb_file_name,
                     'lab_member_name': e
-                }, skip_duplicates=True)
-            
-            if device_name is not None:
-                Session.DataAcqDevice.insert1({
-                    'nwb_file_name': nwb_file_name,
-                    'device_name': device_name
-                }, skip_duplicates=True)
-            else:
-                print('WARNING: unable to get device for session.')
+                })

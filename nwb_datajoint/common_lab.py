@@ -1,12 +1,11 @@
 # Frank lab schema: lab name and members
-from os import stat
 import datajoint as dj
 
 schema = dj.schema("common_lab", locals())
 
 
 @schema
-class LabMember(dj.Lookup):
+class LabMember(dj.Manual):
     definition = """
     lab_member_name: varchar(80)
     ---
@@ -28,7 +27,7 @@ class LabMember(dj.Lookup):
 
 
 @schema
-class Institution(dj.Lookup):
+class Institution(dj.Manual):
     definition = """
     institution_name: varchar(80)
     ---
@@ -42,7 +41,7 @@ class Institution(dj.Lookup):
         self.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
 
 @schema
-class Lab(dj.Lookup):
+class Lab(dj.Manual):
     definition = """
     lab_name: varchar(80)
     ---

@@ -12,8 +12,9 @@ import re
 import numpy as np
 import json
 import h5py as h5
-import nwb_datajoint.nwb_helper_fn as nh
-import nwb_datajoint.dj_helper_fn as dh
+from .common_nwbfile import Nwbfile
+from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate
+from .dj_helper_fn import dj_replace
 
 used = [Session, BrainRegion, Probe, IntervalList, FirFilter]
 
@@ -21,7 +22,7 @@ schema = dj.schema('common_ephys')
 
 
 @schema
-class ElectrodeConfig(dj.Manual):
+class ElectrodeConfig(dj.Imported):
     definition = """
     -> Session
     """
@@ -60,87 +61,85 @@ class ElectrodeConfig(dj.Manual):
         contacts: varchar(80)           # label of electrode contacts used for a bipolar signal -- current workaround
         """
 
-    def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
-        '''
-        Insert Electrode groups and electrodes from the NWB file.
-        :param nwb_file_name: string - name of NWB file
-        :return: None
-        '''
-        key = dict()
-        key['nwb_file_name'] = nwb_file_name
-        # insert the session identifier (the name of the nwb file)
-        self.insert1(key, skip_duplicates=True)
-        # now fill in the groups
-        egroups = list(nwbf.electrode_groups.keys())
-        eg_dict = dict()
-        eg_dict['nwb_file_name'] = key['nwb_file_name']
-        for eg_name in egroups:
-            # for each electrode group, we get the group and add an electrode group entry.
-            # as the ElectrodeGroup
-            electrode_group = nwbf.get_electrode_group(eg_name)
-            eg_dict['electrode_group_name'] = eg_name
-            # check to see if the location is listed in the region.BrainRegion schema, and if not add it
-            region_dict = dict()
-            region_dict['region_name'] = electrode_group.location
-            region_dict['subregion_name'] = ''
-            region_dict['subsubregion_name'] = ''
-            query = BrainRegion & region_dict
-            if len(query) == 0:
-                # this region isn't in the list, so add it
-                BrainRegion.insert1(region_dict)
-                query = BrainRegion & region_dict
-                # we also need to get the region_id for this new region or find the right region_id
-            region_id_dict = query.fetch1()
-            eg_dict['region_id'] = region_id_dict['region_id']
-            eg_dict['description'] = electrode_group.description
-            # the following should probably be a function that returns the probe devices from the file
-            probe_re = re.compile("probe")
-            for d in nwbf.devices:
-                if probe_re.search(d):
-                    if nwbf.devices[d] == electrode_group.device:
-                        # this will match the entry in the device schema
-                        eg_dict['probe_type'] = electrode_group.device.probe_type
-                        break
-            ElectrodeConfig.ElectrodeGroup.insert1(eg_dict, skip_duplicates=True)
+    def make(self, key):
+        nwb_file_name = key['nwb_file_name']
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
+            nwbf = io.read()
 
-        # now create the table of electrodes
-        elect_dict = dict()
-        electrodes = nwbf.electrodes.to_dataframe()
-        elect_dict['nwb_file_name'] = key['nwb_file_name']
+            self.insert1({'nwb_file_name': nwb_file_name})
 
-        # Below it would be better to find the mapping between  nwbf.electrodes.colnames and the schema fields and
-        # where possible, assign automatically. It would also help to be robust to missing fields and have them
-        # assigned as empty if they don't exist in the nwb file in case people are not using our extensions.
+            # fill in the groups
+            egroups = list(nwbf.electrode_groups.keys())
+            eg_dict = dict()
+            eg_dict['nwb_file_name'] = key['nwb_file_name']
+            for eg_name in egroups:
+                # for each electrode group, we get the group and add an electrode group entry.
+                # as the ElectrodeGroup
+                electrode_group = nwbf.get_electrode_group(eg_name)
+                eg_dict['electrode_group_name'] = eg_name
+                # check to see if the location is listed in the region.BrainRegion schema, and if not add it
+                region_dict = dict()
+                region_dict['region_name'] = electrode_group.location
+                region_dict['subregion_name'] = ''
+                region_dict['subsubregion_name'] = ''
+                query = BrainRegion() & region_dict
+                if len(query) == 0:
+                    # this region isn't in the list, so add it
+                    BrainRegion().insert1(region_dict)
+                    query = BrainRegion() & region_dict
+                    # we also need to get the region_id for this new region or find the right region_id
+                region_id_dict = query.fetch1()
+                eg_dict['region_id'] = region_id_dict['region_id']
+                eg_dict['description'] = electrode_group.description
+                # the following should probably be a function that returns the probe devices from the file
+                probe_re = re.compile("probe")
+                for d in nwbf.devices:
+                    if probe_re.search(d):
+                        if nwbf.devices[d] == electrode_group.device:
+                            # this will match the entry in the device schema
+                            eg_dict['probe_type'] = electrode_group.device.probe_type
+                            break
+                ElectrodeConfig().ElectrodeGroup().insert1(eg_dict, skip_duplicates=True)
 
-        for elect in electrodes.iterrows():
-            # not certain that the assignment below is correct; needs to be checked.
-            elect_dict['electrode_id'] = elect[0]
-            elect_dict['electrode_group_name'] = elect[1].group_name
-            # FIX to get electrode information properly from input or NWB file. Label may not exist, so we should
-            # check that and use and empty string if not.
-            elect_dict['name'] = str(elect[0])
-            elect_dict['probe_type'] = elect[1].group.device.probe_type
-            elect_dict['probe_shank'] = elect[1].probe_shank
-            # change below when extension name is changed and bug is fixed in fldatamigration
-            elect_dict['probe_electrode'] = elect[1].probe_electrode % 128
+            # now create the table of electrodes
+            elect_dict = dict()
+            electrodes = nwbf.electrodes.to_dataframe()
+            elect_dict['nwb_file_name'] = key['nwb_file_name']
 
-            elect_dict['bad_channel'] = 'True' if elect[1].bad_channel else 'False'
-            elect_dict['region_id'] = eg_dict['region_id']
-            elect_dict['x'] = elect[1].x
-            elect_dict['y'] = elect[1].y
-            elect_dict['z'] = elect[1].z
-            elect_dict['x_warped'] = 0
-            elect_dict['y_warped'] = 0
-            elect_dict['z_warped'] = 0
-            elect_dict['contacts'] = ''
-            elect_dict['filtering'] = elect[1].filtering
-            elect_dict['impedance'] = elect[1].imp
-            try:
-                elect_dict['original_reference_electrode'] = elect[1].ref_elect
-            except:
-                elect_dict['original_reference_electrode'] = -1
+            # Below it would be better to find the mapping between  nwbf.electrodes.colnames and the schema fields and
+            # where possible, assign automatically. It would also help to be robust to missing fields and have them
+            # assigned as empty if they don't exist in the nwb file in case people are not using our extensions.
 
-            ElectrodeConfig.Electrode.insert1(elect_dict, skip_duplicates=True)
+            for elect in electrodes.iterrows():
+                # not certain that the assignment below is correct; needs to be checked.
+                elect_dict['electrode_id'] = elect[0]
+                elect_dict['electrode_group_name'] = elect[1].group_name
+                # FIX to get electrode information properly from input or NWB file. Label may not exist, so we should
+                # check that and use and empty string if not.
+                elect_dict['name'] = str(elect[0])
+                elect_dict['probe_type'] = elect[1].group.device.probe_type
+                elect_dict['probe_shank'] = elect[1].probe_shank
+                # change below when extension name is changed and bug is fixed in fldatamigration
+                elect_dict['probe_electrode'] = elect[1].probe_electrode % 128
+
+                elect_dict['bad_channel'] = 'True' if elect[1].bad_channel else 'False'
+                elect_dict['region_id'] = eg_dict['region_id']
+                elect_dict['x'] = elect[1].x
+                elect_dict['y'] = elect[1].y
+                elect_dict['z'] = elect[1].z
+                elect_dict['x_warped'] = 0
+                elect_dict['y_warped'] = 0
+                elect_dict['z_warped'] = 0
+                elect_dict['contacts'] = ''
+                elect_dict['filtering'] = elect[1].filtering
+                elect_dict['impedance'] = elect[1].imp
+                try:
+                    elect_dict['original_reference_electrode'] = elect[1].ref_elect
+                except:
+                    elect_dict['original_reference_electrode'] = -1
+
+                ElectrodeConfig().Electrode().insert1(elect_dict, skip_duplicates=True)
 
 @schema
 class ElectrodeSortingInfo(dj.Manual):
@@ -198,7 +197,7 @@ class ElectrodeSortingInfo(dj.Manual):
                 for elect in shank_elect:
                     new_group.append([elect, sort_group])
                 # get the new replacement entries for the table
-                self.insert(dh.replace(elect_sort_info, new_group, 'electrode_id', 'sort_group'),replace="True")
+                self.insert(dj_replace(elect_sort_info, new_group, 'electrode_id', 'sort_group'),replace="True")
                 sort_group += 1
 
     def set_group_by_electrode_group(self, nwb_file_name):
@@ -220,7 +219,7 @@ class ElectrodeSortingInfo(dj.Manual):
             new_group = list()
             for elect in eg_elect:
                 new_group.append([ elect, sort_group])
-            self.insert(dh.replace(elect_sort_info, new_group, 'electrode_id', 'sort_group'), replace="True")
+            self.insert(dj_replace(elect_sort_info, new_group, 'electrode_id', 'sort_group'), replace="True")
             sort_group += 1
 
     def set_reference_from_electrodes(self, nwb_file_name):
@@ -238,7 +237,7 @@ class ElectrodeSortingInfo(dj.Manual):
         ref_elect = []
         for elect in electrodes:
             ref_elect.append([elect['electrode_id'], elect['original_reference_electrode']])
-        self.insert(dh.replace(elect_ref_info, ref_elect, 'electrode_id', 'reference_electrode'), replace="True")
+        self.insert(dj_replace(elect_ref_info, ref_elect, 'electrode_id', 'reference_electrode'), replace="True")
 
     def set_reference_from_list(self, nwb_file_name, elect_ref_list):
         '''
@@ -249,7 +248,7 @@ class ElectrodeSortingInfo(dj.Manual):
         '''
         # get the current reference info
         elect_ref_info = (ElectrodeSortingInfo() & {'nwb_file_name': nwb_file_name}).fetch()
-        self.insert(dh.replace(elect_ref_info, elect_ref_list, 'electrode_id', 'reference_electrode'), replace="True")
+        self.insert(dj_replace(elect_ref_info, elect_ref_list, 'electrode_id', 'reference_electrode'), replace="True")
 
     def write_prb(self, nwb_file_name, prb_file_name):
         '''
@@ -284,7 +283,7 @@ class ElectrodeSortingInfo(dj.Manual):
             for electrode_id in channel_group[sort_group]['channels']:
                 # get the relative x and y locations of this channel from the probe table
                 probe_electrode = int(electrodes['probe_electrode'][electrodes['electrode_id'] == electrode_id])
-                rel_x, rel_y = (common_device.Probe.Electrode() & {'probe_electrode' : probe_electrode}).fetch(
+                rel_x, rel_y = (Probe().Electrode() & {'probe_electrode' : probe_electrode}).fetch(
                     'rel_x','rel_y')
                 rel_x = float(rel_x)
                 rel_y = float(rel_y)
@@ -362,7 +361,7 @@ class SpikeSort(dj.Manual):
 
 
 @schema
-class Units(dj.Imported):
+class Unit(dj.Manual):
     definition = """
     -> Session
     unit_id: int # unique identifier for this unit in this session
@@ -373,21 +372,12 @@ class Units(dj.Imported):
     nwb_object_id: int      # the object_id for the spikes; once the object is loaded, use obj.get_unit_spike_times
     """
 
-    # should this use the file pointer instead?
-    def make(self, key):
-        # get the NWB file name from this session
-        nwb_file_name = key['nwb_file_name']
-
-        try:
-            io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-            nwbf = io.read()
-        except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(
-                nwb_file_name))
-            return
-
+    def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
         interval_list_dict = dict()
         interval_list_dict['nwb_file_name'] = nwb_file_name
+        if nwbf.units is None:
+            print(f'Unable to import units: No units found in {nwb_file_name}')
+            return
         units = nwbf.units.to_dataframe()
         for unum in range(len(units)):
             # for each unit we first need to an an interval list for this unit
@@ -395,8 +385,9 @@ class Units(dj.Imported):
                 unum)
             interval_list_dict['valid_times'] = np.asarray(
                 units.iloc[unum]['obs_intervals'])
-            common_interval.IntervalList.insert1(
+            IntervalList().insert1(
                 interval_list_dict, skip_duplicates=True)
+            key = {'nwb_file_name': nwb_file_name}
             try:
                 key['unit_id'] = units.iloc[unum]['id']
             except:
@@ -412,7 +403,7 @@ class Units(dj.Imported):
 
 
 @schema
-class Raw(dj.Manual):
+class Raw(dj.Imported):
     definition = """
     # Raw voltage timeseries data, electricalSeries in NWB
     -> Session
@@ -427,58 +418,48 @@ class Raw(dj.Manual):
         # do your custom stuff here
         super().__init__(*args)  # call the base implementation
 
-    def insert_from_nwb(self, nwb_file_name):
-        '''
-        Insert the nwb object and interval information for the raw electrophysiological data in the NWB file.
-        Assumes the data are returned by nwbf.get_acquisition()
-        :param nwb_file_name:
-        :return:
-        '''
-        # get the NWB file name from this session
-        key = dict()
-        key['nwb_file_name'] = nwb_file_name
-
-        try:
-            io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+    def make(self, key):
+        nwb_file_name = key['nwb_file_name']
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
             nwbf = io.read()
             raw_interval_name = "raw data valid times"
             # get the acquisition object
             rawdata = nwbf.get_acquisition()
-            key['sampling_rate'] = nh.estimate_sampling_rate(np.asarray(rawdata.timestamps), 1.5)
+            print('Estimating sampling rate...')
+            # NOTE: I am only using first 1e6 timepoints to save time... is this okay?
+            sampling_rate = estimate_sampling_rate(np.asarray(rawdata.timestamps[:1000000]), 1.5)
+            print(f'Estimated sampling rate: {sampling_rate}')
+            key['sampling_rate'] = sampling_rate
             # get the list of valid times given the specified sampling rate.
             interval_dict = dict()
             interval_dict['nwb_file_name'] = key['nwb_file_name']
             interval_dict['interval_name'] = raw_interval_name
-            interval_dict['valid_times'] = nh.get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
+            interval_dict['valid_times'] = get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
                                                                   1.75, 0)
-            common_interval.IntervalList.insert1(interval_dict, skip_duplicates=True)
+            IntervalList().insert1(interval_dict, skip_duplicates=True)
 
             # now insert each of the electrodes as an individual row, but with the same nwb_object_id
             key['nwb_object_id'] = rawdata.object_id
-            key['sampling_rate'] = nh.estimate_sampling_rate(np.asarray(rawdata.timestamps), 1.5)
+            key['sampling_rate'] = sampling_rate
             print(f'Importing raw data: Estimated sampling rate:\t{key["sampling_rate"]} Hz')
             print(f'                    Number of valid intervals:\t{len(interval_dict["valid_times"])}')
             key['interval_name'] = raw_interval_name
             key['comments'] = rawdata.comments
             key['description'] = rawdata.description
             self.insert1(key, skip_duplicates='True')
-        except:
-            print(f'Error: Raw data import from nwbfile {nwb_file_name} failed; file may not exist.')
-            raise
-        finally:
-            io.close()
 
-    def nwb_object(self, key):
-        # return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
-        # so we can modify the other one.
-        nwb_file_name = key['nwb_file_name']
+    # def nwb_object(self, key):
+    #     # return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
+    #     # so we can modify the other one.
+    #     nwb_file_name = key['nwb_file_name']
 
-        # TO DO: This likely leaves the io object in place and the file open. Fix
-        io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-        nwbf = io.read()
-        # get the object id
-        nwb_object_id = (self & {'nwb_file_name' : key['nwb_file_name']}).fetch1('nwb_object_id')
-        return nwbf.objects[nwb_object_id]
+    #     # TO DO: This likely leaves the io object in place and the file open. Fix
+    #     io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+    #     nwbf = io.read()
+    #     # get the object id
+    #     nwb_object_id = (self & {'nwb_file_name' : key['nwb_file_name']}).fetch1('nwb_object_id')
+    #     return nwbf.objects[nwb_object_id]
 
 
 @schema
@@ -507,7 +488,7 @@ class LFPElectrode(dj.Manual):
 
 
 @schema
-class LFP(dj.Computed):
+class LFP(dj.Imported):
     definition = """
     -> LFPElectrode                         # the LFP electrodes selected
     ---
@@ -521,7 +502,7 @@ class LFP(dj.Computed):
     @property
     def key_source(self):
         # get a list of the sessions for which we want to compute the LFP
-        return common_session.Session()
+        return Session()
 
     def make(self, key):
        # get the NWB object with the data; FIX: change to fetch with additional infrastructure
@@ -538,10 +519,10 @@ class LFP(dj.Computed):
         #target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
-        valid_times = (common_interval.IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,
+        valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,
                                                           'interval_name': interval_name}).fetch1('valid_times')
         # get the LFP filter that matches the raw data
-        filter = (common_filter.FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
+        filter = (FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
                                                                                   sampling_rate}).fetch(as_dict=True)
 
         # there should only be one filter that matches, so we take the first of the dictionaries
@@ -564,10 +545,10 @@ class LFP(dj.Computed):
         nwb_out_file_name = common_session.LinkedNwbfile().create(key['nwb_file_name'])
         print(f'output file name {nwb_out_file_name}')
 
-        common_filter.FirFilter().filter_data_nwb(nwb_out_file_name, rawdata.timestamps, rawdata.data,
+        FirFilter().filter_data_nwb(nwb_out_file_name, rawdata.timestamps, rawdata.data,
                                                   filter_coeff, valid_times, electrode_id_list, decimation)
         """
-        h5file_name = common_filter.FirFilter().filter_data_hdf5(filtered_data_path, rawdata.timestamps,
+        h5file_name = FirFilter().filter_data_hdf5(filtered_data_path, rawdata.timestamps,
                                                                     rawdata.data, filter_coeff, valid_times,
                                                                                electrode_id_list, decimation)
 
