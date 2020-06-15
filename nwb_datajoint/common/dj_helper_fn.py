@@ -1,7 +1,7 @@
 # helper functions for manipulating information from DataJoing fetch calls
 import numpy as np
 
-def replace(original_table, new_values, key_column, replace_column):
+def dj_replace(original_table, new_values, key_column, replace_column):
     '''
     Given the output of a fetch() call from a schema and a 2D array made up of [key_value, replace_value] tuples,
     finds each instance of key_value in the key_column of the original table and replaces the specified replace_column

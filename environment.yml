@@ -27,3 +27,4 @@ dependencies:
   - python-intervals
   - ghostipy
   - spikeinterface
+  - kachery==0.6.1
