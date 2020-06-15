@@ -1,10 +1,11 @@
-from .storage_dirs import check_env
 import os
 import datajoint as dj
 
 schema = dj.schema("common_lab", locals())
 
 import kachery as ka
+
+# TODO: make decision about docstring -- probably use :param ...:
 
 @schema
 class Nwbfile(dj.Manual):
@@ -19,7 +20,6 @@ class Nwbfile(dj.Manual):
         Args:
             nwb_file_name (str): Relative path to the nwb file
         """
-        check_env()
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         assert os.path.exists(nwb_file_abspath), f'File does not exist: {nwb_file_abspath}'
 

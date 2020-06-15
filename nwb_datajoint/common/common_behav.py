@@ -6,7 +6,7 @@ from .common_session import Session
 from .common_interval import IntervalList
 from .common_nwbfile import Nwbfile
 import datajoint as dj
-import nwb_datajoint.nwb_helper_fn as nh
+from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sampling_rate
 
 # so the linter does not complain about unused variables
 used = [Session]
@@ -31,9 +31,9 @@ class RawPosition(dj.Imported):
 
             # Get the position data. FIX: change Position to position when name changed or fix helper function to allow
             # upper or lower case
-            position = nh.get_data_interface(nwbf, 'position')
+            position = get_data_interface(nwbf, 'position')
             if position is None:
-                position = nh.get_data_interface(nwbf, 'Position')
+                position = get_data_interface(nwbf, 'Position')
 
             if position is not None:
                 pos_interval_name = 'pos valid times'
@@ -41,13 +41,13 @@ class RawPosition(dj.Imported):
                 p = position.get_spatial_series()
                 timestamps = np.asarray(p.timestamps)
                 # estimate the sampling rate
-                sampling_rate = nh.estimate_sampling_rate(timestamps, 1.75)
+                sampling_rate = estimate_sampling_rate(timestamps, 1.75)
                 print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
                 # add the valid intervals to the Interval list
                 interval_dict = dict()
                 interval_dict['nwb_file_name'] = key['nwb_file_name']
                 interval_dict['interval_name'] = pos_interval_name
-                interval_dict['valid_times'] = nh.get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
+                interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
                 IntervalList().insert1(interval_dict, skip_duplicates=True)
 
                 key['nwb_object_id'] = position.object_id

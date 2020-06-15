@@ -12,6 +12,8 @@ used = [Nwbfile, Subject, Institution, Lab, LabMember, Device]
 
 schema = dj.schema("common_session")
 
+# TODO: figure out what to do about ExperimenterList
+
 @schema
 class Session(dj.Imported):
     definition = """

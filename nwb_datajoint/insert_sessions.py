@@ -1,8 +1,6 @@
-from .common_nwbfile import Nwbfile
-from .common_session import ExperimenterList, Session
-from .common_ephys import ElectrodeConfig, Raw
+from .common.common_nwbfile import Nwbfile
+from .common import populate_all_common
 from .storage_dirs import check_env
-from .common_behav import HeadDir, LinPos, RawPosition, Speed
 import datajoint as dj
 
 conn = dj.conn()
@@ -16,27 +14,10 @@ def insert_sessions(nwb_file_names):
 
     Args:
         nwb_file_names (List[str]): List of relative file paths
-    """    
+    """
     check_env()
 
     for nwb_file_name in nwb_file_names:
+        assert not nwb_file_name.startswith('/'), f'You must use relative paths. nwb_file_name: {nwb_file_name}'
         Nwbfile().insert_from_relative_file_name(nwb_file_name)
-    populate_all()
-    
-def populate_all():
-    print('Populate Session...')
-    Session().populate()
-    print('Populate ExperimenterList...')
-    ExperimenterList().populate()
-    print('Populate ElectrodeConfig...')
-    ElectrodeConfig().populate()
-    print('Populate Raw...')
-    Raw().populate()
-    print('RawPosition...')
-    RawPosition().populate()
-    print('HeadDir...')
-    HeadDir().populate()
-    print('Speed...')
-    Speed().populate()
-    print('LinPos...')
-    LinPos().populate()
+    populate_all_common()

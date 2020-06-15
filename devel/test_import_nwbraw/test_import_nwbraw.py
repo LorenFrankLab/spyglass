@@ -5,8 +5,6 @@ import os
 # Configure datajoint
 import datajoint as dj
 dj.config["enable_python_native_blobs"] = True
-if 'DJ_DATABASE_USER' in os.environ: dj.config['database.user'] = os.environ['DJ_DATABASE_USER']
-if 'DJ_DATABASE_PASSWORD' in os.environ: dj.config['database.password'] = os.environ['DJ_DATABASE_PASSWORD']
 
 # Import nwb_datajoint
 import nwb_datajoint as nwb_dj

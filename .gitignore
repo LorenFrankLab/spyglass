@@ -1,4 +1,7 @@
 devel/data
+*-Copy*.ipynb
+Untitled.ipynb
+rec_to_nwb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
