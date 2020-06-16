@@ -1,5 +1,5 @@
-from .common.common_nwbfile import Nwbfile
-from .common import populate_all_common
+from ..common.common_nwbfile import Nwbfile
+from ..common import populate_all_common
 from .storage_dirs import check_env
 import datajoint as dj
 

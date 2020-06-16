@@ -4,8 +4,7 @@ from .common_session import Session
 from .common_region import BrainRegion
 from .common_device import Probe
 from .common_interval import IntervalList
-# TODO: FirFilter needs to be fixed
-# from .common_filter import FirFilter
+from .common_filter import FirFilter
 
 import spikeinterface as si
 import pynwb
@@ -429,7 +428,11 @@ class Raw(dj.Imported):
             nwbf = io.read()
             raw_interval_name = "raw data valid times"
             # get the acquisition object
-            rawdata = nwbf.get_acquisition()
+            try:
+                rawdata = nwbf.get_acquisition()
+            except:
+                print(f'WARNING: Unable to get aquisition object in: {nwb_file_abspath}')
+                return
             print('Estimating sampling rate...')
             # NOTE: Only use first 1e6 timepoints to save time
             sampling_rate = estimate_sampling_rate(np.asarray(rawdata.timestamps[:1000000]), 1.5)
@@ -491,144 +494,140 @@ class LFPElectrode(dj.Manual):
                 self.insert1(lfpelectdict, replace='True')
 
 
-# TODO: fix LFP
-# @schema
-# class LFP(dj.Imported):
-#     definition = """
-#     -> LFPElectrode                         # the LFP electrodes selected
-#     ---
-#     -> Raw                                  # the Raw data this LFP is computed from
-#     -> Session    # the linked session the LFP data is stored in
-#     -> IntervalList         # the valid intervals for the data
-#     -> FirFilter                 # the filter used for the data
-#     nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the linked file
-#     sampling_rate: float # the sampling rate, in HZ
-#     """
-#     @property
-#     def key_source(self):
-#         # get a list of the sessions for which we want to compute the LFP
-#         return Session()
+@schema
+class LFP(dj.Imported):
+    definition = """
+    -> LFPElectrode                         # the LFP electrodes selected
+    ---
+    -> Raw                                  # the Raw data this LFP is computed from
+    -> Session    # the linked session the LFP data is stored in
+    -> IntervalList         # the valid intervals for the data
+    -> FirFilter                 # the filter used for the data
+    nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the linked file
+    sampling_rate: float # the sampling rate, in HZ
+    """
+    @property
+    def key_source(self):
+        # get a list of the sessions for which we want to compute the LFP
+        return Session()
 
-#     def make(self, key):
-#        # get the NWB object with the data; FIX: change to fetch with additional infrastructure
-#         rawdata = Raw().nwb_object(key)
-#         sampling_rate, interval_name = (Raw() & key).fetch1('sampling_rate', 'interval_name')
-#         key['interval_name'] = interval_name
-#         sampling_rate = int(np.round(sampling_rate))
-#         key['sampling_rate'] = sampling_rate
-
-
-#         # TEMPORARY HARD CODED FILTERED DATA PATH
-#         filtered_data_path = '/data/nwb_builder_test_data/filtered_data/'
-#         nwb_file_name = key['nwb_file_name']
-#         #target 1 KHz sampling rate
-#         decimation = sampling_rate // 1000
-
-#         valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,
-#                                                           'interval_name': interval_name}).fetch1('valid_times')
-#         # get the LFP filter that matches the raw data
-#         filter = (FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
-#                                                                                   sampling_rate}).fetch(as_dict=True)
-
-#         # there should only be one filter that matches, so we take the first of the dictionaries
-#         key['filter_name'] = filter[0]['filter_name']
-#         key['filter_sampling_rate'] = filter[0]['filter_sampling_rate']
-
-#         filter_coeff = filter[0]['filter_coeff']
-#         if len(filter_coeff) == 0:
-#             print(f'Error in LFP: no filter found with data sampling rate of {sampling_rate}')
-#             return None
+    def make(self, key):
+       # get the NWB object with the data; FIX: change to fetch with additional infrastructure
+        rawdata = Raw().nwb_object(key)
+        sampling_rate, interval_name = (Raw() & key).fetch1('sampling_rate', 'interval_name')
+        key['interval_name'] = interval_name
+        sampling_rate = int(np.round(sampling_rate))
+        key['sampling_rate'] = sampling_rate
 
 
-#         # get the list of selected LFP Channels from LFPElectrode
-#         electrode_keys = (LFPElectrode & key).fetch('KEY')
-#         electrode_id_list = list(k['electrode_id'] for k in electrode_keys)
+        # TEMPORARY HARD CODED FILTERED DATA PATH
+        filtered_data_path = '/data/nwb_builder_test_data/filtered_data/'
+        nwb_file_name = key['nwb_file_name']
+        #target 1 KHz sampling rate
+        decimation = sampling_rate // 1000
 
-#         #TO DO: go back to filter_data_nwb when appending multiple times to NWB files is fixed.
+        valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,
+                                                          'interval_name': interval_name}).fetch1('valid_times')
+        # get the LFP filter that matches the raw data
+        filter = (FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
+                                                                                  sampling_rate}).fetch(as_dict=True)
 
-#         """
-#         nwb_out_file_name = common_session.LinkedNwbfile().create(key['nwb_file_name'])
-#         print(f'output file name {nwb_out_file_name}')
+        # there should only be one filter that matches, so we take the first of the dictionaries
+        key['filter_name'] = filter[0]['filter_name']
+        key['filter_sampling_rate'] = filter[0]['filter_sampling_rate']
 
-#         FirFilter().filter_data_nwb(nwb_out_file_name, rawdata.timestamps, rawdata.data,
-#                                                   filter_coeff, valid_times, electrode_id_list, decimation)
-#         """
-#         h5file_name = FirFilter().filter_data_hdf5(filtered_data_path, rawdata.timestamps,
-#                                                                     rawdata.data, filter_coeff, valid_times,
-#                                                                                electrode_id_list, decimation)
-
-#         # create a linked NWB file with a new electrical series and link these new data to it. This is TEMPORARY
-#         # linked_file_name = common_session.Nwbfile().get_name_without_create(nwb_file_name)
-
-#         # key['linked_file_name'] = linked_file_name
-#         # key['linked_file_location'] = linked_file_name
-
-#         io_in = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-#         nwbf = io_in.read()
-#         nwbf_out = nwbf.copy()
-
-#        #FIX to be indeces into electrodes, not electrode_ids
-#         electrode_table_region = nwbf_out.create_electrode_table_region(electrode_id_list,
-#                                                                         'filtered electrode table')
-#         print('past append')
-
-#         # open the hdf5 file and get the datasets from it
-#         with h5.File(h5file_name, 'r') as infile:
-#             filtered_data = infile.get('filtered_data')
-#             timestamps = infile.get('timestamps')
-
-#             lfp_description = f'LFP {filter[0]["filter_low_pass"]} Hz to {filter[0]["filter_high_pass"]} Hz '
-#             print(f'writing new NWB file {linked_file_name}')
-#             with pynwb.NWBHDF5IO(path=linked_file_name, mode='a', manager=io_in.manager) as io:
-#                 es = pynwb.ecephys.ElectricalSeries('LFP', filtered_data, electrode_table_region,
-#                                                     timestamps=timestamps, description=lfp_description)
-#                 nwbf_out.add_analysis(es)
-#                 io.write(nwbf_out)
-#                 key['nwb_object_id'] = es.object_id
-
-#             io_in.close()
-#         # loop through all of the electrodes and insert a row for each one
-#         for electrode in electrode_id_list:
-#             key['electrode_id'] = electrode
-#             print(key)
-#             self.insert1(key)
+        filter_coeff = filter[0]['filter_coeff']
+        if len(filter_coeff) == 0:
+            print(f'Error in LFP: no filter found with data sampling rate of {sampling_rate}')
+            return None
 
 
-# TODO: FirFilter needs to be fixed
-# @schema
-# class LFPBandElectrode(dj.Manual):
-#     definition = """
-#     -> LFPElectrode
-#     ---
-#     reference_electrode=-1: int     # The reference electrode to use. -1 for none
-#     -> FirFilter # the filter to be used for this LFP Band 
-#     use_for_band = 'False': enum('True', 'False') # True if this electrode should be filtered in this band
-#     """
+        # get the list of selected LFP Channels from LFPElectrode
+        electrode_keys = (LFPElectrode & key).fetch('KEY')
+        electrode_id_list = list(k['electrode_id'] for k in electrode_keys)
 
-# TODO: FirFilter needs to be fixed
-# @schema
-# class LFPBand(dj.Computed):
-#     definition = """
-#     -> LFPBandElectrode
-#     ---
-#     -> LFP
-#     -> IntervalList
-#     nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
-#     sampling_rate: float # the sampling rate, in HZ
-#     """
+        #TO DO: go back to filter_data_nwb when appending multiple times to NWB files is fixed.
 
-# TODO: FirFilter needs to be fixed
-# @schema
-# class DecompSeries(dj.Computed):
-#     definition = """
-#     # Raw power timeseries data
-#     -> Session
-#     -> LFP
-#     ---
-#     -> IntervalList
-#     nwb_object_id: varchar(255)  # the NWB object ID for loading this object from the file
-#     sampling_rate: float                                # Sampling rate, in Hz
-#     metric: enum("phase","amplitude","power")  # Metric represented in data
-#     comments: varchar(80)
-#     description: varchar(80)
-#     """
+        """
+        nwb_out_file_name = common_session.LinkedNwbfile().create(key['nwb_file_name'])
+        print(f'output file name {nwb_out_file_name}')
+
+        FirFilter().filter_data_nwb(nwb_out_file_name, rawdata.timestamps, rawdata.data,
+                                                  filter_coeff, valid_times, electrode_id_list, decimation)
+        """
+        h5file_name = FirFilter().filter_data_hdf5(filtered_data_path, rawdata.timestamps,
+                                                                    rawdata.data, filter_coeff, valid_times,
+                                                                               electrode_id_list, decimation)
+
+        # create a linked NWB file with a new electrical series and link these new data to it. This is TEMPORARY
+        linked_file_name = Nwbfile().get_name_without_create(nwb_file_name)
+
+        key['linked_file_name'] = linked_file_name
+        key['linked_file_location'] = linked_file_name
+
+        io_in = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+        nwbf = io_in.read()
+        nwbf_out = nwbf.copy()
+
+       #FIX to be indeces into electrodes, not electrode_ids
+        electrode_table_region = nwbf_out.create_electrode_table_region(electrode_id_list,
+                                                                        'filtered electrode table')
+        print('past append')
+
+        # open the hdf5 file and get the datasets from it
+        with h5.File(h5file_name, 'r') as infile:
+            filtered_data = infile.get('filtered_data')
+            timestamps = infile.get('timestamps')
+
+            lfp_description = f'LFP {filter[0]["filter_low_pass"]} Hz to {filter[0]["filter_high_pass"]} Hz '
+            print(f'writing new NWB file {linked_file_name}')
+            with pynwb.NWBHDF5IO(path=linked_file_name, mode='a', manager=io_in.manager) as io:
+                es = pynwb.ecephys.ElectricalSeries('LFP', filtered_data, electrode_table_region,
+                                                    timestamps=timestamps, description=lfp_description)
+                nwbf_out.add_analysis(es)
+                io.write(nwbf_out)
+                key['nwb_object_id'] = es.object_id
+
+            io_in.close()
+        # loop through all of the electrodes and insert a row for each one
+        for electrode in electrode_id_list:
+            key['electrode_id'] = electrode
+            print(key)
+            self.insert1(key)
+
+
+@schema
+class LFPBandElectrode(dj.Manual):
+    definition = """
+    -> LFPElectrode
+    ---
+    reference_electrode=-1: int     # The reference electrode to use. -1 for none
+    -> FirFilter # the filter to be used for this LFP Band 
+    use_for_band = 'False': enum('True', 'False') # True if this electrode should be filtered in this band
+    """
+
+@schema
+class LFPBand(dj.Computed):
+    definition = """
+    -> LFPBandElectrode
+    ---
+    -> LFP
+    -> IntervalList
+    nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
+    sampling_rate: float # the sampling rate, in HZ
+    """
+
+@schema
+class DecompSeries(dj.Computed):
+    definition = """
+    # Raw power timeseries data
+    -> Session
+    -> LFP
+    ---
+    -> IntervalList
+    nwb_object_id: varchar(255)  # the NWB object ID for loading this object from the file
+    sampling_rate: float                                # Sampling rate, in Hz
+    metric: enum("phase","amplitude","power")  # Metric represented in data
+    comments: varchar(80)
+    description: varchar(80)
+    """

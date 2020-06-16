@@ -14,33 +14,33 @@ import datajoint as dj
 schema = dj.schema("common_task", locals())
 
 
-@schema
-class Apparatus(dj.Manual):
-# NOTE: this needs to be updated once we figure out how we're going to define the apparatus
-    definition = """
-     apparatus_name: varchar(80)
-     """
+# @schema
+# class Apparatus(dj.Manual):
+# # NOTE: this needs to be updated once we figure out how we're going to define the apparatus
+#     definition = """
+#      apparatus_name: varchar(80)
+#      """
 
-    def insert_from_nwbfile(self, nwbf):
-        # If we're going to use we will need to add specific apparatus information (cad files?)
-        apparatus_dict = dict()
-        apparatus_mod = []
-        try:
-            apparatus_mod = nwbf.get_processing_module("Apparatus")
-        except:
-            print('No Apparatus module found in NWB file')
-            return
-        if apparatus_mod != []:
-            for d in apparatus_mod.data_interfaces:
-                pass
-                # TODO: restore this functionality
-                # if type(apparatus_mod[d]) == franklabnwb.fl_extension.Apparatus:
-                #     # see this Apparaus if is already in the database
-                #     if {'apparatus_name': d} not in common_task.ApparatusInfo():
-                #         apparatus_dict['apparatus_name'] = d
-                #         common_task.ApparatusInfo.insert1(apparatus_dict)
-                #     else:
-                #         print('Skipping apparatus {}; already in schema\n'.format(d))
+#     def insert_from_nwbfile(self, nwbf):
+#         # If we're going to use we will need to add specific apparatus information (cad files?)
+#         apparatus_dict = dict()
+#         apparatus_mod = []
+#         try:
+#             apparatus_mod = nwbf.get_processing_module("Apparatus")
+#         except:
+#             print('No Apparatus module found in NWB file')
+#             return
+#         if apparatus_mod != []:
+#             for d in apparatus_mod.data_interfaces:
+#                 pass
+#                 # TODO: restore this functionality
+#                 if type(apparatus_mod[d]) == franklabnwb.fl_extension.Apparatus:
+#                     # see this Apparaus if is already in the database
+#                     if {'apparatus_name': d} not in common_task.ApparatusInfo():
+#                         apparatus_dict['apparatus_name'] = d
+#                         common_task.ApparatusInfo.insert1(apparatus_dict)
+#                     else:
+#                         print('Skipping apparatus {}; already in schema\n'.format(d))
 
 @schema
 class Task(dj.Manual):
@@ -82,7 +82,7 @@ class TaskEpoch(dj.Manual):
      epoch: int  #the session epoch for this task and apparatus(0 based)
      ---
      -> Task
-     -> Apparatus
+     # -> Apparatus
      -> IntervalList
      exposure: int # the number of this exposure to the apparatus and task
      """
