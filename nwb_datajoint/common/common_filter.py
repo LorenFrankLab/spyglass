@@ -7,7 +7,7 @@ import ghostipy as gsp
 import matplotlib.pyplot as plt
 import uuid
 import h5py as h5
-from hdmf.common.table import DynamicTableRegion
+# from hdmf.common.table import DynamicTableRegion
 
 schema = dj.schema('common_filter')
 
@@ -31,9 +31,10 @@ class FirFilter(dj.Manual):
         # do your custom stuff here
         super().__init__(*args)  # call the base implementation
 
-    def zpk(self):
-        # return the zeros, poles, and gain for the filter
-        return signal.tf2zpk(self.filter_coeff, 1)
+    # probably don't need this function
+    # def zpk(self):
+    #     # return the zeros, poles, and gain for the filter
+    #     return signal.tf2zpk(self.filter_coeff, 1)
 
     def add_filter(self, filter_name, fs, filter_type, band_edges, comments=''):
         # add an FIR bandpass filter of the specified type ('lowpass', 'highpass', or 'bandpass').
@@ -60,6 +61,9 @@ class FirFilter(dj.Manual):
                 return None
             # the transition width is the mean of the widths of left and right transition regions
             tw = ((band_edges[1] - band_edges[0]) + (band_edges[3] - band_edges[2])) / 2.0
+        
+        else:
+            raise Exception(f'Unexpected filter type: {filter_type}')
 
         numtaps = gsp.estimate_taps(fs, tw)
         filterdict = dict()
@@ -174,7 +178,7 @@ class FirFilter(dj.Manual):
             output_shape_list[time_axis] += shape[time_axis]
 
         # open the nwb file to create the dynamic table region and electrode series, then write and close the file
-        with pynwb.NWBHDF5IO(nwb_file_name, "a") as io:
+        with pynwb.NWBHDF5IO(path=nwb_file_name, mode="a") as io:
             nwbf=io.read()
 
         electrode_table_region = nwbf.create_electrode_table_region(electrodes, 'filtered electrode table')
@@ -187,11 +191,11 @@ class FirFilter(dj.Manual):
         #    nwbf.create_processing_module('lfp', 'filtered data')
         #nwbf.processing['lfp'].add(es)
         nwbf.add_acquisition(es)
-        with pynwb.NWBHDF5IO(nwb_file_name, "a") as io:
+        with pynwb.NWBHDF5IO(path=nwb_file_name, mode="a") as io:
             io.write(nwbf)
 
         # reload the NWB file to get the h5py objects for the data and the timestamps
-        with pynwb.NWBHDF5IO(nwb_file_name, "a") as io:
+        with pynwb.NWBHDF5IO(path=nwb_file_name, mode="a") as io:
             nwbf = io.read()
 
         es = nwbf.processing['ephys'].get_container(eseries_name)
@@ -216,12 +220,12 @@ class FirFilter(dj.Manual):
                                 axis=time_axis,
                                 input_index_bounds=[start, stop],
                                 output_index_bounds=[filter_delay, filter_delay + stop - start],
-                                ds=ds,
+                                ds=decimation,
                                 input_dim_restrictions=input_dim_restrictions,
                                 outarray=filtered_data,
                                 output_offset=output_offsets[ii])
 
-        with pynwb.NWBHDF5IO(nwb_file_name, "a") as io:
+        with pynwb.NWBHDF5IO(path=nwb_file_name, mode="a") as io:
             io.write(nwbf)
 
         # Get the object ID for the filtered data and add an entry to the
@@ -356,7 +360,7 @@ class FirFilter(dj.Manual):
             output_shape_list[time_axis] += shape[time_axis]
 
         # create the dataset and the timestamps array
-        filtered_data = np.empty(tuple(output_shape_list), dtype=dtype)
+        filtered_data = np.empty(tuple(output_shape_list), dtype=data.dtype)
         new_timestamps = np.empty((output_shape_list[time_axis],), timestamps.dtype)
 
         indices = np.array(indices, ndmin=2)
@@ -377,7 +381,7 @@ class FirFilter(dj.Manual):
                                 axis=time_axis,
                                 input_index_bounds=[start, stop],
                                 output_index_bounds=[filter_delay, filter_delay + stop - start],
-                                ds=ds,
+                                ds=decimation,
                                 input_dim_restrictions=input_dim_restrictions,
                                 outarray=filtered_data,
                                 output_offset=output_offsets[ii])
@@ -392,10 +396,10 @@ def calc_filter_delay(filter_coeff):
     return (len(filter_coeff) - 1) // 2
 
 
-
-def create_standard_filters():
-    """ Add standard filters to the Filter table including
-    0-400 Hz low pass for continuous raw data -> LFP
-    """
-    FirFilter().add_filter('LFP 0-400 Hz', 20000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
-    FirFilter().add_filter('LFP 0-400 Hz', 30000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
+# TODO: FirFilter needs to be fixed
+# def create_standard_filters():
+#     """ Add standard filters to the Filter table including
+#     0-400 Hz low pass for continuous raw data -> LFP
+#     """
+#     FirFilter().add_filter('LFP 0-400 Hz', 20000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
+#     FirFilter().add_filter('LFP 0-400 Hz', 30000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')

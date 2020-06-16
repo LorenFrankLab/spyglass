@@ -1,4 +1,14 @@
-from os.path import dirname, basename, isfile, join
-import glob
-modules = glob.glob(join(dirname(__file__), "*.py"))
-__all__ = [ basename(f)[:-3] for f in modules if isfile(f) and not f.endswith('__init__.py')]
+import os
+
+# Configure datajoint
+# You can use:
+# export DJ_HOST=...
+# export DJ_USER=...
+# export DJ_PASS=...
+import datajoint as dj
+dj.config["enable_python_native_blobs"] = True
+
+# Important to do this so that we add the franklab namespace for pynwb
+# Note: This is franklab-specific -- TODO: move it outside this repo
+# Note: we need to sync this with the source repo
+from .ndx_franklab_novela import probe

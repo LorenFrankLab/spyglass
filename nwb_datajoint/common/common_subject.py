@@ -1,6 +1,5 @@
 # Test of automatic datajoint schema generation from NWB file
 import datajoint as dj
-import pynwb
 
 schema = dj.schema("common_subject")
 
@@ -20,16 +19,7 @@ class Subject(dj.Manual):
     def __init__(self, *args):
         super().__init__(*args)  # call the base implementation
 
-    def insert_from_nwb(self, nwb_file_name):
-        try:
-            io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-            nwbf = io.read()
-        except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(
-                nwb_file_name))
-            print(io.read())
-            io.close()
-            return
+    def insert_from_nwbfile(self, nwbf):
         #get the subject information and create a dictionary from it
         sub = nwbf.subject
         subject_dict = dict()
@@ -47,6 +37,5 @@ class Subject(dj.Manual):
         subject_dict['sex'] = sex
         subject_dict['species'] = sub.species
         self.insert1(subject_dict,skip_duplicates=True)
-        io.close()
 
 

@@ -26,8 +26,6 @@ dependencies:
 - pip
 - pip:
   - python-intervals
-<<<<<<< HEAD
-=======
   - ghostipy
   - spikeinterface
->>>>>>> develop_nwbraw
+  - kachery==0.6.1

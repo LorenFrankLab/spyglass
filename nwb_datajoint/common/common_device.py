@@ -1,5 +1,4 @@
 import datajoint as dj
-import pynwb
 import re
 
 schema = dj.schema("common_device", locals())
@@ -19,16 +18,7 @@ class Device(dj.Manual):
         # do your custom stuff here
         super().__init__(*args)  # call the base implementation
 
-    def insert_from_nwb(self, nwb_file_name):
-        try:
-            io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-            nwbf = io.read()
-        except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(
-                nwb_file_name))
-            io.close()
-            return
-
+    def insert_from_nwbfile(self, nwbf):
         devices = list(nwbf.devices.keys())
         device_dict = dict()
         for d in devices:
@@ -41,9 +31,8 @@ class Device(dj.Manual):
                 device_dict['system'] = d.system
                 device_dict['amplifier'] = d.amplifier
                 device_dict['adc_circuit'] = d.circuit
-                common_device.Device.insert1(device_dict, skip_duplicates=True)
-        io.close()
-
+                self.insert1(device_dict, skip_duplicates=True)
+            
 
 
 @schema
@@ -77,17 +66,7 @@ class Probe(dj.Manual):
         # do your custom stuff here
         super().__init__(*args)  # call the base implementation
 
-    def insert_from_nwb(self, nwb_file_name):
-        try:
-            io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-            nwbf = io.read()
-        except:
-            print('Error: nwbfile {} cannot be opened for reading\n'.format(
-                nwb_file_name))
-            print(io.read())
-            io.close()
-            return
-
+    def insert_from_nwbfile(self, nwbf):
         probe_dict = dict()
         probe_re = re.compile("probe")
         for d in nwbf.devices:
@@ -109,7 +88,7 @@ class Probe(dj.Manual):
                     for s_num in p.shanks:
                         shank = p.shanks[s_num]
                         shank_dict['probe_shank'] = int(shank.name)
-                        self.Shank.insert1(shank_dict)
+                        Probe().Shank().insert1(shank_dict)
                         elect_dict['probe_shank'] = shank_dict['probe_shank']
                         # FIX name when fixed
                         # go through the electrodes and add each one to the Electrode table
@@ -122,5 +101,3 @@ class Probe(dj.Manual):
                             elect_dict['rel_y'] = electrode.rel_y
                             elect_dict['rel_z'] = electrode.rel_z
                             self.Electrode.insert1(elect_dict)
-
-        io.close()
