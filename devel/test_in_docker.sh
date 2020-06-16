@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# For use on travis
+# This runs the test inside docker using the .devcontainer/Dockerfile
+
 set -ex
 
 allargs="$@"
