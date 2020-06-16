@@ -42,12 +42,20 @@ def datajoint_server():
     process = multiprocessing.Process(target=run_service_datajoint_server, kwargs=dict())
     process.start()
     
-    _wait_for_datajoint_server_to_start()
+    try:
+        _wait_for_datajoint_server_to_start()
+    except:
+        _kill_datajoint_server()
+        raise
 
     yield process
+
+    process.terminate()    
+    _kill_datajoint_server()
+
+def _kill_datajoint_server():
     print('Terminating datajoint server')
 
-    process.terminate()
     ss2 = hi.ShellScript(f"""
     #!/bin/bash
 
@@ -68,6 +76,6 @@ def _wait_for_datajoint_server_to_start():
         except:
             pass
         elapsed = time.time() - timer
-        if elapsed > 60:
+        if elapsed > 300:
             raise Exception('Timeout while waiting for datajoint server to start')
-        time.sleep(1)
+        time.sleep(5)
