@@ -12,7 +12,7 @@ import re
 import numpy as np
 import json
 import h5py as h5
-from .common_nwbfile import Nwbfile
+from .common_nwbfile import Nwbfile, LinkedNwbfile
 from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate
 from .dj_helper_fn import dj_replace
 
@@ -452,17 +452,18 @@ class Raw(dj.Imported):
             key['description'] = rawdata.description
             self.insert1(key, skip_duplicates='True')
 
-    # def nwb_object(self, key):
-    #     # return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
-    #     # so we can modify the other one.
-    #     nwb_file_name = key['nwb_file_name']
+    def nwb_object(self, key):
+        # return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
+        # so we can modify the other one. 
+        # NOTE: This leaves the file open, which means that it cannot be appended to. This should be fine normally
+        nwb_file_name = key['nwb_file_name']
 
-    #     # TO DO: This likely leaves the io object in place and the file open. Fix
-    #     io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-    #     nwbf = io.read()
-    #     # get the object id
-    #     nwb_object_id = (self & {'nwb_file_name' : key['nwb_file_name']}).fetch1('nwb_object_id')
-    #     return nwbf.objects[nwb_object_id]
+        # TO DO: This likely leaves the io object in place and the file open. Fix
+        io = pynwb.NWBHDF5IO(path=nwb_file_name, mode='r')
+        nwbf = io.read()
+        # get the object id
+        nwb_object_id = (self & {'nwb_file_name' : key['nwb_file_name']}).fetch1('nwb_object_id')
+        return nwbf.objects[nwb_object_id]
 
 
 @schema
@@ -544,8 +545,7 @@ class LFP(dj.Imported):
 
         #TO DO: go back to filter_data_nwb when appending multiple times to NWB files is fixed.
 
-       
-        nwb_out_file_name = common_session.LinkedNwbfile().create(key['nwb_file_name'])
+        nwb_out_file_name = LinkedNwbfile().create(key['nwb_file_name'])
         print(f'output file name {nwb_out_file_name}')
 
         FirFilter().filter_data_nwb(nwb_out_file_name, rawdata.timestamps, rawdata.data,
@@ -556,12 +556,12 @@ class LFP(dj.Imported):
                                                                                electrode_id_list, decimation)
 
         # create a linked NWB file with a new electrical series and link these new data to it. This is TEMPORARY
-        linked_file_name = Nwbfile().get_name_without_create(nwb_file_name)
+        linked_file_name = LinkedNwbfile().get_name_without_create(nwb_file_name)
 
         key['linked_file_name'] = linked_file_name
         key['linked_file_location'] = linked_file_name
 
-        io_in = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+        io_in = pynwb.NWBHDF5IO(path=nwb_file_name, mode='r')
         nwbf = io_in.read()
         nwbf_out = nwbf.copy()
 
