@@ -46,13 +46,13 @@ class RawPosition(dj.Imported):
                 # add the valid intervals to the Interval list
                 interval_dict = dict()
                 interval_dict['nwb_file_name'] = key['nwb_file_name']
-                interval_dict['interval_name'] = pos_interval_name
+                interval_dict['interval_list_name'] = pos_interval_name
                 interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
                 IntervalList().insert1(interval_dict, skip_duplicates=True)
 
                 key['nwb_object_id'] = position.object_id
                 # this is created when we populate the Task schema
-                key['interval_name'] = pos_interval_name
+                key['interval_list_name'] = pos_interval_name
                 self.insert1(key)
 
             else:
@@ -85,7 +85,7 @@ class HeadDir(dj.Imported):
                 return
             key['nwb_object_id'] = -1
             # this is created when we populate the Task schema
-            key['interval_name'] = 'task epochs'
+            key['interval_list_name'] = 'task epochs'
             self.insert1(key)
 
 
@@ -113,7 +113,7 @@ class Speed(dj.Imported):
                 return
             key['nwb_object_id'] = -1
             # this is created when we populate the Task schema
-            key['interval_name'] = 'task epochs'
+            key['interval_list_name'] = 'task epochs'
             self.insert1(key)
 
 
@@ -141,5 +141,5 @@ class LinPos(dj.Imported):
                 return
             key['nwb_object_id'] = -1
             # this is created when we populate the Task schema
-            key['interval_name'] = 'task epochs'
+            key['interval_list_name'] = 'task epochs'
             self.insert1(key)
