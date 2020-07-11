@@ -12,4 +12,5 @@ Newer code for importing from new NWB data files is in the develop_nwbraw branch
 2. Setup conda environment using the file in the root nwb_datajoint directory
 ```conda env create -f environment.yml```
 3. Install this repo ```python setup.py develop``` 
-4. Try running the notebook/populate_from_NWB.ipynb
+4. Download an example NWB file (note that this is ~77GB) https://www.dropbox.com/s/srra33e0igaj5rm/beans20190718.nwb?dl=0
+4. Try running the notebooks/populate_from_NWB.ipynb
