@@ -12,4 +12,4 @@ Newer code for importing from new NWB data files is in the develop_nwbraw branch
 2. Setup conda environment using the file in the root nwb_datajoint directory
 ```conda env create -f environment.yml```
 3. Install this repo ```python setup.py develop``` 
-4. Follow the instructions in notebooks/populate_DJ_from_NWB_raw.ipynb
+4. Try running the notebook/populate_from_NWB.ipynb
