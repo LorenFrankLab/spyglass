@@ -32,10 +32,6 @@ class FirFilter(dj.Manual):
         # do your custom stuff here
         super().__init__(*args)  # call the base implementation
 
-    def zpk(self):
-        # return the zeros, poles, and gain for the filter
-        return signal.tf2zpk(self.filter_coeff, 1)
-
     def add_filter(self, filter_name, fs, filter_type, band_edges, comments=''):
         # add an FIR bandpass filter of the specified type ('lowpass', 'highpass', or 'bandpass').
         # band_edges should be as follows:
@@ -142,7 +138,7 @@ class FirFilter(dj.Manual):
 
         This function takes data and timestamps from an NWB electrical series and filters them using the ghostipy
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
-        created and linked to the original NWB file using common_session.LinkedNwbfile.create()
+        created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
         """
 
         n_dim = len(data.shape)
@@ -245,7 +241,7 @@ class FirFilter(dj.Manual):
 
         This function takes data and timestamps from an NWB electrical series and filters them using the ghostipy
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
-        created and linked to the original NWB file using common_session.LinkedNwbfile.create()
+        created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
         """
 
         n_dim = len(data.shape)

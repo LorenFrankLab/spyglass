@@ -1,5 +1,5 @@
 from .common_session import Session, ExperimenterList
-from .common_ephys import ElectrodeConfig, Raw
+from .common_ephys import ElectrodeGroup, Electrode, Raw
 from .common_behav import RawPosition, HeadDir, Speed, LinPos
 
 def populate_all_common():
@@ -7,8 +7,10 @@ def populate_all_common():
     Session().populate()
     print('Populate ExperimenterList...')
     ExperimenterList().populate()
-    print('Populate ElectrodeConfig...')
-    ElectrodeConfig().populate()
+    print('Populate ElectrodeGroup...')
+    ElectrodeGroup().populate()
+    print('Populate Electrode...')
+    Electrode().populate()
     print('Populate Raw...')
     Raw().populate()
     print('RawPosition...')

@@ -3,7 +3,7 @@
 from .common_behav import RawPosition, HeadDir, Speed, LinPos
 from .common_device import  Device, Probe
 from .common_dio import Digitalio
-from .common_ephys import ElectrodeConfig, ElectrodeSortingInfo
+from .common_ephys import ElectrodeGroup, Electrode, ElectrodeSortingInfo
 from .common_ephys import SpikeSorting, SpikeSorter, SpikeSorterParameters
 # from .common_ephys import LFP, LFPBand
 # from .common_filter import FirFilter

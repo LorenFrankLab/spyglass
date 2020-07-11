@@ -11,9 +11,9 @@ import kachery as ka
 @schema
 class Nwbfile(dj.Manual):
     definition = """
-    nwb_file_name: varchar(400)
+    nwb_file_name: varchar(255) #the name of the NWB file
     ---
-    nwb_file_sha1: varchar(40)
+    nwb_file_sha1: varchar(40) # the sha1 hash of the NWB file for kachery
     """
     def insert_from_relative_file_name(self, nwb_file_name):
         """Insert a new session from an existing nwb file.
@@ -43,12 +43,14 @@ class Nwbfile(dj.Manual):
         return nwb_file_abspath
 
 @schema
-class LinkedNwbfile(dj.Manual):
-    definition = """
-    -> Nwbfile              
-    linked_file_name: varchar(255) # the name of the linked file
+class AnalysisNwbfile(dj.Manual):
+    definition = """   
+    analysis_file_name: varchar(255) # the name of the file 
     ---
-    linked_file_location: filepath@local  # the datajoint managed location of the linked file
+    parent_nwb_file='': varchar(255) # the name of the parent NWB file. Used for naming and metadata copy
+    analysis_file_description='': varchar(255) # an optional description of this analysis
+    analysis_file_sha1: varchar(40) # the sha1 hash of the NWB file for kachery
+    analysis_parameters=NULL: blob # additional relevant parmeters. Currently used only for analyses that span multiple NWB files
     """
 
     def __init__(self, *args):
@@ -60,26 +62,23 @@ class LinkedNwbfile(dj.Manual):
         '''
         Opens the input NWB file, creates a copy, writes out the copy to disk and return the name of the new file
         :param nwb_file_name:
-        :return: linked_file_name - the name of the linked file
+        :return: file_name - the name of the new NWB file
         '''
         #
         in_io  = pynwb.NWBHDF5IO(path=nwb_file_name, mode='r')
         nwbf_in = in_io.read()
-        nwbf_out = nwbf_in.copy()
+        nwbf_out = nwbf_in.export()
 
         key = dict()
-        key['nwb_file_name'] = nwb_file_name
+        key['parent_nwb_file_name'] = nwb_file_name
         # get the current number of linked files
-        #n_linked_files = len((LinkedNwbfile() & {'nwb_file_name' : nwb_file_name}).fetch())
+        #n_linked_files = len((AnalysisNwbfile() & {'nwb_file_name' : nwb_file_name}).fetch())
         # name the file, adding the number of links with preceeding zeros
 
-        # the init function is called everytime this object is accessed by DataJoint, so to set a variable we have to
-        # do it here.
-
-        n_linked_files = len(LinkedNwbfile())
-        nwb_out_file_name = os.path.splitext(nwb_file_name)[0] + str(n_linked_files).zfill(8) + '.nwb'
-        key['linked_file_name'] = nwb_out_file_name
-        key['linked_file_location'] = nwb_out_file_name
+        n__files = len((AnalysisNwbfile() & {'parent_nwb_file': nwb_file_name}).fetch())
+        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_linked_files).zfill(8) + '.nwb'
+        key['analysis_file_name'] = nwb_out_file_name
+        key['analysis_file_description'] = ''
         # write the linked file
         print(f'writing new NWB file {nwb_out_file_name}')
         with pynwb.NWBHDF5IO(path=nwb_out_file_name, mode='a', manager=in_io.manager) as io:
@@ -91,20 +90,4 @@ class LinkedNwbfile(dj.Manual):
         print('inserted file')
 
         return nwb_out_file_name
-
-    def get_name_without_create(self, nwb_file_name):
-        '''
-        Returns the name of a new NWB linked NWB file and adds it to the table but does NOT create it. This is
-        currently necessary because of a bug in the HDMF library that prevents multiple appends to an NWB file and
-        should be removed when that bug is fixed.
-        :param nwb_file_name:
-        :return: linked_file_name - the name of the file that can be linked
-        '''
-        key = dict()
-        key['nwb_file_name'] = nwb_file_name
-        n_linked_files = len(LinkedNwbfile())
-        linked_file_name = os.path.splitext(nwb_file_name)[0] + str(n_linked_files).zfill(8) + '.nwb'
-        key['linked_file_name'] = linked_file_name
-        self.insert1(key)
-        return linked_file_name
 
