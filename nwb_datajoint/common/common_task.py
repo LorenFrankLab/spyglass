@@ -119,17 +119,17 @@ class TaskEpoch(dj.Manual):
 
             # create an interval structure for this epoch
             interval_dict['nwb_file_name'] = key['nwb_file_name']
-            interval_dict['interval_name'] = 'task epoch {}'.format(enum)
+            interval_dict['interval_list_name'] = 'task epoch {}'.format(enum)
             all_epoch_intervals[enum] = np.asarray(
                 [epochs['start_time'][enum], epochs['stop_time'][enum]])
             interval_dict['valid_times'] = all_epoch_intervals[enum]
             IntervalList().insert1(
                 interval_dict, skip_duplicates=True)
             # add this interval
-            key['interval_name'] = interval_dict['interval_name']
+            key['interval_list_name'] = interval_dict['interval_name']
             self.insert1(key)
         # now create a new interval with all the epochs
-        interval_dict['interval_name'] = 'task epochs'
+        interval_dict['interval_list_name'] = 'task epochs'
         interval_dict['valid_times'] = all_epoch_intervals
         IntervalList().insert1(
             interval_dict, skip_duplicates=True)

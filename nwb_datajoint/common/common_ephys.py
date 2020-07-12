@@ -12,7 +12,7 @@ import re
 import numpy as np
 import json
 import h5py as h5
-from .common_nwbfile import Nwbfile
+from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate
 from .dj_helper_fn import dj_replace
 
@@ -22,62 +22,30 @@ schema = dj.schema('common_ephys')
 
 
 @schema
-class ElectrodeConfig(dj.Imported):
+class ElectrodeGroup(dj.Imported):
     definition = """
+    # grouping of electrodes corresponding to a physical probe
     -> Session
+    electrode_group_name: varchar(80)  # electrode group name from NWBFile
+    ---
+    -> BrainRegion
+    -> Probe
+    description: varchar(80) # description of electrode group
+    target_hemisphere: enum('Right','Left')
     """
-
-    class ElectrodeGroup(dj.Part):
-        definition = """
-        # grouping of electrodes corresponding to a physical probe
-        -> master
-        electrode_group_name: varchar(80)  # electrode group name from NWBFile
-        ---
-        -> BrainRegion
-        -> Probe
-        description: varchar(80) # description of electrode group
-        target_hemisphere: enum('Right','Left')
-        """
-
-    class Electrode(dj.Part):
-        definition = """
-        -> master
-        electrode_id: int               # the unique number for this electrode
-        ---
-        -> master.ElectrodeGroup
-        -> Probe.Electrode
-        -> BrainRegion
-        name='': varchar(80)           # unique label for each contact
-        original_reference_electrode=-1: int # the configured reference electrode for this electrode 
-        x=NULL: float                   # the x coordinate of the electrode position in the brain
-        y=NULL: float                   # the y coordinate of the electrode position in the brain
-        z=NULL: float                   # the z coordinate of the electrode position in the brain
-        filtering: varchar(200)         # description of the signal filtering
-        impedance=null: float                # electrode impedance
-        bad_channel: enum("True","False")      # if electrode is 'good' or 'bad' as observed during recording
-        x_warped=NULL: float                 # x coordinate of electrode position warped to common template brain
-        y_warped=NULL: float                 # y coordinate of electrode position warped to common template brain
-        z_warped=NULL: float                 # z coordinate of electrode position warped to common template brain
-        contacts: varchar(80)           # label of electrode contacts used for a bipolar signal -- current workaround
-        """
-
     def make(self, key):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
             nwbf = io.read()
-
-            self.insert1({'nwb_file_name': nwb_file_name})
-
             # fill in the groups
             egroups = list(nwbf.electrode_groups.keys())
-            eg_dict = dict()
-            eg_dict['nwb_file_name'] = key['nwb_file_name']
+            
             for eg_name in egroups:
                 # for each electrode group, we get the group and add an electrode group entry.
                 # as the ElectrodeGroup
                 electrode_group = nwbf.get_electrode_group(eg_name)
-                eg_dict['electrode_group_name'] = eg_name
+                key['electrode_group_name'] = eg_name
                 # check to see if the location is listed in the region.BrainRegion schema, and if not add it
                 region_dict = dict()
                 region_dict['region_name'] = electrode_group.location
@@ -90,63 +58,87 @@ class ElectrodeConfig(dj.Imported):
                     query = BrainRegion() & region_dict
                     # we also need to get the region_id for this new region or find the right region_id
                 region_id_dict = query.fetch1()
-                eg_dict['region_id'] = region_id_dict['region_id']
-                eg_dict['description'] = electrode_group.description
+                key['region_id'] = region_id_dict['region_id']
+                key['description'] = electrode_group.description
                 # the following should probably be a function that returns the probe devices from the file
                 probe_re = re.compile("probe")
                 for d in nwbf.devices:
                     if probe_re.search(d):
                         if nwbf.devices[d] == electrode_group.device:
                             # this will match the entry in the device schema
-                            eg_dict['probe_type'] = electrode_group.device.probe_type
+                            key['probe_type'] = electrode_group.device.probe_type
                             break
-                if 'probe_type' not in eg_dict:
-                    eg_dict['probe_type'] = 'unknown-probe-type'
-                ElectrodeConfig().ElectrodeGroup().insert1(eg_dict, skip_duplicates=True)
+                if 'probe_type' not in key:
+                    key['probe_type'] = 'unknown-probe-type'
+                self.insert1(key, skip_duplicates=True)
 
-            # now create the table of electrodes
-            elect_dict = dict()
+@schema
+class Electrode(dj.Imported):
+    definition = """
+    -> ElectrodeGroup
+    electrode_id: int               # the unique number for this electrode
+    ---
+    -> Probe.Electrode
+    -> BrainRegion
+    name='': varchar(80)           # unique label for each contact
+    original_reference_electrode=-1: int # the configured reference electrode for this electrode 
+    x=NULL: float                   # the x coordinate of the electrode position in the brain
+    y=NULL: float                   # the y coordinate of the electrode position in the brain
+    z=NULL: float                   # the z coordinate of the electrode position in the brain
+    filtering: varchar(200)         # description of the signal filtering
+    impedance=null: float                # electrode impedance
+    bad_channel: enum("True","False")      # if electrode is 'good' or 'bad' as observed during recording
+    x_warped=NULL: float                 # x coordinate of electrode position warped to common template brain
+    y_warped=NULL: float                 # y coordinate of electrode position warped to common template brain
+    z_warped=NULL: float                 # z coordinate of electrode position warped to common template brain
+    contacts: varchar(80)           # label of electrode contacts used for a bipolar signal -- current workaround
+    """
+
+    def make(self, key):
+        nwb_file_name = key['nwb_file_name']
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
+            nwbf = io.read()
+            # create the table of electrodes
             electrodes = nwbf.electrodes.to_dataframe()
-            elect_dict['nwb_file_name'] = key['nwb_file_name']
 
             # Below it would be better to find the mapping between  nwbf.electrodes.colnames and the schema fields and
             # where possible, assign automatically. It would also help to be robust to missing fields and have them
-            # assigned as empty if they don't exist in the nwb file in case people are not using our extensions.
+            # assigned as empty if they don't exist in the nwb file in case people are not using our column names.
 
             for elect in electrodes.iterrows():
-                # not certain that the assignment below is correct; needs to be checked.
-                elect_dict['electrode_id'] = elect[0]
-                elect_dict['electrode_group_name'] = elect[1].group_name
-                # FIX to get electrode information properly from input or NWB file. Label may not exist, so we should
-                # check that and use and empty string if not.
-                elect_dict['name'] = str(elect[0])
-                elect_dict['probe_type'] = elect[1].group.device.probe_type
-                elect_dict['probe_shank'] = elect[1].probe_shank
-                # change below when extension name is changed and bug is fixed in fldatamigration
-                elect_dict['probe_electrode'] = elect[1].probe_electrode % 128
-
-                elect_dict['bad_channel'] = 'True' if elect[1].bad_channel else 'False'
-                elect_dict['region_id'] = eg_dict['region_id']
-                elect_dict['x'] = elect[1].x
-                elect_dict['y'] = elect[1].y
-                elect_dict['z'] = elect[1].z
-                elect_dict['x_warped'] = 0
-                elect_dict['y_warped'] = 0
-                elect_dict['z_warped'] = 0
-                elect_dict['contacts'] = ''
-                elect_dict['filtering'] = elect[1].filtering
-                elect_dict['impedance'] = elect[1].imp
+                key['electrode_group_name'] = elect[1].group_name
+                key['electrode_id'] = elect[0]
+                key['name'] = str(elect[0])
+                key['probe_type'] = elect[1].group.device.probe_type
+                key['probe_shank'] = elect[1].probe_shank
+                key['probe_electrode'] = elect[1].probe_electrode 
+                key['bad_channel'] = 'True' if elect[1].bad_channel else 'False'
+                # look up the region
+                region_dict = dict()
+                region_dict['region_name'] = elect[1].group.location
+                region_dict['subregion_name'] = ''
+                region_dict['subsubregion_name'] = ''
+                key['region_id'] = (BrainRegion() & region_dict).fetch1('region_id')
+                key['x'] = elect[1].x
+                key['y'] = elect[1].y
+                key['z'] = elect[1].z
+                key['x_warped'] = 0
+                key['y_warped'] = 0
+                key['z_warped'] = 0
+                key['contacts'] = ''
+                key['filtering'] = elect[1].filtering
+                key['impedance'] = elect[1].imp
                 try:
-                    elect_dict['original_reference_electrode'] = elect[1].ref_elect
+                    key['original_reference_electrode'] = elect[1].ref_elect
                 except:
-                    elect_dict['original_reference_electrode'] = -1
-
-                ElectrodeConfig().Electrode().insert1(elect_dict, skip_duplicates=True)
+                    key['original_reference_electrode'] = -1
+                self.insert1(key, skip_duplicates=True)
 
 @schema
 class ElectrodeSortingInfo(dj.Manual):
     definition = """
-     -> ElectrodeConfig.Electrode
+     -> Electrode
      ---
      sort_group=-1: int  # the number of the sorting group for this electrode
      reference_electrode=-1: int  # the electrode to use for reference. -1: no reference, -2: common median 
@@ -162,7 +154,7 @@ class ElectrodeSortingInfo(dj.Manual):
         :return: None
         '''
         # add entries with default values for all fields
-        electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}) \
+        electrodes = (Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}) \
             .fetch()
         electrode_sorting_info = electrodes[['nwb_file_name', 'electrode_id']]
         self.insert(electrode_sorting_info, replace="True")
@@ -177,7 +169,7 @@ class ElectrodeSortingInfo(dj.Manual):
         Electrodes from probes with multiple shanks (e.g. polymer probes) are placed in one group per shank
         '''
         # get the electrodes from this NWB file
-        electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name' : nwb_file_name} & {'bad_channel' : 'False'}) \
+        electrodes = (Electrode() & {'nwb_file_name' : nwb_file_name} & {'bad_channel' : 'False'}) \
             .fetch()
         # get the current sorting info
         elect_sort_info  = (ElectrodeSortingInfo() & {'nwb_file_name' : nwb_file_name}).fetch()
@@ -209,7 +201,7 @@ class ElectrodeSortingInfo(dj.Manual):
         Assign groups to all non-bad channel electrodes based on their electrode group:
         '''
         # get the electrodes from this NWB file
-        electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}) \
+        electrodes = (Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}) \
             .fetch()
         e_groups = np.unique(electrodes['electrode_group_name'])
         # get the current sorting info
@@ -231,7 +223,7 @@ class ElectrodeSortingInfo(dj.Manual):
         :return: Null
         '''
         # get the electrodes from this NWB file
-        electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}) \
+        electrodes = (Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}) \
             .fetch()
         # get the current reference info
         elect_ref_info  = (ElectrodeSortingInfo() & {'nwb_file_name' : nwb_file_name}).fetch()
@@ -273,7 +265,7 @@ class ElectrodeSortingInfo(dj.Manual):
         sort_electrodes = (ElectrodeSortingInfo() & {'nwb_file_name': nwb_file_name}).fetch()
         sort_groups = np.unique(sort_electrodes['sort_group']).tolist()
         max_group = int(np.max(np.asarray(sort_groups)))
-        electrodes = (ElectrodeConfig.Electrode() & {'nwb_file_name': nwb_file_name}).fetch()
+        electrodes = (Electrode() & {'nwb_file_name': nwb_file_name}).fetch()
         # get the relative x and y positions of each electrode in each probe.
 
         for sort_group in sort_groups:
@@ -368,7 +360,7 @@ class Unit(dj.Manual):
     -> Session
     unit_id: int # unique identifier for this unit in this session
     ---
-    -> ElectrodeConfig.ElectrodeGroup
+    -> ElectrodeGroup
     -> IntervalList
     cluster_name: varchar(80)   # the name for this cluster (e.g. t5 c4)
     nwb_object_id: int      # the object_id for the spikes; once the object is loaded, use obj.get_unit_spike_times
@@ -383,7 +375,7 @@ class Unit(dj.Manual):
         units = nwbf.units.to_dataframe()
         for unum in range(len(units)):
             # for each unit we first need to an an interval list for this unit
-            interval_list_dict['interval_name'] = 'unit {} interval list'.format(
+            interval_list_dict['interval_list_name'] = 'unit {} interval list'.format(
                 unum)
             interval_list_dict['valid_times'] = np.asarray(
                 units.iloc[unum]['obs_intervals'])
@@ -397,7 +389,7 @@ class Unit(dj.Manual):
 
             egroup = units.iloc[unum]['electrode_group']
             key['electrode_group_name'] = egroup.name
-            key['interval_name'] = interval_list_dict['interval_name']
+            key['interval_list_name'] = interval_list_dict['interval_name']
             key['cluster_name'] = units.iloc[unum]['cluster_name']
             #key['spike_times'] = np.asarray(units.iloc[unum]['spike_times'])
             key['nwb_object_id'] = -1  # FIX
@@ -441,7 +433,7 @@ class Raw(dj.Imported):
             # get the list of valid times given the specified sampling rate.
             interval_dict = dict()
             interval_dict['nwb_file_name'] = key['nwb_file_name']
-            interval_dict['interval_name'] = raw_interval_name
+            interval_dict['interval_list_name'] = raw_interval_name
             interval_dict['valid_times'] = get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
                                                                   1.75, 0)
             IntervalList().insert1(interval_dict, skip_duplicates=True)
@@ -451,29 +443,36 @@ class Raw(dj.Imported):
             key['sampling_rate'] = sampling_rate
             print(f'Importing raw data: Estimated sampling rate:\t{key["sampling_rate"]} Hz')
             print(f'                    Number of valid intervals:\t{len(interval_dict["valid_times"])}')
-            key['interval_name'] = raw_interval_name
+            key['interval_list_name'] = raw_interval_name
             key['comments'] = rawdata.comments
             key['description'] = rawdata.description
             self.insert1(key, skip_duplicates='True')
 
-    # def nwb_object(self, key):
-    #     # return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
-    #     # so we can modify the other one.
-    #     nwb_file_name = key['nwb_file_name']
+    def nwb_object(self, key):
+        # return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
+        # so we can modify the other one. 
+        # NOTE: This leaves the file open, which means that it cannot be appended to. This should be fine normally
+        nwb_file_name = key['nwb_file_name']
 
-    #     # TO DO: This likely leaves the io object in place and the file open. Fix
-    #     io = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
-    #     nwbf = io.read()
-    #     # get the object id
-    #     nwb_object_id = (self & {'nwb_file_name' : key['nwb_file_name']}).fetch1('nwb_object_id')
-    #     return nwbf.objects[nwb_object_id]
+        # TO DO: This likely leaves the io object in place and the file open. Fix
+        io = pynwb.NWBHDF5IO(path=nwb_file_name, mode='r')
+        nwbf = io.read()
+        # get the object id
+        nwb_object_id = (self & {'nwb_file_name' : key['nwb_file_name']}).fetch1('nwb_object_id')
+        return nwbf.objects[nwb_object_id]
 
 
 @schema
-class LFPElectrode(dj.Manual):
+class LFPSelection(dj.Manual):
     definition = """
-     -> ElectrodeConfig.Electrode
+     -> Session
      """
+
+    class LFPElectrode(dj.Part):
+        definition = """
+        -> master
+        -> Electrode
+        """
 
     def set_lfp_electrodes(self, nwb_file_name, electrode_list):
         '''
@@ -483,39 +482,33 @@ class LFPElectrode(dj.Manual):
         :return:
         '''
         # remove the electrodes
-        (LFPElectrode() & {'nwb_file_name' : nwb_file_name}).delete()
+        (LFPSelection().LFPElectrode() & {'nwb_file_name' : nwb_file_name}).delete()
         # TO DO: do this in a better way
-        all_electrodes = ElectrodeConfig.Electrode.fetch(as_dict=True)
-        primary_key = ElectrodeConfig.Electrode.primary_key
+        all_electrodes = Electrode.fetch(as_dict=True)
+        primary_key = Electrode.primary_key
         for e in all_electrodes:
             # create a dictionary so we can insert new elects
             if e['electrode_id'] in electrode_list:
                 lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
-                self.insert1(lfpelectdict, replace='True')
+                LFPSelection.LFPElectrode.insert1(lfpelectdict, replace='True')
 
 
 @schema
 class LFP(dj.Imported):
     definition = """
-    -> LFPElectrode                         # the LFP electrodes selected
+    -> LFPSelection
     ---
-    -> Raw                                  # the Raw data this LFP is computed from
-    -> Session    # the linked session the LFP data is stored in
     -> IntervalList         # the valid intervals for the data
     -> FirFilter                 # the filter used for the data
     nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the linked file
     sampling_rate: float # the sampling rate, in HZ
     """
-    @property
-    def key_source(self):
-        # get a list of the sessions for which we want to compute the LFP
-        return Session()
 
     def make(self, key):
        # get the NWB object with the data; FIX: change to fetch with additional infrastructure
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_name = (Raw() & key).fetch1('sampling_rate', 'interval_name')
-        key['interval_name'] = interval_name
+        key['interval_list_name'] = interval_name
         sampling_rate = int(np.round(sampling_rate))
         key['sampling_rate'] = sampling_rate
 
@@ -526,8 +519,7 @@ class LFP(dj.Imported):
         #target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
-        valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,
-                                                          'interval_name': interval_name}).fetch1('valid_times')
+        valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,  'interval_list_name': interval_name}).fetch1('valid_times')
         # get the LFP filter that matches the raw data
         filter = (FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
                                                                                   sampling_rate}).fetch(as_dict=True)
@@ -543,29 +535,29 @@ class LFP(dj.Imported):
 
 
         # get the list of selected LFP Channels from LFPElectrode
-        electrode_keys = (LFPElectrode & key).fetch('KEY')
+
+        electrode_keys = (LFPSelection.LFPElectrode & key).fetch('KEY')
         electrode_id_list = list(k['electrode_id'] for k in electrode_keys)
 
         #TO DO: go back to filter_data_nwb when appending multiple times to NWB files is fixed.
 
-        """
-        nwb_out_file_name = common_session.LinkedNwbfile().create(key['nwb_file_name'])
+        nwb_out_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         print(f'output file name {nwb_out_file_name}')
 
         FirFilter().filter_data_nwb(nwb_out_file_name, rawdata.timestamps, rawdata.data,
-                                                  filter_coeff, valid_times, electrode_id_list, decimation)
-        """
+                                    filter_coeff, valid_times, electrode_id_list, decimation)
+        
         h5file_name = FirFilter().filter_data_hdf5(filtered_data_path, rawdata.timestamps,
-                                                                    rawdata.data, filter_coeff, valid_times,
-                                                                               electrode_id_list, decimation)
+                                                    rawdata.data, filter_coeff, valid_times,
+                                                    electrode_id_list, decimation)
 
         # create a linked NWB file with a new electrical series and link these new data to it. This is TEMPORARY
-        linked_file_name = Nwbfile().get_name_without_create(nwb_file_name)
+        linked_file_name = AnalysisNwbfile().get_name_without_create(nwb_file_name
 
         key['linked_file_name'] = linked_file_name
         key['linked_file_location'] = linked_file_name
 
-        io_in = pynwb.NWBHDF5IO(nwb_file_name, mode='r')
+        io_in = pynwb.NWBHDF5IO(path=nwb_file_name, mode='r')
         nwbf = io_in.read()
         nwbf_out = nwbf.copy()
 
@@ -597,37 +589,96 @@ class LFP(dj.Imported):
 
 
 @schema
-class LFPBandElectrode(dj.Manual):
+class LFPBandSelection(dj.Manual):
     definition = """
-    -> LFPElectrode
-    ---
-    reference_electrode=-1: int     # The reference electrode to use. -1 for none
-    -> FirFilter # the filter to be used for this LFP Band 
-    use_for_band = 'False': enum('True', 'False') # True if this electrode should be filtered in this band
-    """
-
-@schema
-class LFPBand(dj.Computed):
-    definition = """
-    -> LFPBandElectrode
-    ---
-    -> LFP
-    -> IntervalList
-    nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
-    sampling_rate: float # the sampling rate, in HZ
-    """
-
-@schema
-class DecompSeries(dj.Computed):
-    definition = """
-    # Raw power timeseries data
     -> Session
-    -> LFP
-    ---
-    -> IntervalList
-    nwb_object_id: varchar(255)  # the NWB object ID for loading this object from the file
-    sampling_rate: float                                # Sampling rate, in Hz
-    metric: enum("phase","amplitude","power")  # Metric represented in data
-    comments: varchar(80)
-    description: varchar(80)
     """
+
+    class LFPBandElectrode(dj.Part):
+        definition = """
+        -> master
+        -> LFPSelection.LFPElectrode # the LFP electrode to be filtered LFP
+        -> FirFilter                 # the filter to used for the data        
+        -> IntervalList # the set of times to be filtered
+        reference_elect_id = -1: int # the reference electrode to use; -1 for no reference
+        ---
+        """
+
+    def set_lfp_band_electrodes(self, nwb_file_name, electrode_list, filter_name, interval_name, reference_electrode_list):
+        '''
+        Adds an entry for each electrode in the electrode_list with the specified filter, interval_list, and reference electrode.
+        Also removes any entries that have the same filter, interval list and reference electrode but are not in the electrode_list.
+        :param nwb_file_name: string - the name of the nwb file for the desired session
+        :param electrode_list: list of LFP electrodes to be filtered
+        :param filter_name: the name of the filter (from the FirFilter schema)
+        :param interval_name: the name of the interval list (from the IntervalList schema)
+        :param reference_electrode_list: A single electrode id corresponding to the reference to use for all electrodes or a list with one element per entry in the electrode_list
+        :return:
+        '''
+        # Error checks on parameters
+        # electrode_list
+        available_electrodes = (LFPSelection().LFPElectrode() & {'nwb_file_name' : nwb_file_name}).fetch('electrode_id')[0]
+        if not np.all(np.isin(electrode_list,available_electrodes)):
+            raise ValueError('All elements in electrode_list must be valid electrode_ids in the LFPSelection table')
+        #filter_name
+        if not len(FirFilter() & {'filter_name' : filter_name}).fetch():
+            raise ValueError(f'filter {filter_name} is not in the FirFilter table')
+        #interval_list
+        if not len(IntervalList() & {'interval_name' : interval_name}).fetch():
+            raise ValueError(f'interval list {interval_list} is not in the IntervalList table; the list must be added before this function is called')
+        # reference_electrode_list
+        if len(reference_electrode_list) != 1 or len(reference_electrode_list) != len(electrode_list):
+            raise ValueError(f'reference_electrode_list must contain either 1 or len(electrode_list) elements')
+        if not np.all(np.isin(reference_electrode_list,available_electrodes)):
+            raise ValueError('All elements in reference_electrode_list must be valid electrode_ids in the LFPSelection table')
+        
+        # make a list of all the references
+        ref_list = np.zeros((len(electrode_list),))
+        ref_list[:] = reference_electrode_list       
+
+        #get all of the current entries and delete any that are not in the list
+        key = dict()
+        key['nwb_file_name'] = nwb_file_name
+        key['filter_name'] = filter_name
+        key['interval_name'] = interval_name
+        elect_id, ref_id = (LFPBandElectrode() & key).fetch('electrode_id', 'reference_elect_id')
+        for e, r in zip(elect_id, ref_id): 
+            if not len(np.where((electrode_list == e) & (ref_list == r))[0]):
+                key['electrode_id'] = e
+                key['reference_elect_id'] = r
+                (LFPBandElectrode() & key).delete()
+
+        #iterate through all of the new elements and add them
+        for e, r in zip(electrode_list, ref_list):
+            key['electrode_id'] = e
+            key['reference_elect_id'] = r
+            LFPBandElectrode().insert1(key)
+
+
+# TODO: FirFilter needs to be fixed
+# @schema
+# class LFPBand(dj.Computed):
+#     definition = """
+#     -> LFPBandElectrode
+#     ---
+#     -> LFP
+#     -> IntervalList
+#     nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
+#     sampling_rate: float # the sampling rate, in HZ
+#     """
+
+# TODO: FirFilter needs to be fixed
+# @schema
+# class DecompSeries(dj.Computed):
+#     definition = """
+#     # Raw power timeseries data
+#     -> Session
+#     -> LFP
+#     ---
+#     -> IntervalList
+#     nwb_object_id: varchar(255)  # the NWB object ID for loading this object from the file
+#     sampling_rate: float                                # Sampling rate, in Hz
+#     metric: enum("phase","amplitude","power")  # Metric represented in data
+#     comments: varchar(80)
+#     description: varchar(80)
+#     """

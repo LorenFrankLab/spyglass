@@ -5,7 +5,7 @@ schema = dj.schema("common_device", locals())
 
 
 @schema
-class Device(dj.Manual):
+class DataAcquisitionDevice(dj.Manual):
     definition = """
     device_name: varchar(80)
     ---
@@ -18,21 +18,55 @@ class Device(dj.Manual):
         # do your custom stuff here
         super().__init__(*args)  # call the base implementation
 
-    def insert_from_nwbfile(self, nwbf):
-        devices = list(nwbf.devices.keys())
+    def insert_from_nwbfile(self, nwbf): 
+        """Insert a data acquisition device from an nwb file
+
+        :param nwbf: NWB file object
+        :type nwbf: file object
+        :return: list of data acquisition object names
+        :rtype: list
+        """
         device_dict = dict()
-        for d in devices:
-            # note that at present we skip the header_device from trodes rec files. We could add it in if at some
-            # point we felt it was needed.
-            if (d == 'data_acq_device'):
-                # FIX: we need to get the right fields in the NWB device for this schema
-                # device.Device.insert1(dict(device_name=d))
-                device_dict['device_name'] = d
-                device_dict['system'] = d.system
-                device_dict['amplifier'] = d.amplifier
-                device_dict['adc_circuit'] = d.circuit
+        device_name_list = list()
+        for d in nwbf.devices:
+            # TODO: change SpikeGadgets to data_acq_device when change is made by Novela
+            if d == 'SpikeGadgets':
+                device = nwbf.devices[d]
+                device_dict['device_name'] = 'data_acq_device 0'
+                device_dict['system'] = 'SpikeGadgets'
+                device_dict['amplifier'] = device.amplifier
+                device_dict['adc_circuit'] = device.adc_circuit
                 self.insert1(device_dict, skip_duplicates=True)
-            
+                device_name_list.append(device_dict['device_name'])
+        return device_name_list
+        
+@schema              
+class CameraDevice(dj.Manual):
+    definition = """
+    camera_name: varchar(80)
+    ---
+    meters_per_pixel = 0 : float # height / width of pixel in meters
+    """
+
+    def insert_from_nwbfile(self, nwbf): 
+        """Insert a camera device from an nwb file
+
+        :param nwbf: NWB file object
+        :type nwbf: file object
+        :return: list of camera names
+        :rtype: list
+        """
+        device_dict = dict()
+        device_name_list = list()
+        for d in nwbf.devices:
+            if 'camera_device' in d:
+                device = nwbf.devices[d]
+                # TODO: fix camera name and add fields when new extension is available
+                device_dict['camera_name'] = nwbf.subject.subject_id + ' ' + d
+                device_dict['meters_per_pixel'] = device.meters_per_pixel
+                self.insert1(device_dict, skip_duplicates=True)
+                device_name_list.append(device_dict['camera_name'])
+        return device_name_list         
 
 
 @schema

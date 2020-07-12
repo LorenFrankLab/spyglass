@@ -36,24 +36,26 @@ class RawPosition(dj.Imported):
                 position = get_data_interface(nwbf, 'Position')
 
             if position is not None:
-                pos_interval_name = 'pos valid times'
-                # get the valid intervals for the position data
-                p = position.get_spatial_series()
-                timestamps = np.asarray(p.timestamps)
-                # estimate the sampling rate
-                sampling_rate = estimate_sampling_rate(timestamps, 1.75)
-                print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
-                # add the valid intervals to the Interval list
-                interval_dict = dict()
-                interval_dict['nwb_file_name'] = key['nwb_file_name']
-                interval_dict['interval_name'] = pos_interval_name
-                interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
-                IntervalList().insert1(interval_dict, skip_duplicates=True)
+                
+                for pos_epoch, series_name in enumerate(position.spatial_series):
+                    pos_interval_name = f'pos {pos_epoch} valid times'
+                    # get the valid intervals for the position data
+                    p = position.spatial_series[series_name]
+                    timestamps = np.asarray(p.timestamps)
+                    # estimate the sampling rate
+                    sampling_rate = estimate_sampling_rate(timestamps, 1.75)
+                    print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
+                    # add the valid intervals to the Interval list
+                    interval_dict = dict()
+                    interval_dict['nwb_file_name'] = key['nwb_file_name']
+                    interval_dict['interval_list_name'] = pos_interval_name
+                    interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
+                    IntervalList().insert1(interval_dict, skip_duplicates=True)
 
-                key['nwb_object_id'] = position.object_id
-                # this is created when we populate the Task schema
-                key['interval_name'] = pos_interval_name
-                self.insert1(key)
+                    key['nwb_object_id'] = position.object_id
+                    # this is created when we populate the Task schema
+                    key['interval_list_name'] = pos_interval_name
+                    self.insert1(key, skip_duplicates='True')
 
             else:
                 print('No position data interface found in  {}\n'.format(key['nwb_file_name']))
@@ -85,7 +87,7 @@ class HeadDir(dj.Imported):
                 return
             key['nwb_object_id'] = -1
             # this is created when we populate the Task schema
-            key['interval_name'] = 'task epochs'
+            key['interval_list_name'] = 'task epochs'
             self.insert1(key)
 
 
@@ -113,7 +115,7 @@ class Speed(dj.Imported):
                 return
             key['nwb_object_id'] = -1
             # this is created when we populate the Task schema
-            key['interval_name'] = 'task epochs'
+            key['interval_list_name'] = 'task epochs'
             self.insert1(key)
 
 
@@ -141,5 +143,5 @@ class LinPos(dj.Imported):
                 return
             key['nwb_object_id'] = -1
             # this is created when we populate the Task schema
-            key['interval_name'] = 'task epochs'
+            key['interval_list_name'] = 'task epochs'
             self.insert1(key)

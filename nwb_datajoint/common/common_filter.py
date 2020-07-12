@@ -11,7 +11,6 @@ import h5py as h5
 
 schema = dj.schema('common_filter')
 
-
 @schema
 class FirFilter(dj.Manual):
     definition = """                                                                             
@@ -30,11 +29,6 @@ class FirFilter(dj.Manual):
     def __init__(self, *args):
         # do your custom stuff here
         super().__init__(*args)  # call the base implementation
-
-    # probably don't need this function
-    # def zpk(self):
-    #     # return the zeros, poles, and gain for the filter
-    #     return signal.tf2zpk(self.filter_coeff, 1)
 
     def add_filter(self, filter_name, fs, filter_type, band_edges, comments=''):
         # add an FIR bandpass filter of the specified type ('lowpass', 'highpass', or 'bandpass').
@@ -142,7 +136,7 @@ class FirFilter(dj.Manual):
 
         This function takes data and timestamps from an NWB electrical series and filters them using the ghostipy
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
-        created and linked to the original NWB file using common_session.LinkedNwbfile.create()
+        created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
         """
 
         n_dim = len(data.shape)
@@ -245,7 +239,7 @@ class FirFilter(dj.Manual):
 
         This function takes data and timestamps from an NWB electrical series and filters them using the ghostipy
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
-        created and linked to the original NWB file using common_session.LinkedNwbfile.create()
+        created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
         """
 
         n_dim = len(data.shape)
@@ -361,6 +355,7 @@ class FirFilter(dj.Manual):
 
         # create the dataset and the timestamps array
         filtered_data = np.empty(tuple(output_shape_list), dtype=data.dtype)
+
         new_timestamps = np.empty((output_shape_list[time_axis],), timestamps.dtype)
 
         indices = np.array(indices, ndmin=2)
@@ -382,6 +377,7 @@ class FirFilter(dj.Manual):
                                 input_index_bounds=[start, stop],
                                 output_index_bounds=[filter_delay, filter_delay + stop - start],
                                 ds=decimation,
+                                ds=ds,
                                 input_dim_restrictions=input_dim_restrictions,
                                 outarray=filtered_data,
                                 output_offset=output_offsets[ii])
@@ -396,10 +392,9 @@ def calc_filter_delay(filter_coeff):
     return (len(filter_coeff) - 1) // 2
 
 
-# TODO: FirFilter needs to be fixed
-# def create_standard_filters():
-#     """ Add standard filters to the Filter table including
-#     0-400 Hz low pass for continuous raw data -> LFP
-#     """
-#     FirFilter().add_filter('LFP 0-400 Hz', 20000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
-#     FirFilter().add_filter('LFP 0-400 Hz', 30000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
+def create_standard_filters():
+    """ Add standard filters to the Filter table including
+    0-400 Hz low pass for continuous raw data -> LFP
+    """
+    FirFilter().add_filter('LFP 0-400 Hz', 20000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
+    FirFilter().add_filter('LFP 0-400 Hz', 30000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')

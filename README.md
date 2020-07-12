@@ -10,4 +10,5 @@ to date notebooks
 4. [Use the datajoint docker installation](https://tutorials.datajoint.io/setting-up/local-database.html)
 5. Run notebooks/populate_DJ_from_NWB_raw.ipynb to import one or more NWB files
 into the datajoint database
-6. As another example, after importing, run notebooks/NWB_DJ_LFP.ipynwb to extract LFP 
+6. Run populate_from_NWB.ipynb from the notebooks directory.
+7. As another example, after importing, run notebooks/NWB_DJ_LFP.ipynwb to extract LFP 

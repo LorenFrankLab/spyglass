@@ -4,11 +4,11 @@ import pynwb
 from .common_nwbfile import Nwbfile
 from .common_lab import Lab, Institution, LabMember
 from .common_subject import Subject
-from .common_device import Device
+from .common_device import DataAcquisitionDevice, CameraDevice
 from .common_device import Probe
 
 # So that linters don't complain that these are unused
-used = [Nwbfile, Subject, Institution, Lab, LabMember, Device]
+used = [Nwbfile, Subject, Institution, Lab, LabMember]
 
 schema = dj.schema("common_session")
 
@@ -49,8 +49,13 @@ class Session(dj.Imported):
             print('Subject...')
             Subject().insert_from_nwbfile(nwbf)
 
-            print('Device...')
-            Device().insert_from_nwbfile(nwbf)
+            print('DataAcquisitionDevice...')
+            # note that this returns a list of names; we don't use this at the moment but we might later.
+            device_name_list = DataAcquisitionDevice().insert_from_nwbfile(nwbf)
+             # note that this returns a list of names; we don't use this at the moment but we might later.
+            print('CameraDevice...')
+            device_name_list = CameraDevice().insert_from_nwbfile(nwbf)
+ 
             print('Probe...')
             Probe().insert_from_nwbfile(nwbf)
 
