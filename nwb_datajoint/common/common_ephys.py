@@ -552,7 +552,7 @@ class LFP(dj.Imported):
                                                     electrode_id_list, decimation)
 
         # create a linked NWB file with a new electrical series and link these new data to it. This is TEMPORARY
-        linked_file_name = AnalysisNwbfile().get_name_without_create(nwb_file_name
+        linked_file_name = AnalysisNwbfile().get_name_without_create(nwb_file_name)
 
         key['linked_file_name'] = linked_file_name
         key['linked_file_location'] = linked_file_name

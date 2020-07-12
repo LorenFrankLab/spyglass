@@ -75,13 +75,13 @@ class AnalysisNwbfile(dj.Manual):
         #n_linked_files = len((AnalysisNwbfile() & {'nwb_file_name' : nwb_file_name}).fetch())
         # name the file, adding the number of links with preceeding zeros
 
-        n__files = len((AnalysisNwbfile() & {'parent_nwb_file': nwb_file_name}).fetch())
-        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_linked_files).zfill(8) + '.nwb'
-        key['analysis_file_name'] = nwb_out_file_name
+        n_analysis_files = len((AnalysisNwbfile() & {'parent_nwb_file': nwb_file_name}).fetch())
+        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_analysis_files).zfill(8) + '.nwb'
+        key['analysis_file_name'] = analysis_file_name
         key['analysis_file_description'] = ''
         # write the linked file
-        print(f'writing new NWB file {nwb_out_file_name}')
-        with pynwb.NWBHDF5IO(path=nwb_out_file_name, mode='a', manager=in_io.manager) as io:
+        print(f'writing new NWB file {analysis_file_name}')
+        with pynwb.NWBHDF5IO(path=analysis_file_name, mode='a', manager=in_io.manager) as io:
             io.write(nwbf_out)
 
         in_io.close()
@@ -89,5 +89,5 @@ class AnalysisNwbfile(dj.Manual):
         self.insert1(key)
         print('inserted file')
 
-        return nwb_out_file_name
+        return analysis_file_name
 

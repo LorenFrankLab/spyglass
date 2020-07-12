@@ -5,6 +5,7 @@ import numpy as np
 from .common_session import Session
 from .common_interval import IntervalList
 from .common_nwbfile import Nwbfile
+from .common_ephys import Raw
 import datajoint as dj
 from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sampling_rate
 
@@ -12,7 +13,6 @@ from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sam
 used = [Session]
 
 schema = dj.schema('common_behav')
-
 
 @schema
 class RawPosition(dj.Imported):
@@ -32,11 +32,8 @@ class RawPosition(dj.Imported):
             # Get the position data. FIX: change Position to position when name changed or fix helper function to allow
             # upper or lower case
             position = get_data_interface(nwbf, 'position')
-            if position is None:
-                position = get_data_interface(nwbf, 'Position')
-
-            if position is not None:
-                
+ 
+            if position is not None:  
                 for pos_epoch, series_name in enumerate(position.spatial_series):
                     pos_interval_name = f'pos {pos_epoch} valid times'
                     # get the valid intervals for the position data

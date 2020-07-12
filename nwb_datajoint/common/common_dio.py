@@ -1,15 +1,37 @@
-import datajoint as dj
+import pynwb
+import numpy as np
+
 from .common_session import Session
+from .common_interval import IntervalList
+from .common_nwbfile import Nwbfile
+from .common_ephys import Raw
+import datajoint as dj
+from .nwb_helper_fn import get_data_interface
 
-schema = dj.schema("common_dio", locals())
+# so the linter does not complain about unused variables
+used = [Session, IntervalList]
 
+schema = dj.schema('common_dio')
 
 @schema
-class Digitalio(dj.Manual):
+class DIOEvents(dj.Imported):
     definition = """
     -> Session
-    dio_label: varchar(80)  # the label for this digital IO port
+    dio_event_name: varchar(80) # the name assigned to this DIO event
     ---
-    input_port: enum('True', 'False') # is this an input port
-    nwb_object_id: varchar(255) # the object identifier for these data
+    nwb_object_id: varchar(80)            # the object id of the data in the NWB file
+    -> IntervalList       # the list of intervals for this object
     """
+    def make(self, key):
+        nwb_file_name = key['nwb_file_name']
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
+            nwbf = io.read()
+            # Get the data interface for 'behavioral_events"
+            behav_events = get_data_interface(nwbf, 'behavioral_events').time_series
+            # the times for these events correspond to the valid times for the raw data
+            key['interval_list_name'] = (Raw() & {'nwb_file_name' : nwb_file_name}).fetch1('interval_list_name')
+            for event_series in behav_events:
+                key['dio_event_name'] = event_series
+                key['nwb_object_id'] = behav_events[event_series].object_id
+                self.insert1(key, skip_duplicates='True')

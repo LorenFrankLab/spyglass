@@ -377,7 +377,6 @@ class FirFilter(dj.Manual):
                                 input_index_bounds=[start, stop],
                                 output_index_bounds=[filter_delay, filter_delay + stop - start],
                                 ds=decimation,
-                                ds=ds,
                                 input_dim_restrictions=input_dim_restrictions,
                                 outarray=filtered_data,
                                 output_offset=output_offsets[ii])

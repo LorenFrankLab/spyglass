@@ -14,6 +14,6 @@ dj.config["enable_python_native_blobs"] = True
 
 from ndx_franklab_novela import probe
 
-from .storage_dirs import check_env, kachery_storage_dir, base_dir
-from .insert_sessions import insert_sessions
+from .data_import.storage_dirs import check_env, kachery_storage_dir, base_dir
+from .data_import.insert_sessions import insert_sessions
 

@@ -9,10 +9,10 @@ def get_data_interface(nwbf, data_interface_name):
     :param data_interface_name: string with name of data interface
     :return: data interface object or None
     """
-    for module_name in nwbf.modules:
-        module = nwbf.get_processing_module(module_name)
+    for module_name in nwbf.processing:
+        module = nwbf.processing[module_name]
         if data_interface_name in module.data_interfaces:
-            return module.get_data_interface(data_interface_name)
+            return module.Get(data_interface_name)
         else:
             return None
 

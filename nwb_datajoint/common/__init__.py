@@ -2,8 +2,8 @@
 # Note: users will have their own tables... permission system
 from .common_behav import RawPosition, HeadDir, Speed, LinPos
 from .common_device import  DataAcquisitionDevice, CameraDevice, Probe
-from .common_dio import Digitalio
-from .common_ephys import ElectrodeGroup, Electrode, ElectrodeSortingInfo
+from .common_dio import DIOEvents
+from .common_ephys import ElectrodeGroup, Electrode, ElectrodeSortingInfo, Raw
 from .common_ephys import SpikeSorting, SpikeSorter, SpikeSorterParameters
 # from .common_ephys import LFP, LFPBand
 # from .common_filter import FirFilter
