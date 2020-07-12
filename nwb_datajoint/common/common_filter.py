@@ -11,8 +11,6 @@ import h5py as h5
 
 schema = dj.schema('common_filter')
 
-
-# TODO FirFilter needs to be fixed
 @schema
 class FirFilter(dj.Manual):
     definition = """                                                                             
@@ -356,7 +354,8 @@ class FirFilter(dj.Manual):
             output_shape_list[time_axis] += shape[time_axis]
 
         # create the dataset and the timestamps array
-        filtered_data = np.empty(tuple(output_shape_list), dtype=dtype)
+        filtered_data = np.empty(tuple(output_shape_list), dtype=data.dtype)
+
         new_timestamps = np.empty((output_shape_list[time_axis],), timestamps.dtype)
 
         indices = np.array(indices, ndmin=2)
@@ -377,6 +376,7 @@ class FirFilter(dj.Manual):
                                 axis=time_axis,
                                 input_index_bounds=[start, stop],
                                 output_index_bounds=[filter_delay, filter_delay + stop - start],
+                                ds=decimation,
                                 ds=ds,
                                 input_dim_restrictions=input_dim_restrictions,
                                 outarray=filtered_data,

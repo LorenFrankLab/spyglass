@@ -1,0 +1,7 @@
+language: minimal
+services:
+- docker
+install:
+- docker pull magland/nwb-datajoint-dev:latest
+script:
+- devel/test_in_docker.sh

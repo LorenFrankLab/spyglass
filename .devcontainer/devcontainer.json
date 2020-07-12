@@ -30,7 +30,9 @@
 	"postCreateCommand": ".devcontainer/post_create.sh",
 
 	"mounts": [
-		"source=${localWorkspaceFolder}/devel/data,target=/data,type=bind,consistency=delegated"
+		"source=${localWorkspaceFolder}/devel/data,target=/data,type=bind,consistency=delegated",
+		"source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+		"source=/tmp,target=/tmp,type=bind,consistency=cached"
 	],
 
 	"containerEnv": {

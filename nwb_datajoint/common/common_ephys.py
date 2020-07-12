@@ -420,7 +420,11 @@ class Raw(dj.Imported):
             nwbf = io.read()
             raw_interval_name = "raw data valid times"
             # get the acquisition object
-            rawdata = nwbf.get_acquisition()
+            try:
+                rawdata = nwbf.get_acquisition()
+            except:
+                print(f'WARNING: Unable to get aquisition object in: {nwb_file_abspath}')
+                return
             print('Estimating sampling rate...')
             # NOTE: Only use first 1e6 timepoints to save time
             sampling_rate = estimate_sampling_rate(np.asarray(rawdata.timestamps[:1000000]), 1.5)
@@ -515,8 +519,7 @@ class LFP(dj.Imported):
         #target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
-        valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,
-                                                          'interval_list_name': interval_name}).fetch1('valid_times')
+        valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,  'interval_list_name': interval_name}).fetch1('valid_times')
         # get the LFP filter that matches the raw data
         filter = (FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
                                                                                   sampling_rate}).fetch(as_dict=True)
@@ -532,6 +535,7 @@ class LFP(dj.Imported):
 
 
         # get the list of selected LFP Channels from LFPElectrode
+
         electrode_keys = (LFPSelection.LFPElectrode & key).fetch('KEY')
         electrode_id_list = list(k['electrode_id'] for k in electrode_keys)
 
@@ -548,7 +552,7 @@ class LFP(dj.Imported):
                                                     electrode_id_list, decimation)
 
         # create a linked NWB file with a new electrical series and link these new data to it. This is TEMPORARY
-        linked_file_name = AnalysisNwbfile().get_name_without_create(nwb_file_name)
+        linked_file_name = AnalysisNwbfile().get_name_without_create(nwb_file_name
 
         key['linked_file_name'] = linked_file_name
         key['linked_file_location'] = linked_file_name

@@ -22,6 +22,7 @@ dependencies:
 - pytest
 - pytest-cov
 - coveralls
+- ghostipy
 - pip
 - pip:
   - python-intervals

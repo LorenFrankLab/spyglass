@@ -6,6 +6,7 @@ thisdir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(thisdir)
 
 pytest_plugins = [
+    "fixtures._datajoint_server"
 ]
 
 def pytest_addoption(parser):

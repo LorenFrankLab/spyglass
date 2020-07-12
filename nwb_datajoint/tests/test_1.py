@@ -1,21 +1,73 @@
 import os
+import shutil
 import uuid
 from datetime import datetime
 import pynwb
 from pynwb.file import Subject
 import pytz
 import numpy as np
-from nwb_datajoint import insert_sessions
+import kachery as ka
 
 from ._temporarydirectory import TemporaryDirectory
 
-def test_1(tmp_path):
+def test_1(tmp_path, datajoint_server):
+    from nwb_datajoint.data_import import insert_sessions
+    from nwb_datajoint.common import Session, Device, Probe
     tmpdir = str(tmp_path)
     os.environ['NWB_DATAJOINT_BASE_DIR'] = tmpdir + '/nwb-data'
     os.environ['KACHERY_STORAGE_DIR'] = tmpdir + '/nwb-data/kachery-storage'
     os.mkdir(os.environ['NWB_DATAJOINT_BASE_DIR'])
     os.mkdir(os.environ['KACHERY_STORAGE_DIR'])
 
+    nwb_fname = os.environ['NWB_DATAJOINT_BASE_DIR'] + '/test.nwb'  
+
+    with ka.config(fr='default_readonly'):
+        ka.load_file('sha1://8ed68285c327b3766402ee75730d87994ac87e87/beans20190718_no_eseries_no_behavior.nwb', dest=nwb_fname)
+
+    with pynwb.NWBHDF5IO(path=nwb_fname, mode='r') as io:
+        nwbf = io.read()
+
+    insert_sessions(['test.nwb'])
+
+    x = (Session() & {'nwb_file_name': 'test.nwb'}).fetch1()
+    assert x['nwb_file_name'] == 'test.nwb'
+    assert x['subject_id'] == 'Beans'
+    assert x['institution_name'] == 'University of California, San Francisco'
+    assert x['lab_name'] == 'Loren Frank'
+    assert x['session_id'] == 'beans_01'
+    assert x['session_description'] == 'Reinforcement leaarning'
+    assert x['session_start_time'] == datetime(2019, 7, 18, 15, 29, 47)
+    assert x['timestamps_reference_time'] == datetime(1970, 1, 1, 0, 0)
+    assert x['experiment_description'] == 'Reinforcement learning'
+
+    x = Device().fetch()
+    # No devices?
+    assert len(x) == 0
+
+    x = Probe().fetch()
+    assert len(x) == 1
+    assert x[0]['probe_type'] == '128c-4s8mm6cm-20um-40um-sl' 
+    assert x[0]['probe_description'] == '128 channel polyimide probe'
+    assert x[0]['num_shanks'] == 4
+    assert x[0]['contact_side_numbering'] == 'True'
+
+# This is how I created the file: beans20190718_no_eseries_no_behavior.nwb
+def _create_beans20190718_no_eseries_no_behavior():
+    # Use: pip install git+https://github.com/flatironinstitute/h5_to_json
+    import os
+    import shutil
+    import h5_to_json as h5j
+
+    basepath = '/workspaces/nwb_datajoint/devel/data/nwb_builder_test_data/'
+    nwb_path = basepath + '/beans20190718.nwb'
+    x = h5j.h5_to_dict(
+        nwb_path,
+        exclude_groups=['/acquisition/e-series', '/processing/behavior'],
+        include_datasets=True
+    )
+    h5j.dict_to_h5(x, basepath + '/beans20190718_no_eseries_no_behavior.nwb')
+
+def _old_method_for_creating_test_file():
     nwb_content = pynwb.NWBFile(
         session_description='test-session-description',
         experimenter='test-experimenter-name',
@@ -64,13 +116,7 @@ def test_1(tmp_path):
             filtering='none',
             group=grp
         )
-
     nwb_fname = os.environ['NWB_DATAJOINT_BASE_DIR'] + '/test.nwb'  
     with pynwb.NWBHDF5IO(path=nwb_fname, mode='w') as io:
         io.write(nwb_content)
         io.close()
-
-    with pynwb.NWBHDF5IO(path=nwb_fname, mode='r') as io:
-        nwbf = io.read()
-
-    insert_sessions(['test.nwb'])
