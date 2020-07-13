@@ -22,10 +22,9 @@ dependencies:
 - pytest
 - pytest-cov
 - coveralls
-- ghostipy
 - pip
 - pip:
   - python-intervals
   - ghostipy
   - spikeinterface
-  - kachery==0.6.1
+  - kachery==0.6.4

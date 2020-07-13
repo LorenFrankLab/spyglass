@@ -20,6 +20,6 @@ setuptools.setup(
         'python-dateutil',
         'datajoint',
         'ghostipy',
-        'kachery==0.6.1'
+        'kachery==0.6.4'
     ],
 )
