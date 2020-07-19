@@ -120,7 +120,7 @@ class FirFilter(dj.Manual):
         # return the filter delay
         filter = (self & {'filter_name': filter_name} & {'filter_sampling_rate': fs}).fetch(as_dict=True)
         f = filter[0]
-        return calc_filter_delay(filter['filter_coeff'])
+        return self.calc_filter_delay(filter['filter_coeff'])
 
     def filter_data_nwb(self, nwb_file_name, timestamps, data, filter_coeff, valid_times, electrodes,
                         decimation):
@@ -130,7 +130,7 @@ class FirFilter(dj.Manual):
         :param data: original data array
         :param filter_coeff: numpy array with filter coefficients for FIR filter
         :param valid_times: 2D numpy array with start and stop times of intervals to be filtered
-        :param electrodes: list of electrodes to filter
+        :param electrodes: list of electrode_ids to filter
         :param decimation: decimation factor
         :return: The NWB object id of the filtered data
 
@@ -152,7 +152,7 @@ class FirFilter(dj.Manual):
         output_shape_list[electrode_axis] = len(electrodes)
         output_offsets = [0]
 
-        filter_delay = calc_filter_delay(filter_coeff)
+        filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
             frm, to = np.searchsorted(timestamps, (a_start, a_stop))
             if to > n_samples:
@@ -181,10 +181,10 @@ class FirFilter(dj.Manual):
         es = pynwb.ecephys.ElectricalSeries(name='filt test', data=np.empty(tuple(output_shape_list), dtype='i2'),
                                             electrodes=electrode_table_region, timestamps= np.empty(0))
         # check to see if there is already an ephys processing module, and if not, add one
-        #if len(nwbf.processing) == 0 or 'lfp' not in nwbf.processing:
-        #    nwbf.create_processing_module('lfp', 'filtered data')
-        #nwbf.processing['lfp'].add(es)
-        nwbf.add_acquisition(es)
+        if len(nwbf.processing) == 0 or 'lfp' not in nwbf.processing:
+            nwbf.create_processing_module('lfp', 'filtered data')
+        nwbf.processing['lfp'].add(es)
+        #nwbf.add_acquisition(es)
         with pynwb.NWBHDF5IO(path=nwb_file_name, mode="a") as io:
             io.write(nwbf)
 
@@ -223,7 +223,8 @@ class FirFilter(dj.Manual):
             io.write(nwbf)
 
         # Get the object ID for the filtered data and add an entry to the
-        #return nwbf.
+        return es.object_id
+
 
     def filter_data_hdf5(self, file_path, timestamps, data, filter_coeff, valid_times, electrodes,
                         decimation):
@@ -255,7 +256,7 @@ class FirFilter(dj.Manual):
         output_shape_list[electrode_axis] = len(electrodes)
         output_offsets = [0]
 
-        filter_delay = calc_filter_delay(filter_coeff)
+        filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
             frm, to = np.searchsorted(timestamps, (a_start, a_stop))
             if to > n_samples:
@@ -335,7 +336,7 @@ class FirFilter(dj.Manual):
         output_shape_list[electrode_axis] = len(electrodes)
         output_offsets = [0]
 
-        filter_delay = calc_filter_delay(filter_coeff)
+        filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
             frm, to = np.searchsorted(timestamps, (a_start, a_stop))
             if to > n_samples:
@@ -383,17 +384,17 @@ class FirFilter(dj.Manual):
 
         return filtered_data, new_timestamps
 
-def calc_filter_delay(filter_coeff):
-    """
-    :param filter_coeff:
-    :return: filter delay
-    """
-    return (len(filter_coeff) - 1) // 2
+    def calc_filter_delay(self, filter_coeff):
+        """
+        :param filter_coeff:
+        :return: filter delay
+        """
+        return (len(filter_coeff) - 1) // 2
 
 
-def create_standard_filters():
-    """ Add standard filters to the Filter table including
-    0-400 Hz low pass for continuous raw data -> LFP
-    """
-    FirFilter().add_filter('LFP 0-400 Hz', 20000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
-    FirFilter().add_filter('LFP 0-400 Hz', 30000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
+    def create_standard_filters(self):
+        """ Add standard filters to the Filter table including
+        0-400 Hz low pass for continuous raw data -> LFP
+        """
+        self.add_filter('LFP 0-400 Hz', 20000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
+        self.add_filter('LFP 0-400 Hz', 30000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')

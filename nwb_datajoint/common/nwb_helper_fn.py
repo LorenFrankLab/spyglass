@@ -12,9 +12,8 @@ def get_data_interface(nwbf, data_interface_name):
     for module_name in nwbf.processing:
         module = nwbf.processing[module_name]
         if data_interface_name in module.data_interfaces:
-            return module.Get(data_interface_name)
-        else:
-            return None
+            return module.get(data_interface_name) 
+    return None
 
 def estimate_sampling_rate(timestamps, multiplier):
     '''Estimate the sampling rate given a list of timestamps. Assumes that the most common temporal differences
@@ -29,6 +28,9 @@ def estimate_sampling_rate(timestamps, multiplier):
     # 2. identify adjacent samples as those that have a time difference < the multiplier * the modal value
     # 3. average the time differences between adjacent samples
     sample_diff = np.diff(timestamps[~np.isnan(timestamps)])
+    if len(sample_diff) < 10:
+        print(f'Error in estimate_sampling_rate: only {len(sample_diff)} timestamps are valid. Check the data.')
+        return -1
     nsmooth = 10
     smoother = np.ones(nsmooth) / nsmooth
     smooth_diff = np.convolve(sample_diff, smoother, mode='same')

@@ -1,5 +1,7 @@
 from .common_session import Session, ExperimenterList
 from .common_ephys import ElectrodeGroup, Electrode, Raw
+from .common_sensors import SensorData
+from .common_task import TaskEpoch
 from .common_behav import RawPosition, HeadDir, Speed, LinPos
 from .common_dio import DIOEvents
 
@@ -16,6 +18,10 @@ def populate_all_common():
     Raw().populate()
     print('Populate DIOEvants...')
     DIOEvents().populate()   
+    print('Populate SensorData')
+    SensorData().populate()
+    print('Populate TaskEpochs')
+    TaskEpoch().populate()
     print('RawPosition...')
     RawPosition().populate()
     print('HeadDir...')

@@ -45,28 +45,37 @@ class CameraDevice(dj.Manual):
     definition = """
     camera_name: varchar(80)
     ---
+    camera_id=-1 : int # temporary camera ID until name is made unique
     meters_per_pixel = 0 : float # height / width of pixel in meters
     """
+    def initialize(self):
+        # create a "none" camera
+        # TODO: move to initialization script so it doesn't get called every time
+        self.insert1({'camera_name': 'none'}, skip_duplicates='True')
 
     def insert_from_nwbfile(self, nwbf): 
         """Insert a camera device from an nwb file
 
         :param nwbf: NWB file object
         :type nwbf: file object
-        :return: list of camera names
-        :rtype: list
+        :return: None
+        :rtype: None
         """
         device_dict = dict()
         device_name_list = list()
         for d in nwbf.devices:
             if 'camera_device' in d:
+                c = str.split(d)
+                device_dict['camera_id'] = int(c[1])
                 device = nwbf.devices[d]
                 # TODO: fix camera name and add fields when new extension is available
                 device_dict['camera_name'] = nwbf.subject.subject_id + ' ' + d
                 device_dict['meters_per_pixel'] = device.meters_per_pixel
                 self.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['camera_name'])
-        return device_name_list         
+        print(f'Inserted {device_name_list}')
+
+     
 
 
 @schema

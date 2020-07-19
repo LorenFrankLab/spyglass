@@ -41,18 +41,22 @@ class RawPosition(dj.Imported):
                     timestamps = np.asarray(p.timestamps)
                     # estimate the sampling rate
                     sampling_rate = estimate_sampling_rate(timestamps, 1.75)
-                    print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
-                    # add the valid intervals to the Interval list
-                    interval_dict = dict()
-                    interval_dict['nwb_file_name'] = key['nwb_file_name']
-                    interval_dict['interval_list_name'] = pos_interval_name
-                    interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
-                    IntervalList().insert1(interval_dict, skip_duplicates=True)
+                    if sampling_rate < 0:
+                        print(f'Error adding position data for position epoch {pos_epoch}')
+                        raise ValueError
+                    else:
+                        print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
+                        # add the valid intervals to the Interval list
+                        interval_dict = dict()
+                        interval_dict['nwb_file_name'] = key['nwb_file_name']
+                        interval_dict['interval_list_name'] = pos_interval_name
+                        interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
+                        IntervalList().insert1(interval_dict, skip_duplicates=True)
 
-                    key['nwb_object_id'] = position.object_id
-                    # this is created when we populate the Task schema
-                    key['interval_list_name'] = pos_interval_name
-                    self.insert1(key, skip_duplicates='True')
+                        key['nwb_object_id'] = position.object_id
+                        # this is created when we populate the Task schema
+                        key['interval_list_name'] = pos_interval_name
+                        self.insert1(key, skip_duplicates='True')
 
             else:
                 print('No position data interface found in  {}\n'.format(key['nwb_file_name']))

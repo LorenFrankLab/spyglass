@@ -1,6 +1,7 @@
 import datajoint as dj
 
 from .common_session import Session
+from .common_nwbfile import AnalysisNwbfile
 from .common_region import BrainRegion
 from .common_device import Probe
 from .common_interval import IntervalList
@@ -455,7 +456,8 @@ class Raw(dj.Imported):
         nwb_file_name = key['nwb_file_name']
 
         # TO DO: This likely leaves the io object in place and the file open. Fix
-        io = pynwb.NWBHDF5IO(path=nwb_file_name, mode='r')
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        io = pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r')
         nwbf = io.read()
         # get the object id
         nwb_object_id = (self & {'nwb_file_name' : key['nwb_file_name']}).fetch1('nwb_object_id')
@@ -481,16 +483,20 @@ class LFPSelection(dj.Manual):
         :param electrode_list: list of electrodes to be used for LFP
         :return:
         '''
-        # remove the electrodes
-        (LFPSelection().LFPElectrode() & {'nwb_file_name' : nwb_file_name}).delete()
-        # TO DO: do this in a better way
-        all_electrodes = Electrode.fetch(as_dict=True)
-        primary_key = Electrode.primary_key
-        for e in all_electrodes:
-            # create a dictionary so we can insert new elects
-            if e['electrode_id'] in electrode_list:
-                lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
-                LFPSelection.LFPElectrode.insert1(lfpelectdict, replace='True')
+        # remove the session and then recreate the session and Electrode list
+        (LFPSelection() & {'nwb_file_name' : nwb_file_name}).delete()
+        # check to see if the user allowed the deletion
+        if len((LFPSelection() & {'nwb_file_name' : nwb_file_name}).fetch()) == 0:
+            LFPSelection().insert1({'nwb_file_name' : nwb_file_name})
+
+            # TO DO: do this in a better way
+            all_electrodes = Electrode.fetch(as_dict=True)
+            primary_key = Electrode.primary_key
+            for e in all_electrodes:
+                # create a dictionary so we can insert new elects
+                if e['electrode_id'] in electrode_list:
+                    lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
+                    LFPSelection().LFPElectrode.insert1(lfpelectdict, replace='True')
 
 
 @schema
@@ -507,19 +513,19 @@ class LFP(dj.Imported):
     def make(self, key):
        # get the NWB object with the data; FIX: change to fetch with additional infrastructure
         rawdata = Raw().nwb_object(key)
-        sampling_rate, interval_name = (Raw() & key).fetch1('sampling_rate', 'interval_name')
-        key['interval_list_name'] = interval_name
+        sampling_rate, interval_list_name = (Raw() & key).fetch1('sampling_rate', 'interval_list_name')
+        key['interval_list_name'] = interval_list_name
         sampling_rate = int(np.round(sampling_rate))
         key['sampling_rate'] = sampling_rate
 
 
-        # TEMPORARY HARD CODED FILTERED DATA PATH
+        # TODO: Fix TEMPORARY HARD CODED FILTERED DATA PATH
         filtered_data_path = '/data/nwb_builder_test_data/filtered_data/'
         nwb_file_name = key['nwb_file_name']
         #target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
-        valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,  'interval_list_name': interval_name}).fetch1('valid_times')
+        valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,  'interval_list_name': interval_list_name}).fetch1('valid_times')
         # get the LFP filter that matches the raw data
         filter = (FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
                                                                                   sampling_rate}).fetch(as_dict=True)
@@ -532,10 +538,7 @@ class LFP(dj.Imported):
         if len(filter_coeff) == 0:
             print(f'Error in LFP: no filter found with data sampling rate of {sampling_rate}')
             return None
-
-
         # get the list of selected LFP Channels from LFPElectrode
-
         electrode_keys = (LFPSelection.LFPElectrode & key).fetch('KEY')
         electrode_id_list = list(k['electrode_id'] for k in electrode_keys)
 
@@ -544,48 +547,50 @@ class LFP(dj.Imported):
         nwb_out_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         print(f'output file name {nwb_out_file_name}')
 
-        FirFilter().filter_data_nwb(nwb_out_file_name, rawdata.timestamps, rawdata.data,
+        nwb_object_id = FirFilter().filter_data_nwb(nwb_out_file_name, rawdata.timestamps, rawdata.data,
                                     filter_coeff, valid_times, electrode_id_list, decimation)
+
+        key['nwb_object_id'] = nwb_object_id
+        key['sampling_rate'] = sampling_rate // decimation
+
+        self.insert1(key)
         
-        h5file_name = FirFilter().filter_data_hdf5(filtered_data_path, rawdata.timestamps,
-                                                    rawdata.data, filter_coeff, valid_times,
-                                                    electrode_id_list, decimation)
+        # h5file_name = FirFilter().filter_data_hdf5(filtered_data_path, rawdata.timestamps,
+        #                                             rawdata.data, filter_coeff, valid_times,
+        #                                             electrode_id_list, decimation)
 
-        # create a linked NWB file with a new electrical series and link these new data to it. This is TEMPORARY
-        linked_file_name = AnalysisNwbfile().get_name_without_create(nwb_file_name)
+        # # create a anaylysi NWB file with a new electrical series and link these new data to it. This is TEMPORARY
+        # linked_file_name = AnalysisNwbfile().get_name_without_create(nwb_file_name)
 
-        key['linked_file_name'] = linked_file_name
-        key['linked_file_location'] = linked_file_name
+        # key['linked_file_name'] = linked_file_name
+        # key['linked_file_location'] = linked_file_name
 
-        io_in = pynwb.NWBHDF5IO(path=nwb_file_name, mode='r')
-        nwbf = io_in.read()
-        nwbf_out = nwbf.copy()
 
-       #FIX to be indeces into electrodes, not electrode_ids
-        electrode_table_region = nwbf_out.create_electrode_table_region(electrode_id_list,
-                                                                        'filtered electrode table')
-        print('past append')
+        #FIX to be indeces into electrodes, not electrode_ids
+        # electrode_table_region = nwbf_out.create_electrode_table_region(electrode_id_list,
+        #                                                                 'filtered electrode table')
+        # print('past append')
 
-        # open the hdf5 file and get the datasets from it
-        with h5.File(h5file_name, 'r') as infile:
-            filtered_data = infile.get('filtered_data')
-            timestamps = infile.get('timestamps')
+        # # open the hdf5 file and get the datasets from it
+        # with h5.File(h5file_name, 'r') as infile:
+        #     filtered_data = infile.get('filtered_data')
+        #     timestamps = infile.get('timestamps')
 
-            lfp_description = f'LFP {filter[0]["filter_low_pass"]} Hz to {filter[0]["filter_high_pass"]} Hz '
-            print(f'writing new NWB file {linked_file_name}')
-            with pynwb.NWBHDF5IO(path=linked_file_name, mode='a', manager=io_in.manager) as io:
-                es = pynwb.ecephys.ElectricalSeries('LFP', filtered_data, electrode_table_region,
-                                                    timestamps=timestamps, description=lfp_description)
-                nwbf_out.add_analysis(es)
-                io.write(nwbf_out)
-                key['nwb_object_id'] = es.object_id
+        #     lfp_description = f'LFP {filter[0]["filter_low_pass"]} Hz to {filter[0]["filter_high_pass"]} Hz '
+        #     print(f'writing new NWB file {linked_file_name}')
+        #     with pynwb.NWBHDF5IO(path=linked_file_name, mode='a', manager=io_in.manager) as io:
+        #         es = pynwb.ecephys.ElectricalSeries('LFP', filtered_data, electrode_table_region,
+        #                                             timestamps=timestamps, description=lfp_description)
+        #         nwbf_out.add_analysis(es)
+        #         io.write(nwbf_out)
+        #         key['nwb_object_id'] = es.object_id
 
-            io_in.close()
-        # loop through all of the electrodes and insert a row for each one
-        for electrode in electrode_id_list:
-            key['electrode_id'] = electrode
-            print(key)
-            self.insert1(key)
+        #     io_in.close()
+        # # loop through all of the electrodes and insert a row for each one
+        # for electrode in electrode_id_list:
+        #     key['electrode_id'] = electrode
+        #     print(key)
+        #     self.insert1(key)
 
 
 @schema

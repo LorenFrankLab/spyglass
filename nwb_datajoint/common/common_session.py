@@ -50,11 +50,9 @@ class Session(dj.Imported):
             Subject().insert_from_nwbfile(nwbf)
 
             print('DataAcquisitionDevice...')
-            # note that this returns a list of names; we don't use this at the moment but we might later.
-            device_name_list = DataAcquisitionDevice().insert_from_nwbfile(nwbf)
-             # note that this returns a list of names; we don't use this at the moment but we might later.
+            DataAcquisitionDevice().insert_from_nwbfile(nwbf)
             print('CameraDevice...')
-            device_name_list = CameraDevice().insert_from_nwbfile(nwbf)
+            CameraDevice().insert_from_nwbfile(nwbf)
  
             print('Probe...')
             Probe().insert_from_nwbfile(nwbf)
@@ -71,14 +69,6 @@ class Session(dj.Imported):
                 'experiment_description': nwbf.experiment_description
             }, skip_duplicates=True)
 
-            #     """
-            #     Task and Apparatus Information structures.
-            #     These hold general information not specific to any one epoch. Specific information is added in task.TaskEpoch
-            #     """
-            print('Task...')
-            Task().insert_from_nwbfile(nwbf)
-            print('Task Epoch...')
-            TaskEpoch().insert_from_nwbfile(nwbf)
             print('Skipping Apparatus for now...')
             # Apparatus().insert_from_nwbfile(nwbf)
 
@@ -102,7 +92,7 @@ class ExperimenterList(dj.Imported):
 
     def make(self, key):
         nwb_file_name = key['nwb_file_name']
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         ExperimenterList().insert1({'nwb_file_name': nwb_file_name}, skip_duplicates=True)
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
             nwbf = io.read()
