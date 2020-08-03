@@ -7,7 +7,7 @@ import ghostipy as gsp
 import matplotlib.pyplot as plt
 import uuid
 import h5py as h5
-# from hdmf.common.table import DynamicTableRegion
+from .nwb_helper_fn import get_electrode_indeces
 
 schema = dj.schema('common_filter')
 
@@ -89,7 +89,7 @@ class FirFilter(dj.Manual):
         # create 1d array for coefficients
         filterdict['filter_coeff'] = np.array(gsp.firdesign(numtaps, band_edges, desired, fs=fs, p=p), ndmin=1)
         # add this filter to the table
-        self.insert1(filterdict, replace="True")
+        self.insert1(filterdict, skip_duplicates="True")
 
     def plot_magnitude(self, filter_name, fs):
         filter = (self & {'filter_name': filter_name} & {'filter_sampling_rate' : fs}).fetch(as_dict=True)
@@ -122,16 +122,16 @@ class FirFilter(dj.Manual):
         f = filter[0]
         return self.calc_filter_delay(filter['filter_coeff'])
 
-    def filter_data_nwb(self, nwb_file_name, timestamps, data, filter_coeff, valid_times, electrodes,
+    def filter_data_nwb(self, analysis_file_name, timestamps, data, filter_coeff, valid_times, electrodes,
                         decimation):
         """
-        :param nwb_file_name: str   name of previously created nwb file where filtered data should be stored
+        :param analysis_nwb_file_name: str   full path to previously created analysis nwb file where filtered data should be stored. This also has the name of the original NWB file where the data will be taken from
         :param timestamps: numpy array with list of timestamps for data
-        :param data: original data array
+        :param data: original data array (numpy or h5py)
         :param filter_coeff: numpy array with filter coefficients for FIR filter
         :param valid_times: 2D numpy array with start and stop times of intervals to be filtered
         :param electrodes: list of electrode_ids to filter
-        :param decimation: decimation factor
+        :param decimation: int decimation factor 
         :return: The NWB object id of the filtered data
 
         This function takes data and timestamps from an NWB electrical series and filters them using the ghostipy
@@ -152,12 +152,13 @@ class FirFilter(dj.Manual):
         output_shape_list[electrode_axis] = len(electrodes)
         output_offsets = [0]
 
+        output_dtype = type(data[0][0])
+
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
             frm, to = np.searchsorted(timestamps, (a_start, a_stop))
             if to > n_samples:
                 to = n_samples
-
             indices.append((frm, to))
             shape, dtype = gsp.filter_data_fir(data,
                                                filter_coeff,
@@ -167,138 +168,50 @@ class FirFilter(dj.Manual):
                                                describe_dims=True,
                                                ds=decimation,
                                                input_dim_restrictions=input_dim_restrictions)
-            print(f'dtype = {dtype}, {data}')
+            #print(f'dtype = {dtype}, {data}')
             output_offsets.append(output_offsets[-1] + shape[time_axis])
+            #TODO: remove int() when fixed:
             output_shape_list[time_axis] += shape[time_axis]
 
         # open the nwb file to create the dynamic table region and electrode series, then write and close the file
-        with pynwb.NWBHDF5IO(path=nwb_file_name, mode="a") as io:
+        with pynwb.NWBHDF5IO(path=analysis_file_name, mode="a") as io:
             nwbf=io.read()
+            # get the indeces of the electrodes in the electrode table
+            elect_ind = get_electrode_indeces(nwbf, electrodes)
 
-        electrode_table_region = nwbf.create_electrode_table_region(electrodes, 'filtered electrode table')
-        # FIX: name needs to be unique
-        eseries_name = 'filt_test'
-        es = pynwb.ecephys.ElectricalSeries(name='filt test', data=np.empty(tuple(output_shape_list), dtype='i2'),
-                                            electrodes=electrode_table_region, timestamps= np.empty(0))
-        # check to see if there is already an ephys processing module, and if not, add one
-        if len(nwbf.processing) == 0 or 'lfp' not in nwbf.processing:
-            nwbf.create_processing_module('lfp', 'filtered data')
-        nwbf.processing['lfp'].add(es)
-        #nwbf.add_acquisition(es)
-        with pynwb.NWBHDF5IO(path=nwb_file_name, mode="a") as io:
+            electrode_table_region = nwbf.create_electrode_table_region(elect_ind, 'filtered electrode table')
+            eseries_name = 'data'
+            # TODO: use datatype of data
+            es = pynwb.ecephys.ElectricalSeries(name=eseries_name, 
+                                                data=np.empty(tuple(output_shape_list), 
+                                                dtype=output_dtype),
+                                                electrodes=electrode_table_region, 
+                                                timestamps= np.empty(output_shape_list[time_axis]))
+            # check to see if there is already an ephys processing module, and if not, add one
+            if len(nwbf.processing) == 0 or 'lfp' not in nwbf.processing:
+                nwbf.create_processing_module('lfp', 'filtered data')
+            nwbf.processing['lfp'].add(es)
+            #nwbf.add_acquisition(es)
             io.write(nwbf)
 
         # reload the NWB file to get the h5py objects for the data and the timestamps
-        with pynwb.NWBHDF5IO(path=nwb_file_name, mode="a") as io:
+        with pynwb.NWBHDF5IO(path=analysis_file_name, mode="a") as io:
             nwbf = io.read()
-
-        es = nwbf.processing['ephys'].get_container(eseries_name)
-        filtered_data = es.data
-        new_timestamps = es.timestamps
-
-        indices = np.array(indices, ndmin=2)
-
-        # Filter and write the output dataset
-        ts_offset = 0
-
-        for ii, (start, stop) in enumerate(indices):
-            extracted_ts = timestamps[start:stop:decimation]
-
-            print(f"Diffs {np.diff(extracted_ts)}")
-            new_timestamps[ts_offset:ts_offset + len(extracted_ts)] = extracted_ts
-            ts_offset += len(extracted_ts)
-
-            # finally ready to filter data!
-            gsp.filter_data_fir(data,
-                                filter_coeff,
-                                axis=time_axis,
-                                input_index_bounds=[start, stop],
-                                output_index_bounds=[filter_delay, filter_delay + stop - start],
-                                ds=decimation,
-                                input_dim_restrictions=input_dim_restrictions,
-                                outarray=filtered_data,
-                                output_offset=output_offsets[ii])
-
-        with pynwb.NWBHDF5IO(path=nwb_file_name, mode="a") as io:
-            io.write(nwbf)
-
-        # Get the object ID for the filtered data and add an entry to the
-        return es.object_id
-
-
-    def filter_data_hdf5(self, file_path, timestamps, data, filter_coeff, valid_times, electrodes,
-                        decimation):
-        """
-        :param file_path: str   location for saving the timestamps and filtered data
-        :param timestamps: numpy array with list of timestamps for data
-        :param data: original data array
-        :param filter_coeff: numpy array with filter coefficients for FIR filter
-        :param valid_times: 2D numpy array with start and stop times of intervals to be filtered
-        :param electrodes: list of electrodes to filter
-        :param decimation: decimation factor
-        :return: hdf5_file_name - the file name for the hdf5 file with the filtered data and timestamps in it
-
-        This function takes data and timestamps from an NWB electrical series and filters them using the ghostipy
-        package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
-        created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
-        """
-
-        n_dim = len(data.shape)
-        n_samples = len(timestamps)
-        # find the
-        time_axis = 0 if data.shape[0] == n_samples else 1
-        electrode_axis = 1 - time_axis
-        input_dim_restrictions = [None] * n_dim
-        input_dim_restrictions[electrode_axis] = np.s_[electrodes]
-
-        indices = []
-        output_shape_list = [0] * n_dim
-        output_shape_list[electrode_axis] = len(electrodes)
-        output_offsets = [0]
-
-        filter_delay = self.calc_filter_delay(filter_coeff)
-        for a_start, a_stop in valid_times:
-            frm, to = np.searchsorted(timestamps, (a_start, a_stop))
-            if to > n_samples:
-                to = n_samples
-
-            indices.append((frm, to))
-            shape, dtype = gsp.filter_data_fir(data,
-                                               filter_coeff,
-                                               axis=time_axis,
-                                               input_index_bounds=[frm, to],
-                                               output_index_bounds=[filter_delay, filter_delay + to - frm],
-                                               describe_dims=True,
-                                               ds=decimation,
-                                               input_dim_restrictions=input_dim_restrictions)
-            output_offsets.append(output_offsets[-1] + shape[time_axis])
-            output_shape_list[time_axis] += shape[time_axis]
-
-        # create a unique filename for these data
-        new_filepath = file_path +  uuid.uuid4().hex + '.hdf5'
-        with h5.File(new_filepath, 'w') as outfile:
-
-            filtered_data = outfile.create_dataset('filtered_data',
-                                          shape=tuple(output_shape_list),
-                                          dtype=data.dtype)
-            filtered_data.attrs['electrode_ids'] = electrodes
-            new_timestamps = outfile.create_dataset('timestamps',
-                                      shape=(output_shape_list[time_axis], ),
-                                      dtype=timestamps.dtype)
+            es = nwbf.processing['lfp'].get(eseries_name)
+            filtered_data = es.data
+            new_timestamps = es.timestamps
 
             indices = np.array(indices, ndmin=2)
-
             # Filter and write the output dataset
             ts_offset = 0
 
             for ii, (start, stop) in enumerate(indices):
                 extracted_ts = timestamps[start:stop:decimation]
 
-                #print(f"Diffs {np.diff(extracted_ts)}")
                 new_timestamps[ts_offset:ts_offset + len(extracted_ts)] = extracted_ts
                 ts_offset += len(extracted_ts)
 
-                # filter data
+                # finally ready to filter data!
                 gsp.filter_data_fir(data,
                                     filter_coeff,
                                     axis=time_axis,
@@ -308,9 +221,10 @@ class FirFilter(dj.Manual):
                                     input_dim_restrictions=input_dim_restrictions,
                                     outarray=filtered_data,
                                     output_offset=output_offsets[ii])
-            return new_filepath
+            io.write(nwbf)
 
-
+        # Get the object ID for the filtered data and add an entry to the
+        return es.object_id
 
     def filter_data(self, timestamps, data, filter_coeff, valid_times, electrodes,
                         decimation):

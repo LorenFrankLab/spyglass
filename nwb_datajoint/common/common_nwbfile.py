@@ -1,13 +1,15 @@
 import os
 import datajoint as dj
 import pynwb
+from .dj_helper_fn import dj_replace
 
 schema = dj.schema("common_lab", locals())
 
 import kachery as ka
 
 # define the fields that should be kept in AnalysisNWBFiles
-nwb_keep_fields = ('devices', 'electrode_groups', 'electrodes', 'experiment_description', 'experimenter', 'file_create_date', 'institution', 'lab', 'session_description', 'session_id', 
+nwb_keep_fields = ('devices', 'electrode_groups', 'electrodes', 'experiment_description', 'experimenter', 
+                   'file_create_date', 'identifier', 'intervals', 'institution', 'lab', 'session_description', 'session_id', 
                    'session_start_time', 'subject', 'timestamps_reference_time')
 
 # TODO: make decision about docstring -- probably use :param ...:
@@ -65,45 +67,64 @@ class AnalysisNwbfile(dj.Manual):
     def create(self, nwb_file_name):
         '''
         Opens the input NWB file, creates a copy, writes out the copy to disk and return the name of the new file
-        :param nwb_file_name:
-        :return: file_name - the name of the new NWB file
+        :param nwb_file_name: str
+        :return: analysis_file_name: str
         '''
         #
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
 
-        in_io  = pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r')
-        nwbf_in = in_io.read()
+        io  = pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r')
+        nwbf = io.read()
         
         #  pop off the unnecessary elements to save space
-        nwb_fields = nwbf_in.fields
+
+        nwb_fields = nwbf.fields
         for field in nwb_fields:
             if field not in nwb_keep_fields:
-                nwb_object = getattr(nwbf_in, field)
-                if type(nwb_object) is dict:
+                nwb_object = getattr(nwbf, field)
+                if type(nwb_object) is pynwb.core.LabelledDict:  
                     for module in list(nwb_object.keys()):
-                        nwb_object.pop(module)
-
+                        mod = nwb_object.pop(module)
+                        nwbf._remove_child(mod)
+        
+                        
         key = dict()
         key['nwb_file_name'] = nwb_file_name
         # get the current number of analysis files related to this nwb file
         n_analysis_files = len((AnalysisNwbfile() & {'parent_nwb_file': nwb_file_name}).fetch())
         # name the file, adding the number of files with preceeding zeros
 
-        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_analysis_files).zfill(8) + '.nwb'
+        analysis_file_name = os.path.splitext(nwb_file_name)[0] + '_' + str(n_analysis_files).zfill(8) + '.nwb'
         key['analysis_file_name'] = analysis_file_name
         key['analysis_file_description'] = ''
         # write the new file
         print(f'writing new NWB file {analysis_file_name}')
         analysis_file_abspath = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        with pynwb.NWBHDF5IO(path=analysis_file_abspath, mode='w') as io:
-            io.write(nwbf_in)
+        # export the new NWB file
+        with pynwb.NWBHDF5IO(path=analysis_file_abspath, mode='w') as export_io:
+            export_io.export(io, nwbf)
 
-        in_io.close()
-        # insert the key into the Linked File table
+        io.close()
+
+        # insert the new file
         self.insert1(key)
-        print('inserted file')
-
         return analysis_file_name
+
+    def add_to_kachery(self, analysis_file_name): 
+        """Add the specified analysis nwb file to the Kachery store for sharing
+        :return: none
+        :rtype: none
+        """
+        print('Computing SHA-1 and storing in kachery...')
+        with ka.config(use_hard_links=True):
+            kachery_path = ka.store_file(analysis_file_name)
+            sha1 = ka.get_file_hash(kachery_path)
+        #update the entry for this element with the sha1 entry
+        
+        analysis_file_info  = (AnalysisNwbfile() & {'analysis_file_name' : analysis_file_name}).fetch()
+        new_sha1 = (analysis_file_name, sha1)
+        self.insert(dj_replace(analysis_file_info, new_sha1, 'analysis_file_name', 'analysis_file_sha1'),
+                                 replace="True")
 
     @staticmethod
     def get_abs_path(analysis_nwb_file_name):

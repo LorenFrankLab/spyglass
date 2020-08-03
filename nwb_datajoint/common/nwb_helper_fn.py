@@ -78,5 +78,14 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
 
     return valid_times[valid_intervals,:]
 
+def get_electrode_indeces(electrical_series, electrode_ids):
+    """Given an NWB file or electrical series object , returns the indeces of the specified electrode_ids. 
 
-
+    :param electrical_series: NWB file handle or nwb electrical series object
+    :type electrical_series: 
+    :param electrode_ids: array or list of electrode_ids
+    :type electrode_ids: numpy array or list
+    :return: electrode_indeces (numpy array of indeces)
+    """
+    eletrode_table_region = list(electrical_series.electrodes.to_dataframe().index)
+    return [elect_idx for elect_idx, elect_id in enumerate(eletrode_table_region) if elect_id in electrode_ids]

@@ -45,8 +45,11 @@ class CameraDevice(dj.Manual):
     definition = """
     camera_name: varchar(80)
     ---
-    camera_id=-1 : int # temporary camera ID until name is made unique
     meters_per_pixel = 0 : float # height / width of pixel in meters
+    manufacturer='' : varchar(80) 
+    model='' : varchar(80)
+    lens='': varchar(80)
+    camera_id=-1 : int
     """
     def initialize(self):
         # create a "none" camera
@@ -66,11 +69,15 @@ class CameraDevice(dj.Manual):
         for d in nwbf.devices:
             if 'camera_device' in d:
                 c = str.split(d)
-                device_dict['camera_id'] = int(c[1])
+                device_dict['camera_id'] = c[1]
                 device = nwbf.devices[d]
                 # TODO: fix camera name and add fields when new extension is available
-                device_dict['camera_name'] = nwbf.subject.subject_id + ' ' + d
+                device_dict['camera_name'] = device.camera_name
+                #device_dict['manufacturer'] = device.manufacturer
+                device_dict['model'] = device.model
+                device_dict['lens'] = device.lens
                 device_dict['meters_per_pixel'] = device.meters_per_pixel
+
                 self.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['camera_name'])
         print(f'Inserted {device_name_list}')
