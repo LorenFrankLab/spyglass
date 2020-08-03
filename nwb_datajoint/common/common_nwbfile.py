@@ -1,7 +1,7 @@
 import os
 import datajoint as dj
 import pynwb
-from .dj_helper_fn import dj_replace
+from .dj_helper_fn import dj_replace, fetch_nwb
 
 schema = dj.schema("common_lab", locals())
 
@@ -19,6 +19,7 @@ class Nwbfile(dj.Manual):
     definition = """
     nwb_file_name: varchar(255) #the name of the NWB file
     ---
+    nwb_file_abs_path: varchar(255) # the full path name to the file
     nwb_file_sha1: varchar(40) # the sha1 hash of the NWB file for kachery
     """
     def insert_from_relative_file_name(self, nwb_file_name):
@@ -27,16 +28,17 @@ class Nwbfile(dj.Manual):
         Args:
             nwb_file_name (str): Relative path to the nwb file
         """
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        assert os.path.exists(nwb_file_abspath), f'File does not exist: {nwb_file_abspath}'
+        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+        assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
 
         print('Computing SHA-1 and storing in kachery...')
         with ka.config(use_hard_links=True):
-            kachery_path = ka.store_file(nwb_file_abspath)
+            kachery_path = ka.store_file(nwb_file_abs_path)
             sha1 = ka.get_file_hash(kachery_path)
         
         self.insert1(dict(
             nwb_file_name=nwb_file_name,
+            nwb_file_abs_path=nwb_file_abs_path,
             nwb_file_sha1=sha1
         ), skip_duplicates=True)
     
@@ -54,6 +56,7 @@ class AnalysisNwbfile(dj.Manual):
     analysis_file_name: varchar(255) # the name of the file 
     ---
     -> Nwbfile # the name of the parent NWB file. Used for naming and metadata copy
+    analysis_file_abs_path: varchar(255) # the full path of the file
     analysis_file_description='': varchar(255) # an optional description of this analysis
     analysis_file_sha1='': varchar(40) # the sha1 hash of the NWB file for kachery
     analysis_parameters=NULL: blob # additional relevant parmeters. Currently used only for analyses that span multiple NWB files
@@ -99,9 +102,10 @@ class AnalysisNwbfile(dj.Manual):
         key['analysis_file_description'] = ''
         # write the new file
         print(f'writing new NWB file {analysis_file_name}')
-        analysis_file_abspath = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        key['analysis_file_abs_path'] = analysis_file_abs_path
         # export the new NWB file
-        with pynwb.NWBHDF5IO(path=analysis_file_abspath, mode='w') as export_io:
+        with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
             export_io.export(io, nwbf)
 
         io.close()
@@ -116,12 +120,13 @@ class AnalysisNwbfile(dj.Manual):
         :rtype: none
         """
         print('Computing SHA-1 and storing in kachery...')
+        analysis_file_info  = (AnalysisNwbfile() & {'analysis_file_name' : analysis_file_name}).fetch1()
+        
         with ka.config(use_hard_links=True):
-            kachery_path = ka.store_file(analysis_file_name)
+            kachery_path = ka.store_file(analysis_file_info['analysis_file_abs_path'])
             sha1 = ka.get_file_hash(kachery_path)
         #update the entry for this element with the sha1 entry
         
-        analysis_file_info  = (AnalysisNwbfile() & {'analysis_file_name' : analysis_file_name}).fetch()
         new_sha1 = (analysis_file_name, sha1)
         self.insert(dj_replace(analysis_file_info, new_sha1, 'analysis_file_name', 'analysis_file_sha1'),
                                  replace="True")

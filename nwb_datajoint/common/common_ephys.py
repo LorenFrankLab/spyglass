@@ -14,7 +14,7 @@ import json
 import h5py as h5
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indeces
-from .dj_helper_fn import dj_replace
+from .dj_helper_fn import dj_replace, fetch_nwb
 
 used = [Session, BrainRegion, Probe, IntervalList]
 
@@ -461,6 +461,9 @@ class Raw(dj.Imported):
         # get the object id
         nwb_object_id = (self & {'nwb_file_name' : key['nwb_file_name']}).fetch1('nwb_object_id')
         return nwbf.objects[nwb_object_id]
+    
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
 
 
 @schema
@@ -562,6 +565,9 @@ class LFP(dj.Imported):
         # get the object id
         nwb_object_id = (self & {'analysis_file_name' : lfp_file_name}).fetch1('nwb_object_id')
         return nwbf.objects[nwb_object_id]
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
 @schema
 class LFPBandSelection(dj.Manual):
@@ -706,9 +712,10 @@ class LFPBand(dj.Computed):
 
         key['analysis_file_name'] = lfp_band_file_name
         key['nwb_object_id'] = nwb_object_id
-
         self.insert1(key)
 
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
 # TODO: FirFilter needs to be fixed
 # @schema

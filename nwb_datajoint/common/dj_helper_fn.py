@@ -1,5 +1,7 @@
 # helper functions for manipulating information from DataJoing fetch calls
 import numpy as np
+import pynwb
+import re
 
 def dj_replace(original_table, new_values, key_column, replace_column):
     '''
@@ -25,3 +27,32 @@ def dj_replace(original_table, new_values, key_column, replace_column):
 
     original_table[replace_column][replace_ind] = new_values[:,1]
     return original_table
+
+
+def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
+    """
+    :param query_expression: a DJ query expression (e.g. join, restrict) or a table to call fetch on
+    :param nwb_master: tuple of (table, attr) to get the NWB filepath from
+    :param attrs: attrs from normal fetch()
+    :param kwargs: kwargs from normal fetch()
+    :return: fetched list of dict
+    """
+    kwargs['as_dict'] = True  # force return as dictionary
+    tbl, attr_name = nwb_master
+    
+    if not attrs:
+        attrs = query_expression.heading.names
+
+    rec_dicts = (query_expression * tbl.proj(nwb2load_filepath=attr_name)).fetch(*attrs, 'nwb2load_filepath', **kwargs)
+    
+    if not rec_dicts or not np.any(['object_id' in key for key in rec_dicts[0]]):
+        return rec_dicts
+    
+    ret = []
+    for rec_dict in rec_dicts:
+        io = pynwb.NWBHDF5IO(rec_dict.pop('nwb2load_filepath'), mode='r')
+        nwbf = io.read()
+        nwb_objs = {re.sub('(_?)object_id', '', id_attr): nwbf.objects[rec_dict[id_attr]]
+                    for id_attr in attrs if 'object_id' in id_attr}
+        ret.append({**rec_dict, **nwb_objs})
+    return ret
