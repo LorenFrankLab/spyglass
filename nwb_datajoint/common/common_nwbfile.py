@@ -116,11 +116,17 @@ class AnalysisNwbfile(dj.Manual):
         return analysis_file_name
 
     def add_to_kachery(self, analysis_file_name): 
-        """Add the specified analysis nwb file to the Kachery store for sharing
-        :return: none
-        :rtype: none
+        """Adds the specified file to kachery
+
+        :param analysis_file_name: analysis file name or full path
+        :type analysis_file_name: [str]
         """
+        dir, analysis_file_name = os.path.split(analysis_file_name)
+        # make sure the file exists
+        if not os.path.isfile(self.get_abs_path(analysis_file_name)):
+            raise ValueError(f'Analysis file {analysis_file_name} is incorrect.')
         print('Computing SHA-1 and storing in kachery...')
+        # get the file name
         analysis_file_info  = (AnalysisNwbfile() & {'analysis_file_name' : analysis_file_name}).fetch1()
         
         with ka.config(use_hard_links=True):
@@ -128,7 +134,7 @@ class AnalysisNwbfile(dj.Manual):
             sha1 = ka.get_file_hash(kachery_path)
         #update the entry for this element with the sha1 entry
         
-        new_sha1 = (analysis_file_name, sha1)
+        new_sha1 = [(analysis_file_name, sha1)]
         self.insert(dj_replace(analysis_file_info, new_sha1, 'analysis_file_name', 'analysis_file_sha1'),
                                  replace="True")
 

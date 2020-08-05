@@ -123,7 +123,7 @@ class FirFilter(dj.Manual):
         f = filter[0]
         return self.calc_filter_delay(filter['filter_coeff'])
 
-    def filter_data_nwb(self, analysis_file_name, timestamps, data, filter_coeff, valid_times, electrode_ids,
+    def filter_data_nwb(self, analysis_file_abs_path, timestamps, data, filter_coeff, valid_times, electrode_ids,
                         decimation):
         """
         :param analysis_nwb_file_name: str   full path to previously created analysis nwb file where filtered data should be stored. This also has the name of the original NWB file where the data will be taken from
@@ -175,7 +175,7 @@ class FirFilter(dj.Manual):
             output_shape_list[time_axis] += shape[time_axis]
 
         # open the nwb file to create the dynamic table region and electrode series, then write and close the file
-        with pynwb.NWBHDF5IO(path=analysis_file_name, mode="a") as io:
+        with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a") as io:
             nwbf=io.read()
             # get the indeces of the electrodes in the electrode table
             elect_ind = get_electrode_indeces(nwbf, electrode_ids)
@@ -193,7 +193,7 @@ class FirFilter(dj.Manual):
             io.write(nwbf)
 
         # reload the NWB file to get the h5py objects for the data and the timestamps
-        with pynwb.NWBHDF5IO(path=analysis_file_name, mode="a") as io:
+        with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a") as io:
             nwbf = io.read()
             es = nwbf.objects[es.object_id]
             filtered_data = es.data
@@ -218,7 +218,8 @@ class FirFilter(dj.Manual):
                                     outarray=filtered_data,
                                     output_offset=output_offsets[ii])
             io.write(nwbf)
-
+        # add the Analysis file to kachery
+        AnalysisNwbfile().add_to_kachery(analysis_file_abs_path)
         # return the object ID for the filtered data
         return es.object_id
 
