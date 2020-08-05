@@ -50,7 +50,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     
     ret = []
     for rec_dict in rec_dicts:
-        io = pynwb.NWBHDF5IO(rec_dict.pop('nwb2load_filepath'), mode='r')
+        io = pynwb.NWBHDF5IO(path=rec_dict.pop('nwb2load_filepath'), mode='r')
         nwbf = io.read()
         nwb_objs = {re.sub('(_?)object_id', '', id_attr): nwbf.objects[rec_dict[id_attr]]
                     for id_attr in attrs if 'object_id' in id_attr}

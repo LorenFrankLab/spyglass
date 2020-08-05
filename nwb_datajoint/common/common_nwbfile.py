@@ -2,6 +2,7 @@ import os
 import datajoint as dj
 import pynwb
 from .dj_helper_fn import dj_replace, fetch_nwb
+from .nwb_helper_fn import get_electrode_indeces
 
 schema = dj.schema("common_lab", locals())
 
@@ -138,3 +139,35 @@ class AnalysisNwbfile(dj.Manual):
 
         analysis_nwb_file_abspath = os.path.join(base_dir, 'analysis', analysis_nwb_file_name)
         return analysis_nwb_file_abspath
+
+    def add_nwb_object(self, analysis_file_name, nwb_object):
+        """Adds an nwb object to the analysis file in the scratch area and returns the nwb object id
+
+        :param analysis_file_name: the name of the analysis nwb file
+        :type analysis_file_name: str
+        :param nwb_object: the nwb object created by pynwb
+        :type nwb_object: NWBDataInterface
+        :param processing_module: the name of the processing module to create, defaults to 'analysis'
+        :type processing_module: str, optional
+        :return: the nwb object id of the added object
+        :rtype: str
+        """
+        #open the file, write the new object and return the object id
+        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
+            nwbf=io.read()
+            nwbf.add_scratch.add(nwb_object)
+            io.write(nwbf)
+            return nwb_object.object_id
+
+    def get_electrode_indeces(self, analysis_file_name, electrode_ids):
+        """Given an analysis NWB file name, returns the indeces of the specified electrode_ids. 
+        :param analysis_file_name: analysis NWB file name
+        :type analysi_file_name: str 
+        :param electrode_ids: array or list of electrode_ids
+        :type electrode_ids: numpy array or list
+        :return: electrode_indeces (numpy array of indeces)
+        """
+        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
+            nwbf=io.read()
+            return get_electrode_indeces(nwbf.electrodes, electrode_ids)
+ 

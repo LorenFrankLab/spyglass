@@ -10,6 +10,7 @@ import spikeinterface as si
 import pynwb
 import re
 import numpy as np
+import scipy.signal as signal
 import json
 import h5py as h5
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
@@ -399,6 +400,8 @@ class Unit(dj.Manual):
 
 @schema
 class Raw(dj.Imported):
+
+    #TODO: change nwb_object_id to raw_data_id
     definition = """
     # Raw voltage timeseries data, electricalSeries in NWB
     -> Session
@@ -508,7 +511,7 @@ class LFP(dj.Imported):
     -> IntervalList         # the valid intervals for the data
     -> FirFilter                 # the filter used for the data
     -> AnalysisNwbfile      # the name of the nwb file with the lfp data
-    nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
+    lfp_object_id: varchar(80)  # the NWB object ID for loading this object from the file
     lfp_sampling_rate: float # the sampling rate, in HZ
     """
 
@@ -516,16 +519,15 @@ class LFP(dj.Imported):
        # get the NWB object with the data; FIX: change to fetch with additional infrastructure
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_list_name = (Raw() & key).fetch1('sampling_rate', 'interval_list_name')
-        # TEST
-        #interval_list_name = 'test'
-        key['interval_list_name'] = interval_list_name
         sampling_rate = int(np.round(sampling_rate))
+
+        key['interval_list_name'] = interval_list_name
+        valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,  'interval_list_name': interval_list_name}).fetch1('valid_times')
 
         nwb_file_name = key['nwb_file_name']
         #target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
-        valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,  'interval_list_name': interval_list_name}).fetch1('valid_times')
         # get the LFP filter that matches the raw data
         filter = (FirFilter() & {'filter_name' : 'LFP 0-400 Hz'} & {'filter_sampling_rate':
                                                                                   sampling_rate}).fetch(as_dict=True)
@@ -546,24 +548,22 @@ class LFP(dj.Imported):
 
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         # test:
-        nwb_object_id = FirFilter().filter_data_nwb(lfp_file_abspath, rawdata.timestamps, rawdata.data,
+        lfp_object_id = FirFilter().filter_data_nwb(lfp_file_abspath, rawdata.timestamps, rawdata.data,
                                     filter_coeff, valid_times, electrode_id_list, decimation)
 
         key['analysis_file_name'] = lfp_file_name
-        key['nwb_object_id'] = nwb_object_id
+        key['lfp_object_id'] = lfp_object_id
         key['lfp_sampling_rate'] = sampling_rate // decimation
-
         self.insert1(key)
         
     def nwb_object(self, key):
-        # return the nwb_object; TODO: this should be replaced with a fetch call. 
-        # NOTE: This leaves the file open, which means that it cannot be appended to. This should be fine normally
+        # return the nwb_object.
         lfp_file_name = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1('analysis_file_name')
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         io = pynwb.NWBHDF5IO(path=lfp_file_abspath, mode='r')
         nwbf = io.read()
         # get the object id
-        nwb_object_id = (self & {'analysis_file_name' : lfp_file_name}).fetch1('nwb_object_id')
+        nwb_object_id = (self & {'analysis_file_name' : lfp_file_name}).fetch1('filtered_data_object_id')
         return nwbf.objects[nwb_object_id]
 
     def fetch_nwb(self, *attrs, **kwargs):
@@ -662,11 +662,12 @@ class LFPBand(dj.Computed):
     -> LFPBandSelection
     ---
     -> AnalysisNwbfile
-    nwb_object_id: varchar(80)  # the NWB object ID for loading this object from the file
+    filtered_data_object_id: varchar(80)  # the NWB object ID for loading this object from the file
     """
     def make(self, key):
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
-        lfp_object = LFP().nwb_object(key)
+        lfp_object = (LFP() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['lfp']
+        
         # load all the data to speed filtering
         lfp_data = np.asarray(lfp_object.data, dtype=type(lfp_object.data[0][0]))
         lfp_timestamps = np.asarray(lfp_object.timestamps, dtype=type(lfp_object.timestamps[0]))
@@ -692,7 +693,6 @@ class LFPBand(dj.Computed):
         decimation = int(lfp_sampling_rate) // lfp_band_sampling_rate
 
         # get the LFP filter that matches the raw data
-        print(filter_name, lfp_band_sampling_rate)
         filter = (FirFilter() & {'filter_name' : filter_name} & 
                                 {'filter_sampling_rate': filter_sampling_rate}).fetch(as_dict=True)
         if len(filter) == 0:
@@ -707,28 +707,14 @@ class LFPBand(dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
         # filter the data and write to an the nwb file
-        nwb_object_id = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_timestamps, lfp_data,
-                                    filter_coeff, valid_times, lfp_band_elect_index, decimation)
+        filtered_data_object_id = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_timestamps, lfp_data,
+                                    filter_coeff, valid_times, lfp_band_elect_id, decimation)
 
         key['analysis_file_name'] = lfp_band_file_name
-        key['nwb_object_id'] = nwb_object_id
+        key['filtered_data_object_id'] = filtered_data_object_id
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
-# TODO: FirFilter needs to be fixed
-# @schema
-# class DecompSeries(dj.Computed):
-#     definition = """
-#     # Raw power timeseries data
-#     -> Session
-#     -> LFP
-#     ---
-#     -> IntervalList
-#     nwb_object_id: varchar(255)  # the NWB object ID for loading this object from the file
-#     sampling_rate: float                                # Sampling rate, in Hz
-#     metric: enum("phase","amplitude","power")  # Metric represented in data
-#     comments: varchar(80)
-#     description: varchar(80)
-#     """
+
