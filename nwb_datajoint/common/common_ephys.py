@@ -7,12 +7,15 @@ from .common_interval import IntervalList
 from .common_filter import FirFilter
 
 import spikeinterface as si
+import spikeextractors as se
 import pynwb
 import re
+import os
 import numpy as np
 import scipy.signal as signal
 import json
 import h5py as h5
+from tempfile import NamedTemporaryFile
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indeces
 from .dj_helper_fn import dj_replace, fetch_nwb
@@ -237,10 +240,11 @@ class SortGroup(dj.Manual):
                                              replace="True")
        
 
-    def write_prb(self, nwb_file_name, prb_file_name):
+    def write_prb(self, sort_group_id, nwb_file_name, prb_file_name):
         '''
-        Writes a prb file containing informaiton on the sorting groups and their geometry for use with the
+        Writes a prb file containing informaiton on the specified sort group and it's geometry for use with the
         SpikeInterface package. See the SpikeInterface documentation for details on prb file format.
+        :param sort_group_id: the id of the sort group
         :param nwb_file_name: the name of the nwb file for the session you wish to use
         :param prb_file_name: the name of the output prb file
         :return: None
@@ -260,25 +264,24 @@ class SortGroup(dj.Manual):
         max_group = int(np.max(np.asarray(sort_group_list)))
         electrodes = (Electrode() & key).fetch()
 
-        for sort_group in sort_group_list:
-            key['sort_group_id'] = sort_group
-            sort_group_electrodes = (SortGroup.SortGroupElectrode() & key).fetch()
-            channel_group[sort_group] = dict()
-            channel_group[sort_group]['channels'] = sort_group_electrodes['electrode_id'].tolist()
-            geometry = list()
-            label = list()
-            for electrode_id in channel_group[sort_group]['channels']:
-                # get the relative x and y locations of this channel from the probe table
-                probe_electrode = int(electrodes['probe_electrode'][electrodes['electrode_id'] == electrode_id])
-                rel_x, rel_y = (Probe().Electrode() & {'probe_electrode' : probe_electrode}).fetch(
-                    'rel_x','rel_y')
-                rel_x = float(rel_x)
-                rel_y = float(rel_y)
-                geometry.append([rel_x, rel_y])
-                label.append(str(electrode_id))
-            channel_group[sort_group]['geometry'] = geometry
-            channel_group[sort_group]['label'] = label
-        # write the prf file in their odd format
+        key['sort_group_id'] = sort_group_id
+        sort_group_electrodes = (SortGroup.SortGroupElectrode() & key).fetch()
+        channel_group[sort_group_id] = dict()
+        channel_group[sort_group_id]['channels'] = sort_group_electrodes['electrode_id'].tolist()
+        geometry = list()
+        label = list()
+        for electrode_id in channel_group[sort_group_id]['channels']:
+            # get the relative x and y locations of this channel from the probe table
+            probe_electrode = int(electrodes['probe_electrode'][electrodes['electrode_id'] == electrode_id])
+            rel_x, rel_y = (Probe().Electrode() & {'probe_electrode' : probe_electrode}).fetch(
+                'rel_x','rel_y')
+            rel_x = float(rel_x)
+            rel_y = float(rel_y)
+            geometry.append([rel_x, rel_y])
+            label.append(str(electrode_id))
+        channel_group[sort_group_id]['geometry'] = geometry
+        channel_group[sort_group_id]['label'] = label
+        # write the prf file in their odd format. Note that we only have one group, but the code below works for multiple groups
         prbf.write('channel_groups = {\n')
         for group in channel_group.keys():
             prbf.write(f'    {int(group)}:\n')
@@ -293,32 +296,6 @@ class SortGroup(dj.Manual):
         prbf.write('    }\n')
         prbf.close()
 
-
-@schema
-class ElectrodeSortingInfo(dj.Manual):
-    definition = """
-     -> Electrode
-     ---
-     sort_group=-1: int  # the number of the sorting group for this electrode
-     reference_electrode=-1: int  # the electrode to use for reference. -1: no reference, -2: common median 
-    """
-    def __init__(self, *args):
-        # do your custom stuff here
-        super().__init__(*args)  # call the base implementation
-
-    def initialize(self, nwb_file_name):
-        '''
-        Initialize the entries for the specified nwb file with the default values
-        :param nwb_file_name:
-        :return: None
-        '''
-        # add entries with default values for all fields
-        electrodes = (Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}).fetch()
-        electrode_sorting_info = electrodes[['nwb_file_name', 'electrode_group_name', 'electrode_id']]
-        self.insert(electrode_sorting_info, replace="True")
-
-
- 
 @schema
 class SpikeSorter(dj.Manual):
     definition = """
@@ -356,7 +333,7 @@ class SpikeSorterParameters(dj.Manual):
             if len((SpikeSorter() & {'sorter_name' : sorter}).fetch()):
                 sort_param_dict['sorter_name'] = sorter
                 sort_param_dict['parameter_dict'] = si.sorters.get_default_params(sorter)
-                self.insert1(sort_param_dict, replace="True")
+                self.insert1(sort_param_dict, skip_duplicates="True")
             else:
                 print(f'Error in SpikeSorterParameter: sorter {sorter} not in SpikeSorter schema')
                 continue
@@ -364,63 +341,74 @@ class SpikeSorterParameters(dj.Manual):
 # Note: Unit and SpikeSorting need to be developed further and made compatible with spikeinterface
 
 @schema
-class SpikeSorting(dj.Manual):
+class SpikeSortingParameters(dj.Manual):
     definition = """
-    -> Session
+    -> SortGroup
     -> SpikeSorterParameters 
-    ---
-    nwb_object_id: varchar(256) # the NWB object holding information about this sort. 
-    """
-
-
-
-
-@schema
-class Unit(dj.Manual):
-    definition = """
-    -> Session
-    unit_id: int # unique identifier for this unit in this session
-    ---
-    -> ElectrodeGroup
     -> IntervalList
-    cluster_name: varchar(80)   # the name for this cluster (e.g. t5 c4)
-    nwb_object_id: int      # the object_id for the spikes; once the object is loaded, use obj.get_unit_spike_times
     """
 
-    def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
-        interval_list_dict = dict()
-        interval_list_dict['nwb_file_name'] = nwb_file_name
-        if nwbf.units is None:
-            print(f'Unable to import units: No units found in {nwb_file_name}')
-            return
-        units = nwbf.units.to_dataframe()
-        for unum in range(len(units)):
-            # for each unit we first need to an an interval list for this unit
-            interval_list_dict['interval_list_name'] = 'unit {} interval list'.format(
-                unum)
-            interval_list_dict['valid_times'] = np.asarray(
-                units.iloc[unum]['obs_intervals'])
-            IntervalList().insert1(
-                interval_list_dict, skip_duplicates=True)
-            key = {'nwb_file_name': nwb_file_name}
-            try:
-                key['unit_id'] = units.iloc[unum]['id']
-            except:
-                key['unit_id'] = unum
+@schema 
+class SpikeSorting(dj.Computed):
+    definition = """
+    -> SpikeSortingParameters
+    ---
+    -> AnalysisNwbfile
+    units_object_id: varchar(40) # the object id for the spike sorting output stored in the file
+    """
 
-            egroup = units.iloc[unum]['electrode_group']
-            key['electrode_group_name'] = egroup.name
-            key['interval_list_name'] = interval_list_dict['interval_name']
-            key['cluster_name'] = units.iloc[unum]['cluster_name']
-            #key['spike_times'] = np.asarray(units.iloc[unum]['spike_times'])
-            key['nwb_object_id'] = -1  # FIX
-            self.insert1(key)
+    def make(self, key):
+        # get the valid times. 
+        # NOTE: we will sort between the smallest and largest valid time, concatenating the data in between,
+        # as the sorters cannot currently work with multiple time intervals 
+        valid_times = (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
+                                         'interval_list_name' : key['interval_list_name']}).fetch(valid_times)
+        # get the largest and smallest times
+        start_end_time = [valid_times[0][0,0], valid_times[0][-1,-1]]
+
+        # get the indeces of the data to use. Note that spike_extractors has a time_to_frame function, 
+        # but it seems to set the time of the first sample to 0, which will not match our intervals
+        raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
+        valid_indeces = np.searchsorted(raw_data_obj.timestamps, start_end_time)
+        print(f'sample indeces: {valid_indeces}')
+
+        # Use spike_interface to run the sorter on the selected sort group
+        raw_data = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']), electrical_series_name='e-series')
+        raw_data.add_epoch(key['interval_list_name'], valid_indeces[0], valid_indeces[1])
+        # restrict the raw data to the specific samples
+        raw_data = raw_data.get_epoch(key['interval_list_name'])
+        
+        # create a temporary file for the probe and write out the channel locations in the prb file
+        prb_f = NamedTemporaryFile(mode='w')
+        SortGroup().write_prb(key['sort_group_id'], key['nwb_file_name'], prb_f.name)
+        # add the probe geometry to the raw_data recording
+        raw_data.load_probe_file(prf_f.name)
+        # limit the sorting to the specified electodes
+        electrode_ids = (SortGroup.SortGroupElectrode() & {'nwb_file_name' : key['nwb_file_name'], 
+                                                           'sort_group_id' : key['sort_group_id']}).fetch('electrode_ids')
+        raw_data_subset = se.SubRecordingExtractor(raw_data, channel_ids=electrode_ids)
+
+        sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
+                                                      'parameter_set_name': key['parameter_set_name']}).fetch('parameter_dict')
+        print(f'Sorting {key}...')
+        sort = si.sorters.run_mountainsort4(recording=raw_data_subset, **sort_parameters, 
+                                            grouping_property='group', 
+                                            output_folder=os.getenv('SORTING_TEMP_DIR', None))
+        # create a dictionary of the sorted spike times
+        units = dict()
+        for unit_id in sort.get_unit_ids():
+            unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)
+            units[unit_id] = raw_data_obj.timestamps[unit_spike_samples]
+        
+        # TEST: create a new Analysis nwb file for the data and save the units dictionary in it. We'll use the NWB units eventually
+        analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
+        units_object_id = AnalysisNwbfile().add_nwb_object(analysis_file_name, units)
+
+
 
 
 @schema
 class Raw(dj.Imported):
-
-    #TODO: change nwb_object_id to raw_data_id
     definition = """
     # Raw voltage timeseries data, electricalSeries in NWB
     -> Session
