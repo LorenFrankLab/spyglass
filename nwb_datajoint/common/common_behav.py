@@ -50,7 +50,8 @@ class RawPosition(dj.Imported):
                         interval_dict = dict()
                         interval_dict['nwb_file_name'] = key['nwb_file_name']
                         interval_dict['interval_list_name'] = pos_interval_name
-                        interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 1.75, 0)
+                        # allow single skipped frames
+                        interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 2.5, 0)
                         IntervalList().insert1(interval_dict, skip_duplicates=True)
 
                         key['nwb_object_id'] = position.object_id

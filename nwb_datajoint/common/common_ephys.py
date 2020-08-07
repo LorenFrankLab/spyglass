@@ -306,10 +306,9 @@ class SpikeSorter(dj.Manual):
         Add each of the sorters from spikeinterface.sorters 
         :return: None
         '''
-        self.delete()
         sorters = si.sorters.available_sorters()
         for sorter in sorters:
-            self.insert1({'sorter_name' : sorter}, replace="True")
+            self.insert1({'sorter_name' : sorter}, skip_duplicates="True")
 
 @schema
 class SpikeSorterParameters(dj.Manual):
@@ -362,7 +361,7 @@ class SpikeSorting(dj.Computed):
         # NOTE: we will sort between the smallest and largest valid time, concatenating the data in between,
         # as the sorters cannot currently work with multiple time intervals 
         valid_times = (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
-                                         'interval_list_name' : key['interval_list_name']}).fetch(valid_times)
+                                         'interval_list_name' : key['interval_list_name']}).fetch('valid_times')
         # get the largest and smallest times
         start_end_time = [valid_times[0][0,0], valid_times[0][-1,-1]]
 
@@ -378,20 +377,25 @@ class SpikeSorting(dj.Computed):
         # restrict the raw data to the specific samples
         raw_data = raw_data.get_epoch(key['interval_list_name'])
         
-        # create a temporary file for the probe and write out the channel locations in the prb file
+        # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
         prb_f = NamedTemporaryFile(mode='w')
-        SortGroup().write_prb(key['sort_group_id'], key['nwb_file_name'], prb_f.name)
+        name, extension = os.path.splitext(prb_f.name)
+        prb_file_name = name + '.prb'
+        os.rename(prb_f.name, name + '.prb')
+ 
+        SortGroup().write_prb(key['sort_group_id'], key['nwb_file_name'], prb_file_name)
         # add the probe geometry to the raw_data recording
-        raw_data.load_probe_file(prf_f.name)
+        raw_data.load_probe_file(prb_file_name)
         # limit the sorting to the specified electodes
         electrode_ids = (SortGroup.SortGroupElectrode() & {'nwb_file_name' : key['nwb_file_name'], 
-                                                           'sort_group_id' : key['sort_group_id']}).fetch('electrode_ids')
+                                                           'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
         raw_data_subset = se.SubRecordingExtractor(raw_data, channel_ids=electrode_ids)
 
         sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
-                                                      'parameter_set_name': key['parameter_set_name']}).fetch('parameter_dict')
+                                                      'parameter_set_name': key['parameter_set_name']}).fetch1()
+
         print(f'Sorting {key}...')
-        sort = si.sorters.run_mountainsort4(recording=raw_data_subset, **sort_parameters, 
+        sort = si.sorters.run_mountainsort4(recording=raw_data_subset, **sort_parameters['parameter_dict'], 
                                             grouping_property='group', 
                                             output_folder=os.getenv('SORTING_TEMP_DIR', None))
         # create a dictionary of the sorted spike times

@@ -33,7 +33,7 @@ class Session(dj.Imported):
         # These imports must go here to avoid cyclic dependencies
         from .common_task import Task, TaskEpoch
         from .common_interval import IntervalList
-        from .common_ephys import Unit
+        #from .common_ephys import Unit
 
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
@@ -75,8 +75,8 @@ class Session(dj.Imported):
             print('IntervalList...')
             IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
-            print('Unit...')
-            Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
+            # print('Unit...')
+            # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
 @schema
 class ExperimenterList(dj.Imported):
@@ -93,7 +93,7 @@ class ExperimenterList(dj.Imported):
     def make(self, key):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        ExperimenterList().insert1({'nwb_file_name': nwb_file_name}, skip_duplicates=True)
+        self.insert1({'nwb_file_name': nwb_file_name}, skip_duplicates=True)
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
             nwbf = io.read()
             for e in nwbf.experimenter:
