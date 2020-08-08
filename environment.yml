@@ -6,7 +6,6 @@ channels:
 - franklab
 dependencies:
 - "python>=3.6"
-- pynwb
 - matplotlib
 - pandas
 - networkx
@@ -22,6 +21,10 @@ dependencies:
 - pytest
 - pytest-cov
 - coveralls
+- pynwb
+- pybind11
+- ndx-franklab-novela
+- distributed
 - pip
 - pip:
   - python-intervals

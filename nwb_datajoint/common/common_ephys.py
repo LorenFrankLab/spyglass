@@ -398,18 +398,17 @@ class SpikeSorting(dj.Computed):
         sort = si.sorters.run_mountainsort4(recording=raw_data_subset, **sort_parameters['parameter_dict'], 
                                             grouping_property='group', 
                                             output_folder=os.getenv('SORTING_TEMP_DIR', None))
-        # create a dictionary of the sorted spike times
+        # create a stack of labelled arrays of the sorted spike times
         units = dict()
         for unit_id in sort.get_unit_ids():
-            unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)
+            unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)  
+            print(f'looking up times for unit {unit_id}: {len(unit_spike_samples)} spikes, sample 1: {unit_spike_samples[0]}')
             units[unit_id] = raw_data_obj.timestamps[unit_spike_samples]
-        
-        # TEST: create a new Analysis nwb file for the data and save the units dictionary in it. We'll use the NWB units eventually
-        analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
-        units_object_id = AnalysisNwbfile().add_nwb_object(analysis_file_name, units)
 
-
-
+        #Add the units to a new Analysis file        
+        key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
+        key['units_object_id'] = AnalysisNwbfile().add_units(key['analysis_file_name'], units)
+        self.insert1(key)
 
 @schema
 class Raw(dj.Imported):

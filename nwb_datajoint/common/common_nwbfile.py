@@ -161,9 +161,25 @@ class AnalysisNwbfile(dj.Manual):
         #open the file, write the new object and return the object id
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
-            nwbf.add_scratch.add(nwb_object)
+            nwbf.add_scratch(nwb_object)
             io.write(nwbf)
             return nwb_object.object_id
+    
+    def add_units(self, analysis_file_name, units_dict):
+        """[Given a units dictionary where each entry has a unit id as the key and spike times as the data
+
+        :param analysis_file_name: the name of the analysis nwb file
+        :type analysis_file_name: str
+        :param units_dict: dictionary of units and times with unit ids as keys
+        :type units_dict: dict
+        :return: the nwb object id of the Units object
+        """
+        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
+            nwbf=io.read()
+            for id in units_dict.keys():
+                nwbf.add_unit(spike_times=units_dict[id], id=id)
+            io.write(nwbf)
+            return nwbf.units.object_id
 
     def get_electrode_indeces(self, analysis_file_name, electrode_ids):
         """Given an analysis NWB file name, returns the indeces of the specified electrode_ids. 
