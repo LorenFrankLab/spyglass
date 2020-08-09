@@ -49,4 +49,4 @@
 7. Other examples: 
 	NWB_DJ_LFP.ipynwb to extract LFP 
 	nwbdj_spikeinterface.pynwb to setup and run spikesorting
-a
+
