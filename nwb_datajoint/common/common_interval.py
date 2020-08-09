@@ -6,6 +6,8 @@ used = [Session]
 
 schema = dj.schema('common_interval')
 
+# TODO: ADD export to NWB function to save relevant intervals in an NWB file
+
 # define the schema for intervals
 @schema
 class IntervalList(dj.Manual):
@@ -31,5 +33,14 @@ class IntervalList(dj.Manual):
             epoch_dict['valid_times'] = np.asarray([[e[1].start_time, e[1].stop_time]])
             self.insert1(epoch_dict, skip_duplicates=True)
 
+@schema
+class SortIntervalList(dj.Manual):
+    definition = """
+    -> Session
+    sort_interval_list_name: varchar(200) #descriptive name of this interval list
+    ---
+    sort_intervals: longblob # 2D numpy array with start and end times for each interval to be used for spike sorting
+    """
 
-    # FIX: ADD export to NWB function to save relevant intervals in an NWB file
+    
+

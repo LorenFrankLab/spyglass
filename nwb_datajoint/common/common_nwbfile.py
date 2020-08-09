@@ -174,6 +174,7 @@ class AnalysisNwbfile(dj.Manual):
         :type units_dict: dict
         :return: the nwb object id of the Units object
         """
+        #TODO: add observation intervals
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
             for id in units_dict.keys():

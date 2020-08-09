@@ -7,7 +7,7 @@ from .common_ephys import ElectrodeGroup, Electrode, SortGroup, Raw
 from .common_ephys import SpikeSorting, SpikeSorter, SpikeSorterParameters, SpikeSortingParameters
 from .common_ephys import LFPSelection, LFP, LFPBandSelection, LFPBand
 from .common_filter import FirFilter
-from .common_interval import IntervalList
+from .common_interval import IntervalList, SortIntervalList
 from .common_lab import Lab, LabMember, Institution
 from .common_region import BrainRegion
 from .common_sensors import SensorData
