@@ -353,6 +353,7 @@ class SpikeSortingParameters(dj.Manual):
     -> SortGroup
     -> SpikeSorterParameters 
     -> SortIntervalList # the time intervals to be used for sorting
+    ---
     -> IntervalList # the valid times for the raw data (excluding artifacts, etc. if desired)
     """
 
@@ -369,18 +370,19 @@ class SpikeSorting(dj.Computed):
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
         # get the valid times. 
         # NOTE: we will sort independently between each entry in the valid times list
-        sort_intervals = (SortIntervalList() & {'nwb_file_name' : key['nwb_file_name'],
+        sort_intervals, valid_times = (SortIntervalList() & {'nwb_file_name' : key['nwb_file_name'],
                                         'sort_interval_list_name' : key['sort_interval_list_name']})\
-                                            .fetch('sort_intervals')
+                                            .fetch('sort_intervals', 'valid_times')
         units = dict()
         # we will add an offset to the unit_id for each sort interval to avoid duplicating ids
         unit_id_offset = 0
         #interate through the arrays of valid times, sorting separately for each array
-        for sort_interval in sort_intervals[0]:
+        for sort_interval, valid_times in zip(sort_intervals[0], valid_times[0]):
             # get the indeces of the data to use. Note that spike_extractors has a time_to_frame function, 
             # but it seems to set the time of the first sample to 0, which will not match our intervals
-            raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
-            sort_indeces = np.searchsorted(raw_data_obj.timestamps, sort_interval)
+            raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']'
+            timestamps = np.asarray(raw_data_obj.timestamps)
+            sort_indeces = np.searchsorted(timestamps, sort_interval)
             print(f'sample indeces: {sort_indeces}')
 
             # Use spike_interface to run the sorter on the selected sort group
@@ -394,6 +396,7 @@ class SpikeSorting(dj.Computed):
             raw_data.add_epoch(key['sort_interval_list_name'], sort_indeces[0], sort_indeces[1])
             # restrict the raw data to the specific samples
             raw_data_epoch = raw_data.get_epoch(key['sort_interval_list_name'])
+
            
             # get the reference for this sort group
             sort_reference_electrode_id = (SortGroup() & {'nwb_file_name' : key['nwb_file_name'], 
@@ -407,6 +410,9 @@ class SpikeSorting(dj.Computed):
             else:
                 raw_data_epoch_referenced = raw_data_epoch
 
+            # Blank out times using valid_times from IntervalList
+            
+            
             # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
             with tempfile.TemporaryDirectory() as tmp_dir:
                 prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')
@@ -420,7 +426,6 @@ class SpikeSorting(dj.Computed):
             sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
                                                         'parameter_set_name': key['parameter_set_name']}).fetch1()
 
-            #TODO: Add artifact rejection
 
             print(f'Sorting {key}...')
             sort = si.sorters.run_mountainsort4(recording=raw_data_epoch_referenced_subset, 
