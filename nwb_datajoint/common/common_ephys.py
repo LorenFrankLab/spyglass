@@ -380,7 +380,7 @@ class SpikeSorting(dj.Computed):
         for sort_interval, valid_times in zip(sort_intervals[0], valid_times[0]):
             # get the indeces of the data to use. Note that spike_extractors has a time_to_frame function, 
             # but it seems to set the time of the first sample to 0, which will not match our intervals
-            raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']'
+            raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
             timestamps = np.asarray(raw_data_obj.timestamps)
             sort_indeces = np.searchsorted(timestamps, sort_interval)
             print(f'sample indeces: {sort_indeces}')
@@ -412,7 +412,7 @@ class SpikeSorting(dj.Computed):
 
             # Blank out times using valid_times from IntervalList
             
-            
+
             # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
             with tempfile.TemporaryDirectory() as tmp_dir:
                 prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')

@@ -1,4 +1,4 @@
-from .common_start_endssion import Session
+from .common_session import Session
 import datajoint as dj
 import numpy as np
 
@@ -55,8 +55,8 @@ def interval_list_contains_ind(valid_times, timestamps):
     """
     ind = []
     for valid_time in valid_times:
-        ind += np.ndarray.flatten(np.argwhere(np.logical_and(timestamps >= valid_time[0], 
-                                                            timestamps <= valid_time[1]))).tolist()
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= valid_time[0], 
+                                                   timestamps <= valid_time[1]))).tolist()
     return np.asarray(ind)
 
 def interval_list_contains(valid_times, timestamps):
@@ -70,8 +70,8 @@ def interval_list_contains(valid_times, timestamps):
     """
     ind = []
     for valid_time in valid_times:
-        ind += np.ndarray.flatten(np.argwhere(np.logical_and(timestamps >= valid_time[0], 
-                                                            timestamps <= valid_time[1]))).tolist()
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= valid_time[0], 
+                                                   timestamps <= valid_time[1]))).tolist()
     return timestamps[ind]
 
 def interval_list_excludes_ind(valid_times, timestamps):
@@ -92,8 +92,8 @@ def interval_list_excludes_ind(valid_times, timestamps):
     # add the first and last timestamp indices
     ind = []
     for invalid_time in invalid_times:
-        ind += np.ndarray.flatten(np.argwhere(np.logical_and(timestamps > invalid_time[0], 
-                                                            timestamps < invalid_time[1]))).tolist()
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0], 
+                                                   timestamps < invalid_time[1]))).tolist()
     return np.asarray(ind)
     
 def interval_list_excludes(valid_times, timestamps):
@@ -106,15 +106,15 @@ def interval_list_excludes(valid_times, timestamps):
     :return: numpy array of timestamps that are in one of the valid_times intervals
     """
     # add the first and last times to the list and creat a list of invalid intervals
-    valid_times_list = np.ndarray.ravel(valid_times).tolist()
+    valid_times_list = np.ravel(valid_times).tolist()
     valid_times_list.insert(0, timestamps[0]-0.00001)
     valid_times_list.append(timestamps[-1]+0.00001)
     invalid_times = np.array(valid_times_list).reshape(-1, 2)
     # add the first and last timestamp indices
     ind = []
     for valid_time in valid_times:
-        ind += np.ndarray.flatten(np.argwhere(np.logical_and(timestamps > valid_time[0], 
-                                                            timestamps < valid_time[1]))).tolist()
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps > valid_time[0], 
+                                                   timestamps < valid_time[1]))).tolist()
     return timestamps[ind]
 
 def interval_list_intersect(interval_list1, interval_list2):
