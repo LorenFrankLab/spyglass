@@ -30,7 +30,7 @@ class IntervalList(dj.Manual):
         epoch_dict['nwb_file_name'] = nwb_file_name
         for e in epochs.iterrows():
             epoch_dict['interval_list_name'] = e[1].tags[0]
-            epoch_dict['valid_times'] = np.asarray([e[1].start_time, e[1].stop_time])
+            epoch_dict['valid_times'] = np.asarray([[e[1].start_time, e[1].stop_time]])
             self.insert1(epoch_dict, skip_duplicates=True)
 
 
@@ -88,7 +88,6 @@ def interval_list_excludes_ind(valid_times, timestamps):
     valid_times_list.insert(0, timestamps[0]-0.00001)
     valid_times_list.append(timestamps[-1]+0.001)
     invalid_times = np.array(valid_times_list).reshape(-1, 2)
-    print(invalid_times)
     # add the first and last timestamp indices
     ind = []
     for invalid_time in invalid_times:
@@ -112,9 +111,9 @@ def interval_list_excludes(valid_times, timestamps):
     invalid_times = np.array(valid_times_list).reshape(-1, 2)
     # add the first and last timestamp indices
     ind = []
-    for valid_time in valid_times:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps > valid_time[0], 
-                                                   timestamps < valid_time[1]))).tolist()
+    for invalid_time in invalid_times:
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0], 
+                                                   timestamps < invalid_time[1]))).tolist()
     return timestamps[ind]
 
 def interval_list_intersect(interval_list1, interval_list2):
@@ -182,4 +181,4 @@ def interval_list_union(interval_list1, interval_list2):
     union = []
     for start, stop in zip(union_starts, union_stops):
         union.append([combined_intervals[start], combined_intervals[stop]])
-    return np.asarray(intersect)
+    return np.asarray(union)

@@ -570,11 +570,13 @@ class LFP(dj.Imported):
         sampling_rate, interval_list_name = (Raw() & key).fetch1('sampling_rate', 'interval_list_name')
         sampling_rate = int(np.round(sampling_rate))
 
+        #TEST
+        #interval_list_name = '01_s1'
         key['interval_list_name'] = interval_list_name
+       
         valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,  'interval_list_name': interval_list_name}).fetch1('valid_times')
 
-        nwb_file_name = key['nwb_file_name']
-        #target 1 KHz sampling rate
+        # target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
         # get the LFP filter that matches the raw data
@@ -756,6 +758,7 @@ class LFPBand(dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
         # filter the data and write to an the nwb file
+        print(valid_times)
         filtered_data_object_id = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_timestamps, lfp_data,
                                     filter_coeff, valid_times, lfp_band_elect_id, decimation)
 

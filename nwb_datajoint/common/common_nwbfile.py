@@ -21,7 +21,6 @@ class Nwbfile(dj.Manual):
     nwb_file_name: varchar(255) #the name of the NWB file
     ---
     nwb_file_abs_path: varchar(255) # the full path name to the file
-    nwb_file_sha1: varchar(40) # the sha1 hash of the NWB file for kachery
     """
     def insert_from_relative_file_name(self, nwb_file_name):
         """Insert a new session from an existing nwb file.
@@ -32,16 +31,13 @@ class Nwbfile(dj.Manual):
         nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
         assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
 
-        print('Computing SHA-1 and storing in kachery...')
-        with ka.config(use_hard_links=True):
-            kachery_path = ka.store_file(nwb_file_abs_path)
-            sha1 = ka.get_file_hash(kachery_path)
-        
+ 
         self.insert1(dict(
             nwb_file_name=nwb_file_name,
             nwb_file_abs_path=nwb_file_abs_path,
-            nwb_file_sha1=sha1
         ), skip_duplicates=True)
+
+ 
     
     @staticmethod
     def get_abs_path(nwb_file_name):
@@ -51,6 +47,9 @@ class Nwbfile(dj.Manual):
         nwb_file_abspath = os.path.join(base_dir, nwb_file_name)
         return nwb_file_abspath
 
+
+#TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
+# We therefore need another way to keep track of the 
 @schema
 class AnalysisNwbfile(dj.Manual):
     definition = """   
@@ -59,7 +58,6 @@ class AnalysisNwbfile(dj.Manual):
     -> Nwbfile # the name of the parent NWB file. Used for naming and metadata copy
     analysis_file_abs_path: varchar(255) # the full path of the file
     analysis_file_description='': varchar(255) # an optional description of this analysis
-    analysis_file_sha1='': varchar(40) # the sha1 hash of the NWB file for kachery
     analysis_parameters=NULL: blob # additional relevant parmeters. Currently used only for analyses that span multiple NWB files
     """
 
@@ -115,28 +113,6 @@ class AnalysisNwbfile(dj.Manual):
         self.insert1(key)
         return analysis_file_name
 
-    def add_to_kachery(self, analysis_file_name): 
-        """Adds the specified file to kachery
-
-        :param analysis_file_name: analysis file name or full path
-        :type analysis_file_name: [str]
-        """
-        dir, analysis_file_name = os.path.split(analysis_file_name)
-        # make sure the file exists
-        if not os.path.isfile(self.get_abs_path(analysis_file_name)):
-            raise ValueError(f'Analysis file {analysis_file_name} is incorrect.')
-        print('Computing SHA-1 and storing in kachery...')
-        # get the file name
-        analysis_file_info  = (AnalysisNwbfile() & {'analysis_file_name' : analysis_file_name}).fetch1()
-        
-        with ka.config(use_hard_links=True):
-            kachery_path = ka.store_file(analysis_file_info['analysis_file_abs_path'])
-            sha1 = ka.get_file_hash(kachery_path)
-        #update the entry for this element with the sha1 entry
-        
-        new_sha1 = [(analysis_file_name, sha1)]
-        self.insert(dj_replace(analysis_file_info, new_sha1, 'analysis_file_name', 'analysis_file_sha1'),
-                                 replace="True")
 
     @staticmethod
     def get_abs_path(analysis_nwb_file_name):
@@ -193,4 +169,35 @@ class AnalysisNwbfile(dj.Manual):
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
             return get_electrode_indeces(nwbf.electrodes, electrode_ids)
- 
+
+@schema 
+class NwbfileKachery(dj.Computed):
+    definition = """
+    -> Nwbfile
+    ---
+    nwb_file_sha1: varchar(40) # the sha1 hash of the NWB file for kachery
+    """
+    def make(self, key):
+        print('Computing SHA-1 and storing in kachery...')
+        nwb_file_abs_path = Nwbfile.get_abs_path(key['nwb_file_name'])
+        with ka.config(use_hard_links=True):
+            kachery_path = ka.store_file(nwb_file_abs_path)
+            key['nwb_file_sha1'] = ka.get_file_hash(kachery_path)
+        self.insert1(key)
+
+@schema
+class AnalysisNwbfileKachery(dj.Computed):
+    definition = """   
+    -> AnalysisNwbfile
+    ---
+    analysis_file_sha1: varchar(40) # the sha1 hash of the file
+    """
+    def make(self, key):
+        print('Computing SHA-1 and storing in kachery...')
+        nwb_file_abs_path = Nwbfile.get_abs_path(key['nwb_file_name'])
+        with ka.config(use_hard_links=True):
+            kachery_path = ka.store_file(nwb_file_abs_path)
+            key['nwb_file_sha1'] = ka.get_file_hash(kachery_path)
+        self.insert1(key)
+
+    #TODO: load from kachery and fetch_nwb
