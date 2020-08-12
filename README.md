@@ -28,6 +28,8 @@
         cd spikeextractors
 	
         python setup.py develop
+	
+        cd ..
     
     ndx-franklab-novela (conda version too restrictive)
     
@@ -36,6 +38,8 @@
         cd ndx-franklab-novela
 	
         python setup.py develop
+	
+        cd ..
 
     ml-ms4alg
 
@@ -44,6 +48,8 @@
         cd ml_ms4alg
 	
         python setup.py develop
+	
+        cd ..
 			
 6. Run populate_from_NWB.ipynb from the notebooks directory.
 7. Other examples: 
