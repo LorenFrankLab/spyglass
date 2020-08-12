@@ -194,10 +194,10 @@ class AnalysisNwbfileKachery(dj.Computed):
     """
     def make(self, key):
         print('Computing SHA-1 and storing in kachery...')
-        nwb_file_abs_path = Nwbfile.get_abs_path(key['nwb_file_name'])
+        analysis_file_abs_path = AnalysisNwbfile().get_abs_path(key['analysis_file_name'])
         with ka.config(use_hard_links=True):
-            kachery_path = ka.store_file(nwb_file_abs_path)
-            key['nwb_file_sha1'] = ka.get_file_hash(kachery_path)
+            kachery_path = ka.store_file(analysis_file_abs_path)
+            key['analysis_file_sha1'] = ka.get_file_hash(kachery_path)
         self.insert1(key)
 
-    #TODO: load from kachery and fetch_nwb
+    #TODO: load from kachery and fetch_nwbß

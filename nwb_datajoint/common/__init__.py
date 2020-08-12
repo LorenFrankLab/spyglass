@@ -14,7 +14,7 @@ from .common_sensors import SensorData
 from .common_session import Session, ExperimenterList
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
-from .common_nwbfile import Nwbfile, AnalysisNwbfile
+from .common_nwbfile import Nwbfile, AnalysisNwbfile, NwbfileKachery, AnalysisNwbfileKachery
 from .nwb_helper_fn import *
 
 from .populate_all_common import populate_all_common
