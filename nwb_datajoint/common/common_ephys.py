@@ -370,9 +370,13 @@ class SpikeSorting(dj.Computed):
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
         # get the valid times. 
         # NOTE: we will sort independently between each entry in the valid times list
-        sort_intervals, valid_times = (SortIntervalList() & {'nwb_file_name' : key['nwb_file_name'],
+        sort_intervals =  (SortIntervalList() & {'nwb_file_name' : key['nwb_file_name'],
                                         'sort_interval_list_name' : key['sort_interval_list_name']})\
-                                            .fetch('sort_intervals', 'valid_times')
+                                            .fetch1('sort_intervals')
+        interval_list_name = (SpikeSortingParameters() & key).fetch1('interval_list_name')
+        valid_times =  (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
+                                        'interval_list_name' : interval_list_name})\
+                                            .fetch('valid_times')       
         units = dict()
         # we will add an offset to the unit_id for each sort interval to avoid duplicating ids
         unit_id_offset = 0
