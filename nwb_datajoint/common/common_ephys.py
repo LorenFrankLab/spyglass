@@ -373,6 +373,7 @@ class SpikeSorting(dj.Computed):
         sort_intervals =  (SortIntervalList() & {'nwb_file_name' : key['nwb_file_name'],
                                         'sort_interval_list_name' : key['sort_interval_list_name']})\
                                             .fetch1('sort_intervals')
+        print(f'sort_intervals: {sort_intervals}')
         interval_list_name = (SpikeSortingParameters() & key).fetch1('interval_list_name')
         valid_times =  (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
                                         'interval_list_name' : interval_list_name})\
@@ -381,11 +382,12 @@ class SpikeSorting(dj.Computed):
         # we will add an offset to the unit_id for each sort interval to avoid duplicating ids
         unit_id_offset = 0
         #interate through the arrays of valid times, sorting separately for each array
-        for sort_interval, valid_times in zip(sort_intervals[0], valid_times[0]):
+        for sort_interval, valid_times in zip(sort_intervals, valid_times):
             # get the indeces of the data to use. Note that spike_extractors has a time_to_frame function, 
             # but it seems to set the time of the first sample to 0, which will not match our intervals
             raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
             timestamps = np.asarray(raw_data_obj.timestamps)
+            print(sort_interval)
             sort_indeces = np.searchsorted(timestamps, sort_interval)
             print(f'sample indeces: {sort_indeces}')
 
