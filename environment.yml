@@ -23,7 +23,6 @@ dependencies:
 - coveralls
 - pynwb
 - pybind11
-- ndx-franklab-novela
 - distributed
 - pip
 - pip:
