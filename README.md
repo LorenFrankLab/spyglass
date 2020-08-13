@@ -3,6 +3,7 @@
 
 ## Setup 
 ### Instructions as of 08-08-2020
+
 1. Clone repository
 2. Setup conda environment
 ```conda env create -f environment.yml```
