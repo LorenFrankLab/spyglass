@@ -22,7 +22,8 @@ dependencies:
 - pytest
 - pytest-cov
 - coveralls
-- pynwb
+#- pynwb
+- hdmf
 - pybind11
 - ndx-franklab-novela
 - distributed
