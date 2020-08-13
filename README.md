@@ -16,10 +16,6 @@
 
 5. Temporary development packages:
     
-    hdmf: 
-    
-    	pip install -U hdmf --find-links https://github.com/hdmf-dev/hdmf/releases/tag/latest --no-index
-    
     pynwb:
     
     	pip install -U pynwb --find-links https://github.com/NeurodataWithoutBorders/pynwb/releases/tag/latest --no-index
