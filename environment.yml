@@ -4,6 +4,7 @@ channels:
 - conda-forge
 - edeno
 - franklab
+- novelakrk
 dependencies:
 - "python>=3.6"
 - matplotlib
