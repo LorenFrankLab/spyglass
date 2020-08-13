@@ -18,7 +18,13 @@
     
     pynwb:
     
-    	pip install -U pynwb --find-links https://github.com/NeurodataWithoutBorders/pynwb/releases/tag/latest --no-index
+        git clone https://github.com/NeurodataWithoutBorders/pynwb.git
+	
+    	cd pynwb
+	
+    	python setup.py develop
+	
+    	cd ..
     
     spikeextractors (pip not currently up to date):
     
