@@ -126,6 +126,10 @@ def interval_list_intersect(interval_list1, interval_list2):
     :return: interval_list
     :rtype:  numpy array of intervals [start, stop]
     """
+   
+    #print(f'interval list 1 {interval_list1}')
+    #print(f'interval list 2 {interval_list2}')
+
     interval_list1 = np.ravel(interval_list1)
     # create a parallel list where 1 indicates the start and -1 the end of an interval
     interval_list1_start_end = np.ones(interval_list1.shape)

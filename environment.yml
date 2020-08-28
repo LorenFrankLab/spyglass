@@ -1,11 +1,11 @@
-name: nwb_datajoint_test
+name: nwbdj
 channels:
 - defaults
 - conda-forge
 - edeno
 - franklab
 dependencies:
-- "python>=3.6"
+- "python==3.6"
 - matplotlib
 - pandas
 - networkx

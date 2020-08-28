@@ -1,6 +1,7 @@
 import os
 import datajoint as dj
 import pynwb
+import numpy as np
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_electrode_indeces
 
@@ -87,7 +88,6 @@ class AnalysisNwbfile(dj.Manual):
                 if type(nwb_object) is pynwb.core.LabelledDict:  
                     for module in list(nwb_object.keys()):
                         mod = nwb_object.pop(module)
-                        nwbf._remove_child(mod)
         
                         
         key = dict()
@@ -141,22 +141,32 @@ class AnalysisNwbfile(dj.Manual):
             io.write(nwbf)
             return nwb_object.object_id
     
-    def add_units(self, analysis_file_name, units_dict):
+    def add_units(self, analysis_file_name, units, units_valid_times, units_sort_interval):
         """[Given a units dictionary where each entry has a unit id as the key and spike times as the data
 
         :param analysis_file_name: the name of the analysis nwb file
         :type analysis_file_name: str
-        :param units_dict: dictionary of units and times with unit ids as keys
-        :type units_dict: dict
+        :param units: dictionary of units and times with unit ids as keys
+        :type units: dict
+        :param units_valid_times: dictionary of units and valid times  with unit ids as keys
+        :type units_valid_times: dict
+        :param units_sort_interval: dictionary of units and sort_interval with unit ids as keys
+        :type units_sort_interval: dict
         :return: the nwb object id of the Units object
         """
-        #TODO: add observation intervals
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
-            for id in units_dict.keys():
-                nwbf.add_unit(spike_times=units_dict[id], id=id)
-            io.write(nwbf)
-            return nwbf.units.object_id
+            sort_intervals = list()
+            if len(units.keys()):
+                for id in units.keys():
+                    nwbf.add_unit(spike_times=units[id], id=id, obs_intervals=units_valid_times[id])
+                    sort_intervals.append(units_sort_interval[id])
+                # add a column for the sort interval
+                nwbf.add_unit_column(name='sort_interval', description='the interval used for spike sorting', data=sort_intervals)
+                io.write(nwbf)
+                return nwbf.units.object_id
+            else: 
+                return ''
 
     def get_electrode_indeces(self, analysis_file_name, electrode_ids):
         """Given an analysis NWB file name, returns the indeces of the specified electrode_ids. 
@@ -200,4 +210,4 @@ class AnalysisNwbfileKachery(dj.Computed):
             key['analysis_file_sha1'] = ka.get_file_hash(kachery_path)
         self.insert1(key)
 
-    #TODO: load from kachery and fetch_nwbß
+    #TODO: load from kachery and fetch_nwb
