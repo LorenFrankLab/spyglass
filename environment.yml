@@ -1,4 +1,4 @@
-name: nwb_datajoint_test
+name: nwbdj
 channels:
 - defaults
 - conda-forge
@@ -6,7 +6,7 @@ channels:
 - franklab
 - novelakrk
 dependencies:
-- "python>=3.6"
+- "python==3.6"
 - matplotlib
 - pandas
 - networkx
@@ -25,7 +25,6 @@ dependencies:
 #- pynwb
 - hdmf
 - pybind11
-- ndx-franklab-novela
 - distributed
 - pip
 - pip:

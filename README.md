@@ -16,28 +16,7 @@
 
 5. Temporary development packages:
     
-    pynwb:
-    
-        git clone https://github.com/NeurodataWithoutBorders/pynwb.git
-	
-    	cd pynwb
-	
-    	python setup.py develop
-	
-    	cd ..
-    
-    spikeextractors (pip not currently up to date):
-    
-        pip uninstall spikeextractors
-	
-        git clone https://github.com/SpikeInterface/spikeextractors.git
-	
-        cd spikeextractors
-	
-        python setup.py develop
-	
-        cd ..
-    
+
     ndx-franklab-novela (conda version too restrictive)
     
         git clone https://github.com/NovelaNeuro/ndx-franklab-novela.git

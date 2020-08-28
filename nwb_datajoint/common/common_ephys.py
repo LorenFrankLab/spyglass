@@ -4,7 +4,7 @@ import tempfile
 from .common_session import Session
 from .common_region import BrainRegion
 from .common_device import Probe
-from .common_interval import IntervalList, SortIntervalList
+from .common_interval import IntervalList, SortIntervalList, interval_list_intersect, interval_list_excludes_ind
 from .common_filter import FirFilter
 
 import spikeinterface as si
@@ -353,6 +353,7 @@ class SpikeSortingParameters(dj.Manual):
     -> SortGroup
     -> SpikeSorterParameters 
     -> SortIntervalList # the time intervals to be used for sorting
+    ---
     -> IntervalList # the valid times for the raw data (excluding artifacts, etc. if desired)
     """
 
@@ -361,7 +362,7 @@ class SpikeSorting(dj.Computed):
     definition = """
     -> SpikeSortingParameters
     ---
-    ->AnalysisNwbfile
+    -> AnalysisNwbfile
     units_object_id: varchar(40) # the object ID for the units for this sort group
     """
 
@@ -369,23 +370,39 @@ class SpikeSorting(dj.Computed):
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
         # get the valid times. 
         # NOTE: we will sort independently between each entry in the valid times list
-        sort_intervals = (SortIntervalList() & {'nwb_file_name' : key['nwb_file_name'],
+        sort_intervals =  (SortIntervalList() & {'nwb_file_name' : key['nwb_file_name'],
                                         'sort_interval_list_name' : key['sort_interval_list_name']})\
-                                            .fetch('sort_intervals')
+                                            .fetch1('sort_intervals')
+        print(f'sort_intervals: {sort_intervals}')
+        interval_list_name = (SpikeSortingParameters() & key).fetch1('interval_list_name')
+        valid_times =  (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
+                                        'interval_list_name' : interval_list_name})\
+                                            .fetch('valid_times')[0]   
         units = dict()
+        units_valid_times = dict()
+        units_sort_interval = dict()
         # we will add an offset to the unit_id for each sort interval to avoid duplicating ids
         unit_id_offset = 0
-        #interate through the arrays of valid times, sorting separately for each array
-        for sort_interval in sort_intervals[0]:
+        #interate through the arrays of sort intervals, sorting each interval separately
+        for sort_interval in sort_intervals:
             # get the indeces of the data to use. Note that spike_extractors has a time_to_frame function, 
             # but it seems to set the time of the first sample to 0, which will not match our intervals
             raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
-            sort_indeces = np.searchsorted(raw_data_obj.timestamps, sort_interval)
-            print(f'sample indeces: {sort_indeces}')
+            timestamps = np.asarray(raw_data_obj.timestamps)
+            sort_indeces = np.searchsorted(timestamps, sort_interval)
+            #print(f'sample indeces: {sort_indeces}')
 
             # Use spike_interface to run the sorter on the selected sort group
             raw_data = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']), electrical_series_name='e-series')
             
+            # Get the list of valid times for this sort interval
+            sort_interval_valid_times = interval_list_intersect(np.array([sort_interval]), valid_times)
+            exclude_inds = interval_list_excludes_ind(sort_interval_valid_times, timestamps)
+            exclude_inds = exclude_inds[exclude_inds <= sort_indeces[-1]]
+            # Blank out non-valid times. 
+            # TODO: add a blanking function to the preprocessing module 
+            raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
+
             # create a group id within spikeinterface for the specified electodes
             electrode_ids = (SortGroup.SortGroupElectrode() & {'nwb_file_name' : key['nwb_file_name'], 
                                                             'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
@@ -407,6 +424,8 @@ class SpikeSorting(dj.Computed):
             else:
                 raw_data_epoch_referenced = raw_data_epoch
 
+ 
+
             # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
             with tempfile.TemporaryDirectory() as tmp_dir:
                 prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')
@@ -420,7 +439,6 @@ class SpikeSorting(dj.Computed):
             sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
                                                         'parameter_set_name': key['parameter_set_name']}).fetch1()
 
-            #TODO: Add artifact rejection
 
             print(f'Sorting {key}...')
             sort = si.sorters.run_mountainsort4(recording=raw_data_epoch_referenced_subset, 
@@ -431,13 +449,18 @@ class SpikeSorting(dj.Computed):
             timestamps = np.asarray(raw_data_obj.timestamps)
             unit_ids = sort.get_unit_ids()
             for unit_id in unit_ids:
+                current_index = unit_id + unit_id_offset
                 unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)  
                 #print(f'looking up times for unit {unit_id + unit_id_offset}: {len(unit_spike_samples)} spikes')
-                units[unit_id+unit_id_offset] = timestamps[unit_spike_samples]
-            unit_id_offset += np.max(unit_ids) + 1
+                units[current_index] = timestamps[unit_spike_samples]
+                units_valid_times[current_index] = sort_interval_valid_times
+                units_sort_interval[current_index] = [sort_interval]
+            if len(unit_ids) > 0:
+                unit_id_offset += np.max(unit_ids) + 1
         
         #Add the units to the Analysis file        
-        key['units_object_id'] = AnalysisNwbfile().add_units(key['analysis_file_name'], units)
+        key['units_object_id'] = AnalysisNwbfile().add_units(key['analysis_file_name'], units, units_valid_times,
+                                                              units_sort_interval)
         self.insert1(key)
         # add an offset sufficient to avoid unit number overlap (+1 more to make it easy to find the space)
 
@@ -565,11 +588,13 @@ class LFP(dj.Imported):
         sampling_rate, interval_list_name = (Raw() & key).fetch1('sampling_rate', 'interval_list_name')
         sampling_rate = int(np.round(sampling_rate))
 
+        #TEST
+        #interval_list_name = '01_s1'
         key['interval_list_name'] = interval_list_name
+       
         valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'] ,  'interval_list_name': interval_list_name}).fetch1('valid_times')
 
-        nwb_file_name = key['nwb_file_name']
-        #target 1 KHz sampling rate
+        # target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
         # get the LFP filter that matches the raw data
@@ -751,6 +776,7 @@ class LFPBand(dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
         # filter the data and write to an the nwb file
+        print(valid_times)
         filtered_data_object_id = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_timestamps, lfp_data,
                                     filter_coeff, valid_times, lfp_band_elect_id, decimation)
 

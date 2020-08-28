@@ -218,8 +218,8 @@ class FirFilter(dj.Manual):
                                     outarray=filtered_data,
                                     output_offset=output_offsets[ii])
             io.write(nwbf)
-        # add the Analysis file to kachery
-        AnalysisNwbfile().add_to_kachery(analysis_file_abs_path)
+        # TODO: add the Analysis file to kachery
+        #AnalysisNwbfile().add_to_kachery(analysis_file_abs_path)
         # return the object ID for the filtered data
         return es.object_id
 
