@@ -3,8 +3,8 @@
 from .common_behav import RawPosition, HeadDir, Speed, LinPos
 from .common_device import  DataAcquisitionDevice, CameraDevice, Probe
 from .common_dio import DIOEvents
-from .common_ephys import ElectrodeGroup, Electrode, SortGroup, Raw
-from .common_ephys import SpikeSorting, SpikeSorter, SpikeSorterParameters, SpikeSortingParameters
+from .common_ephys import ElectrodeGroup, Electrode, Raw
+from .common_spikesorting import SpikeSorting, SpikeSorter, SpikeSorterParameters, SpikeSortingParameters
 from .common_ephys import LFPSelection, LFP, LFPBandSelection, LFPBand
 from .common_filter import FirFilter
 from .common_interval import IntervalList, SortIntervalList, interval_list_contains, interval_list_contains_ind, interval_list_excludes, interval_list_excludes_ind, interval_list_intersect
