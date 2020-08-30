@@ -2,7 +2,7 @@
 # nwb_datajoint
 
 ## Setup 
-### Instructions as of 08-08-2020
+### Instructions as of 08-28-2020
 1. Clone repository
 2. Setup conda environment
 ```conda env create -f environment.yml```
@@ -12,18 +12,6 @@
 5. Temporary development packages:
     
  
-    spikeextractors (pip not currently up to date):
-    
-        pip uninstall spikeextractors
-	
-        git clone https://github.com/SpikeInterface/spikeextractors.git
-	
-        cd spikeextractors
-	
-        python setup.py develop
-	
-        cd ..
-    
     ndx-franklab-novela (conda version too restrictive)
     
         git clone https://github.com/NovelaNeuro/ndx-franklab-novela.git
