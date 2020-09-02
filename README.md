@@ -8,7 +8,7 @@
 2. Set up and activate the conda environment: 
    ```bash
    conda env create -f environment.yml
-   conda activate nwb_datajoint_test
+   conda activate nwbdj
    ```
 3. Install the repo: 
    ```bash
