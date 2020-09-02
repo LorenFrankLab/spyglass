@@ -28,6 +28,10 @@
         cd ndx-franklab-novela
 	
     open `requirements.txt` in your favorite text editor and remove the line `hdmf==1.6.4`
+    
+        vim requirements.txt
+	
+    install the repo
 	
         python setup.py develop
 	
