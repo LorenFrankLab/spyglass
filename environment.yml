@@ -1,11 +1,11 @@
-name: nwbdj
+name: nwbdj1
 channels:
 - defaults
 - conda-forge
 - edeno
 - franklab
 dependencies:
-- "python==3.6"
+- "python==3.8"
 - matplotlib
 - pandas
 - networkx
@@ -21,12 +21,12 @@ dependencies:
 - pytest
 - pytest-cov
 - coveralls
-- pynwb
+- pynwb>=1.4
 - pybind11
 - distributed
 - pip
 - pip:
-  - python-intervals
   - ghostipy
   - spikeinterface
   - kachery==0.6.4
+  - ml_ms4alg

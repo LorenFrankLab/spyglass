@@ -260,39 +260,59 @@ class SpikeSorting(dj.Computed):
                                             .fetch('valid_times')[0]   
         raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
         timestamps = np.asarray(raw_data_obj.timestamps)
+        sampling_rate = estimate_sampling_rate(timestamps[0:100000], 1.5)
 
         units = dict()
         units_valid_times = dict()
         units_sort_interval = dict()
+        units_waveforms = dict()
         # we will add an offset to the unit_id for each sort interval to avoid duplicating ids
         unit_id_offset = 0
         #interate through the arrays of sort intervals, sorting each interval separately
         for sort_interval in sort_intervals:
                # Get the list of valid times for this sort interval
-            sort_interval_valid_times = interval_list_intersect(np.array([sort_interval]), valid_times)
-            recording_extractor = get_recording_extractor(key, sort_interval, sort_interval_valid_times)
+            recording_extractor, sort_interval_valid_times = self.get_recording_extractor(key, sort_interval)
             sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
                                                         'parameter_set_name': key['parameter_set_name']}).fetch1()
+            #cache_file = tempfile.NamedTemporaryFile("r+")
+            #print('created cache file')
+            recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor)
             print(f'Sorting {key}...')
-            sort = si.sorters.run_mountainsort4(recording=recording_extractor, 
+            sort = si.sorters.run_mountainsort4(recording=recording_extractor_cached, 
                                                 **sort_parameters['parameter_dict'], 
                                                 grouping_property='group', 
                                                 output_folder=os.getenv('SORTING_TEMP_DIR', None))
             # create a stack of labelled arrays of the sorted spike times
             timestamps = np.asarray(raw_data_obj.timestamps)
             unit_ids = sort.get_unit_ids()
-            for unit_id in unit_ids:
+            # get the waveforms; we may want to specifiy these parameters more flexibly in the future
+            template_params = st.postprocessing.get_waveforms_params()
+            print(sort_parameters)
+            template_params['grouping_property'] = 'group'
+            # set the window to half of the clip size before and half after
+            template_params['ms_before'] = sort_parameters['parameter_dict']['clip_size'] / sampling_rate * 1000 / 2
+            template_params['ms_after'] = template_params['ms_before'] 
+            template_params['max_spikes_per_unit'] = 1000
+            template_params['dtype'] = 'i2'
+            #template_params['n_jobs'] = 7
+            template_params['verbose'] = False
+            #print(f'template_params: {template_params}')
+            unit_templates = st.postprocessing.get_unit_templates(recording_extractor_cached, sort, **template_params)
+            print(len(unit_templates))
+            for index, unit_id in enumerate(unit_ids):
                 current_index = unit_id + unit_id_offset
                 unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)  
-                #print(f'looking up times for unit {unit_id + unit_id_offset}: {len(unit_spike_samples)} spikes')
+                #print(f'template for {unit_id}: {unit_templates[unit_id]} ')
                 units[current_index] = timestamps[unit_spike_samples]
+                # the templates are zero based, so we have to use the index here
+                units_waveforms[current_index] = unit_templates[index]
                 units_valid_times[current_index] = sort_interval_valid_times
                 units_sort_interval[current_index] = [sort_interval]
             if len(unit_ids) > 0:
                 unit_id_offset += np.max(unit_ids) + 1
         
         #Add the units to the Analysis file        
-        key['units_object_id'] = AnalysisNwbfile().add_units(key['analysis_file_name'], units, units_valid_times,
+        key['units_object_id'] = AnalysisNwbfile().add_units(key['analysis_file_name'], units, units_waveforms, units_valid_times,
                                                               units_sort_interval)
         self.insert1(key)
         # add an offset sufficient to avoid unit number overlap (+1 more to make it easy to find the space)
@@ -300,82 +320,98 @@ class SpikeSorting(dj.Computed):
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
-def get_recording_extractor(key, sort_interval, valid_times):
-    """Given a key containing the key fields for a SpikeSorting schema, and the interval to be sorted, and a list
-    of the valid time intervals, returns the recording extractor object using the spikeinterface package
+    def get_recording_extractor(self, key, sort_interval):
+        """Given a key containing the key fields for a SpikeSorting schema, and the interval to be sorted,
+         returns the recording extractor object (see the spikeinterface package for details)
 
-    :param key: key to SpikeSorting schema
-    :type key: dict
-    :param sort_interval: [start_time, end_time]
-    :type sort_interval: 1D array with the start and end times for this sort
-    :param valid_times: array of [start_time, end_time] intervals
-    :type valid_times: 1D array of arrays 
+        :param key: key to SpikeSorting schema
+        :type key: dict
+        :param sort_interval: [start_time, end_time]
+        :type sort_interval: 1D array with the start and end times for this sort
+        :return: (recording_extractor, sort_interval_valid_times)
+        :rtype: tuple with spikeextractor recording extractor object and valid times list
+        """
+        interval_list_name = (SpikeSortingParameters() & key).fetch1('interval_list_name')
+        valid_times =  (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
+                                        'interval_list_name' : interval_list_name})\
+                                            .fetch('valid_times')[0]  
+        sort_interval_valid_times = interval_list_intersect(np.array([sort_interval]), valid_times)
+                                 
+        raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
+        # get the indeces of the data to use. Note that spike_extractors has a time_to_frame function, 
+        # but it seems to set the time of the first sample to 0, which will not match our intervals
+        timestamps = np.asarray(raw_data_obj.timestamps)
+        sort_indeces = np.searchsorted(timestamps, np.ravel(sort_interval))
+        #print(f'sample indeces: {sort_indeces}')
+
+        # Use spike_interface to run the sorter on the selected sort group
+        raw_data = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']), electrical_series_name='e-series')
+        
+        # Blank out non-valid times. 
+        exclude_inds = interval_list_excludes_ind(sort_interval_valid_times, timestamps)
+        exclude_inds = exclude_inds[exclude_inds <= sort_indeces[-1]]
+        # TODO: add a blanking function to the preprocessing module 
+        raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
+
+        # create a group id within spikeinterface for the specified electodes
+        electrode_ids = (SortGroup.SortGroupElectrode() & {'nwb_file_name' : key['nwb_file_name'], 
+                                                        'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
+        raw_data.set_channel_groups([key['sort_group_id']]*len(electrode_ids), channel_ids=electrode_ids)
+        
+        raw_data.add_epoch(key['sort_interval_list_name'], sort_indeces[0], sort_indeces[1])
+        # restrict the raw data to the specific samples
+        raw_data_epoch = raw_data.get_epoch(key['sort_interval_list_name'])
+        
+        # get the reference for this sort group
+        sort_reference_electrode_id = (SortGroup() & {'nwb_file_name' : key['nwb_file_name'], 
+                                                    'sort_group_id' : key['sort_group_id']}
+                                                    ).fetch('sort_reference_electrode_id')           
+        if sort_reference_electrode_id >= 0:
+            raw_data_epoch_referenced = st.preprocessing.common_reference(raw_data_epoch, reference='single',
+                                                            groups=[key['sort_group_id']], ref_channels=sort_reference_electrode_id)
+        elif sort_reference_electrode_id == -2:
+            raw_data_epoch_referenced = st.preprocessing.common_reference(raw_data, reference='median')
+        else:
+            raw_data_epoch_referenced = raw_data_epoch
+
+        # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')
+            SortGroup().write_prb(key['sort_group_id'], key['nwb_file_name'], prb_file_name)
+            # add the probe geometry to the raw_data recording
+            raw_data_epoch_referenced.load_probe_file(prb_file_name)
+
+        return se.SubRecordingExtractor(raw_data_epoch_referenced,channel_ids=electrode_ids), sort_interval_valid_times
+
+    def get_sorting_extractor(self, key, sort_interval):
+        """Generates a numpy sorting extractor given a key that retrieves a SpikeSorting and a specified sort interval
+
+        :param key: key for a single SpikeSorting
+        :type key: dict
+        :param sort_interval: [start_time, end_time]
+        :type sort_interval: numpy array
+        :return: a spikeextractors sorting extractor with the sorting information
+        """
+        # get the units object from the NWB file that the data are stored in.
+        units = (SpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
+        unit_timestamps = []
+        unit_labels = []
+        
+        # TODO: do something more efficient here; note that searching for maching sort_intervals within pandas doesn't seem to work
+        for index, unit in units.iterrows():
+            if np.ndarray.all(np.ravel(unit['sort_interval']) == sort_interval):
+                unit_timestamps.extend(unit['spike_times'])
+                unit_labels.extend([index]*len(unit['spike_times']))
+
+        output=se.NumpySortingExtractor()
+        output.set_times_labels(times=np.asarray(unit_timestamps),labels=np.asarray(unit_labels))
+        return output
+
+
+@schema 
+class SpikeSortingExtractorFile(dj.Computed):
+    definition = """
+    -> SpikeSorter
+    ---
+    units_object_id: varchar(40) # the object ID for the units for this sort group
     """
-    raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
-    # get the indeces of the data to use. Note that spike_extractors has a time_to_frame function, 
-    # but it seems to set the time of the first sample to 0, which will not match our intervals
-    timestamps = np.asarray(raw_data_obj.timestamps)
-    sort_indeces = np.searchsorted(timestamps, np.ravel(sort_interval))
-    #print(f'sample indeces: {sort_indeces}')
-
-    # Use spike_interface to run the sorter on the selected sort group
-    raw_data = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']), electrical_series_name='e-series')
-    
-    exclude_inds = interval_list_excludes_ind(valid_times, timestamps)
-    exclude_inds = exclude_inds[exclude_inds <= sort_indeces[-1]]
-    # Blank out non-valid times. 
-    # TODO: add a blanking function to the preprocessing module 
-    raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
-
-    # create a group id within spikeinterface for the specified electodes
-    electrode_ids = (SortGroup.SortGroupElectrode() & {'nwb_file_name' : key['nwb_file_name'], 
-                                                    'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
-    raw_data.set_channel_groups([key['sort_group_id']]*len(electrode_ids), channel_ids=electrode_ids)
-    
-    raw_data.add_epoch(key['sort_interval_list_name'], sort_indeces[0], sort_indeces[1])
-    # restrict the raw data to the specific samples
-    raw_data_epoch = raw_data.get_epoch(key['sort_interval_list_name'])
-    
-    # get the reference for this sort group
-    sort_reference_electrode_id = (SortGroup() & {'nwb_file_name' : key['nwb_file_name'], 
-                                                'sort_group_id' : key['sort_group_id']}
-                                                ).fetch('sort_reference_electrode_id')           
-    if sort_reference_electrode_id >= 0:
-        raw_data_epoch_referenced = st.preprocessing.common_reference(raw_data_epoch, reference='single',
-                                                        groups=[key['sort_group_id']], ref_channels=sort_reference_electrode_id)
-    elif sort_reference_electrode_id == -2:
-        raw_data_epoch_referenced = st.preprocessing.common_reference(raw_data, reference='median')
-    else:
-        raw_data_epoch_referenced = raw_data_epoch
-
-    # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')
-        SortGroup().write_prb(key['sort_group_id'], key['nwb_file_name'], prb_file_name)
-        # add the probe geometry to the raw_data recording
-        raw_data_epoch_referenced.load_probe_file(prb_file_name)
-
-    return se.SubRecordingExtractor(raw_data_epoch_referenced,channel_ids=electrode_ids)
-
-def get_sorting_extractor(key, sort_interval):
-    """Generates a numpy sorting extractor given a key that retrieves a SpikeSorting and a specified sort interval
-
-    :param key: key for a single SpikeSorting
-    :type key: dict
-    :param sort_interval: [start_time, end_time]
-    :type sort_interval: numpy array
-    :return: a spikeextractors sorting extractor with the sorting information
-    """
-    # get the units object from the NWB file that the data are stored in.
-    units = (SpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
-    unit_timestamps = []
-    unit_labels = []
-    
-    for index, unit in units.iterrows():
-        if np.ndarray.all(np.ravel(unit['sort_interval']) == sort_interval):
-            unit_timestamps.extend(unit['spike_times'])
-            unit_labels.extend([index]*len(unit['spike_times']))
-
-    output=se.NumpySortingExtractor()
-    output.set_times_labels(times=np.asarray(unit_timestamps),labels=np.asarray(unit_labels))
-    return output
