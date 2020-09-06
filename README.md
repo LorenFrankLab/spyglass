@@ -19,7 +19,7 @@
    
 4. [Use the datajoint docker installation](https://tutorials.datajoint.io/setting-up/local-database.html)
 
-5. Temporary development packages:
+5. Temporary development package:
 
     ndx-franklab-novela (conda version too restrictive)
     
@@ -37,15 +37,6 @@
 	
         cd ..
 
-    ml-ms4alg
-
-        git clone https://github.com/LorenFrankLab/ml_ms4alg.git
-	
-        cd ml_ms4alg
-	
-        python setup.py develop
-	
-        cd ..
 			
 6. Run `populate_from_NWB.ipynb` from the notebooks directory.
 7. Other examples: 
