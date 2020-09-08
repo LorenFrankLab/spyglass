@@ -311,7 +311,8 @@ class SpikeSorting(dj.Computed):
             if len(unit_ids) > 0:
                 unit_id_offset += np.max(unit_ids) + 1
         
-        #Add the units to the Analysis file        
+        #Add the units to the Analysis file       
+        # TODO: consider replacing with spikeinterface call if possible 
         key['units_object_id'] = AnalysisNwbfile().add_units(key['analysis_file_name'], units, units_waveforms, units_valid_times,
                                                               units_sort_interval)
         self.insert1(key)
@@ -384,6 +385,7 @@ class SpikeSorting(dj.Computed):
         return se.SubRecordingExtractor(raw_data_epoch_referenced,channel_ids=electrode_ids), sort_interval_valid_times
 
     def get_sorting_extractor(self, key, sort_interval):
+        #TODO: replace with spikeinterface call
         """Generates a numpy sorting extractor given a key that retrieves a SpikeSorting and a specified sort interval
 
         :param key: key for a single SpikeSorting
