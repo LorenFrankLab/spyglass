@@ -5,6 +5,9 @@
 ### Instructions as of 09-02-2020
 
 1. Clone this repository
+   ```
+   git clone https://github.com/LorenFrankLab/nwb_datajoint.git
+   ```
 2. Set up and activate the conda environment: 
    ```bash
    conda env create -f environment.yml
