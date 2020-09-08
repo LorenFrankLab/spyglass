@@ -274,9 +274,10 @@ class SpikeSorting(dj.Computed):
             recording_extractor, sort_interval_valid_times = self.get_recording_extractor(key, sort_interval)
             sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
                                                         'parameter_set_name': key['parameter_set_name']}).fetch1()
-            #cache_file = tempfile.NamedTemporaryFile("r+")
-            #print('created cache file')
-            recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor)
+            # get a name for the recording extractor for this sort interval
+            recording_extractor_path = os.path.join(os.environ['SPIKE_SORTING_STORAGE_DIR'], 
+                                                    key['analysis_file_name'], '_', str(sort_interval))
+            recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor, save_path=recording_extractor_path)
             print(f'Sorting {key}...')
             sort = si.sorters.run_mountainsort4(recording=recording_extractor_cached, 
                                                 **sort_parameters['parameter_dict'], 

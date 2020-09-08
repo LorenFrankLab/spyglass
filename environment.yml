@@ -1,4 +1,4 @@
-name: nwbdj1
+name: nwb_datajoint
 channels:
 - defaults
 - conda-forge
@@ -12,6 +12,7 @@ dependencies:
 - datajoint
 - python-dateutil
 - ipywidgets
+- ipykernel
 - nodejs
 - jupyter
 - jupyterlab

@@ -123,12 +123,11 @@ class FirFilter(dj.Manual):
         f = filter[0]
         return self.calc_filter_delay(filter['filter_coeff'])
 
-    def filter_data_nwb(self, analysis_file_abs_path, timestamps, data, filter_coeff, valid_times, electrode_ids,
+    def filter_data_nwb(self, analysis_file_abs_path, eseries, filter_coeff, valid_times, electrode_ids,
                         decimation):
         """
         :param analysis_nwb_file_name: str   full path to previously created analysis nwb file where filtered data should be stored. This also has the name of the original NWB file where the data will be taken from
-        :param timestamps: numpy array with list of timestamps for data
-        :param data: original data array (numpy or h5py)
+        :param eseries: electrical series with data to be filtered
         :param filter_coeff: numpy array with filter coefficients for FIR filter
         :param valid_times: 2D numpy array with start and stop times of intervals to be filtered
         :param electrode_ids: list of electrode_ids to filter
@@ -139,14 +138,17 @@ class FirFilter(dj.Manual):
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
         created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
         """
-
+        data = eseries.data
+        timestamps = eseries.timestamps
         n_dim = len(data.shape)
         n_samples = len(timestamps)
         # find the
         time_axis = 0 if data.shape[0] == n_samples else 1
         electrode_axis = 1 - time_axis
         input_dim_restrictions = [None] * n_dim
-        input_dim_restrictions[electrode_axis] = np.s_[electrode_ids]
+
+        # to get the input dimension restrictions we need to look at the electrode table for the eseries and get the indeces from that
+        input_dim_restrictions[electrode_axis] = np.s_[get_electrode_indeces(eseries, electrode_ids)]
 
         indices = []
         output_shape_list = [0] * n_dim

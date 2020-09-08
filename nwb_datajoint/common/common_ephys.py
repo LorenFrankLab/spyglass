@@ -318,7 +318,7 @@ class LFP(dj.Imported):
 
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         # test:
-        lfp_object_id = FirFilter().filter_data_nwb(lfp_file_abspath, rawdata.timestamps, rawdata.data,
+        lfp_object_id = FirFilter().filter_data_nwb(lfp_file_abspath, rawdata,
                                     filter_coeff, valid_times, electrode_id_list, decimation)
 
         key['analysis_file_name'] = lfp_file_name
@@ -477,8 +477,7 @@ class LFPBand(dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
         # filter the data and write to an the nwb file
-        print(valid_times)
-        filtered_data_object_id = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_timestamps, lfp_data,
+        filtered_data_object_id = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_object,
                                     filter_coeff, valid_times, lfp_band_elect_id, decimation)
 
         key['analysis_file_name'] = lfp_band_file_name

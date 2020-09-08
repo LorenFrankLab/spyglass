@@ -1,5 +1,6 @@
 import numpy as np
-
+from operator import itemgetter 
+  
 # import matplotlib.pyplot as plt
 
 #NWB helper functions for finding processing modules and data interfaces
@@ -88,6 +89,6 @@ def get_electrode_indeces(electrical_series, electrode_ids):
     :type electrode_ids: numpy array or list
     :return: electrode_indeces (numpy array of indeces)
     """
-    eletrode_table_region = list(electrical_series.electrodes.to_dataframe().index)
-    return [elect_idx for elect_idx, elect_id in enumerate(eletrode_table_region) if elect_id in electrode_ids]
+    electrode_table_region = list(electrical_series.electrodes.to_dataframe().index)
+    return [elect_idx for elect_idx, elect_id in enumerate(electrode_table_region) if elect_id in electrode_ids]
 
