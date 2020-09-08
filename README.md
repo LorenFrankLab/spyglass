@@ -5,18 +5,21 @@
 ### Instructions as of 09-02-2020
 
 1. Clone this repository
-   ```
+   ```bash
    git clone https://github.com/LorenFrankLab/nwb_datajoint.git
    ```
 2. Set up and activate the conda environment: 
    ```bash
+   cd nwb_datajoint
    conda env create -f environment.yml
+   cd ..
    conda activate nwbdj
    ```
 3. Install the repo: 
    ```bash
    cd nwb_datajoint
    python setup.py develop
+   cd ..
    ```
    - Ignore the error `error: numba 0.50.1 is installed but numba<0.49,>=0.37.0 is required by {'datashader'}`
    
