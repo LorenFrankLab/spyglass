@@ -159,6 +159,8 @@ class FirFilter(dj.Manual):
 
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
+            if a_stop > timestamps[-1]:
+                a_stop = timestamps[-1]
             frm, to = np.searchsorted(timestamps, (a_start, a_stop))
             if to > n_samples:
                 to = n_samples
