@@ -141,12 +141,14 @@ class AnalysisNwbfile(dj.Manual):
             io.write(nwbf)
             return nwb_object.object_id
     
-    def add_units(self, analysis_file_name, units, units_valid_times, units_sort_interval):
+    def add_units(self, analysis_file_name, units, units_templates, units_valid_times, units_sort_interval):
         """[Given a units dictionary where each entry has a unit id as the key and spike times as the data
 
         :param analysis_file_name: the name of the analysis nwb file
         :type analysis_file_name: str
         :param units: dictionary of units and times with unit ids as keys
+        :type units: dict
+        :param units_templates: dictionary of units with waveform templates in each entry
         :type units: dict
         :param units_valid_times: dictionary of units and valid times  with unit ids as keys
         :type units_valid_times: dict
@@ -159,7 +161,8 @@ class AnalysisNwbfile(dj.Manual):
             sort_intervals = list()
             if len(units.keys()):
                 for id in units.keys():
-                    nwbf.add_unit(spike_times=units[id], id=id, obs_intervals=units_valid_times[id])
+                    nwbf.add_unit(spike_times=units[id], id=id, waveform_mean=units_templates[id],
+                                  obs_intervals=units_valid_times[id])
                     sort_intervals.append(units_sort_interval[id])
                 # add a column for the sort interval
                 nwbf.add_unit_column(name='sort_interval', description='the interval used for spike sorting', data=sort_intervals)

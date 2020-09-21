@@ -44,8 +44,8 @@
         cd ..
 
 			
-6. Run `populate_from_NWB.ipynb` from the notebooks directory.
+6. Run `populate_from_NWB_tutorial.ipynb` from the notebooks directory.
 7. Other examples: 
-	NWB_DJ_LFP.ipynwb to extract LFP 
+	nwbdj_lfp_tutorial.ipynwb to extract LFP 
 	nwbdj_spikeinterface.pynwb to setup and run spikesorting
 

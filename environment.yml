@@ -1,4 +1,4 @@
-name: nwbdj
+name: nwb_datajoint
 channels:
 - defaults
 - conda-forge
@@ -6,13 +6,14 @@ channels:
 - franklab
 - novelakrk
 dependencies:
-- "python==3.6"
+- "python==3.8"
 - matplotlib
 - pandas
 - networkx
 - datajoint
 - python-dateutil
 - ipywidgets
+- ipykernel
 - nodejs
 - jupyter
 - jupyterlab
@@ -22,13 +23,12 @@ dependencies:
 - pytest
 - pytest-cov
 - coveralls
-#- pynwb
-- hdmf
+- pynwb>=1.4
 - pybind11
 - distributed
 - pip
 - pip:
-  - python-intervals
   - ghostipy
   - spikeinterface
   - kachery==0.6.4
+  - ml_ms4alg
