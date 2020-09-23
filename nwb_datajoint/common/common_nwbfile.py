@@ -2,6 +2,7 @@ import os
 import datajoint as dj
 import pynwb
 import numpy as np
+import pandas as pd
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_electrode_indeces
 
@@ -122,7 +123,10 @@ class AnalysisNwbfile(dj.Manual):
         analysis_nwb_file_abspath = os.path.join(base_dir, 'analysis', analysis_nwb_file_name)
         return analysis_nwb_file_abspath
 
-    def add_nwb_object(self, analysis_file_name, nwb_object):
+    @staticmethod
+    def add_nwb_object(analysis_file_name, nwb_object):
+        #TODO: change to add_object with checks for object type and a name parameter, which should be specified if it is not
+        # an NWB container
         """Adds an nwb object to the analysis file in the scratch area and returns the nwb object id
 
         :param analysis_file_name: the name of the analysis nwb file
@@ -140,8 +144,29 @@ class AnalysisNwbfile(dj.Manual):
             nwbf.add_scratch(nwb_object)
             io.write(nwbf)
             return nwb_object.object_id
-    
-    def add_units(self, analysis_file_name, units, units_templates, units_valid_times, units_sort_interval):
+
+    @staticmethod
+    def add(analysis_file_name, object, name=None):
+        #Adds any vali
+        """Adds an object to the analysis file in the scratch area and returns the nwb object id. 
+        The object must be of a type that can be added to the nwbfile scratch space (see pynwb documentation for add_scratch)
+
+        :param analysis_file_name: the name of the analysis nwb file
+        :type analysis_file_name: str
+        :param object: the object created by pynwb
+        :type 
+        :param processing_module: the name of the processing module to create, defaults to 'analysis'
+        :type processing_module: str, optional
+        :return: the nwb object id of the added object
+        :rtype: str
+        """
+        #open the file, write the new object and return the object id
+        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
+            nwbf=io.read()
+            nwbf.add_scratch(nwb_object)
+            io.write(nwbf)
+            return nwb_object.object_id   
+    def add_units(self, analysis_file_name, units, units_templates, units_valid_times, units_sort_interval, units_waveforms=None):
         """[Given a units dictionary where each entry has a unit id as the key and spike times as the data
 
         :param analysis_file_name: the name of the analysis nwb file
@@ -154,7 +179,9 @@ class AnalysisNwbfile(dj.Manual):
         :type units_valid_times: dict
         :param units_sort_interval: dictionary of units and sort_interval with unit ids as keys
         :type units_sort_interval: dict
-        :return: the nwb object id of the Units object
+        :param units_waveforms: dictionary of unit wavforms with unit ids as keys (optional)
+        :type units_waveforms: dict
+        :return: the nwb object id of the Units object and the object id of the waveforms object ('' if None)
         """
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
@@ -166,8 +193,15 @@ class AnalysisNwbfile(dj.Manual):
                     sort_intervals.append(units_sort_interval[id])
                 # add a column for the sort interval
                 nwbf.add_unit_column(name='sort_interval', description='the interval used for spike sorting', data=sort_intervals)
+                # if the waveforms were specified, add them as a dataframe 
+                waveforms_object_id = ''
+                #TODO: get code below to work; currently leads to error
+                #if units_waveforms is not None:
+                    #TODO: Check to see if numpy structured array would be a better approach for the waveforms
+                    #nwbf.add_scratch(pd.DataFrame.from_dict(units_waveforms, orient='index'), name='units_waveforms')
+                    #waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
                 io.write(nwbf)
-                return nwbf.units.object_id
+                return nwbf.units.object_id, waveforms_object_id
             else: 
                 return ''
 

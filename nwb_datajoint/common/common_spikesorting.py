@@ -245,6 +245,7 @@ class SpikeSorting(dj.Computed):
     ---
     -> AnalysisNwbfile
     units_object_id: varchar(40) # the object ID for the units for this sort group
+    units_waveforms_object_id : varchar(40) # the object ID for the unit waveforms
     """
 
     def make(self, key):
@@ -265,6 +266,7 @@ class SpikeSorting(dj.Computed):
         units = dict()
         units_valid_times = dict()
         units_sort_interval = dict()
+        units_templates = dict()
         units_waveforms = dict()
         # we will add an offset to the unit_id for each sort interval to avoid duplicating ids
         unit_id_offset = 0
@@ -287,26 +289,30 @@ class SpikeSorting(dj.Computed):
             timestamps = np.asarray(raw_data_obj.timestamps)
             unit_ids = sort.get_unit_ids()
             # get the waveforms; we may want to specifiy these parameters more flexibly in the future
-            template_params = st.postprocessing.get_waveforms_params()
+            waveform_params = st.postprocessing.get_waveforms_params()
             print(sort_parameters)
-            template_params['grouping_property'] = 'group'
+            waveform_params['grouping_property'] = 'group'
             # set the window to half of the clip size before and half after
-            template_params['ms_before'] = sort_parameters['parameter_dict']['clip_size'] / sampling_rate * 1000 / 2
-            template_params['ms_after'] = template_params['ms_before'] 
-            template_params['max_spikes_per_unit'] = 1000
-            template_params['dtype'] = 'i2'
+            waveform_params['ms_before'] = sort_parameters['parameter_dict']['clip_size'] / sampling_rate * 1000 / 2
+            waveform_params['ms_after'] = waveform_params['ms_before'] 
+            waveform_params['max_spikes_per_unit'] = 1000
+            waveform_params['dtype'] = 'i2'
             #template_params['n_jobs'] = 7
-            template_params['verbose'] = False
+            waveform_params['verbose'] = False
             #print(f'template_params: {template_params}')
-            unit_templates = st.postprocessing.get_unit_templates(recording_extractor_cached, sort, **template_params)
-            print(len(unit_templates))
+            templates = st.postprocessing.get_unit_templates(recording_extractor_cached, sort, **waveform_params)
+            # for the waveforms themselves we only need to change the max_spikes_per_unit:
+            waveform_params['max_spikes_per_unit'] = 1e100
+            waveforms = st.postprocessing.get_unit_waveforms(recording_extractor_cached, sort, unit_ids, **waveform_params)
+
             for index, unit_id in enumerate(unit_ids):
                 current_index = unit_id + unit_id_offset
                 unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)  
                 #print(f'template for {unit_id}: {unit_templates[unit_id]} ')
                 units[current_index] = timestamps[unit_spike_samples]
-                # the templates are zero based, so we have to use the index here
-                units_waveforms[current_index] = unit_templates[index]
+                # the templates are zero based, so we have to use the index here. 
+                units_templates[current_index] = templates[index]
+                units_waveforms[current_index] = waveforms[index]
                 units_valid_times[current_index] = sort_interval_valid_times
                 units_sort_interval[current_index] = [sort_interval]
             if len(unit_ids) > 0:
@@ -314,8 +320,10 @@ class SpikeSorting(dj.Computed):
         
         #Add the units to the Analysis file       
         # TODO: consider replacing with spikeinterface call if possible 
-        key['units_object_id'] = AnalysisNwbfile().add_units(key['analysis_file_name'], units, units_waveforms, units_valid_times,
-                                                              units_sort_interval)
+        units_object_id, units_waveforms_object_id = AnalysisNwbfile().add_units(key['analysis_file_name'], units, units_templates, units_valid_times,
+                                                              units_sort_interval, units_waveforms=units_waveforms)
+        key['units_object_id'] = units_object_id
+        key['units_waveforms_object_id'] = units_waveforms_object_id
         self.insert1(key)
         # add an offset sufficient to avoid unit number overlap (+1 more to make it easy to find the space)
 
@@ -386,7 +394,7 @@ class SpikeSorting(dj.Computed):
         return se.SubRecordingExtractor(raw_data_epoch_referenced,channel_ids=electrode_ids), sort_interval_valid_times
 
     def get_sorting_extractor(self, key, sort_interval):
-        #TODO: replace with spikeinterface call
+        #TODO: replace with spikeinterface call if possible
         """Generates a numpy sorting extractor given a key that retrieves a SpikeSorting and a specified sort interval
 
         :param key: key for a single SpikeSorting
@@ -410,11 +418,3 @@ class SpikeSorting(dj.Computed):
         output.set_times_labels(times=np.asarray(unit_timestamps),labels=np.asarray(unit_labels))
         return output
 
-
-@schema 
-class SpikeSortingExtractorFile(dj.Computed):
-    definition = """
-    -> SpikeSorter
-    ---
-    units_object_id: varchar(40) # the object ID for the units for this sort group
-    """
