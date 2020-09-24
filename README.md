@@ -13,7 +13,7 @@
    cd nwb_datajoint
    conda env create -f environment.yml
    cd ..
-   conda activate nwbdj
+   conda activate nwb_datajoint
    ```
 3. Install the repo: 
    ```bash
