@@ -144,7 +144,6 @@ class AnalysisNwbfile(dj.Manual):
             io.write(nwbf)
             return nwb_object.object_id
 
-    @staticmethod
     # def add(analysis_file_name, object, name=None):
     #     #Adds any vali
     #     """Adds an object to the analysis file in the scratch area and returns the nwb object id. 
@@ -196,10 +195,15 @@ class AnalysisNwbfile(dj.Manual):
                 # if the waveforms were specified, add them as a dataframe 
                 waveforms_object_id = ''
                 #TODO: get code below to work; currently leads to error
-                #if units_waveforms is not None:
+                if units_waveforms is not None:
                     #TODO: Check to see if numpy structured array would be a better approach for the waveforms
-                    #nwbf.add_scratch(pd.DataFrame.from_dict(units_waveforms, orient='index'), name='units_waveforms')
-                    #waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
+                    # names = ['unit_id','waveforms']
+                    # formats = ['i4','i2']
+                    # dtype = dict(names = names, formats=formats)
+                    waveforms = list(units_waveforms.items())
+                    #test = pd.DataFrame.from_dict(units_waveforms, orient='index')
+                    nwbf.add_scratch(waveforms, name='units_waveforms', notes='')
+                    waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
                 io.write(nwbf)
                 return nwbf.units.object_id, waveforms_object_id
             else: 

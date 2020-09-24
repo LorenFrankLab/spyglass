@@ -48,7 +48,6 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
         return rec_dicts
     
     ret = []
-    print(rec_dicts)
     for rec_dict in rec_dicts:
         io = pynwb.NWBHDF5IO(rec_dict.pop('nwb2load_filepath'), mode='r')
         nwbf = io.read()

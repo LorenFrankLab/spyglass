@@ -249,6 +249,7 @@ class SpikeSorting(dj.Computed):
     """
 
     def make(self, key):
+        print('in spike sorting')
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
         # get the valid times. 
         # NOTE: we will sort independently between each entry in the valid times list
@@ -312,7 +313,7 @@ class SpikeSorting(dj.Computed):
                 units[current_index] = timestamps[unit_spike_samples]
                 # the templates are zero based, so we have to use the index here. 
                 units_templates[current_index] = templates[index]
-                units_waveforms[current_index] = waveforms[index]
+                units_waveforms[current_index] = np.array(waveforms[index])
                 units_valid_times[current_index] = sort_interval_valid_times
                 units_sort_interval[current_index] = [sort_interval]
             if len(unit_ids) > 0:
@@ -320,12 +321,12 @@ class SpikeSorting(dj.Computed):
         
         #Add the units to the Analysis file       
         # TODO: consider replacing with spikeinterface call if possible 
-        units_object_id, units_waveforms_object_id = AnalysisNwbfile().add_units(key['analysis_file_name'], units, units_templates, units_valid_times,
-                                                              units_sort_interval, units_waveforms=units_waveforms)
+        units_object_id, units_waveforms_object_id = AnalysisNwbfile().add_units(key['analysis_file_name'], units, 
+                                                                units_templates, units_valid_times,
+                                                                units_sort_interval, units_waveforms=units_waveforms)
         key['units_object_id'] = units_object_id
         key['units_waveforms_object_id'] = units_waveforms_object_id
         self.insert1(key)
-        # add an offset sufficient to avoid unit number overlap (+1 more to make it easy to find the space)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
