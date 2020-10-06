@@ -21,10 +21,8 @@ def main():
     # ### Set the sort grouping by shank
 
 
-    nd.common.SortGroup().set_group_by_shank(nwb_file_name)
-    nd.common.SortGroup()
-
-
+    #nd.common.SortGroup().set_group_by_shank(nwb_file_name)
+    #nd.common.SortGroup()
     #nd.common.SpikeSorter().insert_from_spikeinterface()
     #nd.common.SpikeSorterParameters().insert_from_spikeinterface()
 
@@ -38,7 +36,7 @@ def main():
     param['clip_size'] = 30
     param['noise_overlap_threshold'] = 0
 
-    nd.common.SpikeSorterParameters().insert1({'sorter_name': 'mountainsort4', 'parameter_set_name' : 'franklab_mountainsort_20KHz', 'parameter_dict' : param}, skip_duplicates='True')
+    #nd.common.SpikeSorterParameters().insert1({'sorter_name': 'mountainsort4', 'parameter_set_name' : 'franklab_mountainsort_20KHz', 'parameter_dict' : param}, skip_duplicates='True')
 
     param = p['parameter_dict']
 
@@ -47,7 +45,7 @@ def main():
     # create a 10 second test intervals for debugging
     s1 = (nd.common.IntervalList() & {'interval_list_name' : '01_s1'}).fetch1('valid_times')
     a = s1[0][0]
-    b = a + 10
+    b = a + 100
     t = np.asarray([[a,b]])
     #t = np.vstack((t, np.asarray([[a+120,b+120]])))
     nd.common.SortIntervalList().insert1({'nwb_file_name' : nwb_file_name, 'sort_interval_list_name' : 'test', 'sort_intervals' : t}, replace='True')
@@ -58,6 +56,7 @@ def main():
     key['sort_group_id'] = sort_group_id
     key['sorter_name'] = 'mountainsort4'
     key['parameter_set_name'] = 'franklab_mountainsort_20KHz'
+    key['waveform_parameters_name'] = 'franklab default'
     key['interval_list_name'] = '01_s1'
     key['sort_interval_list_name'] = 'test'
     nd.common.SpikeSortingParameters().insert1(key, skip_duplicates='True')
@@ -75,7 +74,7 @@ def main():
     sorting = (nd.common.SpikeSorting & {'nwb_file_name' : nwb_file_name, 'sort_group_id' : sort_group_id}).fetch()
     key = {'nwb_file_name' : nwb_file_name, 'sort_group_id' : sort_group_id}
     units = (nd.common.SpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
-    print(units)
+    #print(units)
 
 
 if __name__ == "__main__":
