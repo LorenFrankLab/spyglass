@@ -194,15 +194,11 @@ class AnalysisNwbfile(dj.Manual):
                 nwbf.add_unit_column(name='sort_interval', description='the interval used for spike sorting', data=sort_intervals)
                 # if the waveforms were specified, add them as a dataframe 
                 waveforms_object_id = ''
-                #TODO: get code below to work; currently leads to error
                 if units_waveforms is not None:
-                    #TODO: Check to see if numpy structured array would be a better approach for the waveforms
-                    # names = ['unit_id','waveforms']
-                    # formats = ['i4','i2']
-                    # dtype = dict(names = names, formats=formats)
-                    waveforms = list(units_waveforms.items())
-                    #test = pd.DataFrame.from_dict(units_waveforms, orient='index')
-                    nwbf.add_scratch(waveforms, name='units_waveforms', notes='')
+                    waveforms = pd.DataFrame.from_dict(units_waveforms, orient='index')
+                    # the dataframe has to have strings for column names
+                    waveforms.columns = ['waveforms']
+                    nwbf.add_scratch(waveforms, name='units_waveforms')
                     waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
                 io.write(nwbf)
                 return nwbf.units.object_id, waveforms_object_id

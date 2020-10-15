@@ -19,7 +19,7 @@ from ndx_franklab_novela import Probe
 def main():
     nwb_file_name = (nd.common.Session() & {'session_id': 'beans_01'}).fetch1('nwb_file_name')
     # ### Set the sort grouping by shank
-
+    
 
     #nd.common.SortGroup().set_group_by_shank(nwb_file_name)
     #nd.common.SortGroup()
@@ -37,6 +37,7 @@ def main():
     param['noise_overlap_threshold'] = 0
 
     #nd.common.SpikeSorterParameters().insert1({'sorter_name': 'mountainsort4', 'parameter_set_name' : 'franklab_mountainsort_20KHz', 'parameter_dict' : param}, skip_duplicates='True')
+    
 
     param = p['parameter_dict']
 
@@ -48,7 +49,21 @@ def main():
     b = a + 100
     t = np.asarray([[a,b]])
     #t = np.vstack((t, np.asarray([[a+120,b+120]])))
-    nd.common.SortIntervalList().insert1({'nwb_file_name' : nwb_file_name, 'sort_interval_list_name' : 'test', 'sort_intervals' : t}, replace='True')
+    #nd.common.SortIntervalList().insert1({'nwb_file_name' : nwb_file_name, 'sort_interval_list_name' : 'test', 'sort_intervals' : t}, replace='True')
+
+    # create the sorting waveform parameters table
+    n_noise_waveforms = 1000 # the number of random noise waveforms to save
+    save_all_waveforms='False'
+    waveform_param_dict = st.postprocessing.get_waveforms_params()
+    waveform_param_dict['grouping_property'] = 'group'
+    # set the window to half of the clip size before and half after
+    waveform_param_dict['ms_before'] = .75
+    waveform_param_dict['ms_after'] = .75
+    waveform_param_dict['dtype'] = 'i2'
+    waveform_param_dict['verbose'] = False
+    waveform_param_dict['max_spikes_per_unit'] = 1000
+    nd.common.SpikeSortingWaveformParameters.insert1({'waveform_parameters_name' : 'franklab default', 'n_noise_waveforms' : n_noise_waveforms, 
+                                                    'save_all_waveforms': save_all_waveforms, 'waveform_parameter_dict' : waveform_param_dict})
 
     sort_group_id = 1
     key = dict()

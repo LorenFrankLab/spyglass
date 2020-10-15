@@ -30,5 +30,5 @@ dependencies:
 - pip:
   - ghostipy
   - spikeinterface
-  - kachery==0.6.4
+  - kachery>0.6.4
   - ml_ms4alg
