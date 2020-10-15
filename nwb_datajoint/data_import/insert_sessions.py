@@ -2,6 +2,8 @@ from ..common.common_nwbfile import Nwbfile
 from ..common import populate_all_common
 from .storage_dirs import check_env
 import datajoint as dj
+import os
+import pynwb
 
 conn = dj.conn()
 
@@ -19,5 +21,41 @@ def insert_sessions(nwb_file_names):
 
     for nwb_file_name in nwb_file_names:
         assert not nwb_file_name.startswith('/'), f'You must use relative paths. nwb_file_name: {nwb_file_name}'
-        Nwbfile().insert_from_relative_file_name(nwb_file_name)
+
+        out_nwb_file_name = os.path.splitext(nwb_file_name)[0] + '_linkraw.nwb'
+        copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
+        Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
     populate_all_common()
+
+
+def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
+    print(f'Creating a copy of NWB file {nwb_file_name} with link to raw ephys data: {out_nwb_file_name}')
+    nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+    assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
+    out_nwb_file_abs_path = Nwbfile.get_abs_path(out_nwb_file_name)
+
+    with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r') as input_io:
+        nwbf = input_io.read()
+
+        # pop off the unnecessary elements to save space
+        nwbf.acquisition.pop('e-series')
+
+        # export the new NWB file
+        with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='w') as export_io:
+            export_io.export(input_io, nwbf)
+
+    # add link from new file back to raw ephys data in raw data file
+    manager = pynwb.get_manager()
+    with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r', manager=manager) as input_io:
+        nwbf_raw = input_io.read()
+        raw_ephys = nwbf_raw.acquisition['e-series']
+
+        with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='a', manager=manager) as export_io:
+            nwbf_export = export_io.read()
+
+            # add link to raw ephys ElectricalSeries from raw data file
+            nwbf_export.add_acquisition(raw_ephys)
+
+            export_io.write(nwbf_export)
+
+    return out_nwb_file_abs_path
