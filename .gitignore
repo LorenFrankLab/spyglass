@@ -142,3 +142,5 @@ dmypy.json
 *.DS_Store
 
 temp_nwb/*
+
+notebooks/mountainsort4_output/
