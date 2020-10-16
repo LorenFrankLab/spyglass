@@ -97,7 +97,7 @@ class AnalysisNwbfile(dj.Manual):
         n_analysis_files = len((AnalysisNwbfile() & {'parent_nwb_file': nwb_file_name}).fetch())
         # name the file, adding the number of files with preceeding zeros
 
-        analysis_file_name = os.path.splitext(nwb_file_name)[0] + '_' + str(n_analysis_files).zfill(8) + '.nwb'
+        analysis_file_name = os.path.splitext(nwb_file_name)[0] + '_' + str(n_analysis_files).zfill(6) + '.nwb'
         key['analysis_file_name'] = analysis_file_name
         key['analysis_file_description'] = ''
         # write the new file
@@ -195,10 +195,9 @@ class AnalysisNwbfile(dj.Manual):
                 # if the waveforms were specified, add them as a dataframe 
                 waveforms_object_id = ''
                 if units_waveforms is not None:
-                    waveforms = pd.DataFrame.from_dict(units_waveforms, orient='index')
-                    # the dataframe has to have strings for column names
-                    waveforms.columns = ['waveforms']
-                    nwbf.add_scratch(waveforms, name='units_waveforms')
+                    waveforms_df = pd.DataFrame.from_dict(units_waveforms, orient='index')
+                    waveforms_df.columns = ['waveforms']
+                    nwbf.add_scratch(waveforms_df, name='units_waveforms', notes='')
                     waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
                 io.write(nwbf)
                 return nwbf.units.object_id, waveforms_object_id
