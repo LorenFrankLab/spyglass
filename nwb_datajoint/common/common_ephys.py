@@ -4,7 +4,7 @@ import tempfile
 from .common_session import Session
 from .common_region import BrainRegion
 from .common_device import Probe
-from .common_interval import IntervalList, SortIntervalList, interval_list_intersect, interval_list_excludes_ind
+from .common_interval import IntervalList, SortInterval, interval_list_intersect, interval_list_excludes_ind
 from .common_filter import FirFilter
 
 import spikeinterface as si

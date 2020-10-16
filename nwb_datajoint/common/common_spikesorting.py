@@ -4,7 +4,7 @@ import tempfile
 from .common_session import Session
 from .common_region import BrainRegion
 from .common_device import Probe
-from .common_interval import IntervalList, SortIntervalList, interval_list_intersect, interval_list_excludes_ind
+from .common_interval import IntervalList, SortInterval, interval_list_intersect, interval_list_excludes_ind
 from .common_ephys import Raw, Electrode, ElectrodeGroup
 
 import labbox_ephys as le
@@ -235,7 +235,6 @@ class SpikeSortingWaveformParameters(dj.Manual):
     waveform_parameters_name: varchar(80) # the name for this set of waveform extraction parameters
     ---
     n_noise_waveforms=1000: int # the number of random noise waveforms to save
-    save_all_waveforms: enum('True', 'False') #should we save all of the waveforms for future use.
     waveform_parameter_dict: blob # a dictionary containing the SpikeInterface waveform parameters
     """
 
@@ -244,7 +243,7 @@ class SpikeSortingParameters(dj.Manual):
     definition = """
     -> SortGroup
     -> SpikeSorterParameters 
-    -> SortIntervalList # the time intervals to be used for sorting
+    -> SortInterval # the time interval to be used for sorting
     ---
     -> SpikeSortingWaveformParameters 
     -> IntervalList # the valid times for the raw data (excluding artifacts, etc. if desired)  
@@ -258,25 +257,17 @@ class SpikeSorting(dj.Computed):
     -> AnalysisNwbfile
     units_object_id: varchar(40) # the object ID for the units for this sort group
     units_waveforms_object_id : varchar(40) # the object ID for the unit waveforms
+    noise_waveforms_object_id: varchar(40) # the object ID for the noise waveforms
     """
-
-    class CurationWaveforms(dj.Part):
-        definition = """
-        -> master
-        sort_interval_index: int  # the index of this sort interval
-        ---
-        waveforms_file_name: varchar(200) # the name of the hdf5 file with waveforms for curation via labboxEphys
-        noise_waveforms_file_name: varchar(200) # the name of the hdf5 file with noise waveforms for curation via labboxEphys
-        """
 
     def make(self, key):
         print('in spike sorting')
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
         # get the valid times. 
         # NOTE: we will sort independently between each entry in the valid times list
-        sort_intervals =  (SortIntervalList() & {'nwb_file_name' : key['nwb_file_name'],
-                                        'sort_interval_list_name' : key['sort_interval_list_name']})\
-                                            .fetch1('sort_intervals')
+        sort_interval =  (SortInterval() & {'nwb_file_name' : key['nwb_file_name'],
+                                        'sort_interval_name' : key['sort_interval_name']})\
+                                            .fetch1('sort_interval')
         interval_list_name = (SpikeSortingParameters() & key).fetch1('interval_list_name')
         valid_times =  (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
                                         'interval_list_name' : interval_list_name})\
@@ -292,103 +283,93 @@ class SpikeSorting(dj.Computed):
         units_sort_interval = dict()
         units_templates = dict()
         units_waveforms = dict()
-        # we will add an offset to the unit_id for each sort interval to avoid duplicating ids
-        unit_id_offset = 0
-        curation_waveforms_key = dict()
-        #interate through the arrays of sort intervals, sorting each interval separately
-        for sort_interval_index, sort_interval in enumerate(sort_intervals):
-               # Get the list of valid times for this sort interval
-            recording_extractor, sort_interval_valid_times = self.get_recording_extractor(key, sort_interval, sort_interval_index)
-            sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
-                                                        'parameter_set_name': key['parameter_set_name']}).fetch1()
-            # get a name for the recording extractor for this sort interval
-            recording_extractor_path = os.path.join(os.environ['SPIKE_SORTING_STORAGE_DIR'], 
-                                                    key['analysis_file_name'], str(sort_interval_index))
-            recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor, save_path=recording_extractor_path)
-            print(f'Sorting {key}...')
-            sort = si.sorters.run_mountainsort4(recording=recording_extractor_cached, 
-                                                **sort_parameters['parameter_dict'], 
-                                                grouping_property='group', 
-                                                output_folder=os.getenv('SORTING_TEMP_DIR', None))
-            # create a stack of labelled arrays of the sorted spike times
-            timestamps = np.asarray(raw_data_obj.timestamps)
-            unit_ids = sort.get_unit_ids()
-            # get the waveforms
-            waveform_params = sorting_waveform_param['waveform_parameter_dict']
-            if sorting_waveform_param['save_all_waveforms']:
-                max_spikes = waveform_params['max_spikes_per_unit']
-                # get all of the waveforms for curation and, if specified, to save
-                waveform_params['max_spikes_per_unit'] = 1e100
-                waveforms = st.postprocessing.get_unit_waveforms(recording_extractor_cached, sort, unit_ids, **waveform_params)
-                # reset the max_spikes_per_unit 
-                waveform_params['max_spikes_per_unit'] = max_spikes
-            else: 
-                waveforms = None
-            
-            templates = st.postprocessing.get_unit_templates(recording_extractor_cached, sort, **waveform_params)
-
-            # create the files for curation
-            # TODO: clean up and move to separate function
-            curation_waveforms_key[sort_interval_index] = key.copy()
-            curation_waveforms_key[sort_interval_index].pop('analysis_file_name')
-            curation_waveforms_key[sort_interval_index]['sort_interval_index'] = sort_interval_index
-            #TODO: fix to create real file names and move to function
-            
-            curation_waveforms_key[sort_interval_index]['waveforms_file_name'] = recording_extractor_path + '_' + 'spike_waveforms.h5'
-            curation_waveforms_key[sort_interval_index]['noise_waveforms_file_name'] = recording_extractor_path + '_' + 'noise_waveforms.h5'
-
-            # calculate the snippet length
-            snippet_len = (int(np.rint(sampling_rate / 1000 * waveform_params['ms_before'])), 
-                           int(np.rint(sampling_rate / 1000 * waveform_params['ms_after'])))
-            print(f'snippet len: {snippet_len}')
-            # Prepare the snippets h5 file
-            le.prepare_snippets_h5_from_extractors(
-                recording=recording_extractor_cached,
-                sorting=sort,
-                output_h5_path=curation_waveforms_key[sort_interval_index]['waveforms_file_name'],
-                start_frame=None,
-                end_frame=None,
-                snippet_len = snippet_len,
-                max_events_per_unit=None,
-                max_neighborhood_size=6
-            )
-
-            # generate a set of random frame numbers for noise snippets
-            # start by getting the first and last frame for this epoch
-            #frames = recording_extractor_cached.get_epoch_info(str(sort_interval_index))
-            rng = np.random.default_rng()
-            noise_frames = np.sort(np.random.randint(0, recording_extractor_cached.get_num_frames(), sorting_waveform_param['n_noise_waveforms']))
-             
-            noise_sorting=se.NumpySortingExtractor()
-            noise_sorting.set_times_labels(times=noise_frames,labels=np.zeros(noise_frames.shape))
-            le.prepare_snippets_h5_from_extractors(
-                recording=recording_extractor_cached,
-                sorting=noise_sorting,
-                output_h5_path=curation_waveforms_key[sort_interval_index]['noise_waveforms_file_name'],
-                start_frame=None,
-                end_frame=None,
-                snippet_len = snippet_len,
-                max_events_per_unit=None,
-                max_neighborhood_size=10000
-            )
+ 
+        # Get the list of valid times for this sort interval
+        recording_extractor, sort_interval_valid_times = self.get_recording_extractor(key, sort_interval)
+        sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
+                                                    'parameter_set_name': key['parameter_set_name']}).fetch1()
+        # get a name for the recording extractor for this sort interval
+        recording_extractor_path = os.path.join(os.environ['SPIKE_SORTING_STORAGE_DIR'], 
+                                                key['analysis_file_name'], np.array2string(sort_interval))
+        recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor, save_path=recording_extractor_path)
+        print(f'Sorting {key}...')
+        sort = si.sorters.run_mountainsort4(recording=recording_extractor_cached, 
+                                            **sort_parameters['parameter_dict'], 
+                                            grouping_property='group', 
+                                            output_folder=os.getenv('SORTING_TEMP_DIR', None))
+        # create a stack of labelled arrays of the sorted spike times
+        timestamps = np.asarray(raw_data_obj.timestamps)
+        unit_ids = sort.get_unit_ids()
+        # get the waveforms
+        waveform_params = sorting_waveform_param['waveform_parameter_dict']
+        #TODO: remove this code fully once we're using the labbox ephys waveform extractor corrrectly
+        # if sorting_waveform_param['save_all_waveforms']:
+        #     max_spikes = waveform_params['max_spikes_per_unit']
+        #     # get all of the waveforms for curation and, if specified, to save
+        #     waveform_params['max_spikes_per_unit'] = 1e100
+        #     waveforms = st.postprocessing.get_unit_waveforms(recording_extractor_cached, sort, unit_ids, **waveform_params)
+        #     # reset the max_spikes_per_unit 
+        #     waveform_params['max_spikes_per_unit'] = max_spikes
+        # else: 
+        #     waveforms = None
+        
+        templates = st.postprocessing.get_unit_templates(recording_extractor_cached, sort, **waveform_params)
 
  
-            for index, unit_id in enumerate(unit_ids):
-                current_index = unit_id + unit_id_offset
-                unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)  
-                #print(f'template for {unit_id}: {unit_templates[unit_id]} ')
-                units[current_index] = timestamps[unit_spike_samples]
-                # the templates are zero based, so we have to use the index here. 
-                units_templates[current_index] = templates[index]
-                if sorting_waveform_param['save_all_waveforms']:
-                    units_waveforms[current_index] = np.array(waveforms[index])
-                units_valid_times[current_index] = sort_interval_valid_times
-                units_sort_interval[current_index] = [sort_interval]
-            if len(unit_ids) > 0:
-                unit_id_offset += np.max(unit_ids) + 1
+        #TODO: move these waveforms to an NWB object
+        tmp_waveform_file = recording_extractor_path + '_' + 'spike_waveforms.h5'
+        tmp_noise_waveform_file = recording_extractor_path + '_' + 'noise_waveforms.h5'
 
-        if not sorting_waveform_param['save_all_waveforms']:
-            units_waveforms = None
+        # calculate the snippet length
+        snippet_len = (int(np.rint(sampling_rate / 1000 * waveform_params['ms_before'])), 
+                        int(np.rint(sampling_rate / 1000 * waveform_params['ms_after'])))
+        #TODO: write new labbox ephys function to store waveforms in AnalysisNWBFile
+        # Prepare the snippets h5 file
+        le.prepare_snippets_h5_from_extractors(
+            recording=recording_extractor_cached,
+            sorting=sort,
+            output_h5_path=tmp_waveform_file,
+            start_frame=None,
+            end_frame=None,
+            snippet_len = snippet_len,
+            max_events_per_unit=None,
+            max_neighborhood_size=6
+        )
+
+        # generate a set of random frame numbers for noise snippets
+        # start by getting the first and last frame for this epoch
+        #frames = recording_extractor_cached.get_epoch_info(str(sort_interval_index))
+        rng = np.random.default_rng()
+        noise_frames = np.sort(np.random.randint(0, recording_extractor_cached.get_num_frames(), sorting_waveform_param['n_noise_waveforms']))
+            
+        noise_sorting=se.NumpySortingExtractor()
+        noise_sorting.set_times_labels(times=noise_frames,labels=np.zeros(noise_frames.shape))
+        le.prepare_snippets_h5_from_extractors(
+            recording=recording_extractor_cached,
+            sorting=noise_sorting,
+            output_h5_path=tmp_noise_waveform_file,
+            start_frame=None,
+            end_frame=None,
+            snippet_len = snippet_len,
+            max_events_per_unit=None,
+            max_neighborhood_size=10000
+        )
+
+
+        for index, unit_id in enumerate(unit_ids):
+            unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)  
+            #print(f'template for {unit_id}: {unit_templates[unit_id]} ')
+            #TODO: check in that unit_spike_samples are actually indeces into the timestamps and not some truncated version thereof
+            units[unit_id] = timestamps[unit_spike_samples]
+            # the templates are zero based, so we have to use the index here. 
+            units_templates[unit_id] = templates[index]
+            #TODO make sure unit_waveforms are saved correct.y
+            # units_waveforms[unit_id] = np.array(waveforms[index])
+            units_valid_times[unit_id] = sort_interval_valid_times
+            units_sort_interval[unit_id] = [sort_interval]
+
+        # TODO: remove once we are saving the waveforms correctly
+        units_waveforms = None
 
         #Add the units to the Analysis file       
         # TODO: consider replacing with spikeinterface call if possible 
@@ -397,18 +378,17 @@ class SpikeSorting(dj.Computed):
                                                                 units_sort_interval, units_waveforms=units_waveforms)
         key['units_object_id'] = units_object_id
         key['units_waveforms_object_id'] = units_waveforms_object_id
+        #TODO: fix once noise waveforms are saved to the file
+        key['noise_waveforms_object_id'] = ''
         self.insert1(key)
 
-        # loop through the sort intervals and insert the file information for each one
-        # TODO: use a single insert call
-        for sort_interval_index, sort_interval in enumerate(sort_intervals):
-            SpikeSorting().CurationWaveforms().insert1(curation_waveforms_key[sort_interval_index])
+ 
 
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
-    def get_recording_extractor(self, key, sort_interval, sort_interval_index):
+    def get_recording_extractor(self, key, sort_interval):
         """Given a key containing the key fields for a SpikeSorting schema, and the interval to be sorted,
          returns the recording extractor object (see the spikeinterface package for details)
 
@@ -416,8 +396,6 @@ class SpikeSorting(dj.Computed):
         :type key: dict
         :param sort_interval: [start_time, end_time]
         :type sort_interval: 1D array with the start and end times for this sort
-        :param sort_interval_index: the index of this sort interval in the overall sort interval list. Used to name the epoch (str(sort_interval_index))
-        :type sort_interval_index: int
         :return: (recording_extractor, sort_interval_valid_times)
         :rtype: tuple with spikeextractor recording extractor object and valid times list
         """
@@ -447,7 +425,7 @@ class SpikeSorting(dj.Computed):
         electrode_ids = (SortGroup.SortGroupElectrode() & {'nwb_file_name' : key['nwb_file_name'], 
                                                         'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
         raw_data.set_channel_groups([key['sort_group_id']]*len(electrode_ids), channel_ids=electrode_ids)
-        epoch_name = str(sort_interval_index)
+        epoch_name = np.array2string(sort_interval)
         raw_data.add_epoch(epoch_name, sort_indeces[0], sort_indeces[1])
         # restrict the raw data to the specific samples
         raw_data_epoch = raw_data.get_epoch(epoch_name)

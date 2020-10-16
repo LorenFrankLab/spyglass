@@ -35,12 +35,12 @@ class IntervalList(dj.Manual):
 
 
 @schema
-class SortIntervalList(dj.Manual):
+class SortInterval(dj.Manual):
     definition = """
     -> Session
-    sort_interval_list_name: varchar(200) #descriptive name of this interval list
+    sort_interval_name: varchar(200) #descriptive name for this interval 
     ---
-    sort_intervals: longblob # 2D numpy array with start and end times for each interval to be used for spike sorting
+    sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
 
 #TODO: make all of the functions below faster if possible
