@@ -55,6 +55,7 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
 
             # add link to raw ephys ElectricalSeries from raw data file
             nwbf_export.add_acquisition(raw_ephys)
+            nwbf_export.set_modified()  # workaround until the above sets modified=True on the file
 
             export_io.write(nwbf_export)
 
