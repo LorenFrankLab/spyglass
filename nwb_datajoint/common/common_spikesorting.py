@@ -258,6 +258,8 @@ class SpikeSorting(dj.Computed):
     units_object_id: varchar(40) # the object ID for the units for this sort group
     units_waveforms_object_id : varchar(40) # the object ID for the unit waveforms
     noise_waveforms_object_id: varchar(40) # the object ID for the noise waveforms
+    time_of_sort = 0: int # This is when the sort was done.
+
     """
 
     def make(self, key):

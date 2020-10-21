@@ -49,6 +49,23 @@ class Nwbfile(dj.Manual):
         nwb_file_abspath = os.path.join(base_dir, nwb_file_name)
         return nwb_file_abspath
 
+    @staticmethod
+    def add_to_lock(nwb_file_name):
+        """ Adds the specified nwbfile to the file with the list of nwb files to be locked
+
+        :param nwb_file_name: the name of an nwb file that has been inserted into the Nwbfile() schema
+        :type nwb_file_name: string
+        :return: None
+        """
+        key = {'nwb_file_name' : nwb_file_name}
+        # check to make sure the file exists
+        assert len((Nwbfile() & key).fetch()) > 0, f'Error adding {nwb_file_name} to lock file, not in Nwbfile() schema'
+        
+        lock_file = open(os.getenv('NWB_LOCK_FILE'), 'a+')
+        lock_file.write(f'{nwb_file_name}\n')
+        lock_file.close()
+            
+
 
 #TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
 # We therefore need another way to keep track of the 
@@ -122,6 +139,21 @@ class AnalysisNwbfile(dj.Manual):
 
         analysis_nwb_file_abspath = os.path.join(base_dir, 'analysis', analysis_nwb_file_name)
         return analysis_nwb_file_abspath
+
+    @staticmethod
+    def add_to_lock(analysis_file_name):
+        """ Adds the specified analysis nwbfile to the file with the list of nwb files to be locked
+
+        :param analysis_file_name: the name of an nwb file that has been inserted into the Nwbfile() schema
+        :type nwb_file_name: string
+        :return: None
+        """
+        key = {'analysis_file_name' : analysis_file_name}
+        # check to make sure the file exists
+        assert len((AnalysisNwbfile() & key).fetch()) > 0, f'Error adding {analysis_file_name} to lock file, not in AnalysisNwbfile() schema'
+        lock_file = open(os.getenv('ANALYSIS_LOCK_FILE'), 'a+')
+        lock_file.write(f'{analysis_file_name}\n')
+        lock_file.close()
 
     def add_nwb_object(self, analysis_file_name, nwb_object):
         #TODO: change to add_object with checks for object type and a name parameter, which should be specified if it is not
