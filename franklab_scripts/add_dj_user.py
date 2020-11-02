@@ -17,7 +17,7 @@ else:
 file = tempfile.NamedTemporaryFile(mode='w')
 
 file.write("GRANT ALL PRIVILEGES ON `{}\_%`.* TO `{}`@\'%\' IDENTIFIED BY \'temppass\';\n".format(username, username))
-file.write("GRANT INSERT, UPDATE ON `common\_%`.* TO `{}`@'%';\n".format(username))
+file.write("GRANT ALL PRIVILEGES ON `common\_%`.* TO `{}`@'%';\n".format(username))
 file.write("GRANT SELECT ON `%`.* TO `{}`@'%';\n".format(username))
 file.flush()
 
