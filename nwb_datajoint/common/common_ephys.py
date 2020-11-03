@@ -215,7 +215,7 @@ class Raw(dj.Imported):
 @schema
 class SampleCount(dj.Imported):
     definition = """
-    # Sample count / timestamp timeseries
+    # Sample count :s timestamp timeseries
     -> Session
     ---
     sample_count_object_id: varchar(40)      # the NWB object ID for loading this object from the file
@@ -227,7 +227,7 @@ class SampleCount(dj.Imported):
             nwbf = io.read()
             # get the sample count object
             #TODO: change name when nwb file is changed
-            sample_count = get_data_interface(nwbf, 'CameraSampleFrameCounts')
+            sample_count = get_data_interface(nwbf, 'sample_count')
             if sample_count is None:
                 print(f'WARNING: Unable to get sample count object in: {nwb_file_abspath}')
                 return

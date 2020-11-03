@@ -9,8 +9,9 @@ from .common_dio import DIOEvents
 def populate_all_common():
     print('Populate Session...')
     Session().populate()
-    print('Populate NwbfileKachery...')
-    NwbfileKachery.populate()
+    #If we use Kachery for data sharing we could uncomment the following two lines. TBD
+    #print('Populate NwbfileKachery...')
+    #NwbfileKachery.populate()
     print('Populate ExperimenterList...')
     ExperimenterList().populate()
     print('Populate ElectrodeGroup...')

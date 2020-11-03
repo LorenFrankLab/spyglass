@@ -114,7 +114,7 @@ class AnalysisNwbfile(dj.Manual):
         n_analysis_files = len((AnalysisNwbfile() & {'parent_nwb_file': nwb_file_name}).fetch())
         # name the file, adding the number of files with preceeding zeros
 
-        analysis_file_name = os.path.splitext(nwb_file_name)[0] + '_' + str(n_analysis_files).zfill(6) + '.nwb'
+        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_analysis_files).zfill(6) + '.nwb'
         key['analysis_file_name'] = analysis_file_name
         key['analysis_file_description'] = ''
         # write the new file

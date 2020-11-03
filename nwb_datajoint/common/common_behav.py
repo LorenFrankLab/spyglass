@@ -113,7 +113,6 @@ class VideoFile(dj.Imported):
         # get the interval for the current TaskEpoch
         #print(f'key = {key}')
         interval_list_name = (TaskEpoch() & key).fetch1('interval_list_name')
-        print(interval_list_name)
         valid_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'], 
                                        'interval_list_name' : interval_list_name}).fetch1('valid_times')
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
