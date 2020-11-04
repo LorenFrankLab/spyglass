@@ -9,7 +9,7 @@ from .common_dio import DIOEvents
 def populate_all_common():
     print('Populate Session...')
     Session().populate()
-    #If we use Kachery for data sharing we could uncomment the following two lines. TBD
+    #If we use Kachery for data sharing we can uncomment the following two lines. TBD
     #print('Populate NwbfileKachery...')
     #NwbfileKachery.populate()
     print('Populate ExperimenterList...')
