@@ -157,6 +157,9 @@ class SortGroup(dj.Manual):
 
         key['sort_group_id'] = sort_group_id
         sort_group_electrodes = (SortGroup.SortGroupElectrode() & key).fetch()
+        electrode_group_name = sort_group_electrodes['electrode_group_name'][0]
+        probe_type = (ElectrodeGroup & {'nwb_file_name' : nwb_file_name, 
+                                        'electrode_group_name' : electrode_group_name}).fetch1('probe_type')
         channel_group[sort_group_id] = dict()
         channel_group[sort_group_id]['channels'] = sort_group_electrodes['electrode_id'].tolist()
         geometry = list()
@@ -164,8 +167,8 @@ class SortGroup(dj.Manual):
         for electrode_id in channel_group[sort_group_id]['channels']:
             # get the relative x and y locations of this channel from the probe table
             probe_electrode = int(electrodes['probe_electrode'][electrodes['electrode_id'] == electrode_id])
-            rel_x, rel_y = (Probe().Electrode() & {'probe_electrode' : probe_electrode}).fetch(
-                'rel_x','rel_y')
+            rel_x, rel_y = (Probe().Electrode() & {'probe_type': probe_type, 
+                                                    'probe_electrode' : probe_electrode}).fetch('rel_x','rel_y')
             rel_x = float(rel_x)
             rel_y = float(rel_y)
             geometry.append([rel_x, rel_y])
@@ -488,3 +491,21 @@ class SpikeSorting(dj.Computed):
         output.set_times_labels(times=np.asarray(unit_timestamps),labels=np.asarray(unit_labels))
         return output
 
+
+
+
+
+""" for curation feed reading:
+import kachery_p2p as kp
+a = kp.load_feed('feed://...')
+b= a.get_subfeed(dict(documentId='default', key='sortings'))
+b.get_all_messages()
+
+result is list of dictionaries
+
+
+During creation of feed:
+feed_uri = create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
+
+Pull option-create_snapshot branch
+"""
