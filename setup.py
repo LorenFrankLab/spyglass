@@ -15,7 +15,7 @@ setuptools.setup(
         'networkx',
         'python-intervals',
         'matplotlib',
-        'numpy',
+        'numpy>=1.19.4',
         'scipy',
         'python-dateutil',
         'datajoint',
