@@ -111,9 +111,8 @@ class AnalysisNwbfile(dj.Manual):
         key = dict()
         key['nwb_file_name'] = nwb_file_name
         # get the current number of analysis files related to this nwb file
-        n_analysis_files = len((AnalysisNwbfile() & {'parent_nwb_file': nwb_file_name}).fetch())
+        n_analysis_files = len((AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch())
         # name the file, adding the number of files with preceeding zeros
-
         analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_analysis_files).zfill(6) + '.nwb'
         key['analysis_file_name'] = analysis_file_name
         key['analysis_file_description'] = ''

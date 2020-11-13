@@ -21,7 +21,7 @@ import json
 import h5py as h5
 from tempfile import NamedTemporaryFile
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
-from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indeces
+from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices
 from .dj_helper_fn import dj_replace, fetch_nwb
 
 from mountainlab_pytools.mdaio import readmda
@@ -326,8 +326,6 @@ class SpikeSorting(dj.Computed):
             waveform_param_name = (SpikeSortingParameters() & key).fetch1('waveform_parameters_name')
             sorting_waveform_param = (SpikeSortingWaveformParameters() & {'waveform_parameters_name' : waveform_param_name}).fetch1()
 
-
-    
             # Get the list of valid times for this sort interval
             recording_extractor, sort_interval_valid_times = self.get_recording_extractor(key, sort_interval)
             sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
@@ -391,7 +389,7 @@ class SpikeSorting(dj.Computed):
             for index, unit_id in enumerate(unit_ids):
                 unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)  
                 #print(f'template for {unit_id}: {unit_templates[unit_id]} ')
-                #TODO: check in that unit_spike_samples are actually indeces into the timestamps and not some truncated version thereof
+                #TODO: check in that unit_spike_samples are actually indices into the timestamps and not some truncated version thereof
                 units[unit_id] = timestamps[unit_spike_samples]
                 # the templates are zero based, so we have to use the index here. 
                 units_templates[unit_id] = templates[index]
@@ -434,20 +432,20 @@ class SpikeSorting(dj.Computed):
         sort_interval_valid_times = interval_list_intersect(np.array([sort_interval]), valid_times)
                                  
         raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
-        # get the indeces of the data to use. Note that spike_extractors has a time_to_frame function, 
+        # get the indices of the data to use. Note that spike_extractors has a time_to_frame function, 
         # but it seems to set the time of the first sample to 0, which will not match our intervals
         timestamps = np.asarray(raw_data_obj.timestamps)
-        sort_indeces = np.searchsorted(timestamps, np.ravel(sort_interval))
-        assert sort_indeces[1] - sort_indeces[0] > 1000, f'Error in get_recording_extractor: sort indeces {sort_indeces} are not valid'
+        sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
+        assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
         
-        #print(f'sample indeces: {sort_indeces}')
+        #print(f'sample indices: {sort_indices}')
 
         # Use spike_interface to run the sorter on the selected sort group
         raw_data = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']), electrical_series_name='e-series')
         
         # Blank out non-valid times. 
-        exclude_inds = interval_list_excludes_ind(sort_interval_valid_times, timestamps)
-        exclude_inds = exclude_inds[exclude_inds <= sort_indeces[-1]]
+        exclude_inds = interval_list_excludes_ind(sort_interval_valid_times, timestamps[sort_indices[0]:sort_indices[1]])
+        exclude_inds = exclude_inds[exclude_inds <= sort_indices[-1]]
         # TODO: add a blanking function to the preprocessing module 
         raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
 
@@ -456,7 +454,7 @@ class SpikeSorting(dj.Computed):
                                                         'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
         raw_data.set_channel_groups([key['sort_group_id']]*len(electrode_ids), channel_ids=electrode_ids)
         epoch_name = np.array2string(sort_interval)
-        raw_data.add_epoch(epoch_name, sort_indeces[0], sort_indeces[1])
+        raw_data.add_epoch(epoch_name, sort_indices[0], sort_indices[1])
         # restrict the raw data to the specific samples
         raw_data_epoch = raw_data.get_epoch(epoch_name)
         
@@ -497,17 +495,17 @@ class SpikeSorting(dj.Computed):
         unit_labels = []
         
         raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
-        # get the indeces of the data to use. Note that spike_extractors has a time_to_frame function, 
+        # get the indices of the data to use. Note that spike_extractors has a time_to_frame function, 
         # but it seems to set the time of the first sample to 0, which will not match our intervals
         timestamps = np.asarray(raw_data_obj.timestamps)
-        sort_indeces = np.searchsorted(timestamps, np.ravel(sort_interval))
+        sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
        
         unit_timestamps_list = []
         # TODO: do something more efficient here; note that searching for maching sort_intervals within pandas doesn't seem to work
         for index, unit in units.iterrows():
             if np.ndarray.all(np.ravel(unit['sort_interval']) == sort_interval):
                 #unit_timestamps.extend(unit['spike_times'])
-                unit_frames = np.searchsorted(timestamps, unit['spike_times']) - sort_indeces[0]
+                unit_frames = np.searchsorted(timestamps, unit['spike_times']) - sort_indices[0]
                 unit_timestamps.extend(unit_frames)
                 #unit_timestamps_list.append(unit_frames)
                 unit_labels.extend([index]*len(unit['spike_times']))
