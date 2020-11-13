@@ -516,7 +516,21 @@ class SpikeSorting(dj.Computed):
         return output
 
 
+@schema
+class CuratedSpikeSorting(dj.Computed):
+    definition = """
+    -> SpikeSorting
+    """
 
+    class Units(dj.Part):
+        definition = """
+        -> master
+        unit_id: int # the cluster number for this unit 
+        ---
+        noise_overlap: float # the noise overlap metric
+        isolation_score: float # the isolation score metric
+        snr : float
+        """        
 
 
 """ for curation feed reading:
