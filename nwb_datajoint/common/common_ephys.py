@@ -19,7 +19,7 @@ import json
 import h5py as h5
 from tempfile import NamedTemporaryFile
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
-from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indeces, get_data_interface
+from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices, get_data_interface
 from .dj_helper_fn import dj_replace, fetch_nwb
 
 used = [Session, BrainRegion, Probe, IntervalList]
@@ -445,9 +445,9 @@ class LFPBand(dj.Computed):
         #get the electrodes to be filtered and their references
         lfp_band_elect_id, lfp_band_ref_id = (LFPBandSelection().LFPBandElectrode() & key).fetch('electrode_id', 'reference_elect_id')
 
-        # get the indeces of the electrodes to be filtered and the references     
-        lfp_band_elect_index = get_electrode_indeces(lfp_object, lfp_band_elect_id)
-        lfp_band_ref_index = get_electrode_indeces(lfp_object, lfp_band_ref_id)
+        # get the indices of the electrodes to be filtered and the references     
+        lfp_band_elect_index = get_electrode_indices(lfp_object, lfp_band_elect_id)
+        lfp_band_ref_index = get_electrode_indices(lfp_object, lfp_band_ref_id)
 
         # subtract off the references for the selected channels  
         for index, elect_index in enumerate(lfp_band_elect_index):

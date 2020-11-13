@@ -1,6 +1,7 @@
 import pynwb
 import ndx_franklab_novela
 import shutil
+from .nwb_helper_fn import get_data_interface
 
 
 def copy_all_but_raw_ephys(nwb_file_abspath, out_nwb_file_abspath):
@@ -9,6 +10,14 @@ def copy_all_but_raw_ephys(nwb_file_abspath, out_nwb_file_abspath):
 
         # pop off the unnecessary elements to save space
         nwbf.acquisition.pop('e-series')
+        # test removal of analog data
+        """
+        analog_found = False
+        if len(get_data_interface(nwbf, 'analog')):
+            analog_found = True
+            nwbf.processing['analog'].data_interfaces
+        nwbf.
+        """
 
         # export the new NWB file
         with pynwb.NWBHDF5IO(path=out_nwb_file_abspath, mode='w') as export_io:

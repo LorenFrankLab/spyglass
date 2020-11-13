@@ -29,6 +29,7 @@ from mountainlab_pytools.mdaio import readmda
 used = [Session, BrainRegion, Probe, IntervalList, Raw]
 
 schema = dj.schema('common_spikesorting')
+
 @schema 
 class SortGroup(dj.Manual):
     definition = """

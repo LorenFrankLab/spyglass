@@ -4,7 +4,7 @@ import pynwb
 import numpy as np
 import pandas as pd
 from .dj_helper_fn import dj_replace, fetch_nwb
-from .nwb_helper_fn import get_electrode_indeces
+from .nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_lab", locals())
 
@@ -235,17 +235,17 @@ class AnalysisNwbfile(dj.Manual):
             else: 
                 return ''
 
-    def get_electrode_indeces(self, analysis_file_name, electrode_ids):
-        """Given an analysis NWB file name, returns the indeces of the specified electrode_ids. 
+    def get_electrode_indices(self, analysis_file_name, electrode_ids):
+        """Given an analysis NWB file name, returns the indices of the specified electrode_ids. 
         :param analysis_file_name: analysis NWB file name
         :type analysi_file_name: str 
         :param electrode_ids: array or list of electrode_ids
         :type electrode_ids: numpy array or list
-        :return: electrode_indeces (numpy array of indeces)
+        :return: electrode_indices (numpy array of indices)
         """
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
-            return get_electrode_indeces(nwbf.electrodes, electrode_ids)
+            return get_electrode_indices(nwbf.electrodes, electrode_ids)
 
 @schema 
 class NwbfileKachery(dj.Computed):
