@@ -1,0 +1,23 @@
+datajoint
+nodejs (conda install -c conda-forge/label/cf202003 nodejs)
+hither
+spikeinterface
+ml_ms4alg
+
+then:
+nwb_datajoint (main thing)
+ndx-novela (why do we need this?)
+labbox-ephys (needed for snippets)
+
+if cannot connect to dj, then downgrade pymysql to 0.9.2
+if cannot write nwb, then downgrade h5py to 2.10.0
+if stall during spikesorting, then upgrade numpy to 1.19.4
+if cannot get waveforms, downgrade following packages to these versions:
+spikecomparison           0.3.0                    pypi_0    pypi
+spikeextractors           0.9.1                    pypi_0    pypi
+spikefeatures             0.1.1                    pypi_0    pypi
+spikeinterface            0.10.0                   pypi_0    pypi
+spikemetrics              0.2.2                    pypi_0    pypi
+spikesorters              0.4.2                    pypi_0    pypi
+spiketoolkit              0.7.0                    pypi_0    pypi
+spikewidgets              0.5.0                    pypi_0    pypi
