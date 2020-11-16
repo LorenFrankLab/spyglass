@@ -537,7 +537,7 @@ class CuratedSpikeSorting(dj.Computed):
 import kachery_p2p as kp
 a = kp.load_feed('feed://...')
 b= a.get_subfeed(dict(documentId='default', key='sortings'))
-b.get_all_messages()
+b.get_next_messages()
 
 result is list of dictionaries
 
