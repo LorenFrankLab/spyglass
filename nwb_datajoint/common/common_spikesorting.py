@@ -19,6 +19,8 @@ import numpy as np
 import scipy.signal as signal
 import json
 import h5py as h5
+import kachery_p2p as kp
+import kachery as ka
 from tempfile import NamedTemporaryFile
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices
@@ -266,6 +268,7 @@ class SpikeSorting(dj.Computed):
     units_waveforms_object_id : varchar(40) # the object ID for the unit waveforms
     noise_waveforms_object_id: varchar(40) # the object ID for the noise waveforms
     time_of_sort = 0: int # This is when the sort was done.
+    curation_feed_uri: varchar(40) # URI of the feed to be used by labbox-ephys during curation
     """
 
     def make(self, key):
@@ -409,6 +412,65 @@ class SpikeSorting(dj.Computed):
         key['units_waveforms_object_id'] = units_waveforms_object_id
         #TODO: fix once noise waveforms are saved to the file
         key['noise_waveforms_object_id'] = ''
+        
+        # -----------------------------------------------------------------
+        # generate feed for labbox-ephys to be used during curation
+        # -----------------------------------------------------------------
+        # first, store and get URI of the snippets h5 file
+        snippets_h5_uri = self.get_kachery_store_uri(tmp_waveform_file)
+        
+        # get recording and sorting extractors
+        recording_obj = {
+            'recording_format': 'snippets1',
+            'data': {
+                'snippets_h5_uri': snippets_h5_uri
+            }
+        }
+        sorting_obj = {
+            'sorting_format': 'snippets1',
+            'data': {
+                'snippets_h5_uri': snippets_h5_uri
+            }
+        }
+        recording = le.LabboxEphysRecordingExtractor(recording_obj)
+        sorting = le.LabboxEphysSortingExtractor(sorting_obj)
+        
+        # add messages
+        le_recordings = []
+        le_sortings = []
+    
+        le_recordings.append(dict(
+            recordingId = 'loren_example1', # what to call this?
+            recordingLabel = 'loren_example1', # what to call this?
+            recordingPath = ka.store_object(recording_obj, basename='loren_example1.json'),
+            recordingObject = recording_obj,
+            description='''
+            Example from Loren Frank # 
+            '''.strip()
+        ))
+        le_sortings.append(dict(
+            sortingId='loren_example1:mountainsort4',
+            sortingLabel='loren_example1:mountainsort4',
+            sortingPath=ka.store_object(sorting_obj, basename='loren_example-mountainsort4.json'),
+            sortingObject=sorting_obj,
+
+            recordingId='loren_example1',
+            recordingPath=ka.store_object(recording_obj, basename='loren_example1.json'),
+            recordingObject=recording_obj,
+
+            description='''
+            Example from Loren Frank (MountainSort4)
+            '''.strip()
+        ))
+        
+        # Create the feed
+        # NOTE: This part won't work unless a kachery-p2p daemon is running in the background.
+        # The daemon must be in the same channel as the daemon in the labbox ephys container (flatiron1).
+        # Even if the feed can be opened by the GUI, it will not be writable because of permission issues
+        # for difference instances of kachery-p2p daemons.
+        feed_uri = create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
+        key['curation_feed_uri'] = feed_uri
+        
         self.insert1(key)
 
  
@@ -515,7 +577,53 @@ class SpikeSorting(dj.Computed):
         output.set_times_labels(times=np.asarray(unit_timestamps),labels=np.asarray(unit_labels))
         return output
 
-
+    def get_kachery_store_uri(self, path_h5file):
+        """
+        stores the .h5 snippets file to kachery storage and returns the uri
+        """
+        with ka.config(use_hard_links=True): # what is a hard link?
+            kachery_path = ka.store_file(nwb_file_abs_path)
+            uri = ka.get_file_hash(kachery_path)
+        return uri
+    
+    def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=True):
+        """
+        creates feed to be used by labbox ephys during curation
+        """
+        try:
+            f = kp.create_feed()
+            recordings = f.get_subfeed(dict(documentId='default', key='recordings'))
+            sortings = f.get_subfeed(dict(documentId='default', key='sortings'))
+            for le_recording in le_recordings:
+                recordings.append_message(dict(
+                    action=dict(
+                        type='ADD_RECORDING',
+                        recording=le_recording
+                    )
+                ))
+            for le_sorting in le_sortings:
+                sortings.append_message(dict(
+                    action=dict(
+                        type='ADD_SORTING',
+                        sorting=le_sorting
+                    )
+                ))
+            # for action in le_curation_actions:
+            #     sortings.append_message(dict(
+            #         action=action
+            #     ))
+            if create_snapshot:
+                x = f.create_snapshot([
+                    dict(documentId='default', key='recordings'),
+                    dict(documentId='default', key='sortings')
+                ])
+                return x.get_uri()
+            else:
+                return f.get_uri()
+        finally:
+            if create_snapshot:
+                f.delete()        
+        
 @schema
 class CuratedSpikeSorting(dj.Computed):
     definition = """
