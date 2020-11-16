@@ -268,7 +268,7 @@ class SpikeSorting(dj.Computed):
     units_waveforms_object_id : varchar(40) # the object ID for the unit waveforms
     noise_waveforms_object_id: varchar(40) # the object ID for the noise waveforms
     time_of_sort = 0: int # This is when the sort was done.
-    curation_feed_uri: varchar(40) # URI of the feed to be used by labbox-ephys during curation
+    curation_feed_uri: varchar(80) # URI of the feed to be used by labbox-ephys during curation
     """
 
     def make(self, key):
@@ -418,19 +418,16 @@ class SpikeSorting(dj.Computed):
         # -----------------------------------------------------------------
         # first, store and get URI of the snippets h5 file
         snippets_h5_uri = self.get_kachery_store_uri(tmp_waveform_file)
+        print(snippets_h5_uri)
         
         # get recording and sorting extractors
         recording_obj = {
             'recording_format': 'snippets1',
-            'data': {
-                'snippets_h5_uri': snippets_h5_uri
-            }
+            'data': {'snippets_h5_uri': snippets_h5_uri}
         }
         sorting_obj = {
             'sorting_format': 'snippets1',
-            'data': {
-                'snippets_h5_uri': snippets_h5_uri
-            }
+            'data': {'snippets_h5_uri': snippets_h5_uri}
         }
         recording = le.LabboxEphysRecordingExtractor(recording_obj)
         sorting = le.LabboxEphysSortingExtractor(sorting_obj)
@@ -465,10 +462,14 @@ class SpikeSorting(dj.Computed):
         
         # Create the feed
         # NOTE: This part won't work unless a kachery-p2p daemon is running in the background.
-        # The daemon must be in the same channel as the daemon in the labbox ephys container (flatiron1).
+        # The daemon must be in the same channel and use the same port as the daemon in the labbox ephys container
+        # (e.g. kachery-p2p-start-daemon --channel flatiron1; make sure to set $KACHERY_P2P_API_PORT env var).
         # Even if the feed can be opened by the GUI, it will not be writable because of permission issues
         # for difference instances of kachery-p2p daemons.
-        feed_uri = create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
+        # In the future we will set the KACHERY_P2P_API_PORT env var and have the kachery-p2p daemon in the
+        # labbox-ephys container listen to this port upon launching.
+        feed_uri = self.create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
+        print(feed_uri)
         key['curation_feed_uri'] = feed_uri
         
         self.insert1(key)
@@ -582,9 +583,8 @@ class SpikeSorting(dj.Computed):
         stores the .h5 snippets file to kachery storage and returns the uri
         """
         with ka.config(use_hard_links=True): # what is a hard link?
-            kachery_path = ka.store_file(nwb_file_abs_path)
-            uri = ka.get_file_hash(kachery_path)
-        return uri
+            kachery_path = ka.store_file(path_h5file)
+        return kachery_path
     
     def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=True):
         """
