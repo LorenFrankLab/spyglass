@@ -432,7 +432,7 @@ class SpikeSorting(dj.Computed):
         recording = le.LabboxEphysRecordingExtractor(recording_obj)
         sorting = le.LabboxEphysSortingExtractor(sorting_obj)
         
-        # add messages
+        # add messages including the recording and sorting extractors
         le_recordings = []
         le_sortings = []
     
@@ -462,18 +462,17 @@ class SpikeSorting(dj.Computed):
         
         # Create the feed
         # NOTE: This part won't work unless a kachery-p2p daemon is running in the background.
-        # The daemon must be in the same channel and use the same port as the daemon in the labbox ephys container
+        # This daemon must be in the same channel and use the same port as the daemon in the
+        # labbox-ephys container for the feed to be loaded and edited by the GUI.
         # (e.g. kachery-p2p-start-daemon --channel flatiron1; make sure to set $KACHERY_P2P_API_PORT env var).
-        # Even if the feed can be opened by the GUI, it will not be writable because of permission issues
-        # for difference instances of kachery-p2p daemons.
-        # In the future we will set the KACHERY_P2P_API_PORT env var and have the kachery-p2p daemon in the
-        # labbox-ephys container listen to this port upon launching.
+        #
+        # Currently the feed can be opened by the GUI but not edited; in the future the kachery-p2p daemon
+        # in labbox-ephys container will listen to port set in KACHERY_P2P_API_PORT env var upon launching.
         feed_uri = self.create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
         print(feed_uri)
         key['curation_feed_uri'] = feed_uri
         
         self.insert1(key)
-
  
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
@@ -581,6 +580,8 @@ class SpikeSorting(dj.Computed):
     def get_kachery_store_uri(self, path_h5file):
         """
         stores the .h5 snippets file to kachery storage and returns the uri
+        
+        :path_h5file: full path to the h5 file containing spike snippets
         """
         with ka.config(use_hard_links=True): # what is a hard link?
             kachery_path = ka.store_file(path_h5file)
@@ -588,7 +589,9 @@ class SpikeSorting(dj.Computed):
     
     def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=True):
         """
-        creates feed to be used by labbox ephys during curation
+        creates feed to be used by labbox-ephys during curation
+        
+        :create_snapshot: set to False if want writable feed
         """
         try:
             f = kp.create_feed()
