@@ -1,4 +1,5 @@
 import os
+import pathlib
 import datajoint as dj
 import pynwb
 import numpy as np
@@ -22,7 +23,7 @@ class Nwbfile(dj.Manual):
     definition = """
     nwb_file_name: varchar(255) #the name of the NWB file
     ---
-    nwb_file_abs_path: varchar(255) # the full path name to the file
+    nwb_file_abs_path: filepath@raw
     """
     def insert_from_relative_file_name(self, nwb_file_name):
         """Insert a new session from an existing nwb file.
@@ -38,16 +39,14 @@ class Nwbfile(dj.Manual):
             nwb_file_name=nwb_file_name,
             nwb_file_abs_path=nwb_file_abs_path,
         ), skip_duplicates=True)
-
- 
     
     @staticmethod
     def get_abs_path(nwb_file_name):
-        base_dir = os.getenv('NWB_DATAJOINT_BASE_DIR', None)
+        base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
         assert base_dir is not None, 'You must set NWB_DATAJOINT_BASE_DIR or provide the base_dir argument'
 
-        nwb_file_abspath = os.path.join(base_dir, nwb_file_name)
-        return nwb_file_abspath
+        nwb_file_abspath = base_dir / 'raw' / nwb_file_name
+        return str(nwb_file_abspath)
 
     @staticmethod
     def add_to_lock(nwb_file_name):
@@ -64,7 +63,12 @@ class Nwbfile(dj.Manual):
         lock_file = open(os.getenv('NWB_LOCK_FILE'), 'a+')
         lock_file.write(f'{nwb_file_name}\n')
         lock_file.close()
-            
+
+    def cleanup(self, delete_files=False): 
+        """ Removes the filepath entries for nwb files that are not in use. Does not delete the files themselves. 
+        Run this after deleting the Nwbfile() entries themselves."""
+        self.external['raw'].delete(delete_external_files=delete_files)
+
 
 
 #TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
@@ -75,7 +79,7 @@ class AnalysisNwbfile(dj.Manual):
     analysis_file_name: varchar(255) # the name of the file 
     ---
     -> Nwbfile # the name of the parent NWB file. Used for naming and metadata copy
-    analysis_file_abs_path: varchar(255) # the full path of the file
+    analysis_file_abs_path: filepath@analysis
     analysis_file_description='': varchar(255) # an optional description of this analysis
     analysis_parameters=NULL: blob # additional relevant parmeters. Currently used only for analyses that span multiple NWB files
     """
@@ -175,26 +179,6 @@ class AnalysisNwbfile(dj.Manual):
             io.write(nwbf)
             return nwb_object.object_id
 
-    # def add(analysis_file_name, object, name=None):
-    #     #Adds any vali
-    #     """Adds an object to the analysis file in the scratch area and returns the nwb object id. 
-    #     The object must be of a type that can be added to the nwbfile scratch space (see pynwb documentation for add_scratch)
-
-    #     :param analysis_file_name: the name of the analysis nwb file
-    #     :type analysis_file_name: str
-    #     :param object: the object created by pynwb
-    #     :type 
-    #     :param processing_module: the name of the processing module to create, defaults to 'analysis'
-    #     :type processing_module: str, optional
-    #     :return: the nwb object id of the added object
-    #     :rtype: str
-    #     """
-    #     #open the file, write the new object and return the object id
-    #     with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
-    #         nwbf=io.read()
-    #         nwbf.add_scratch(nwb_object)
-    #         io.write(nwbf)
-    #         return nwb_object.object_id   
 
     def add_units(self, analysis_file_name, units, units_templates, units_valid_times, units_sort_interval, units_waveforms=None):
         """[Given a units dictionary where each entry has a unit id as the key and spike times as the data
@@ -246,6 +230,14 @@ class AnalysisNwbfile(dj.Manual):
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
             return get_electrode_indices(nwbf.electrodes, electrode_ids)
+
+    def cleanup(self, delete_files=False): 
+        """ Removes the filepath entries for nwb files that are not in use. Does not delete the files themselves unless 
+        delete_files=True is specified. Run this after deleting the Nwbfile() entries themselves.
+        :param delete_files: True if original files be deleted (default False
+        :type delete_files: bool 
+        """
+        self.external['analysis'].delete(delete_external_files=delete_files)
 
 @schema 
 class NwbfileKachery(dj.Computed):
