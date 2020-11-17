@@ -35,7 +35,7 @@ def kachery_storage_dir():
     You must set the KACHERY_STORAGE_DIR environment variable.
     And it should be equal to $NWB_DATAJOINT_BASE_DIR/kachery-storage
     '''
-    assert p == base + '/kachery-storage', f'''
+    assert p == os.path.join(base, 'kachery-storage'), f'''
     Although KACHERY_STORAGE_DIR is set, it is not equal to $NWB_DATAJOINT_BASE_DIR/kachery-storage
     
     Current values:
