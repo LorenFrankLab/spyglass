@@ -463,16 +463,16 @@ class SpikeSorting(dj.Computed):
         ))
         
         # check if KACHERY_P2P_API_PORT is set
-        kp_port = os.getenv('KACHERY_P2P_API_PORT', None)
-        assert kp_port is not None, 'You must set KACHERY_P2P_API_PORT'
+        kp_port = os.getenv('KACHERY_P2P_API_PORT', False)
+        assert kp_port, 'You must set KACHERY_P2P_API_PORT environmental variable'
         
         # check if the kachery p2p daemon is running in the background
         # also check if it is in the right channel
         try:
             kp_channel = kp.get_channels()
-            assert kp_channel, 'You must run the Kachery P2P daemon in flatiron1 channel (i.e. kachery-p2p-start-daemon --channel flatiron1)'
+            assert kp_channel, 'You must run the kachery-p2p daemon in flatiron1 channel (i.e. kachery-p2p-start-daemon --channel flatiron1)'
         except ConnectionError:
-            raise RuntimeError('You must have a Kachery P2P daemon running in the background')
+            raise RuntimeError('You must have a kachery-p2p daemon running in the background')
             
         # Create the feed
         
@@ -591,7 +591,7 @@ class SpikeSorting(dj.Computed):
         output.set_times_labels(times=np.asarray(unit_timestamps),labels=np.asarray(unit_labels))
         return output
 
-    def get_kachery_store_uri(self, path_h5file):
+    def get_kachery_store_uri(self, path_h5file: str) -> str:
         """
         stores the .h5 snippets file to kachery storage and returns the uri
         
@@ -601,7 +601,7 @@ class SpikeSorting(dj.Computed):
             kachery_path = ka.store_file(path_h5file)
         return kachery_path
     
-    def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=True):
+    def create_labbox_ephys_feed(self, le_recordings: list[dict], le_sortings: list[dict], create_snapshot=True):
         """
         creates feed to be used by labbox-ephys during curation
         
