@@ -28,6 +28,8 @@ from .dj_helper_fn import dj_replace, fetch_nwb
 
 from mountainlab_pytools.mdaio import readmda
 
+from requests.exceptions import ConnectionError
+
 used = [Session, BrainRegion, Probe, IntervalList, Raw]
 
 schema = dj.schema('common_spikesorting')
@@ -460,11 +462,23 @@ class SpikeSorting(dj.Computed):
             '''.strip()
         ))
         
+        # check if KACHERY_P2P_API_PORT is set
+        kp_port = os.getenv('KACHERY_P2P_API_PORT', None)
+        assert kp_port is not None, 'You must set KACHERY_P2P_API_PORT'
+        
+        # check if the kachery p2p daemon is running in the background
+        # also check if it is in the right channel
+        try:
+            kp_channel = kp.get_channels()
+            assert kp_channel, 'You must run the Kachery P2P daemon in flatiron1 channel (i.e. kachery-p2p-start-daemon --channel flatiron1)'
+        except ConnectionError:
+            raise RuntimeError('You must have a Kachery P2P daemon running in the background')
+            
         # Create the feed
+        
         # NOTE: This part won't work unless a kachery-p2p daemon is running in the background.
         # This daemon must be in the same channel and use the same port as the daemon in the
         # labbox-ephys container for the feed to be loaded and edited by the GUI.
-        # (e.g. kachery-p2p-start-daemon --channel flatiron1; make sure to set $KACHERY_P2P_API_PORT env var).
         #
         # Currently the feed can be opened by the GUI but not edited; in the future the kachery-p2p daemon
         # in labbox-ephys container will listen to port set in KACHERY_P2P_API_PORT env var upon launching.
