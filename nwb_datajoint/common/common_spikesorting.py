@@ -468,6 +468,7 @@ class SpikeSorting(dj.Computed):
         
         # check if the kachery p2p daemon is running in the background
         # also check if it is in the right channel
+        # TODO: run kachery from python
         try:
             kp_channel = kp.get_channels()
             assert kp_channel, 'You must run the kachery-p2p daemon in flatiron1 channel (i.e. kachery-p2p-start-daemon --channel flatiron1)'
@@ -486,6 +487,7 @@ class SpikeSorting(dj.Computed):
         print(feed_uri)
         key['curation_feed_uri'] = feed_uri
         
+        # a funciton that runs the gui with the uri
         self.insert1(key)
  
     def fetch_nwb(self, *attrs, **kwargs):
@@ -601,7 +603,7 @@ class SpikeSorting(dj.Computed):
             kachery_path = ka.store_file(path_h5file)
         return kachery_path
     
-    def create_labbox_ephys_feed(self, le_recordings: list[dict], le_sortings: list[dict], create_snapshot=True):
+    def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=True):
         """
         creates feed to be used by labbox-ephys during curation
         
