@@ -214,6 +214,10 @@ class SpikeSorterParameters(dj.Manual):
     parameter_set_name: varchar(80) # label for this set of parameters
     ---
     parameter_dict: blob # dictionary of parameter names and values
+    frequency_min=300: int # high pass filter value
+    frequency_max=6000: int # low pass filter value
+    filter_width=1000: int # the number of coefficients in the filter
+    filter_chunk_size=30000: int # the size of the chunk for the filtering
     """
 
     def insert_from_spikeinterface(self):
@@ -240,9 +244,88 @@ class SpikeSortingWaveformParameters(dj.Manual):
     definition = """
     waveform_parameters_name: varchar(80) # the name for this set of waveform extraction parameters
     ---
-    n_noise_waveforms=1000: int # the number of random noise waveforms to save
     waveform_parameter_dict: blob # a dictionary containing the SpikeInterface waveform parameters
     """
+
+@schema
+class SpikeSortingMetrics(dj.Manual):
+    definition = """
+    cluster_metrics_list_name: varchar(80) # the name for this list of cluster metrics 
+    ---
+    metrics_dict: blob # a dictionariy of SpikeInterface metrics with True / False elements to indicate whether a given metric should be computed.
+    n_noise_waveforms=1000: int # the number of random noise waveforms to use for the noise overlap
+    n_cluster_waveforms=10000: int # the maximum number of spikes / waveforms from a cluster to use for metric calculations
+    isi_threshold=0.003: float # Interspike interval threshold in s for ISI metric (default 0.003)
+    snr_mode='mad':enum('mad', 'std') # SNR mode: median absolute deviation ('mad) or standard deviation ('std') (default 'mad')
+    snr_noise_duration=10.0 : float # length of data to use for noise estimation (default 10.0)
+    max_channel_peak='both' : enum('both', 'neg', 'pos') # direction of the maximum channel peak: 'both', 'neg', or 'pos' (default 'both')
+    drift_metrics_interval_s=60: float # length of period in s for evaluating drift (default 60 s)
+    drift_metrics_min_spikes_per_interval=10: int # minimum number of spikes in an interval for evaluation of drift (default 10)
+    num_channels_to_compare=7: int # number of channels to be used for the PC extraction and comparison (default 7)
+    n_neighbors=4: int # number of nearest clusters to use for nearest neighbor calculation (default 4)
+    """
+   
+    def get_metric_dict(self):
+        """Get the current list of metrics from spike interface and create a dictionary with all False elemnets.
+           Users should set the desired set of metrics to be true and insert a new entry for that set.
+        """
+        metrics_list =  st.validation.get_quality_metrics_list()
+        metric_dict = dict()
+        return {metric: False for metric in metrics_list}
+        
+
+    @staticmethod
+    def selected_metrics_list(metrics_dict):
+        return [metric for metric in metrics_dict.keys() if metrics_dict[metric]]
+
+    def validate_metrics_list(self, key):
+        """ Checks whether metrics_list contains only valid metric names
+
+        :param key: key for metrics to validate
+        :type key: dict
+        :return: True or False
+        :rtype: boolean
+        """
+        #TODO: get list of valid metrics from spiketoolkit when available
+        valid_metrics = self.get_metric_dict()
+        metrics_dict = (self & key).fetch1('metrics_dict')
+        valid = True
+        for metric in metrics_dict:
+            if not metric in valid_metrics.keys():
+                print(f'Error: {metric} not in list of valid metrics: {valid_metrics}')
+                valid = False
+        return valid
+
+    def compute_metrics(self, key, recording, sorting):
+        """Use spike interface to compute the list of selected metrics for a particular sorting
+
+        :param key: the cluster_metrics_list_name 
+        :type key: str
+        :param recording: recording object
+        :type recording: spike interface recording object
+        :param sorting: sorting object
+        :type sorting: spike interface sorting object
+        :return: metrics
+        :rtype: dataframe
+        """
+        m = (self & key).fetch(as_dict=True)[0]
+        
+        return st.validation.compute_quality_metrics(sorting, 
+                                                    recording=recording, 
+                                                    metric_names=self.selected_metrics_list(m['metrics_dict']),
+                                                    as_dataframe=True,
+                                                    isi_threshold=m['isi_threshold'], 
+                                                    snr_mode=m['snr_mode'],
+                                                    snr_noise_duration=m['snr_noise_duration'], 
+                                                    max_spikes_per_unit_for_snr=m['n_cluster_waveforms'], 
+                                                    max_channel_peak=m['max_channel_peak'], 
+                                                    drift_metrics_interval_s=m['drift_metrics_interval_s'],
+                                                    drift_metrics_min_spikes_per_interval=m['drift_metrics_min_spikes_per_interval'],
+                                                    max_spikes_for_silhouette=m['n_cluster_waveforms'],
+                                                    num_channels_to_compare=m['num_channels_to_compare'],
+                                                    max_spikes_per_cluster=m['n_cluster_waveforms'],
+                                                    max_spikes_for_nn=m['n_cluster_waveforms'],
+                                                    n_neighbors=m['n_neighbors'])
 
 @schema
 class SpikeSortingParameters(dj.Manual):
@@ -252,6 +335,7 @@ class SpikeSortingParameters(dj.Manual):
     -> SortInterval # the time interval to be used for sorting
     ---
     -> SpikeSortingWaveformParameters 
+    -> SpikeSortingMetrics
     -> IntervalList # the valid times for the raw data (excluding artifacts, etc. if desired)  
     import_path = '': varchar(200) #optional path to previous curated sorting output
     """
@@ -271,6 +355,7 @@ class SpikeSorting(dj.Computed):
     def make(self, key):
         print('in spike sorting')
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
+ 
         # get the sort interval 
         sort_interval =  (SortInterval() & {'nwb_file_name' : key['nwb_file_name'],
                                         'sort_interval_name' : key['sort_interval_name']})\
@@ -318,11 +403,15 @@ class SpikeSorting(dj.Computed):
                 units_valid_times[unit_id] = sort_interval_valid_times
                 units_sort_interval[unit_id] = [sort_interval]
 
-            #TODO: move the lines below to the CuratedUnits table
-            #metrics_path = (sort_path / 'metrics_processed.json').exists()
-            #assert metrics_path.exists(), f'Error: {metrics_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}
-            #metrics_processed = json.load(metrics_path)
+            #TODO: Process metrics and store in Units table. 
+            metrics_path = (sort_path / 'metrics_processed.json').exists()
+            assert metrics_path.exists(), f'Error: {metrics_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
+            metrics_processed = json.load(metrics_path)
         else: 
+            metrics_key = dict(cluster_metrics_list_name = (SpikeSortingParameters() & key).fetch1('cluster_metrics_list_name'))
+            # could check that the metrics to be calculated are valid:
+            #assert SpikeSortingMetrics.validate_metrics_list(dict(cluster_metrics_list_name=cluster_metrics_list_name))
+
             sampling_rate = estimate_sampling_rate(timestamps[0:100000], 1.5)
             waveform_param_name = (SpikeSortingParameters() & key).fetch1('waveform_parameters_name')
             sorting_waveform_param = (SpikeSortingWaveformParameters() & {'waveform_parameters_name' : waveform_param_name}).fetch1()
@@ -340,6 +429,11 @@ class SpikeSorting(dj.Computed):
                                                 **sort_parameters['parameter_dict'], 
                                                 grouping_property='group', 
                                                 output_folder=os.getenv('SORTING_TEMP_DIR', None))
+
+
+            # compute the metrics requested
+            
+            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording_extractor_cached, sort)
             # create a stack of labelled arrays of the sorted spike times
             timestamps = np.asarray(raw_data_obj.timestamps)
             unit_ids = sort.get_unit_ids()
@@ -404,7 +498,11 @@ class SpikeSorting(dj.Computed):
         # TODO: consider replacing with spikeinterface call if possible 
         units_object_id, units_waveforms_object_id = AnalysisNwbfile().add_units(key['analysis_file_name'], units, 
                                                                 units_templates, units_valid_times,
-                                                                units_sort_interval, units_waveforms=units_waveforms)
+                                                                units_sort_interval, metrics=metrics, units_waveforms=units_waveforms)
+
+        # Now that the Analysis NWB file is written, add it to the AnalysisNWBFile Schema:
+        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
+
         key['units_object_id'] = units_object_id
         key['units_waveforms_object_id'] = units_waveforms_object_id
         #TODO: fix once noise waveforms are saved to the file
@@ -471,14 +569,20 @@ class SpikeSorting(dj.Computed):
         else:
             raw_data_epoch_referenced = raw_data_epoch
 
+        #filter the data
+        param = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
+                                                        'parameter_set_name': key['parameter_set_name']}).fetch1()
+        raw_data_epoch_referenced_filtered = st.preprocessing.bandpass_filter(raw_data_epoch_referenced, freq_min=param['frequency_min'], 
+                                                                              freq_max=param['frequency_max'], freq_wid=param['filter_width'],
+                                                                              chunk_size = param['filter_chunk_size'])
         # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
         with tempfile.TemporaryDirectory() as tmp_dir:
             prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')
             SortGroup().write_prb(key['sort_group_id'], key['nwb_file_name'], prb_file_name)
             # add the probe geometry to the raw_data recording
-            raw_data_epoch_referenced.load_probe_file(prb_file_name)
+            raw_data_epoch_referenced_filtered.load_probe_file(prb_file_name)
 
-        return se.SubRecordingExtractor(raw_data_epoch_referenced,channel_ids=electrode_ids), sort_interval_valid_times
+        return se.SubRecordingExtractor(raw_data_epoch_referenced_filtered,channel_ids=electrode_ids), sort_interval_valid_times
 
     def get_sorting_extractor(self, key, sort_interval):
         #TODO: replace with spikeinterface call if possible
