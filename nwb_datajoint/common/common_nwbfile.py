@@ -79,7 +79,7 @@ class AnalysisNwbfile(dj.Manual):
     analysis_file_name: varchar(255) # the name of the file 
     ---
     -> Nwbfile # the name of the parent NWB file. Used for naming and metadata copy
-    analysis_file_abs_path: filepath@analysis
+    analysis_file_abs_path: filepath@analysis # the full path to the file
     analysis_file_description='': varchar(255) # an optional description of this analysis
     analysis_parameters=NULL: blob # additional relevant parmeters. Currently used only for analyses that span multiple NWB files
     """
@@ -91,7 +91,8 @@ class AnalysisNwbfile(dj.Manual):
 
     def create(self, nwb_file_name):
         '''
-        Opens the input NWB file, creates a copy, writes out the copy to disk and return the name of the new file
+        Opens the input NWB file, creates a copy, writes out the copy to disk and return the name of the new file.
+        Note that this does NOT add the file to the schema; that needs to be done after data are written to it.
         :param nwb_file_name: str
         :return: analysis_file_name: str
         '''
@@ -131,9 +132,24 @@ class AnalysisNwbfile(dj.Manual):
         io.close()
 
         # insert the new file
-        self.insert1(key)
+        #self.insert1(key)
         return analysis_file_name
 
+    def add(self, nwb_file_name, analysis_file_name):
+        """ Adds the specified file to the schema
+        :param nwb_file_name: the name of the parent nwb file 
+        :type nwb_file_name: string
+        :param analysis_file_name: the name of the analysis nwb file that was created
+        :type analysis_file_name: string
+        :return: None
+        """
+        key = dict()
+        key['nwb_file_name'] = nwb_file_name
+        key['analysis_file_name'] = analysis_file_name
+        key['analysis_file_description'] = ''
+        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        key['analysis_file_abs_path'] = analysis_file_abs_path
+        self.insert1(key)
 
     @staticmethod
     def get_abs_path(analysis_nwb_file_name):
@@ -180,7 +196,7 @@ class AnalysisNwbfile(dj.Manual):
             return nwb_object.object_id
 
 
-    def add_units(self, analysis_file_name, units, units_templates, units_valid_times, units_sort_interval, units_waveforms=None):
+    def add_units(self, analysis_file_name, units, units_templates, units_valid_times, units_sort_interval, metrics=None, units_waveforms=None):
         """[Given a units dictionary where each entry has a unit id as the key and spike times as the data
 
         :param analysis_file_name: the name of the analysis nwb file
@@ -193,8 +209,10 @@ class AnalysisNwbfile(dj.Manual):
         :type units_valid_times: dict
         :param units_sort_interval: dictionary of units and sort_interval with unit ids as keys
         :type units_sort_interval: dict
-        :param units_waveforms: dictionary of unit wavforms with unit ids as keys (optional)
+        :param units_waveforms: optional dictionary of unit waveforms with unit ids as keys (optional)
         :type units_waveforms: dict
+        :param metrics: optional cluster metrics
+        :type units_waveforms: dataframe
         :return: the nwb object id of the Units object and the object id of the waveforms object ('' if None)
         """
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
@@ -207,6 +225,11 @@ class AnalysisNwbfile(dj.Manual):
                     sort_intervals.append(units_sort_interval[id])
                 # add a column for the sort interval
                 nwbf.add_unit_column(name='sort_interval', description='the interval used for spike sorting', data=sort_intervals)
+                # if metrics were specified, add one column per metric
+                if metrics is not None:
+                    for metric in list(metrics):
+                        print(f'adding metric {metric} : {metrics[metric].to_list()}')
+                        nwbf.add_unit_column(name=metric, description=f'{metric} sorting metric', data=metrics[metric].to_list())
                 # if the waveforms were specified, add them as a dataframe 
                 waveforms_object_id = ''
                 if units_waveforms is not None:
