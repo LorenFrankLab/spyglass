@@ -96,6 +96,15 @@ class TaskEpoch(dj.Imported):
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
             nwbf = io.read()
+            camera_name = dict()
+            # the tasks refer to the camera_id which is unique for the NWB file but not for CameraDevice schema, so we need to look up the right camer
+            for d in nwbf.devices:
+                if 'camera_device' in d:
+                    device = nwbf.devices[d]
+                    # get the camera ID
+                    c = str.split(d)
+                    camera_name[int(c[1])] = device.camera_name
+
             # find the task modules and for each one, add the task to the Task schema if it isn't there 
             # and then add an entry for each epoch
             # TODO: change to new task structure
@@ -110,11 +119,13 @@ class TaskEpoch(dj.Imported):
                     key['task_name'] = task.task_name[0]
                     # get the camera used for this task. Use 'none' if there was no camera
                     try:
-                        camera_id = task.camera_id[0]
-                        key['camera_name'] = (CameraDevice() & {'nwb_file_name' : nwb_file_name,
-                                                    'camera_id': int(task.camera_id[0])}).fetch1('camera_name')
+                        camera_id = int(task.camera_id[0])
+                        key['camera_name'] = camera_name[camera_id]
                     except:
                         key['camera_name'] = 'none'
+                    # make sure the 'none' camera is in the CameraDevice table and add if not
+                    if len((CameraDevice() & {'camera_name' : 'none'}).fetch()) == 0:
+                        CameraDevice().insert1({'camera_name' : 'none'})
                     # get the interval list for this task, which corresponds to the matching epoch for the raw data.
                     # Users should define more restrictive intervals as required for analyses
                     session_intervals = (IntervalList() & {'nwb_file_name' : nwb_file_name}).fetch('interval_list_name')

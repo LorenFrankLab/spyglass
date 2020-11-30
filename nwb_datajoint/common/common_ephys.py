@@ -4,7 +4,7 @@ import tempfile
 from .common_session import Session
 from .common_region import BrainRegion
 from .common_device import Probe
-from .common_interval import IntervalList, SortIntervalList, interval_list_intersect, interval_list_excludes_ind
+from .common_interval import IntervalList, SortInterval, interval_list_intersect, interval_list_excludes_ind
 from .common_filter import FirFilter
 
 import spikeinterface as si
@@ -19,7 +19,7 @@ import json
 import h5py as h5
 from tempfile import NamedTemporaryFile
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
-from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indeces, get_data_interface
+from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices, get_data_interface
 from .dj_helper_fn import dj_replace, fetch_nwb
 
 used = [Session, BrainRegion, Probe, IntervalList]
@@ -215,7 +215,7 @@ class Raw(dj.Imported):
 @schema
 class SampleCount(dj.Imported):
     definition = """
-    # Sample count / timestamp timeseries
+    # Sample count :s timestamp timeseries
     -> Session
     ---
     sample_count_object_id: varchar(40)      # the NWB object ID for loading this object from the file
@@ -227,7 +227,7 @@ class SampleCount(dj.Imported):
             nwbf = io.read()
             # get the sample count object
             #TODO: change name when nwb file is changed
-            sample_count = get_data_interface(nwbf, 'CameraSampleFrameCounts')
+            sample_count = get_data_interface(nwbf, 'sample_count')
             if sample_count is None:
                 print(f'WARNING: Unable to get sample count object in: {nwb_file_abspath}')
                 return
@@ -445,9 +445,9 @@ class LFPBand(dj.Computed):
         #get the electrodes to be filtered and their references
         lfp_band_elect_id, lfp_band_ref_id = (LFPBandSelection().LFPBandElectrode() & key).fetch('electrode_id', 'reference_elect_id')
 
-        # get the indeces of the electrodes to be filtered and the references     
-        lfp_band_elect_index = get_electrode_indeces(lfp_object, lfp_band_elect_id)
-        lfp_band_ref_index = get_electrode_indeces(lfp_object, lfp_band_ref_id)
+        # get the indices of the electrodes to be filtered and the references     
+        lfp_band_elect_index = get_electrode_indices(lfp_object, lfp_band_elect_id)
+        lfp_band_ref_index = get_electrode_indices(lfp_object, lfp_band_ref_id)
 
         # subtract off the references for the selected channels  
         for index, elect_index in enumerate(lfp_band_elect_index):

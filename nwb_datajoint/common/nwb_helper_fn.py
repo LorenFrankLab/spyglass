@@ -63,7 +63,7 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
 
     #all true entries of gap represent gaps. Get the times bounding these intervals.
     gapind = np.asarray(np.where(gap))
-    # The end of each valid interval are the indeces of the gaps and the final value
+    # The end of each valid interval are the indices of the gaps and the final value
     valid_end = np.append(gapind, np.asarray(len(timestamps)-1))
 
     # the beginning of the gaps are the first element and gapind+1
@@ -80,14 +80,14 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
 
     return valid_times[valid_intervals,:]
 
-def get_electrode_indeces(electrical_series, electrode_ids):
-    """Given an NWB file or electrical series object , returns the indeces of the specified electrode_ids. 
+def get_electrode_indices(electrical_series, electrode_ids):
+    """Given an NWB file or electrical series object , returns the indices of the specified electrode_ids. 
 
     :param electrical_series: NWB file handle or nwb electrical series object
     :type electrical_series: 
     :param electrode_ids: array or list of electrode_ids
     :type electrode_ids: numpy array or list
-    :return: electrode_indeces (numpy array of indeces)
+    :return: electrode_indices (numpy array of indices)
     """
     electrode_table_region = list(electrical_series.electrodes.to_dataframe().index)
     return [elect_idx for elect_idx, elect_id in enumerate(electrode_table_region) if elect_id in electrode_ids]

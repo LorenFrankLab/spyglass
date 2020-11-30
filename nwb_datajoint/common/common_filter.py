@@ -7,7 +7,7 @@ import ghostipy as gsp
 import matplotlib.pyplot as plt
 import uuid
 import h5py as h5
-from .nwb_helper_fn import get_electrode_indeces
+from .nwb_helper_fn import get_electrode_indices
 from .common_nwbfile import AnalysisNwbfile
 
 schema = dj.schema('common_filter')
@@ -147,8 +147,8 @@ class FirFilter(dj.Manual):
         electrode_axis = 1 - time_axis
         input_dim_restrictions = [None] * n_dim
 
-        # to get the input dimension restrictions we need to look at the electrode table for the eseries and get the indeces from that
-        input_dim_restrictions[electrode_axis] = np.s_[get_electrode_indeces(eseries, electrode_ids)]
+        # to get the input dimension restrictions we need to look at the electrode table for the eseries and get the indices from that
+        input_dim_restrictions[electrode_axis] = np.s_[get_electrode_indices(eseries, electrode_ids)]
 
         indices = []
         output_shape_list = [0] * n_dim
@@ -183,8 +183,8 @@ class FirFilter(dj.Manual):
         # open the nwb file to create the dynamic table region and electrode series, then write and close the file
         with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a") as io:
             nwbf=io.read()
-            # get the indeces of the electrodes in the electrode table
-            elect_ind = get_electrode_indeces(nwbf, electrode_ids)
+            # get the indices of the electrodes in the electrode table
+            elect_ind = get_electrode_indices(nwbf, electrode_ids)
 
             electrode_table_region = nwbf.create_electrode_table_region(elect_ind, 'filtered electrode table')
             eseries_name = 'filtered data'
