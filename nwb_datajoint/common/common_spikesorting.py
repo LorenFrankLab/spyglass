@@ -673,4 +673,32 @@ During creation of feed:
 feed_uri = create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
 
 Pull option-create_snapshot branch
+----------
+metrics
+----------
+- add to units table
+- isolation score, noise overlap
+- waveform samples
+- want to recompute metrics after merge
+
+- looking at spikeinterface to figure out which metrics it is computing and where
+- SNR, dprime, drift, firing rates, nearest neighbor metrics
+- once we have sorting and recording, can just call functions to compute these
+- as soon as sorting is done we call these
+- spike sorting parameters: need a dictionary for all the metrics we compute
+- store in nwb units table
+- would have to create new units table after merges
+- can get rid of unnecessary waveforms
+- ryan will take metrics from units table to labbox ephys
+- labboxepys doesnt have noise overlap
+- noise overlap: how similar are random waveforms to your waveforms
+- mlsm4-alg has feature to toss clusters below noise overlap
+- TODO:
+- parse the feed; and add labels to units table in analysisNWB file and then maybe datajoint
+- nwb file put into kachery
+- labboxy can read from this file via plugin
+- curate
+- take that feed back into datajoint
+- lables lvie only in datajoint units table
+- when pulling back into dj, create new units table that reflects merges
 """
