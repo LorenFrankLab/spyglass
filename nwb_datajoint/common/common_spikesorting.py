@@ -14,6 +14,7 @@ import spiketoolkit as st
 import pynwb
 import re
 import os
+import socket
 import pathlib
 import numpy as np
 import scipy.signal as signal
@@ -517,10 +518,10 @@ class SpikeSorting(dj.Computed):
         # generate feed for labbox-ephys to be used during curation
         # -----------------------------------------------------------------
         # first, store and get URI of the snippets h5 file
-        snippets_h5_uri = self.get_kachery_store_uri(tmp_waveform_file)
-        print(snippets_h5_uri)
+#         snippets_h5_uri = self.get_kachery_store_uri(tmp_waveform_file)
+        snippets_h5_uri = ka.store_file(tmp_waveform_file)
         
-        # get recording and sorting extractors
+        # get labbox recording and sorting extractors
         recording_obj = {
             'recording_format': 'snippets1',
             'data': {'snippets_h5_uri': snippets_h5_uri}
@@ -565,28 +566,24 @@ class SpikeSorting(dj.Computed):
         assert kp_port, 'You must set KACHERY_P2P_API_PORT environmental variable'
         
         # check if the kachery p2p daemon is running in the background
-        # also check if it is in the right channel
         # TODO: run kachery from python
         try:
             kp_channel = kp.get_channels()
-            assert kp_channel, 'You must run the kachery-p2p daemon in flatiron1 channel (i.e. kachery-p2p-start-daemon --channel flatiron1)'
+#             assert kp_channel, 'You must run the kachery-p2p daemon in flatiron1 channel (i.e. kachery-p2p-start-daemon --channel flatiron1)'
         except ConnectionError:
-            raise RuntimeError('You must have a kachery-p2p daemon running in the background')
+            raise RuntimeError('You must have a kachery-p2p daemon running in the background (kachery-p2p-start-daemon --label <name-of-node> --config https://gist.githubusercontent.com/khl02007/b3a092ba3e590946480fb1267964a053/raw/f05eda4789e61980ce630b23ed38a7593f58a7d9/franklab_kachery-p2p_config.yaml)')
             
         # Create the feed
-        
         # NOTE: This part won't work unless a kachery-p2p daemon is running in the background.
-        # This daemon must be in the same channel and use the same port as the daemon in the
-        # labbox-ephys container for the feed to be loaded and edited by the GUI.
-        #
-        # Currently the feed can be opened by the GUI but not edited; in the future the kachery-p2p daemon
-        # in labbox-ephys container will listen to port set in KACHERY_P2P_API_PORT env var upon launching.
         feed_uri = self.create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
-        print(feed_uri)
-        key['curation_feed_uri'] = feed_uri
         
-        # a funciton that runs the gui with the uri
+        # pop into table
+        key['curation_feed_uri'] = feed_uri
         self.insert1(key)
+        
+        # Tell user how to access curation website
+        ipaddr = socket.getfqdn(socket.gethostname())
+        print('Launch labbox-ephys and go to '+ipaddr+':15310/default?feed='+feed_uri)
  
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
@@ -697,19 +694,17 @@ class SpikeSorting(dj.Computed):
         output.set_times_labels(times=np.asarray(unit_timestamps),labels=np.asarray(unit_labels))
         return output
 
-    def get_kachery_store_uri(self, path_h5file: str) -> str:
-        """
-        stores the .h5 snippets file to kachery storage and returns the uri
+#     def get_kachery_store_uri(self, path_h5file: str) -> str:
+#         """stores the .h5 snippets file to kachery storage and returns the uri
         
-        :path_h5file: full path to the h5 file containing spike snippets
-        """
-        with ka.config(use_hard_links=True): # what is a hard link?
-            kachery_path = ka.store_file(path_h5file)
-        return kachery_path
+#         :path_h5file: full path to the h5 file containing spike snippets
+#         """
+#         with ka.config(use_hard_links=True): # what is a hard link?
+#             kachery_path = ka.store_file(path_h5file)
+#         return kachery_path
     
     def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=True):
-        """
-        creates feed to be used by labbox-ephys during curation
+        """creates feed to be used by labbox-ephys during curation
         
         :create_snapshot: set to False if want writable feed
         """
@@ -752,6 +747,9 @@ class CuratedSpikeSorting(dj.Computed):
     definition = """
     -> SpikeSorting
     """
+    def make(self, key):
+        (SpikeSorting & key).fetch1()
+        self.insert(key)
 
     class Units(dj.Part):
         definition = """
@@ -800,9 +798,12 @@ metrics
 - TODO:
 - parse the feed; and add labels to units table in analysisNWB file and then maybe datajoint
 - nwb file put into kachery
-- labboxy can read from this file via plugin
+- labbox can read from this file via plugin
 - curate
 - take that feed back into datajoint
-- lables lvie only in datajoint units table
+- labels live only in datajoint units table
 - when pulling back into dj, create new units table that reflects merges
+
+labbox-launcher command:
+labbox-launcher run magland/labbox-ephys:0.4.0 --docker_run_opts "--net host -e KACHERY_P2P_API_PORT=$KACHERY_P2P_API_PORT" --kachery $KACHERY_STORAGE_DIR
 """
