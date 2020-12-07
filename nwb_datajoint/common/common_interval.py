@@ -38,7 +38,7 @@ class IntervalList(dj.Manual):
 class SortInterval(dj.Manual):
     definition = """
     -> Session
-    sort_interval_name: varchar(200) #descriptive name for this interval 
+    sort_interval_name: varchar(200) #descriptive name for this interval
     ---
     sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
@@ -55,7 +55,7 @@ def interval_list_contains_ind(valid_times, timestamps):
     """
     ind = []
     for valid_time in valid_times:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= valid_time[0], 
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= valid_time[0],
                                                    timestamps <= valid_time[1]))).tolist()
     return np.asarray(ind)
 
@@ -70,7 +70,7 @@ def interval_list_contains(valid_times, timestamps):
     """
     ind = []
     for valid_time in valid_times:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= valid_time[0], 
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= valid_time[0],
                                                    timestamps <= valid_time[1]))).tolist()
     return timestamps[ind]
 
@@ -91,10 +91,10 @@ def interval_list_excludes_ind(valid_times, timestamps):
     # add the first and last timestamp indices
     ind = []
     for invalid_time in invalid_times:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0], 
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0],
                                                    timestamps < invalid_time[1]))).tolist()
     return np.asarray(ind)
-    
+
 def interval_list_excludes(valid_times, timestamps):
     """Returns the indices of the timestamps that are excluded from the valid_times intervals
 
@@ -112,12 +112,13 @@ def interval_list_excludes(valid_times, timestamps):
     # add the first and last timestamp indices
     ind = []
     for invalid_time in invalid_times:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0], 
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0],
                                                    timestamps < invalid_time[1]))).tolist()
     return timestamps[ind]
 
 def interval_list_intersect(interval_list1, interval_list2):
-    """Finds the intersection (overlapping times) for two interval lists 
+    """
+    Finds the intersection (overlapping times) for two interval lists
 
     :param interval_list1: The first interval list
     :type interval_list1: numpy array of intervals [start, stop]
@@ -126,36 +127,41 @@ def interval_list_intersect(interval_list1, interval_list2):
     :return: interval_list
     :rtype:  numpy array of intervals [start, stop]
     """
-   
-    #print(f'interval list 1 {interval_list1}')
-    #print(f'interval list 2 {interval_list2}')
+    x = np.array([max(interval_list1[0],interval_list2[0]),
+                  min(interval_list1[1],interval_list2[1])])
+    if x[1]<x[0]:
+        x = np.array([])
+    return x
 
-    interval_list1 = np.ravel(interval_list1)
-    # create a parallel list where 1 indicates the start and -1 the end of an interval
-    interval_list1_start_end = np.ones(interval_list1.shape)
-    interval_list1_start_end[1::2] = -1
-    
-    interval_list2 = np.ravel(interval_list2)
-    # create a parallel list for the second interval where 2 indicates the start and -2 the end of an interval
-    interval_list2_start_end = np.ones(interval_list2.shape)*2
-    interval_list2_start_end[1::2] = -2
-
-    # concatenate the two lists so we can resort the intervals and apply the same sorting to the start-stop arrays
-    combined_intervals = np.concatenate((interval_list1,interval_list2))
-    ss = np.concatenate((interval_list1_start_end, interval_list2_start_end))
-    sort_ind = np.argsort(combined_intervals)
-    combined_intervals = combined_intervals[sort_ind]
-    # a cumulative sum of 3 indicates the beginning of a joint interval, and the following element is the end
-    intersection_starts = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 3)))
-    intersection_stops = intersection_starts + 1
-    intersect = []
-    for start, stop in zip(intersection_starts, intersection_stops):
-        intersect.append([combined_intervals[start], combined_intervals[stop]])
-    return np.asarray(intersect)
+    # #print(f'interval list 1 {interval_list1}')
+    # #print(f'interval list 2 {interval_list2}')
+    #
+    # interval_list1 = np.ravel(interval_list1)
+    # # create a parallel list where 1 indicates the start and -1 the end of an interval
+    # interval_list1_start_end = np.ones(interval_list1.shape)
+    # interval_list1_start_end[1::2] = -1
+    #
+    # interval_list2 = np.ravel(interval_list2)
+    # # create a parallel list for the second interval where 2 indicates the start and -2 the end of an interval
+    # interval_list2_start_end = np.ones(interval_list2.shape)*2
+    # interval_list2_start_end[1::2] = -2
+    #
+    # # concatenate the two lists so we can resort the intervals and apply the same sorting to the start-stop arrays
+    # combined_intervals = np.concatenate((interval_list1,interval_list2))
+    # ss = np.concatenate((interval_list1_start_end, interval_list2_start_end))
+    # sort_ind = np.argsort(combined_intervals)
+    # combined_intervals = combined_intervals[sort_ind]
+    # # a cumulative sum of 3 indicates the beginning of a joint interval, and the following element is the end
+    # intersection_starts = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 3)))
+    # intersection_stops = intersection_starts + 1
+    # intersect = []
+    # for start, stop in zip(intersection_starts, intersection_stops):
+    #     intersect.append([combined_intervals[start], combined_intervals[stop]])
+    # return np.asarray(intersect)
 
 #TODO: test interval_list_union code
 def interval_list_union(interval_list1, interval_list2):
-    """Finds the union (all times in one or both) for two interval lists 
+    """Finds the union (all times in one or both) for two interval lists
 
     :param interval_list1: The first interval list
     :type interval_list1: numpy array of intervals [start, stop]
@@ -164,25 +170,27 @@ def interval_list_union(interval_list1, interval_list2):
     :return: interval_list
     :rtype:  numpy array of intervals [start, stop]
     """
-    interval_list1 = np.ravel(interval_list1)
-    # create a parallel list where 1 indicates the start and -1 the end of an interval
-    interval_list1_start_end = np.ones(interval_list1.shape)
-    interval_list1_start_end[1::2] = -1
-    
-    interval_list2 = np.ravel(interval_list2)
-    # create a parallel list for the second interval where 1 indicates the start and -1 the end of an interval
-    interval_list2_start_end = np.ones(interval_list2.shape)
-    interval_list2_start_end[1::2] = -1
-
-    # concatenate the two lists so we can resort the intervals and apply the same sorting to the start-end arrays
-    combined_intervals = np.concatenate((interval_list1,interval_list2))
-    ss = np.concatenate((interval_list1_start_end, interval_list2_start_end))
-    sort_ind = np.argsort(combined_intervals)
-    combined_intervals = combined_intervals[sort_ind]
-    # a cumulative sum of 1 indicates the beginning of a joint interval; a cumulative sum of 0 indicates the end
-    union_starts = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 1)))
-    union_stops = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 0)))
-    union = []
-    for start, stop in zip(union_starts, union_stops):
-        union.append([combined_intervals[start], combined_intervals[stop]])
-    return np.asarray(union)
+    return np.array([min(interval_list1[0],interval_list2[0]),
+                     max(interval_list1[1],interval_list2[1])])
+    # interval_list1 = np.ravel(interval_list1)
+    # # create a parallel list where 1 indicates the start and -1 the end of an interval
+    # interval_list1_start_end = np.ones(interval_list1.shape)
+    # interval_list1_start_end[1::2] = -1
+    #
+    # interval_list2 = np.ravel(interval_list2)
+    # # create a parallel list for the second interval where 1 indicates the start and -1 the end of an interval
+    # interval_list2_start_end = np.ones(interval_list2.shape)
+    # interval_list2_start_end[1::2] = -1
+    #
+    # # concatenate the two lists so we can resort the intervals and apply the same sorting to the start-end arrays
+    # combined_intervals = np.concatenate((interval_list1,interval_list2))
+    # ss = np.concatenate((interval_list1_start_end, interval_list2_start_end))
+    # sort_ind = np.argsort(combined_intervals)
+    # combined_intervals = combined_intervals[sort_ind]
+    # # a cumulative sum of 1 indicates the beginning of a joint interval; a cumulative sum of 0 indicates the end
+    # union_starts = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 1)))
+    # union_stops = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 0)))
+    # union = []
+    # for start, stop in zip(union_starts, union_stops):
+    #     union.append([combined_intervals[start], combined_intervals[stop]])
+    # return np.asarray(union)
