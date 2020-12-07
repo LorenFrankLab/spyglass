@@ -342,7 +342,7 @@ class SpikeSortingParameters(dj.Manual):
     -> SpikeSortingWaveformParameters 
     -> SpikeSortingMetrics
     -> IntervalList # the valid times for the raw data (excluding artifacts, etc. if desired)  
-    import_path = '': varchar(200) #optional path to previous curated sorting output
+    import_path = '': varchar(200) # optional path to previous curated sorting output
     """
 
 @schema 
@@ -355,34 +355,60 @@ class SpikeSorting(dj.Computed):
     units_waveforms_object_id : varchar(40) # the object ID for the unit waveforms
     noise_waveforms_object_id: varchar(40) # the object ID for the noise waveforms
     time_of_sort = 0: int # This is when the sort was done.
-    curation_feed_uri: varchar(80) # URI of the feed to be used by labbox-ephys during curation
+    curation_feed_uri: varchar(80) # URI of the feed to be used by labbox-ephys
     """
 
     def make(self, key):
-        print('in spike sorting')
+        """
+        Runs spike sorting on the data and parameters specified by the 
+        SpikeSortingParameter table and inserts a new entry to SpikeSorting table.
+        
+        - Creates an NWB file to hold the results of spike sorting
+        - Creates a spikeinterface RecordingExtractor and saves it
+        - Runs mountainsort4
+        - Computes quality metrics
+        - Saves the results to the AnalysisNWB file 
+        - Generates curation feed
+        
+        : key : partially filled entity, value of primary keys from key source
+                (in this case SpikeSortingParameters)
+        """
+        
+        # Indicate that spike sorting is starting
+        print('Starting spike sorting')
+        
+        # Create a new NWB file for holding the results of analysis (e.g. spike sorting).
+        # Save the name to the 'key' dict to use later.
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
- 
-        # get the sort interval 
+        
+        
+        # ----------------------------------------------------------------------
+        # Prepare a RecordingExtractor to pass into spike sorting
+        # ----------------------------------------------------------------------
+        # Get the sort interval 
         sort_interval =  (SortInterval() & {'nwb_file_name' : key['nwb_file_name'],
-                                        'sort_interval_name' : key['sort_interval_name']})\
+                                            'sort_interval_name' : key['sort_interval_name']})\
                                             .fetch1('sort_interval')
         interval_list_name = (SpikeSortingParameters() & key).fetch1('interval_list_name')
         valid_times =  (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
-                                        'interval_list_name' : interval_list_name})\
-                                            .fetch('valid_times')[0]   
-        # get the raw data timestamps                                   
+                                          'interval_list_name' : interval_list_name})\
+                                          .fetch('valid_times')[0]   
+        
+        # Get the timestamps for the recording                              
         raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
         timestamps = np.asarray(raw_data_obj.timestamps)
 
-        # create the dictionaries for the units
+        # Create dictionaries to hold output of spike sorting
         units = dict()
         units_valid_times = dict()
         units_sort_interval = dict()
         units_templates = dict()
-
-        # check to see if import_path is not empty and if so run the import
+        
+        # Check if spikesorting has already been run on this dataset;
+        # if import_path is not empty, that means there exists a previous spikesorting run
         import_path = (SpikeSortingParameters() & key).fetch1('import_path')
         if import_path != '':
+            # check if 
             sort_path = pathlib.Path(import_path)
             assert sort_path.exists(), f'Error: import_path {import_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             # the following assumes very specific file names from the franklab, change as needed
@@ -413,19 +439,27 @@ class SpikeSorting(dj.Computed):
             metrics_path = (sort_path / 'metrics_processed.json').exists()
             assert metrics_path.exists(), f'Error: {metrics_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             metrics_processed = json.load(metrics_path)
+            
+        # If sorting for the first time
         else: 
-            metrics_key = dict(cluster_metrics_list_name = (SpikeSortingParameters() & key).fetch1('cluster_metrics_list_name'))
+            metrics_key = dict(cluster_metrics_list_name = (SpikeSortingParameters() & 
+                                                            key).fetch1('cluster_metrics_list_name'))
+            
             # could check that the metrics to be calculated are valid:
             #assert SpikeSortingMetrics.validate_metrics_list(dict(cluster_metrics_list_name=cluster_metrics_list_name))
-
+            
+            # Get sampling rate
             sampling_rate = estimate_sampling_rate(timestamps[0:100000], 1.5)
+            
+            # Get parameters about waveform snippets
             waveform_param_name = (SpikeSortingParameters() & key).fetch1('waveform_parameters_name')
-            sorting_waveform_param = (SpikeSortingWaveformParameters() & {'waveform_parameters_name' : waveform_param_name}).fetch1()
+            sorting_waveform_param = (SpikeSortingWaveformParameters() & {'waveform_parameters_name' : 
+                                                                           waveform_param_name}).fetch1()
 
             # Get the list of valid times for this sort interval
             recording_extractor, sort_interval_valid_times = self.get_recording_extractor(key, sort_interval)
             sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
-                                                        'parameter_set_name': key['parameter_set_name']}).fetch1()
+                                                          'parameter_set_name': key['parameter_set_name']}).fetch1()
             # get a name for the recording extractor for this sort interval
             recording_extractor_path = os.path.join(os.environ['SPIKE_SORTING_STORAGE_DIR'], 
                                                     key['analysis_file_name'], np.array2string(sort_interval))
@@ -437,8 +471,7 @@ class SpikeSorting(dj.Computed):
                                                 output_folder=os.getenv('SORTING_TEMP_DIR', None))
 
 
-            # compute the metrics requested
-            
+            # compute the metrics requested         
             metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording_extractor_cached, sort)
             # create a stack of labelled arrays of the sorted spike times
             timestamps = np.asarray(raw_data_obj.timestamps)
@@ -500,11 +533,11 @@ class SpikeSorting(dj.Computed):
         # TODO: remove once we are saving the waveforms correctly
         units_waveforms = None
 
-        #Add the units to the Analysis file       
+        # Add the units to the Analysis file       
         # TODO: consider replacing with spikeinterface call if possible 
         units_object_id, units_waveforms_object_id = AnalysisNwbfile().add_units(key['analysis_file_name'], units, 
                                                                 units_templates, units_valid_times,
-                                                                units_sort_interval, metrics=metrics, units_waveforms=units_waveforms)
+                                                                units_sort_interval, metrics=metrics,    units_waveforms=units_waveforms)
 
         # Now that the Analysis NWB file is written, add it to the AnalysisNWBFile Schema:
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
@@ -522,40 +555,39 @@ class SpikeSorting(dj.Computed):
         snippets_h5_uri = ka.store_file(tmp_waveform_file)
         
         # get labbox recording and sorting extractors
-        recording_obj = {
-            'recording_format': 'snippets1',
-            'data': {'snippets_h5_uri': snippets_h5_uri}
-        }
-        sorting_obj = {
-            'sorting_format': 'snippets1',
-            'data': {'snippets_h5_uri': snippets_h5_uri}
-        }
-        recording = le.LabboxEphysRecordingExtractor(recording_obj)
-        sorting = le.LabboxEphysSortingExtractor(sorting_obj)
-        
-        # add messages including the recording and sorting extractors
+        recording, sorting = self.prepare_recording_sorting(snippets_h5_uri)        
+        unit_ids = sorting.get_unit_ids()
+
+        # Create a test sorting unit metric
+        test_metric = dict(
+            name='test_metric',
+            label='Test',
+            tooltip='Timepoint of first firing event',
+            data=dict(zip([str(uid) for uid in unit_ids], [sorting.get_unit_spike_train(unit_id=uid)[0] for uid in unit_ids]))
+        )
+        external_unit_metrics = [test_metric]
+
+        # Assemble the labbox-ephys recording and sorting
         le_recordings = []
         le_sortings = []
-    
         le_recordings.append(dict(
-            recordingId = 'loren_example1', # what to call this?
-            recordingLabel = 'loren_example1', # what to call this?
-            recordingPath = ka.store_object(recording_obj, basename='loren_example1.json'),
-            recordingObject = recording_obj,
+            recordingId='loren_example1',
+            recordingLabel='loren_example1',
+            recordingPath=kp.store_object(recording.object(), basename='loren_example1.json'),
+            recordingObject=recording.object(),
             description='''
-            Example from Loren Frank # 
+            Example from Loren Frank
             '''.strip()
         ))
         le_sortings.append(dict(
             sortingId='loren_example1:mountainsort4',
             sortingLabel='loren_example1:mountainsort4',
-            sortingPath=ka.store_object(sorting_obj, basename='loren_example-mountainsort4.json'),
-            sortingObject=sorting_obj,
-
+            sortingPath=kp.store_object(sorting.object(), basename='loren_example-mountainsort4.json'),
+            sortingObject=sorting.object(),
             recordingId='loren_example1',
-            recordingPath=ka.store_object(recording_obj, basename='loren_example1.json'),
-            recordingObject=recording_obj,
-
+            recordingPath=kp.store_object(recording.object(), basename='loren_example1.json'),
+            recordingObject=recording.object(),
+            externalUnitMetricsUri=kp.store_object(external_unit_metrics, basename='unit_metrics.json'),
             description='''
             Example from Loren Frank (MountainSort4)
             '''.strip()
@@ -566,18 +598,17 @@ class SpikeSorting(dj.Computed):
         assert kp_port, 'You must set KACHERY_P2P_API_PORT environmental variable'
         
         # check if the kachery p2p daemon is running in the background
-        # TODO: run kachery from python
         try:
             kp_channel = kp.get_channels()
 #             assert kp_channel, 'You must run the kachery-p2p daemon in flatiron1 channel (i.e. kachery-p2p-start-daemon --channel flatiron1)'
         except ConnectionError:
             raise RuntimeError('You must have a kachery-p2p daemon running in the background (kachery-p2p-start-daemon --label <name-of-node> --config https://gist.githubusercontent.com/khl02007/b3a092ba3e590946480fb1267964a053/raw/f05eda4789e61980ce630b23ed38a7593f58a7d9/franklab_kachery-p2p_config.yaml)')
             
-        # Create the feed
+        # Create the labbox-ephys feed
         # NOTE: This part won't work unless a kachery-p2p daemon is running in the background.
         feed_uri = self.create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
         
-        # pop into table
+        # Insert feed into table
         key['curation_feed_uri'] = feed_uri
         self.insert1(key)
         
@@ -589,8 +620,9 @@ class SpikeSorting(dj.Computed):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
     def get_recording_extractor(self, key, sort_interval):
-        """Given a key containing the key fields for a SpikeSorting schema, and the interval to be sorted,
-         returns the recording extractor object (see the spikeinterface package for details)
+        """
+        Given a key containing the key fields for a SpikeSorting schema, and the interval to be sorted,
+        returns the recording extractor object (see the spikeinterface package for details)
 
         :param key: key to SpikeSorting schema
         :type key: dict
@@ -614,7 +646,7 @@ class SpikeSorting(dj.Computed):
         
         #print(f'sample indices: {sort_indices}')
 
-        # Use spike_interface to run the sorter on the selected sort group
+        # Use spikeinterface to run the sorter on the selected sort group
         raw_data = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']), electrical_series_name='e-series')
         
         # Blank out non-valid times. 
@@ -644,7 +676,7 @@ class SpikeSorting(dj.Computed):
         else:
             raw_data_epoch_referenced = raw_data_epoch
 
-        #filter the data
+        # filter the data
         param = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
                                                         'parameter_set_name': key['parameter_set_name']}).fetch1()
         raw_data_epoch_referenced_filtered = st.preprocessing.bandpass_filter(raw_data_epoch_referenced, freq_min=param['frequency_min'], 
@@ -702,7 +734,28 @@ class SpikeSorting(dj.Computed):
 #         with ka.config(use_hard_links=True): # what is a hard link?
 #             kachery_path = ka.store_file(path_h5file)
 #         return kachery_path
-    
+
+    def prepare_recording_sorting(self, snippets_h5_uri):
+        """generates labbox ephys recording and sorting extractors
+        
+        :snippets_h5_uri: uri to snippets h5 file (will change in the future)
+        """
+        recording_obj = {
+            'recording_format': 'snippets1',
+            'data': {
+                'snippets_h5_uri': snippets_h5_uri
+            }
+        }
+        sorting_obj = {
+            'sorting_format': 'snippets1',
+            'data': {
+                'snippets_h5_uri': snippets_h5_uri
+            }
+        }
+        recording = le.LabboxEphysRecordingExtractor(recording_obj)
+        sorting = le.LabboxEphysSortingExtractor(sorting_obj)
+        return recording, sorting
+
     def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=True):
         """creates feed to be used by labbox-ephys during curation
         
@@ -726,10 +779,6 @@ class SpikeSorting(dj.Computed):
                         sorting=le_sorting
                     )
                 ))
-            # for action in le_curation_actions:
-            #     sortings.append_message(dict(
-            #         action=action
-            #     ))
             if create_snapshot:
                 x = f.create_snapshot([
                     dict(documentId='default', key='recordings'),

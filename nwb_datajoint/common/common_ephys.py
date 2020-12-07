@@ -151,7 +151,7 @@ class Raw(dj.Imported):
     ---
     -> IntervalList
     raw_object_id: varchar(80)      # the NWB object ID for loading this object from the file
-    sampling_rate: float                            # Sampling rate calculated from data, in Hz
+    sampling_rate: float            # Sampling rate calculated from data, in Hz
     comments: varchar(80)
     description: varchar(80)
     """
