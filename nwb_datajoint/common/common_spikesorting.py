@@ -833,9 +833,9 @@ class SpikeSorting(dj.Computed):
         -------
         external_unit_metrics: list of dict
         """
-        from math import nan
         external_unit_metrics = []
-        for metric in metrics.columns:
+        # don't use metric whose values are NaN
+        for metric in metrics.columns[:-1]:
             test_metric = dict(
                 name=metric,
                 label=metric,
@@ -851,8 +851,11 @@ class CuratedSpikeSorting(dj.Computed):
     -> SpikeSorting
     """
     def make(self, key):
-        (SpikeSorting & key).fetch1()
+        key = (SpikeSorting & key).fetch1()
         self.insert(key)
+
+    def parse_lables(self):
+        return some_dict
 
     class Units(dj.Part):
         definition = """
