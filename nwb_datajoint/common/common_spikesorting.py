@@ -484,8 +484,8 @@ class SpikeSorting(dj.Computed):
             waveform_params = sorting_waveform_param['waveform_parameter_dict']
             templates = st.postprocessing.get_unit_templates(recording_extractor_cached, sort, **waveform_params)
             #TODO: move these waveforms to an NWB object
-            tmp_waveform_file = Path(str(recording_extractor_path) + '_spike_waveforms.h5')
-            tmp_noise_waveform_file = Path(str(recording_extractor_path) + '_noise_waveforms.h5')
+            tmp_waveform_file = str(recording_extractor_path) + '_spike_waveforms.h5'
+            tmp_noise_waveform_file = str(recording_extractor_path) + '_noise_waveforms.h5'
             # Calculate the snippet length
             sampling_rate = estimate_sampling_rate(timestamps[0:100000], 1.5)
             snippet_len = (int(np.rint(sampling_rate / 1000 * waveform_params['ms_before'])),
