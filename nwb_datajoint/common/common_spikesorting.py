@@ -771,7 +771,14 @@ class SpikeSorting(dj.Computed):
         """
         Creates feed to be used by labbox-ephys during curation
 
-        :create_snapshot: set to False if want writable feed
+        Parameters
+        ----------
+        create_snapshot: bool
+            set to False if want writable feed
+
+        Returns
+        -------
+        feed uri
         """
         try:
             f = kp.create_feed()
@@ -822,6 +829,8 @@ class SpikeSorting(dj.Computed):
         for metric in metrics.columns:
             test_metric = dict(
                 name=metric,
+                label=metric,
+                tooltip=metric,
                 data=dict(zip([str(uid) for uid in unit_ids], [i for i in metrics[metric]]))
             )
             external_unit_metrics.append(test_metric)
