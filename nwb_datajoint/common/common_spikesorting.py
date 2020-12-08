@@ -564,6 +564,18 @@ class SpikeSorting(dj.Computed):
 
         # Change format of metrics to list of dict
         external_unit_metrics = self.metrics_to_labbox_ephys(metrics, unit_ids)
+        print('newversion\n')
+        print(external_unit_metrics)
+
+        test_metric = dict(
+            name='test_metric',
+            label='Test',
+            tooltip='Timepoint of first firing event',
+            data=dict(zip([str(uid) for uid in unit_ids], [sorting.get_unit_spike_train(unit_id=uid)[0] for uid in unit_ids]))
+        )
+        external_unit_metrics = [test_metric]
+        print('oldversion\n')
+        print(external_unit_metrics)
 
         # Get labbox-ephys recording and sorting extractors
         le_recordings = []
