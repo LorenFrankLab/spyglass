@@ -834,8 +834,9 @@ class SpikeSorting(dj.Computed):
         -------
         external_unit_metrics: list of dict
         """
+        from math import nan
         external_unit_metrics = []
-        for metric in metrics.columns:
+        for metric in metrics.columns[:-1]:
             test_metric = dict(
                 name=metric,
                 label=metric,
