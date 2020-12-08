@@ -803,7 +803,7 @@ class SpikeSorting(dj.Computed):
             if create_snapshot:
                 f.delete()
 
-    def metrics_to_labbox_ephys(metrics, unit_ids):
+    def metrics_to_labbox_ephys(self, metrics, unit_ids):
         """
         Turns the metrics pandas.dataframe to a list of dict to feed to labbox
 
