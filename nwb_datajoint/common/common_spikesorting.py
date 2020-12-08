@@ -26,7 +26,6 @@ from tempfile import NamedTemporaryFile
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices
 from .dj_helper_fn import dj_replace, fetch_nwb
-from math import nan
 
 from mountainlab_pytools.mdaio import readmda
 
@@ -836,7 +835,7 @@ class SpikeSorting(dj.Computed):
         """
         from math import nan
         external_unit_metrics = []
-        for metric in metrics.columns[:-1]:
+        for metric in metrics.columns:
             test_metric = dict(
                 name=metric,
                 label=metric,
