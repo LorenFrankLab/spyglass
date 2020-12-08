@@ -467,7 +467,7 @@ class SpikeSorting(dj.Computed):
             # ------------------------------------------------------------------
             # Compute quality metrics
             # ------------------------------------------------------------------
-            metrics_key = SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')
+            metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')
             # metrics_key = {'cluster_metrics_list_name': (SpikeSortingParameters &
             #                                              key).fetch1('cluster_metrics_list_name')}
             # could check that the metrics to be calculated are valid:
