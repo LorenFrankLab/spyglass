@@ -680,8 +680,8 @@ class SpikeSorting(dj.Computed):
         raw_data_epoch = raw_data.get_epoch(epoch_name)
 
         # get the reference for this sort group
-        sort_reference_electrode_id = (SortGroup() & {'nwb_file_name' : key['nwb_file_name'],
-                                                    'sort_group_id' : key['sort_group_id']).fetch('sort_reference_electrode_id')
+        sort_reference_electrode_id = (SortGroup & {'nwb_file_name' : key['nwb_file_name'],
+                                                    'sort_group_id' : key['sort_group_id']}).fetch('sort_reference_electrode_id')
         if sort_reference_electrode_id >= 0:
             raw_data_epoch_referenced = st.preprocessing.common_reference(raw_data_epoch, reference='single',
                                                             groups=[key['sort_group_id']], ref_channels=sort_reference_electrode_id)
