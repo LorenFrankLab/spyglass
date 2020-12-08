@@ -141,7 +141,7 @@ class SortGroup(dj.Manual):
 
     def write_prb(self, sort_group_id, nwb_file_name, prb_file_name):
         '''
-        Writes a prb file containing informaiton on the specified sort group and it's geometry for use with the
+        Writes a prb file containing informaiton on the specified sort group and its geometry for use with the
         SpikeInterface package. See the SpikeInterface documentation for details on prb file format.
         :param sort_group_id: the id of the sort group
         :param nwb_file_name: the name of the nwb file for the session you wish to use
@@ -302,35 +302,38 @@ class SpikeSortingMetrics(dj.Manual):
         return valid
 
     def compute_metrics(self, key, recording, sorting):
-        """Use spike interface to compute the list of selected metrics for a particular sorting
-
-        :param key: the cluster_metrics_list_name
-        :type key: str
-        :param recording: recording object
-        :type recording: spike interface recording object
-        :param sorting: sorting object
-        :type sorting: spike interface sorting object
-        :return: metrics
-        :rtype: dataframe
         """
-        m = (self & key).fetch(as_dict=True)[0]
+        Use spikeinterface to compute the list of selected metrics for a sorting
 
-        return st.validation.compute_quality_metrics(sorting,
-                                                    recording=recording,
-                                                    metric_names=self.selected_metrics_list(m['metrics_dict']),
-                                                    as_dataframe=True,
-                                                    isi_threshold=m['isi_threshold'],
-                                                    snr_mode=m['snr_mode'],
-                                                    snr_noise_duration=m['snr_noise_duration'],
-                                                    max_spikes_per_unit_for_snr=m['n_cluster_waveforms'],
-                                                    max_channel_peak=m['max_channel_peak'],
-                                                    drift_metrics_interval_s=m['drift_metrics_interval_s'],
-                                                    drift_metrics_min_spikes_per_interval=m['drift_metrics_min_spikes_per_interval'],
-                                                    max_spikes_for_silhouette=m['n_cluster_waveforms'],
-                                                    num_channels_to_compare=m['num_channels_to_compare'],
-                                                    max_spikes_per_cluster=m['n_cluster_waveforms'],
-                                                    max_spikes_for_nn=m['n_cluster_waveforms'],
-                                                    n_neighbors=m['n_neighbors'])
+        Parameters
+        ----------
+        key: str
+            cluster_metrics_list_name from SpikeSortingParameters
+        recording: spikeinterface RecordingExtractor
+        sorting: spikeinterface SortingExtractor
+
+        Returns
+        -------
+        metrics: pandas.dataframe
+        """
+        m = (self & {'cluster_metrics_list_name': key}).fetch(as_dict=True)[0]
+
+        return st.validation.compute_quality_metrics(sorting=sorting,
+                                                     recording=recording,
+                                                     metric_names=self.selected_metrics_list(m['metrics_dict']),
+                                                     as_dataframe=True,
+                                                     isi_threshold=m['isi_threshold'],
+                                                     snr_mode=m['snr_mode'],
+                                                     snr_noise_duration=m['snr_noise_duration'],
+                                                     max_spikes_per_unit_for_snr=m['n_cluster_waveforms'],
+                                                     max_channel_peak=m['max_channel_peak'],
+                                                     drift_metrics_interval_s=m['drift_metrics_interval_s'],
+                                                     drift_metrics_min_spikes_per_interval=m['drift_metrics_min_spikes_per_interval'],
+                                                     max_spikes_for_silhouette=m['n_cluster_waveforms'],
+                                                     num_channels_to_compare=m['num_channels_to_compare'],
+                                                     max_spikes_per_cluster=m['n_cluster_waveforms'],
+                                                     max_spikes_for_nn=m['n_cluster_waveforms'],
+                                                     n_neighbors=m['n_neighbors'])
 
 @schema
 class SpikeSortingParameters(dj.Manual):
@@ -388,14 +391,14 @@ class SpikeSorting(dj.Computed):
         # Prepare a RecordingExtractor to pass into spike sorting
         # ----------------------------------------------------------------------
         # Get the sort interval
-        sort_interval =  (SortInterval() & {'nwb_file_name' : key['nwb_file_name'],
-                                            'sort_interval_name' : key['sort_interval_name']}).fetch1('sort_interval')
-        interval_list_name = (SpikeSortingParameters() & key).fetch1('interval_list_name')
-        valid_times =  (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
-                                          'interval_list_name' : interval_list_name}).fetch('valid_times')[0]
+        sort_interval =  (SortInterval & {'nwb_file_name' : key['nwb_file_name'],
+                                          'sort_interval_name' : key['sort_interval_name']}).fetch1('sort_interval')
+        interval_list_name = (SpikeSortingParameters & key).fetch1('interval_list_name')
+        valid_times =  (IntervalList & {'nwb_file_name': key['nwb_file_name'],
+                                        'interval_list_name': interval_list_name}).fetch('valid_times')[0]
 
         # Get the timestamps for the recording
-        raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
+        raw_data_obj = (Raw & {'nwb_file_name': key['nwb_file_name']}).fetch_nwb()[0]['raw']
         timestamps = np.asarray(raw_data_obj.timestamps)
 
         # Create dictionaries to hold output of spike sorting
@@ -408,7 +411,6 @@ class SpikeSorting(dj.Computed):
         # if import_path is not empty, that means there exists a previous spikesorting run
         import_path = (SpikeSortingParameters() & key).fetch1('import_path')
         if import_path != '':
-            # check if
             sort_path = Path(import_path)
             assert sort_path.exists(), f'Error: import_path {import_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             # the following assumes very specific file names from the franklab, change as needed
@@ -442,55 +444,56 @@ class SpikeSorting(dj.Computed):
 
         # If sorting for the first time:
         else:
-
-            # Get parameters about waveform snippets
-            waveform_param_name = (SpikeSortingParameters() & key).fetch1('waveform_parameters_name')
-            sorting_waveform_param = (SpikeSortingWaveformParameters() & {'waveform_parameters_name' :
-                                                                           waveform_param_name}).fetch1()
-
             # Get RecordingExtractor object for our sort interval
             recording_extractor, sort_interval_valid_times = self.get_recording_extractor(key, sort_interval)
-            sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
-                                                          'parameter_set_name': key['parameter_set_name']}).fetch1()
             # Cache the RecordingExtractor for use later
-            recording_extractor_path = Path(os.environ['SPIKE_SORTING_STORAGE_DIR']) /
-                                       key['analysis_file_name'] /
-                                       np.array2string(sort_interval)
+            # Saves the traces of RecordingExtractor in binary .dat format
+            recording_extractor_path = (Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
+                                       / key['analysis_file_name']
+                                       / np.array2string(sort_interval))
             recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor, save_path=recording_extractor_path)
 
+            # ------------------------------------------------------------------
             # Run spike sorting!
-            print(f'Sorting {key}...')
-            sort = si.sorters.run_mountainsort4(recording=recording_extractor_cached,
+            # ------------------------------------------------------------------
+            print(f'Running spike sorting {key}...')
+            sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+                                                        'parameter_set_name': key['parameter_set_name']}).fetch1()
+            sort = si.sorters.run_mountainsort4(recording=recording_extractor,
                                                 **sort_parameters['parameter_dict'],
                                                 grouping_property='group',
                                                 output_folder=os.getenv('SORTING_TEMP_DIR', None))
 
+            # ------------------------------------------------------------------
             # Compute quality metrics
-            metrics_key = dict(cluster_metrics_list_name = (SpikeSortingParameters() &
-                                                            key).fetch1('cluster_metrics_list_name'))
+            # ------------------------------------------------------------------
+            metrics_key = SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')
+            # metrics_key = {'cluster_metrics_list_name': (SpikeSortingParameters &
+            #                                              key).fetch1('cluster_metrics_list_name')}
             # could check that the metrics to be calculated are valid:
             #assert SpikeSortingMetrics.validate_metrics_list(dict(cluster_metrics_list_name=cluster_metrics_list_name))
-            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording_extractor_cached, sort)
-
-            # create a stack of labeled arrays of the sorted spike times
-            unit_ids = sort.get_unit_ids()
+            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording_extractor, sort)
 
             # ------------------------------------------------------------------
             # Get waveform snippets
             # ------------------------------------------------------------------
+            # Get parameters about waveform snippets
+            waveform_param_name = (SpikeSortingParameters & key).fetch1('waveform_parameters_name')
+            sorting_waveform_param = (SpikeSortingWaveformParameters
+                                      & {'waveform_parameters_name': waveform_param_name}).fetch1()
             waveform_params = sorting_waveform_param['waveform_parameter_dict']
             templates = st.postprocessing.get_unit_templates(recording_extractor_cached, sort, **waveform_params)
             #TODO: move these waveforms to an NWB object
             tmp_waveform_file = recording_extractor_path / '_spike_waveforms.h5'
             tmp_noise_waveform_file = recording_extractor_path / '_noise_waveforms.h5'
-            # calculate the snippet length
+            # Calculate the snippet length
             sampling_rate = estimate_sampling_rate(timestamps[0:100000], 1.5)
             snippet_len = (int(np.rint(sampling_rate / 1000 * waveform_params['ms_before'])),
                             int(np.rint(sampling_rate / 1000 * waveform_params['ms_after'])))
             #TODO: write new labbox ephys function to store waveforms in AnalysisNWBFile
             # Prepare the snippets h5 file
             le.prepare_snippets_h5_from_extractors(
-                recording=recording_extractor_cached,
+                recording=recording_extractor,
                 sorting=sort,
                 output_h5_path=tmp_waveform_file,
                 start_frame=None,
@@ -499,17 +502,16 @@ class SpikeSorting(dj.Computed):
                 max_events_per_unit=None,
                 max_neighborhood_size=6
             )
-
             # generate a set of random frame numbers for noise snippets
             # start by getting the first and last frame for this epoch
             #frames = recording_extractor_cached.get_epoch_info(str(sort_interval_index))
             rng = np.random.default_rng()
-            noise_frames = np.sort(np.random.randint(0, recording_extractor_cached.get_num_frames(), sorting_waveform_param['n_noise_waveforms']))
+            noise_frames = np.sort(np.random.randint(0, recording_extractor.get_num_frames(), sorting_waveform_param['n_noise_waveforms']))
 
-            noise_sorting=se.NumpySortingExtractor()
+            noise_sorting = se.NumpySortingExtractor()
             noise_sorting.set_times_labels(times=noise_frames,labels=np.zeros(noise_frames.shape))
             le.prepare_snippets_h5_from_extractors(
-                recording=recording_extractor_cached,
+                recording=recording_extractor,
                 sorting=noise_sorting,
                 output_h5_path=tmp_noise_waveform_file,
                 start_frame=None,
@@ -519,6 +521,11 @@ class SpikeSorting(dj.Computed):
                 max_neighborhood_size=10000
             )
 
+            # ------------------------------------------------------------------
+            # Save sorting output
+            # ------------------------------------------------------------------
+            # create a stack of labeled arrays of the sorted spike times
+            unit_ids = sort.get_unit_ids()
             for index, unit_id in enumerate(unit_ids):
                 unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)
                 #print(f'template for {unit_id}: {unit_templates[unit_id]} ')
@@ -538,7 +545,7 @@ class SpikeSorting(dj.Computed):
                                                                 units_templates, units_valid_times,
                                                                 units_sort_interval, metrics=metrics, units_waveforms=units_waveforms)
 
-        # Now that the Analysis NWB file is written, add it to the AnalysisNWBFile Schema:
+        # Now that the Analysis NWB file is written, add it to the AnalysisNWBFile table:
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
 
         key['units_object_id'] = units_object_id
@@ -547,16 +554,15 @@ class SpikeSorting(dj.Computed):
         key['noise_waveforms_object_id'] = ''
 
         # -----------------------------------------------------------------
-        # generate feed for labbox-ephys to be used during curation
+        # Generate feed for labbox-ephys curation
         # -----------------------------------------------------------------
-        # first, store and get URI of the snippets h5 file
-#         snippets_h5_uri = self.get_kachery_store_uri(tmp_waveform_file)
+        # first, store and get URI of the snippets h5 file (soft link)
         snippets_h5_uri = ka.store_file(tmp_waveform_file)
 
         # get labbox recording and sorting extractors
         recording, sorting = self.prepare_recording_sorting(snippets_h5_uri)
-        unit_ids = sorting.get_unit_ids()
 
+        # TODO: add real metrics
         # Create a test sorting unit metric
         test_metric = dict(
             name='test_metric',
@@ -566,7 +572,7 @@ class SpikeSorting(dj.Computed):
         )
         external_unit_metrics = [test_metric]
 
-        # Assemble the labbox-ephys recording and sorting
+        # Get labbox-ephys recording and sorting extractors
         le_recordings = []
         le_sortings = []
         le_recordings.append(dict(
@@ -592,14 +598,13 @@ class SpikeSorting(dj.Computed):
             '''.strip()
         ))
 
-        # check if KACHERY_P2P_API_PORT is set
+        # Check if KACHERY_P2P_API_PORT is set
         kp_port = os.getenv('KACHERY_P2P_API_PORT', False)
         assert kp_port, 'You must set KACHERY_P2P_API_PORT environmental variable'
 
-        # check if the kachery p2p daemon is running in the background
+        # Check if the kachery-p2p daemon is running in the background
         try:
             kp_channel = kp.get_channels()
-#             assert kp_channel, 'You must run the kachery-p2p daemon in flatiron1 channel (i.e. kachery-p2p-start-daemon --channel flatiron1)'
         except ConnectionError:
             raise RuntimeError(('You must have a kachery-p2p daemon running in'
                                 ' the background (kachery-p2p-start-daemon --label'
@@ -609,11 +614,12 @@ class SpikeSorting(dj.Computed):
                                 '8a7d9/franklab_kachery-p2p_config.yaml)'))
 
         # Create the labbox-ephys feed
-        # NOTE: This part won't work unless a kachery-p2p daemon is running in the background.
+        # set create_snapshot False to get a writable feed
         feed_uri = self.create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
 
-        # Insert feed into table
         key['curation_feed_uri'] = feed_uri
+
+        # Finally, insert the entity into table
         self.insert1(key)
 
         # Tell user how to access curation website
@@ -625,15 +631,20 @@ class SpikeSorting(dj.Computed):
 
     def get_recording_extractor(self, key, sort_interval):
         """
-        Given an entity from SpikeSorting table and the interval to be sorted,
-        returns the spikeinterface RecordingExtractor object
+        Generates a spikeinterface RecordingExtractor object for an entity from
+        SpikeSorting table
 
-        :param key: key to SpikeSorting schema
-        :type key: dict
-        :param sort_interval: [start_time, end_time]
-        :type sort_interval: 1D array with the start and end times for this sort
-        :return: (recording_extractor, sort_interval_valid_times)
-        :rtype: tuple with spikeextractor recording extractor object and valid times list
+        Parameters
+        ----------
+        sort_interval: numpy array
+            (start, end) times for sorting interval
+
+        Returns
+        -------
+        SubRecordingExtractor for the part of recording to be spike sorted after
+            referencing and filtering
+        sort_interval_valid_times: numpy array
+            (start, end) times for valid sorting interval
         """
 
         interval_list_name = (SpikeSortingParameters() & key).fetch1('interval_list_name')
@@ -763,8 +774,9 @@ class SpikeSorting(dj.Computed):
         sorting = le.LabboxEphysSortingExtractor(sorting_obj)
         return recording, sorting
 
-    def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=True):
-        """creates feed to be used by labbox-ephys during curation
+    def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=False):
+        """
+        Creates feed to be used by labbox-ephys during curation
 
         :create_snapshot: set to False if want writable feed
         """
