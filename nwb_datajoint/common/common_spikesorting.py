@@ -473,7 +473,7 @@ class SpikeSorting(dj.Computed):
             # could check that the metrics to be calculated are valid:
             #assert SpikeSortingMetrics.validate_metrics_list(dict(cluster_metrics_list_name=cluster_metrics_list_name))
             metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording_extractor, sort)
-
+            metrics.to_pickle('/stelmo/nwb/metrics.pkl')
             # ------------------------------------------------------------------
             # Get waveform snippets
             # ------------------------------------------------------------------
@@ -810,6 +810,30 @@ class SpikeSorting(dj.Computed):
             if create_snapshot:
                 f.delete()
 
+    def metrics_to_labbox_ephys(metrics, unit_ids):
+        """
+        Turns the metrics pandas.dataframe to a list of dict to feed to labbox
+
+        Parameters
+        ----------
+        metrics: pandas.DataFrame
+            from spikeinterface
+        unit_ids: ?
+
+        Returns
+        -------
+        external_unit_metrics: list of dict
+        """
+        external_unit_metrics = []
+        for metric in metrics.columns:
+            test_metric = dict(
+                name=metric,
+                label='Test',
+                tooltip='Timepoint of first firing event',
+                data=dict(zip([str(uid) for uid in unit_ids], [sorting.get_unit_spike_train(unit_id=uid)[0] for uid in unit_ids]))
+            )
+            external_unit_metrics.append(test_metric)
+    return external_unit_metrics
 @schema
 class CuratedSpikeSorting(dj.Computed):
     definition = """
