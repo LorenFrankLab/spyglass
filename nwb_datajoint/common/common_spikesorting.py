@@ -15,6 +15,7 @@ import pynwb
 import re
 import os
 import socket
+import time
 from pathlib import Path
 import numpy as np
 import scipy.signal as signal
@@ -454,7 +455,7 @@ class SpikeSorting(dj.Computed):
                                        / key['analysis_file_name']
                                        / np.array2string(sort_interval))
             recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor, save_path=recording_extractor_path)
-            np.save('/stelmo/nwb/re.npy',recording_extractor_cached.make_serialized_dict())
+            # np.save('/stelmo/nwb/re.npy',recording_extractor_cached.make_serialized_dict())
 
             # ------------------------------------------------------------------
             # Run spike sorting!
@@ -624,6 +625,7 @@ class SpikeSorting(dj.Computed):
 
         key['curation_feed_uri'] = feed_uri
 
+        key['time_of_sort'] = int(time.time())
         # Finally, insert the entity into table
         self.insert1(key)
 
@@ -867,9 +869,9 @@ class CuratedSpikeSorting(dj.Computed):
         """
 
     def make(self, key):
-        key = (SpikeSorting & key).fetch()
+        # key = (SpikeSorting & key).fetch()
         self.insert(key)
-        analysis_file_name = key['analysis_file_name']
+        analysis_file_name = key['nwb_file_name']
         feed_uri = key['curation_feed_uri']
         labels = self.get_labels(feed_uri)
         self.add_labels_analysisNWB(analysis_file_name, feed_uri)
