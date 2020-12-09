@@ -870,7 +870,8 @@ class CuratedSpikeSorting(dj.Computed):
 
     def make(self, key):
         # key = (SpikeSorting & key).fetch()
-        self.insert(key)
+        print(key)
+        self.insert1(key)
         analysis_file_name = key['nwb_file_name']
         feed_uri = key['curation_feed_uri']
         labels = self.get_labels(feed_uri)
