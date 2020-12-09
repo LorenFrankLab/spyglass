@@ -856,7 +856,6 @@ class CuratedSpikeSorting(dj.Computed):
     definition = """
     -> SpikeSorting
     ---
-    nwb_file_name: varchar(80)
     curation_feed_uri: varchar(80)
     """
 
@@ -873,7 +872,6 @@ class CuratedSpikeSorting(dj.Computed):
 
     def make(self, key):
         parent_key = (SpikeSorting & key).fetch1()
-        key['nwb_file_name'] = parent_key['nwb_file_name']
         key['curation_feed_uri'] = parent_key['curation_feed_uri']
         self.insert1(key)
         labels = self.get_labels(key['curation_feed_uri'])
