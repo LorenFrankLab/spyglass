@@ -875,7 +875,7 @@ class CuratedSpikeSorting(dj.Computed):
         self.add_labels_analysisNWB(analysis_file_name, feed_uri)
         # TODO add metrics to Units table; get them from analysisNWB file
         CuratedSpikeSorting.Units.insert(
-            dict(key, unit_id=unitId, label=label for unitId,label in labels.items()))
+            [dict(key, unit_id=unitId, label=label for unitId,label in labels.items()])
                 # dict(key, unit_id=unitID[k], label=label[k], noise_overalp=noise_overlap[k],
                 #      isolation_score=isolation_score[k], snr for k in some_data)
 
