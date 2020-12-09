@@ -900,7 +900,7 @@ class CuratedSpikeSorting(dj.Computed):
         """
         # feed = 'feed://475b18ebb79d5e9a17a7c492a972c556a39f035fdc4f88638dc7d630d407ef61'
         f = kp.load_feed(feed_uri)
-        sf = a.get_subfeed(dict(documentId='default', key='sortings'))
+        sf = f.get_subfeed(dict(documentId='default', key='sortings'))
         msgs = sf.get_next_messages()
         label_msgs = list(compress(msgs,[(m['action']['type']=='ADD_UNIT_LABEL') or (m['action']['type']=='REMOVE_UNIT_LABEL') for m in msgs]))
         unitIds = list(set([lm['action']['unitId'] for lm in label_msgs]))
