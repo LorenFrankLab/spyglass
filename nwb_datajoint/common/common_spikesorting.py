@@ -454,6 +454,7 @@ class SpikeSorting(dj.Computed):
                                        / key['analysis_file_name']
                                        / np.array2string(sort_interval))
             recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor, save_path=recording_extractor_path)
+            np.save('/stelmo/nwb/re.npy',recording_extractor_cached.make_serialized_dict())
 
             # ------------------------------------------------------------------
             # Run spike sorting!
@@ -484,7 +485,7 @@ class SpikeSorting(dj.Computed):
             sorting_waveform_param = (SpikeSortingWaveformParameters
                                       & {'waveform_parameters_name': waveform_param_name}).fetch1()
             waveform_params = sorting_waveform_param['waveform_parameter_dict']
-            templates = st.postprocessing.get_unit_templates(recording_extractor_cached, sort, **waveform_params)
+            templates = st.postprocessing.get_unit_templates(recording_extractor, sort, **waveform_params)
             #TODO: move these waveforms to an NWB object
             tmp_waveform_file = str(recording_extractor_path) + '_spike_waveforms.h5'
             tmp_noise_waveform_file = str(recording_extractor_path) + '_noise_waveforms.h5'
@@ -537,7 +538,7 @@ class SpikeSorting(dj.Computed):
                 units_templates[unit_id] = templates[index]
                 units_valid_times[unit_id] = sort_interval_valid_times
                 units_sort_interval[unit_id] = [sort_interval]
-
+            np.save('/stelmo/nwb/sorted.npy',sort.get_units_spike_train())
         # TODO: remove once we are saving the waveforms correctly
         units_waveforms = None
 
