@@ -840,7 +840,6 @@ class SpikeSorting(dj.Computed):
         -------
         external_unit_metrics: list of dict
         """
-        from math import nan
         external_unit_metrics = []
         for metric in metrics.columns:
             test_metric = dict(
@@ -869,9 +868,9 @@ class CuratedSpikeSorting(dj.Computed):
         """
 
     def make(self, key):
-        # key = (SpikeSorting & key).fetch()
         print(key)
         self.insert1(key)
+        key = (SpikeSorting & key).fetch()
         analysis_file_name = key['nwb_file_name']
         feed_uri = key['curation_feed_uri']
         labels = self.get_labels(feed_uri)
