@@ -505,21 +505,21 @@ class SpikeSorting(dj.Computed):
             # generate a set of random frame numbers for noise snippets
             # start by getting the first and last frame for this epoch
             #frames = recording_extractor_cached.get_epoch_info(str(sort_interval_index))
-            rng = np.random.default_rng()
-            noise_frames = np.sort(np.random.randint(0, recording_extractor.get_num_frames(), sorting_waveform_param['n_noise_waveforms']))
+#             rng = np.random.default_rng()
+#             noise_frames = np.sort(np.random.randint(0, recording_extractor.get_num_frames(), sorting_waveform_param['n_noise_waveforms']))
 
-            noise_sorting = se.NumpySortingExtractor()
-            noise_sorting.set_times_labels(times=noise_frames,labels=np.zeros(noise_frames.shape))
-            le.prepare_snippets_h5_from_extractors(
-                recording=recording_extractor,
-                sorting=noise_sorting,
-                output_h5_path=tmp_noise_waveform_file,
-                start_frame=None,
-                end_frame=None,
-                snippet_len = snippet_len,
-                max_events_per_unit=None,
-                max_neighborhood_size=10000
-            )
+#             noise_sorting = se.NumpySortingExtractor()
+#             noise_sorting.set_times_labels(times=noise_frames,labels=np.zeros(noise_frames.shape))
+#             le.prepare_snippets_h5_from_extractors(
+#                 recording=recording_extractor,
+#                 sorting=noise_sorting,
+#                 output_h5_path=tmp_noise_waveform_file,
+#                 start_frame=None,
+#                 end_frame=None,
+#                 snippet_len = snippet_len,
+#                 max_events_per_unit=None,
+#                 max_neighborhood_size=10000
+#             )
 
             # ------------------------------------------------------------------
             # Save sorting output
@@ -549,9 +549,9 @@ class SpikeSorting(dj.Computed):
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
 
         key['units_object_id'] = units_object_id
-        key['units_waveforms_object_id'] = units_waveforms_object_id
+#         key['units_waveforms_object_id'] = units_waveforms_object_id
         #TODO: fix once noise waveforms are saved to the file
-        key['noise_waveforms_object_id'] = ''
+#         key['noise_waveforms_object_id'] = ''
 
         # -----------------------------------------------------------------
         # Generate feed for labbox-ephys curation
@@ -574,6 +574,7 @@ class SpikeSorting(dj.Computed):
         # external_unit_metrics = [test_metric]
 
         # Get labbox-ephys recording and sorting extractors
+        # name of analysis nwb file might be a unique label; animal - date - probe - sort group - sort interval (name)
         le_recordings = []
         le_sortings = []
         le_recordings.append(dict(
@@ -666,10 +667,11 @@ class SpikeSorting(dj.Computed):
         raw_data = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']), electrical_series_name='e-series')
 
         # Blank out non-valid times.
-        # exclude_inds = interval_list_excludes_ind(sort_interval_valid_times, timestamps[sort_indices[0]:sort_indices[1]])
-        # exclude_inds = exclude_inds[exclude_inds <= sort_indices[-1]]
+        exclude_inds = interval_list_excludes_ind(sort_interval_valid_times, timestamps[sort_indices[0]:sort_indices[1]])
+        exclude_inds = exclude_inds[exclude_inds <= sort_indices[-1]]
         # TODO: add a blanking function to the preprocessing module
-        # raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
+        # TODO: write function that actually detects artifacts
+        raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
 
         # create a group id within spikeinterface for the specified electodes
         electrode_ids = (SortGroup.SortGroupElectrode() & {'nwb_file_name' : key['nwb_file_name'],
