@@ -357,8 +357,8 @@ class SpikeSorting(dj.Computed):
     ---
     -> AnalysisNwbfile
     units_object_id: varchar(40) # the object ID for the units for this sort group
-    units_waveforms_object_id : varchar(40) # the object ID for the unit waveforms
-    noise_waveforms_object_id: varchar(40) # the object ID for the noise waveforms
+    # units_waveforms_object_id : varchar(40) # the object ID for the unit waveforms
+    # noise_waveforms_object_id: varchar(40) # the object ID for the noise waveforms
     time_of_sort = 0: int # This is when the sort was done.
     curation_feed_uri: varchar(80) # URI of the feed to be used by labbox-ephys
     """
