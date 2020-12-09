@@ -856,7 +856,7 @@ class CuratedSpikeSorting(dj.Computed):
     definition = """
     -> SpikeSorting
     ---
-    analysis_file_name: varchar(80)
+    nwb_file_name: varchar(80)
     curation_feed_uri: varchar(80)
     """
 
