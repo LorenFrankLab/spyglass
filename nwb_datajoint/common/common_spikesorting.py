@@ -22,10 +22,12 @@ import json
 import h5py as h5
 import kachery_p2p as kp
 import kachery as ka
+from itertools import compress
 from tempfile import NamedTemporaryFile
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices
 from .dj_helper_fn import dj_replace, fetch_nwb
+
 
 from mountainlab_pytools.mdaio import readmda
 
@@ -367,10 +369,10 @@ class SpikeSorting(dj.Computed):
         SpikeSortingParameter table and inserts a new entry to SpikeSorting table.
         Roughly, the order of operation is:
         - Create an NWB file to hold the results of spike sorting
-        - Create a spikeinterface RecordingExtractor and caches it
+        - Create a spikeinterface RecordingExtractor and cache it
         - Run mountainsort4
         - Compute quality metrics
-        - Save the results to the AnalysisNWB file
+        - Save the sorted units to AnalysisNWB file
         - Generate a feed URI to be used during curation
 
         Parameter
@@ -852,19 +854,103 @@ class CuratedSpikeSorting(dj.Computed):
     definition = """
     -> SpikeSorting
     """
-    def make(self, key):
-        (SpikeSorting & key).fetch1()
-        self.insert(key)
-
     class Units(dj.Part):
         definition = """
-        -> master
+        -> CuratedSpikeSorting
         unit_id: int # the cluster number for this unit
         ---
-        noise_overlap: float # the noise overlap metric
-        isolation_score: float # the isolation score metric
-        snr : float
+        label: varchar(80) # label for each unit
+        # noise_overlap: float # the noise overlap metric
+        # isolation_score: float # the isolation score metric
+        # snr : float
         """
+
+    def make(self, key):
+        key = (SpikeSorting & key).fetch()
+        self.insert(key)
+        analysis_file_name = key['analysis_file_name']
+        feed_uri = key['curation_feed_uri']
+        labels = self.get_labels(feed_uri)
+        self.add_labels_analysisNWB(analysis_file_name, feed_uri)
+        # TODO add metrics to Units table; get them from analysisNWB file
+        CuratedSpikeSorting.Units.insert(
+            dict(key, unit_id=unitId, label=label for unitId,label in labels.items()))
+                # dict(key, unit_id=unitID[k], label=label[k], noise_overalp=noise_overlap[k],
+                #      isolation_score=isolation_score[k], snr for k in some_data)
+
+    def get_labels(self, feed_uri):
+        """
+        Parses the curation feed to get label for each unit
+        Note: every unit must be given a label before runnig this
+
+        Parameter
+        ---------
+        feed_uri: str
+
+        Returns
+        -------
+        final_labels: dict
+            key is int (unitId), value is list of strings (labels)
+        """
+        # feed = 'feed://475b18ebb79d5e9a17a7c492a972c556a39f035fdc4f88638dc7d630d407ef61'
+        f = kp.load_feed(feed_uri)
+        sf = a.get_subfeed(dict(documentId='default', key='sortings'))
+        msgs = sf.get_next_messages()
+        label_msgs = list(compress(msgs,[(m['action']['type']=='ADD_UNIT_LABEL') or (m['action']['type']=='REMOVE_UNIT_LABEL') for m in msgs]))
+        unitIds = list(set([lm['action']['unitId'] for lm in label_msgs]))
+        final_labels = dict()
+        for cell in unitIds:
+            unit_label_msgs = list(compress(label_msgs, [lm['action']['unitId']==cell for lm in label_msgs]))
+            adds = list(compress(unit_label_msgs,[i['action']['type']=='ADD_UNIT_LABEL' for i in unit_label_msgs]))
+            removes = list(compress(unit_label_msgs,[i['action']['type']=='REMOVE_UNIT_LABEL' for i in unit_label_msgs]))
+            labels_added = [k['action']['label'] for k in adds]
+            labels_removed = [k['action']['label'] for k in removes]
+            final_labels.update({cell: list(set(labels_added) - set(labels_removed))})
+        return final_labels
+
+    def add_labels_analysisNWB(self, analysis_file_name, feed_uri):
+        """
+        Adds the labels given to each unit during curation to analysisNWB file
+        NOTE: labels are in numerical order for unitId (1,2, ...)
+        check if this is also true for the units in the units table of analysisNWB
+
+        Parameters
+        ----------
+        analysis_file_name: str
+            the name of the analysisNWB file
+        """
+        labels = self.get_labels(feed_uri)
+        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
+            nwbf=io.read()
+            nwbf.add_unit_column(name='label', description='label given to unit during curation',
+                                 data=list(labels.values()))
+        return None
+            # sort_intervals = list()
+            # if len(units.keys()):
+            #     for id in units.keys():
+            #         nwbf.add_unit(spike_times=units[id], id=id, waveform_mean=units_templates[id],
+            #                       obs_intervals=units_valid_times[id])
+            #         sort_intervals.append(units_sort_interval[id])
+            #     # add a column for the sort interval
+            #     nwbf.add_unit_column(name='sort_interval', description='the interval used for spike sorting', data=sort_intervals)
+            #     # if metrics were specified, add one column per metric
+            #     if metrics is not None:
+            #         for metric in list(metrics):
+            #             print(f'adding metric {metric} : {metrics[metric].to_list()}')
+            #             nwbf.add_unit_column(name=metric, description=f'{metric} sorting metric', data=metrics[metric].to_list())
+            #     # if the waveforms were specified, add them as a dataframe
+            #     waveforms_object_id = ''
+            #     if units_waveforms is not None:
+            #         waveforms_df = pd.DataFrame.from_dict(units_waveforms, orient='index')
+            #         waveforms_df.columns = ['waveforms']
+            #         nwbf.add_scratch(waveforms_df, name='units_waveforms', notes='')
+            #         waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
+            #     io.write(nwbf)
+            #     return nwbf.units.object_id, waveforms_object_id
+            # else:
+            #     return ''
+
+
 
 
 """ for curation feed reading:
