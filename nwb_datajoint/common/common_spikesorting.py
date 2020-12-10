@@ -871,29 +871,22 @@ class CuratedSpikeSorting(dj.Computed):
 
     def make(self, key):
         parent_key = (SpikeSorting & key).fetch1()
-        # key['curation_feed_uri'] = parent_key['curation_feed_uri']
-        key['curation_feed_uri'] = 'feed://475b18ebb79d5e9a17a7c492a972c556a39f035fdc4f88638dc7d630d407ef61'
+        key['curation_feed_uri'] = parent_key['curation_feed_uri']
+        # key['curation_feed_uri'] = 'feed://475b18ebb79d5e9a17a7c492a972c556a39f035fdc4f88638dc7d630d407ef61'
         self.insert1(key)
         labels = self.get_labels(key['curation_feed_uri'])
+        print('Labels:')
         print(labels)
-        print('adding to units table')
+        print('Adding to dj Units table')
+        # TODO add metrics to Units table; get them from analysisNWB file
         for unitId,label in labels.items():
             label_concat = ','.join(label)
             CuratedSpikeSorting.Units.insert1(dict(key, unit_id=unitId, label=label_concat))
 
-        print('done with units table')
-        print('adding to nwb file')
-        # TODO add metrics to Units table; get them from analysisNWB file
-        # units_key_dict = [dict(key, unit_id = unitId, label=label) for unitId, label in labels.items()]
-        # units_key_list = []
-        # for unit_dict in units_key_dict:
-        #     units_key_list.append([k for k in unit_dict.values()])
-        # print(units_key_list)
-        # CuratedSpikeSorting.Units.insert(units_key_list)
-        # CuratedSpikeSorting.Units.insert(
-        #     dict(key, unit_id=unitId, label=label)
-        #     for unitId,label in labels.items())
-        # self.add_labels_analysisNWB(key['nwb_file_name'], key['curation_feed_uri'])
+        print('Done with dj Units table')
+
+        print('Adding to NWB file')
+        self.add_labels_analysisNWB(key['nwb_file_name'], key['curation_feed_uri'])
         print('done with nwb file')
 
     def get_labels(self, feed_uri):
@@ -910,7 +903,7 @@ class CuratedSpikeSorting(dj.Computed):
         final_labels: dict
             key is int (unitId), value is list of strings (labels)
         """
-        # feed = 'feed://475b18ebb79d5e9a17a7c492a972c556a39f035fdc4f88638dc7d630d407ef61'
+        # feed_uri = 'feed://475b18ebb79d5e9a17a7c492a972c556a39f035fdc4f88638dc7d630d407ef61'
         f = kp.load_feed(feed_uri)
         sf = f.get_subfeed(dict(documentId='default', key='sortings'))
         msgs = sf.get_next_messages()
@@ -938,6 +931,8 @@ class CuratedSpikeSorting(dj.Computed):
             the name of the analysisNWB file
         """
         labels = self.get_labels(feed_uri)
+        for unitId, label in labels.items():
+            labels[unitId] = ','.join(label)
         with pynwb.NWBHDF5IO(path=Nwbfile.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
             nwbf.add_unit_column(name='label', description='label given to unit during curation',
