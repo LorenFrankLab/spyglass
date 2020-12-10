@@ -886,6 +886,7 @@ class CuratedSpikeSorting(dj.Computed):
         # print(units_key_list)
         # CuratedSpikeSorting.Units.insert(units_key_list)
         dict(key, unit_id=unitId, label=label) for unitId,label in labels.items()
+        
         CuratedSpikeSorting.Units.insert(
             dict(key, unit_id=unitId, label=label) for unitId,label in labels.items())
         self.add_labels_analysisNWB(key['nwb_file_name'], key['curation_feed_uri'])
