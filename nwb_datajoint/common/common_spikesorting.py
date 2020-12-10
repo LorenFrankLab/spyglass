@@ -875,12 +875,13 @@ class CuratedSpikeSorting(dj.Computed):
         key['curation_feed_uri'] = parent_key['curation_feed_uri']
         self.insert1(key)
         labels = self.get_labels(key['curation_feed_uri'])
+        print(labels)
         print('adding to units table')
         for unitId,label in labels.items():
             label_concat = ','.join(label)
-            CuratedSpikeSorting.Units.insert1(key, unit_id=unitId, label=label_concat)
+            CuratedSpikeSorting.Units.insert1(dict(key, unit_id=unitId, label=label_concat))
 
-        print('dont with units table')
+        print('done with units table')
         print('adding to nwb file')
         # TODO add metrics to Units table; get them from analysisNWB file
         # units_key_dict = [dict(key, unit_id = unitId, label=label) for unitId, label in labels.items()]
