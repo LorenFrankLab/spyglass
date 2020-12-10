@@ -872,7 +872,8 @@ class CuratedSpikeSorting(dj.Computed):
 
     def make(self, key):
         parent_key = (SpikeSorting & key).fetch1()
-        key['curation_feed_uri'] = parent_key['curation_feed_uri']
+        # key['curation_feed_uri'] = parent_key['curation_feed_uri']
+        key['curation_feed_uri'] = 'feed://475b18ebb79d5e9a17a7c492a972c556a39f035fdc4f88638dc7d630d407ef61'
         self.insert1(key)
         labels = self.get_labels(key['curation_feed_uri'])
         print(labels)
