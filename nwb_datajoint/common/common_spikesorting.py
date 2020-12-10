@@ -855,7 +855,7 @@ class SpikeSorting(dj.Computed):
 class CuratedSpikeSorting(dj.Computed):
     definition = """
     -> SpikeSorting
-    curation_feed_uri = NULL: varchar(80)
+    curation_feed_uri = 'None': varchar(80)
     """
 
     class Units(dj.Part):
