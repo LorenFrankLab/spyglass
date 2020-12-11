@@ -260,17 +260,27 @@ class SpikeSortingMetrics(dj.Manual):
     definition = """
     cluster_metrics_list_name: varchar(80) # the name for this list of cluster metrics
     ---
-    metrics_dict: blob # a dictionariy of SpikeInterface metrics with True / False elements to indicate whether a given metric should be computed.
-    n_noise_waveforms=1000: int # the number of random noise waveforms to use for the noise overlap
-    n_cluster_waveforms=10000: int # the maximum number of spikes / waveforms from a cluster to use for metric calculations
+    metrics_dict: blob # a dict of SpikeInterface metrics with True / False elements to indicate whether a given metric should be computed.
+    # n_noise_waveforms=1000: int # the number of random noise waveforms to use for the noise overlap
+    # n_cluster_waveforms=1000: int # the maximum number of spikes / waveforms from a cluster to use for metric calculations
     isi_threshold=0.003: float # Interspike interval threshold in s for ISI metric (default 0.003)
     snr_mode='mad':enum('mad', 'std') # SNR mode: median absolute deviation ('mad) or standard deviation ('std') (default 'mad')
     snr_noise_duration=10.0 : float # length of data to use for noise estimation (default 10.0)
+    max_spikes_per_unit_for_snr=1000: int # Maximum number of spikes to compute templates for SNR from (default 1000)
+    template_mode='mean': enum('mean','median') # Use 'mean' or 'median' to compute templates
     max_channel_peak='both' : enum('both', 'neg', 'pos') # direction of the maximum channel peak: 'both', 'neg', or 'pos' (default 'both')
+    max_spikes_per_unit_for_noise_overlap=1000 : int # Maximum number of spikes to compute templates for noise overlap from (default 1000)
+    noise_overlap_num_features=5 : int # Number of features to use for PCA for noise overlap
+    noise_overlap_num_knn=1000:int # Number of nearest neighbors for noise overlap
     drift_metrics_interval_s=60: float # length of period in s for evaluating drift (default 60 s)
     drift_metrics_min_spikes_per_interval=10: int # minimum number of spikes in an interval for evaluation of drift (default 10)
+    max_spikes_for_silhouette=1000: int # Max spikes to be used for silhouette metric
     num_channels_to_compare=7: int # number of channels to be used for the PC extraction and comparison (default 7)
+    max_spikes_per_cluster=1000: int # Max spikes to be used from each unit
+    max_spikes_for_nn=1000: int # Max spikes to be used for nearest-neighbors calculation
     n_neighbors=4: int # number of nearest clusters to use for nearest neighbor calculation (default 4)
+    seed=47 : int # Random seed for reproducibility
+    verbose=1 : tinyint(1) # If nonzero, will be verbose in metric computation
     """
 
     def get_metric_dict(self):
@@ -328,15 +338,21 @@ class SpikeSortingMetrics(dj.Manual):
                                                      isi_threshold=m['isi_threshold'],
                                                      snr_mode=m['snr_mode'],
                                                      snr_noise_duration=m['snr_noise_duration'],
-                                                     max_spikes_per_unit_for_snr=m['n_cluster_waveforms'],
+                                                     max_spikes_per_unit_for_snr=m['max_spikes_per_unit_for_snr'],
+                                                     template_mode=m['template_mode'],
                                                      max_channel_peak=m['max_channel_peak'],
+                                                     max_spikes_per_unit_for_noise_overlap=m['max_spikes_per_unit_for_noise_overlap'],
+                                                     noise_overlap_num_features=m['noise_overlap_num_features'],
+                                                     noise_overlap_num_knn=m['noise_overlap_num_knn'],
                                                      drift_metrics_interval_s=m['drift_metrics_interval_s'],
                                                      drift_metrics_min_spikes_per_interval=m['drift_metrics_min_spikes_per_interval'],
-                                                     max_spikes_for_silhouette=m['n_cluster_waveforms'],
+                                                     max_spikes_for_silhouette=m['max_spikes_for_silhouette'],
                                                      num_channels_to_compare=m['num_channels_to_compare'],
-                                                     max_spikes_per_cluster=m['n_cluster_waveforms'],
-                                                     max_spikes_for_nn=m['n_cluster_waveforms'],
-                                                     n_neighbors=m['n_neighbors'])
+                                                     max_spikes_per_cluster=m['max_spikes_per_cluster'],
+                                                     max_spikes_for_nn=m['max_spikes_for_nn'],
+                                                     n_neighbors=m['n_neighbors'],
+                                                     seed=m['seed'],
+                                                     verbose=bool(m['verbose']))
 
 @schema
 class SpikeSortingParameters(dj.Manual):
