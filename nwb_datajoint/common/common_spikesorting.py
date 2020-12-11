@@ -279,7 +279,7 @@ class SpikeSortingMetrics(dj.Manual):
     max_spikes_per_cluster = 1000: int # Max spikes to be used from each unit
     max_spikes_for_nn = 1000: int # Max spikes to be used for nearest-neighbors calculation
     n_neighbors = 4: int # number of nearest clusters to use for nearest neighbor calculation (default 4)
-    n_job = 96: int # Number of parallel jobs (default 96)
+    n_jobs = 96: int # Number of parallel jobs (default 96)
     seed = 47: int # Random seed for reproducibility
     verbose = 1 : tinyint(1) # If nonzero (True), will be verbose in metric computation
     """
@@ -352,7 +352,7 @@ class SpikeSortingMetrics(dj.Manual):
                                                      max_spikes_per_cluster=m['max_spikes_per_cluster'],
                                                      max_spikes_for_nn=m['max_spikes_for_nn'],
                                                      n_neighbors=m['n_neighbors'],
-                                                     n_job=m['n_job'],
+                                                     n_jobs=m['n_jobs'],
                                                      seed=m['seed'],
                                                      verbose=bool(m['verbose']))
 
