@@ -263,24 +263,25 @@ class SpikeSortingMetrics(dj.Manual):
     metrics_dict: blob # a dict of SpikeInterface metrics with True / False elements to indicate whether a given metric should be computed.
     # n_noise_waveforms=1000: int # the number of random noise waveforms to use for the noise overlap
     # n_cluster_waveforms=1000: int # the maximum number of spikes / waveforms from a cluster to use for metric calculations
-    isi_threshold=0.003: float # Interspike interval threshold in s for ISI metric (default 0.003)
-    snr_mode='mad':enum('mad', 'std') # SNR mode: median absolute deviation ('mad) or standard deviation ('std') (default 'mad')
-    snr_noise_duration=10.0 : float # length of data to use for noise estimation (default 10.0)
-    max_spikes_per_unit_for_snr=1000: int # Maximum number of spikes to compute templates for SNR from (default 1000)
-    template_mode='mean': enum('mean','median') # Use 'mean' or 'median' to compute templates
-    max_channel_peak='both' : enum('both', 'neg', 'pos') # direction of the maximum channel peak: 'both', 'neg', or 'pos' (default 'both')
-    max_spikes_per_unit_for_noise_overlap=1000 : int # Maximum number of spikes to compute templates for noise overlap from (default 1000)
-    noise_overlap_num_features=5 : int # Number of features to use for PCA for noise overlap
-    noise_overlap_num_knn=1000:int # Number of nearest neighbors for noise overlap
-    drift_metrics_interval_s=60: float # length of period in s for evaluating drift (default 60 s)
-    drift_metrics_min_spikes_per_interval=10: int # minimum number of spikes in an interval for evaluation of drift (default 10)
-    max_spikes_for_silhouette=1000: int # Max spikes to be used for silhouette metric
-    num_channels_to_compare=7: int # number of channels to be used for the PC extraction and comparison (default 7)
-    max_spikes_per_cluster=1000: int # Max spikes to be used from each unit
-    max_spikes_for_nn=1000: int # Max spikes to be used for nearest-neighbors calculation
-    n_neighbors=4: int # number of nearest clusters to use for nearest neighbor calculation (default 4)
-    seed=47 : int # Random seed for reproducibility
-    verbose=1 : tinyint(1) # If nonzero, will be verbose in metric computation
+    isi_threshold = 0.003: float # Interspike interval threshold in s for ISI metric (default 0.003)
+    snr_mode = 'mad': enum('mad', 'std') # SNR mode: median absolute deviation ('mad) or standard deviation ('std') (default 'mad')
+    snr_noise_duration = 10.0: float # length of data to use for noise estimation (default 10.0)
+    max_spikes_per_unit_for_snr = 1000: int # Maximum number of spikes to compute templates for SNR from (default 1000)
+    template_mode = 'mean': enum('mean','median') # Use 'mean' or 'median' to compute templates
+    max_channel_peak = 'both': enum('both', 'neg', 'pos') # direction of the maximum channel peak: 'both', 'neg', or 'pos' (default 'both')
+    max_spikes_per_unit_for_noise_overlap = 1000: int # Maximum number of spikes to compute templates for noise overlap from (default 1000)
+    noise_overlap_num_features = 5: int # Number of features to use for PCA for noise overlap
+    noise_overlap_num_knn = 1000: int # Number of nearest neighbors for noise overlap
+    drift_metrics_interval_s = 60: float # length of period in s for evaluating drift (default 60 s)
+    drift_metrics_min_spikes_per_interval = 10: int # minimum number of spikes in an interval for evaluation of drift (default 10)
+    max_spikes_for_silhouette = 1000: int # Max spikes to be used for silhouette metric
+    num_channels_to_compare = 7: int # number of channels to be used for the PC extraction and comparison (default 7)
+    max_spikes_per_cluster = 1000: int # Max spikes to be used from each unit
+    max_spikes_for_nn = 1000: int # Max spikes to be used for nearest-neighbors calculation
+    n_neighbors = 4: int # number of nearest clusters to use for nearest neighbor calculation (default 4)
+    n_job = 96: int # Number of parallel jobs (default 96)
+    seed = 47: int # Random seed for reproducibility
+    verbose = 1 : tinyint(1) # If nonzero (True), will be verbose in metric computation
     """
 
     def get_metric_dict(self):
@@ -351,6 +352,7 @@ class SpikeSortingMetrics(dj.Manual):
                                                      max_spikes_per_cluster=m['max_spikes_per_cluster'],
                                                      max_spikes_for_nn=m['max_spikes_for_nn'],
                                                      n_neighbors=m['n_neighbors'],
+                                                     n_job=m['n_job']
                                                      seed=m['seed'],
                                                      verbose=bool(m['verbose']))
 
@@ -471,12 +473,13 @@ class SpikeSorting(dj.Computed):
                                        / key['analysis_file_name']
                                        / np.array2string(sort_interval))
             recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor, save_path=recording_extractor_path)
+            # save the recording extractor modulo binary data (already saved)
             # np.save('/stelmo/nwb/re.npy',recording_extractor_cached.make_serialized_dict())
 
             # ------------------------------------------------------------------
             # Run spike sorting!
             # ------------------------------------------------------------------
-            print(f'Running spike sorting {key}...')
+            print(f'\nRunning spike sorting {key}...')
             sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                         'parameter_set_name': key['parameter_set_name']}).fetch1()
             sort = si.sorters.run_mountainsort4(recording=recording_extractor,
@@ -487,6 +490,7 @@ class SpikeSorting(dj.Computed):
             # ------------------------------------------------------------------
             # Compute quality metrics
             # ------------------------------------------------------------------
+            print('\nComputing quality metrics...')
             metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')
             # metrics_key = {'cluster_metrics_list_name': (SpikeSortingParameters &
             #                                              key).fetch1('cluster_metrics_list_name')}
@@ -497,6 +501,7 @@ class SpikeSorting(dj.Computed):
             # ------------------------------------------------------------------
             # Get waveform snippets
             # ------------------------------------------------------------------
+            print('\nComputing waveforms...')
             # Get parameters about waveform snippets
             waveform_param_name = (SpikeSortingParameters & key).fetch1('waveform_parameters_name')
             sorting_waveform_param = (SpikeSortingWaveformParameters
@@ -544,6 +549,7 @@ class SpikeSorting(dj.Computed):
             # ------------------------------------------------------------------
             # Save sorting output
             # ------------------------------------------------------------------
+            print('\nSaving output...')
             # create a stack of labeled arrays of the sorted spike times
             unit_ids = sort.get_unit_ids()
             for index, unit_id in enumerate(unit_ids):
@@ -555,7 +561,8 @@ class SpikeSorting(dj.Computed):
                 units_templates[unit_id] = templates[index]
                 units_valid_times[unit_id] = sort_interval_valid_times
                 units_sort_interval[unit_id] = [sort_interval]
-            np.save('/stelmo/nwb/sorted.npy',sort.get_units_spike_train())
+            # save the spike train from sorting extractor
+            # np.save('/stelmo/nwb/sorted.npy',sort.get_units_spike_train())
         # TODO: remove once we are saving the waveforms correctly
         units_waveforms = None
 
@@ -576,6 +583,7 @@ class SpikeSorting(dj.Computed):
         # -----------------------------------------------------------------
         # Generate feed for labbox-ephys curation
         # -----------------------------------------------------------------
+        print('\nGenerating feed for labbox')
         # first, store and get URI of the snippets h5 file (soft link)
         snippets_h5_uri = ka.store_file(tmp_waveform_file)
 
@@ -644,6 +652,7 @@ class SpikeSorting(dj.Computed):
         key['time_of_sort'] = int(time.time())
         # Finally, insert the entity into table
         self.insert1(key)
+        print('\nDone - entry inserted to table!\n')
 
         # Tell user how to access curation website
         ipaddr = socket.getfqdn(socket.gethostname())
