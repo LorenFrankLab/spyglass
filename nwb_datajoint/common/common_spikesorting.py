@@ -475,7 +475,7 @@ class SpikeSorting(dj.Computed):
                                        / key['analysis_file_name']
                                        / np.array2string(sort_interval))
             recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor, save_path=recording_extractor_path)
-            print(recording_extractor.get_channel_locations())
+
             # save the recording extractor modulo binary data (already saved)
             # np.save('/stelmo/nwb/re.npy',recording_extractor_cached.make_serialized_dict())
 
@@ -495,10 +495,6 @@ class SpikeSorting(dj.Computed):
             # ------------------------------------------------------------------
             print('\nComputing quality metrics...')
             metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')
-            # metrics_key = {'cluster_metrics_list_name': (SpikeSortingParameters &
-            #                                              key).fetch1('cluster_metrics_list_name')}
-            # could check that the metrics to be calculated are valid:
-            #assert SpikeSortingMetrics.validate_metrics_list(dict(cluster_metrics_list_name=cluster_metrics_list_name))
             metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording_extractor, sort)
 
             # ------------------------------------------------------------------
