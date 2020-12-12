@@ -466,7 +466,8 @@ class SpikeSorting(dj.Computed):
             # start by getting the first and last frame for this epoch
             #frames = recording_extractor_cached.get_epoch_info(str(sort_interval_index))
             rng = np.random.default_rng()
-            noise_frames = np.sort(np.random.randint(0, recording_extractor_cached.get_num_frames(), sorting_waveform_param['n_noise_waveforms']))
+            n_noise_waveforms = (SpikeSortingMetrics() & metrics_key).fetch1('n_noise_waveforms')
+            noise_frames = np.sort(np.random.randint(0, recording_extractor_cached.get_num_frames(), n_noise_waveforms))
                 
             noise_sorting=se.NumpySortingExtractor()
             noise_sorting.set_times_labels(times=noise_frames,labels=np.zeros(noise_frames.shape))
