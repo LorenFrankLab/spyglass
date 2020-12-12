@@ -475,6 +475,7 @@ class SpikeSorting(dj.Computed):
                                        / key['analysis_file_name']
                                        / np.array2string(sort_interval))
             recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor, save_path=recording_extractor_path)
+            print(recording_extractor.get_channel_locations())
             # save the recording extractor modulo binary data (already saved)
             # np.save('/stelmo/nwb/re.npy',recording_extractor_cached.make_serialized_dict())
 
@@ -703,7 +704,7 @@ class SpikeSorting(dj.Computed):
         exclude_inds = exclude_inds[exclude_inds <= sort_indices[-1]]
         # TODO: add a blanking function to the preprocessing module
         # TODO: write function that actually detects artifacts
-        raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
+        # raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
 
         # create a group id within spikeinterface for the specified electodes
         electrode_ids = (SortGroup.SortGroupElectrode() & {'nwb_file_name' : key['nwb_file_name'],
