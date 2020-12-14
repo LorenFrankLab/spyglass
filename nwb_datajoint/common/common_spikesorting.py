@@ -355,6 +355,7 @@ class SpikeSortingMetrics(dj.Manual):
                                                      n_neighbors=m['n_neighbors'],
                                                      n_jobs=m['n_jobs'],
                                                      memmap=bool(m['memmap']),
+                                                     max_spikes_per_unit=100000,
                                                      seed=m['seed'],
                                                      verbose=bool(m['verbose']))
 
