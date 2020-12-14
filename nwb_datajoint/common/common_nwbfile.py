@@ -70,7 +70,6 @@ class Nwbfile(dj.Manual):
         self.external['raw'].delete(delete_external_files=delete_files)
 
 
-
 #TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
 # We therefore need another way to keep track of the
 @schema

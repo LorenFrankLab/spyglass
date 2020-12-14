@@ -898,17 +898,16 @@ class CuratedSpikeSorting(dj.Computed):
     def make(self, key):
         parent_key = (SpikeSorting & key).fetch1()
         key['curation_feed_uri'] = parent_key['curation_feed_uri']
-        # key['curation_feed_uri'] = 'feed://475b18ebb79d5e9a17a7c492a972c556a39f035fdc4f88638dc7d630d407ef61'
         self.insert1(key)
         labels = self.get_labels(key['curation_feed_uri'])
         print('Labels:')
         print(labels)
         print('Adding to dj Units table')
+
         # TODO add metrics to Units table; get them from analysisNWB file
         for unitId,label in labels.items():
             label_concat = ','.join(label)
             CuratedSpikeSorting.Units.insert1(dict(key, unit_id=unitId, label=label_concat))
-
         print('Done with dj Units table')
 
         print('Adding to NWB file')
@@ -917,7 +916,7 @@ class CuratedSpikeSorting(dj.Computed):
 
     def get_labels(self, feed_uri):
         """
-        Parses the curation feed to get label for each unit
+        Parses the curation feed to get a label for each unit.
         Note: every unit must be given a label before runnig this
 
         Parameter
@@ -959,6 +958,7 @@ class CuratedSpikeSorting(dj.Computed):
         labels = self.get_labels(feed_uri)
         for unitId, label in labels.items():
             labels[unitId] = ','.join(label)
+        print(list(labels.values()))
         with pynwb.NWBHDF5IO(path=Nwbfile.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
             nwbf.add_unit_column(name='label', description='label given to unit during curation',
