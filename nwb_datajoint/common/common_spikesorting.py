@@ -281,6 +281,7 @@ class SpikeSortingMetrics(dj.Manual):
     n_neighbors = 4: int # number of nearest clusters to use for nearest neighbor calculation (default 4)
     n_jobs = 96: int # Number of parallel jobs (default 96)
     memmap = 0 : tinyint(1) # If True, waveforms are saved as memmap object (recommended for long recordings with many channels)
+    max_spikes_per_unit = 2000: int # Max spikes to use for computing waveform
     seed = 47: int # Random seed for reproducibility
     verbose = 1 : tinyint(1) # If nonzero (True), will be verbose in metric computation
     """
@@ -355,7 +356,7 @@ class SpikeSortingMetrics(dj.Manual):
                                                      n_neighbors=m['n_neighbors'],
                                                      n_jobs=m['n_jobs'],
                                                      memmap=bool(m['memmap']),
-                                                     max_spikes_per_unit=100000,
+                                                     max_spikes_per_unit=m['max_spikes_per_unit'],
                                                      seed=m['seed'],
                                                      verbose=bool(m['verbose']))
 
