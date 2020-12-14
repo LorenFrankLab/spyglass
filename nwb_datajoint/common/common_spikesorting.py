@@ -902,15 +902,15 @@ class CuratedSpikeSorting(dj.Computed):
         labels = self.get_labels(key['curation_feed_uri'])
         print('Labels:')
         print(labels)
-        print('Adding to dj Units table')
+        print('Adding to dj Units table...')
 
         # TODO add metrics to Units table; get them from analysisNWB file
         for unitId,label in labels.items():
             label_concat = ','.join(label)
             CuratedSpikeSorting.Units.insert1(dict(key, unit_id=unitId, label=label_concat))
-        print('Done with dj Units table')
+        print('Done with dj Units table.')
 
-        print('Adding to NWB file')
+        print('Adding to AnalysisNwb file...')
 
         analysis_nwb_file_name = (AnalysisNwbfile & {'nwb_file_name': key['nwb_file_name']}).fetch1('analysis_file_name')
         self.add_labels_analysisNWB(analysis_nwb_file_name, key['curation_feed_uri'])
@@ -958,8 +958,8 @@ class CuratedSpikeSorting(dj.Computed):
             the name of the analysisNWB file
         """
         labels = self.get_labels(feed_uri)
-        # for unitId, label in labels.items():
-        #     labels[unitId] = ','.join(label)
+        for unitId, label in labels.items():
+            labels[unitId] = ','.join(label)
 
         with pynwb.NWBHDF5IO(path=AnalysisNwbfile.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
