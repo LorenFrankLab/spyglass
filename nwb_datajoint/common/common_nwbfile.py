@@ -155,7 +155,7 @@ class AnalysisNwbfile(dj.Manual):
         base_dir = os.getenv('NWB_DATAJOINT_BASE_DIR', None)
         assert base_dir is not None, 'You must set NWB_DATAJOINT_BASE_DIR or provide the base_dir argument'
 
-        analysis_nwb_file_abspath = os.path.join(base_dir, 'analysis', analysis_nwb_file_name)
+        analysis_nwb_file_abspath = base_dir / 'analysis' / analysis_nwb_file_name
         return analysis_nwb_file_abspath
 
     @staticmethod

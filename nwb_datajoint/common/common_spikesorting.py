@@ -914,7 +914,7 @@ class CuratedSpikeSorting(dj.Computed):
 
         analysis_nwb_file_name = (AnalysisNwbfile & {'nwb_file_name': key['nwb_file_name']}).fetch1('analysis_file_name')
         self.add_labels_analysisNWB(analysis_nwb_file_name, key['curation_feed_uri'])
-        print('done with nwb file')
+        print('Done with nwb file')
 
     def get_labels(self, feed_uri):
         """
@@ -961,36 +961,12 @@ class CuratedSpikeSorting(dj.Computed):
         # for unitId, label in labels.items():
         #     labels[unitId] = ','.join(label)
 
-        with pynwb.NWBHDF5IO(path=Nwbfile.get_abs_path(analysis_file_name), mode="a") as io:
+        with pynwb.NWBHDF5IO(path=AnalysisNwbfile.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
             print(len(nwbf.units))
             nwbf.add_unit_column(name='label', description='label given to unit during curation',
                                  data=list(labels.values()))
         return None
-            # sort_intervals = list()
-            # if len(units.keys()):
-            #     for id in units.keys():
-            #         nwbf.add_unit(spike_times=units[id], id=id, waveform_mean=units_templates[id],
-            #                       obs_intervals=units_valid_times[id])
-            #         sort_intervals.append(units_sort_interval[id])
-            #     # add a column for the sort interval
-            #     nwbf.add_unit_column(name='sort_interval', description='the interval used for spike sorting', data=sort_intervals)
-            #     # if metrics were specified, add one column per metric
-            #     if metrics is not None:
-            #         for metric in list(metrics):
-            #             print(f'adding metric {metric} : {metrics[metric].to_list()}')
-            #             nwbf.add_unit_column(name=metric, description=f'{metric} sorting metric', data=metrics[metric].to_list())
-            #     # if the waveforms were specified, add them as a dataframe
-            #     waveforms_object_id = ''
-            #     if units_waveforms is not None:
-            #         waveforms_df = pd.DataFrame.from_dict(units_waveforms, orient='index')
-            #         waveforms_df.columns = ['waveforms']
-            #         nwbf.add_scratch(waveforms_df, name='units_waveforms', notes='')
-            #         waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
-            #     io.write(nwbf)
-            #     return nwbf.units.object_id, waveforms_object_id
-            # else:
-            #     return ''
 
 
 
