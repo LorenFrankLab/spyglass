@@ -965,6 +965,7 @@ class CuratedSpikeSorting(dj.Computed):
             nwbf.add_unit_column(name='label', description='label given to unit during curation',
                                  data=list(labels.values()))
             print(nwbf.units)
+            io.write(nwbf)
         return None
 
 
