@@ -956,9 +956,9 @@ class CuratedSpikeSorting(dj.Computed):
             the name of the analysisNWB file
         """
         labels = self.get_labels(feed_uri)
-        for unitId, label in labels.items():
-            labels[unitId] = ','.join(label)
-        print(list(labels.values()))
+        # for unitId, label in labels.items():
+        #     labels[unitId] = ','.join(label)
+
         with pynwb.NWBHDF5IO(path=Nwbfile.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf=io.read()
             nwbf.add_unit_column(name='label', description='label given to unit during curation',
