@@ -912,7 +912,7 @@ class CuratedSpikeSorting(dj.Computed):
 
         print('Adding to NWB file')
 
-        analysis_nwb_file_name = (AnalysisNWBfile & {'nwb_file_name': key['nwb_file_name']}).fetch1('analysis_file_name')
+        analysis_nwb_file_name = (AnalysisNwbfile & {'nwb_file_name': key['nwb_file_name']}).fetch1('analysis_file_name')
         self.add_labels_analysisNWB(analysis_nwb_file_name, key['curation_feed_uri'])
         print('done with nwb file')
 
