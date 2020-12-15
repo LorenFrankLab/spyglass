@@ -29,7 +29,6 @@ from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices
 from .dj_helper_fn import dj_replace, fetch_nwb
 
-
 from mountainlab_pytools.mdaio import readmda
 
 from requests.exceptions import ConnectionError
@@ -41,11 +40,13 @@ schema = dj.schema('common_spikesorting')
 @schema
 class SortGroup(dj.Manual):
     definition = """
+    # Table for holding the set of electrodes that will be sorted together
     -> Session
     sort_group_id: int  # identifier for a group of electrodes
     ---
     sort_reference_electrode_id=-1: int  # the electrode to use for reference. -1: no reference, -2: common median
     """
+
     class SortGroupElectrode(dj.Part):
         definition = """
         -> master
@@ -124,8 +125,6 @@ class SortGroup(dj.Manual):
                 self.SortGroupElectrode().insert1(sge_key)
             sort_group += 1
 
-
-
     def set_reference_from_list(self, nwb_file_name, sort_group_ref_list):
         '''
         Set the reference electrode from a list containing sort groups and reference electrodes
@@ -143,14 +142,15 @@ class SortGroup(dj.Manual):
                                              replace="True")
 
     def write_prb(self, sort_group_id, nwb_file_name, prb_file_name):
-        '''
-        Writes a prb file containing informaiton on the specified sort group and its geometry for use with the
-        SpikeInterface package. See the SpikeInterface documentation for details on prb file format.
+        """
+        Writes a prb file containing informaiton on the specified sort group and
+        its geometry for use with the SpikeInterface package. See the
+        SpikeInterface documentation for details on prb file format.
         :param sort_group_id: the id of the sort group
         :param nwb_file_name: the name of the nwb file for the session you wish to use
         :param prb_file_name: the name of the output prb file
         :return: None
-        '''
+        """
         # try to open the output file
         try:
             prbf = open(prb_file_name, 'w')
@@ -204,6 +204,7 @@ class SortGroup(dj.Manual):
 @schema
 class SpikeSorter(dj.Manual):
     definition = """
+    # Table that holds the list of spike sorters avaialbe through spikeinterface
     sorter_name: varchar(80) # the name of the spike sorting algorithm
     """
     def insert_from_spikeinterface(self):
@@ -258,6 +259,7 @@ class SpikeSortingWaveformParameters(dj.Manual):
 @schema
 class SpikeSortingMetrics(dj.Manual):
     definition = """
+    # Table for holding the parameters for computing quality metrics
     cluster_metrics_list_name: varchar(80) # the name for this list of cluster metrics
     ---
     metrics_dict: blob # a dict of SpikeInterface metrics with True / False elements to indicate whether a given metric should be computed.
@@ -398,10 +400,10 @@ class SpikeSorting(dj.Computed):
         - Save the sorted units to AnalysisNWB file
         - Generate a feed URI to be used during curation
 
-        Parameter
-        ---------
+        Parameters
+        ----------
         key: dict
-            partially filled entity, value of primary keys from key source
+            partially filled entity; value of primary keys from key source
             (in this case SpikeSortingParameters)
         """
 
@@ -787,8 +789,8 @@ class SpikeSorting(dj.Computed):
         """
         Generates labbox-ephys recording and sorting extractors
 
-        Parameter
-        ---------
+        Parameters
+        ----------
         snippets_h5_uri: string
             URI to snippets.h5 file (will call from NWB file in the future)
         """
@@ -880,48 +882,59 @@ class SpikeSorting(dj.Computed):
 @schema
 class CuratedSpikeSorting(dj.Computed):
     definition = """
+    # Table for holding the output of spike sorting
     -> SpikeSorting
-    curation_feed_uri = 'None': varchar(80)
+    curation_feed_uri = 'None': varchar(80) # labbox feed for curating sort
     """
 
     class Units(dj.Part):
         definition = """
+        # Table for holding the units
         -> CuratedSpikeSorting
         unit_id: int # the cluster number for this unit
         ---
         label: varchar(80) # label for each unit
-        # noise_overlap: float # the noise overlap metric
-        # isolation_score: float # the isolation score metric
-        # snr : float
+        noise_overlap: float # the noise overlap metric
+        isolation_score: float # the isolation score metric
         """
 
     def make(self, key):
         parent_key = (SpikeSorting & key).fetch1()
         key['curation_feed_uri'] = parent_key['curation_feed_uri']
         self.insert1(key)
+
         labels = self.get_labels(key['curation_feed_uri'])
-        print('Labels:')
-        print(labels)
+
+        print('Labels: '+str(labels))
+
+        analysis_nwb_file_name = (AnalysisNwbfile & {'nwb_file_name': key['nwb_file_name']}).fetch1('analysis_file_name')
+        with pynwb.NWBHDF5IO(path=AnalysisNwbfile.get_abs_path(analysis_nwb_file_name), mode="r") as io:
+            nwbf = io.read()
+            noise_overlap = nwbf.units['noise_overlap'][:]
+            isolation_score = nwbf.units['nn_hit_rate'][:]
+
+        print('Noise overlap: '+str(noise_overlap))
+        print('Isolation score: '+str(isolation_score))
 
         print('Adding to dj Units table...')
-        # TODO add metrics to Units table; get them from analysisNWB file
-        for unitId,label in labels.items():
-            label_concat = ','.join(label)
-            CuratedSpikeSorting.Units.insert1(dict(key, unit_id=unitId, label=label_concat))
+        for idx,unitId in enumerate(labels):
+            label_concat = ','.join(labels[unitId])
+            CuratedSpikeSorting.Units.insert1(dict(key, unit_id=unitId,
+                                                label=label_concat,
+                                                noise_overlap = noise_overal[idx],
+                                                isolation_score = isolation_score[idx]))
         print('Done with dj Units table.')
 
         print('Adding to AnalysisNwb file...')
-        analysis_nwb_file_name = (AnalysisNwbfile & {'nwb_file_name': key['nwb_file_name']}).fetch1('analysis_file_name')
         self.add_labels_analysisNWB(analysis_nwb_file_name, key['curation_feed_uri'])
         print('Done with AnalysisNwb file.')
 
     def get_labels(self, feed_uri):
         """
         Parses the curation feed to get a label for each unit.
-        Note: every unit must be given a label before runnig this
 
-        Parameter
-        ---------
+        Parameters
+        ----------
         feed_uri: str
 
         Returns
@@ -929,7 +942,6 @@ class CuratedSpikeSorting(dj.Computed):
         final_labels: dict
             key is int (unitId), value is list of strings (labels)
         """
-        # feed_uri = 'feed://475b18ebb79d5e9a17a7c492a972c556a39f035fdc4f88638dc7d630d407ef61'
         f = kp.load_feed(feed_uri)
         sf = f.get_subfeed(dict(documentId='default', key='sortings'))
         msgs = sf.get_next_messages()
@@ -947,9 +959,7 @@ class CuratedSpikeSorting(dj.Computed):
 
     def add_labels_analysisNWB(self, analysis_file_name, feed_uri):
         """
-        Adds the labels given to each unit during curation to analysisNWB file
-        NOTE: labels are in numerical order for unitId (1,2, ...)
-        check if this is also true for the units in the units table of analysisNWB
+        Adds the labels given to each unit during curation to AnalysisNWBfile
 
         Parameters
         ----------
@@ -967,6 +977,7 @@ class CuratedSpikeSorting(dj.Computed):
             print(nwbf.units)
             io.write(nwbf)
         return None
+
 
 
 
