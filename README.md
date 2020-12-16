@@ -61,7 +61,7 @@
 7. Install and run the development version of [pynwb](https://github.com/NeurodataWithoutBorders/pynwb)
 
   ```bash
-  pip uninstall pynwb
+  pip uninstall hdmf pynwb
   git clone --recurse-submodules https://github.com/NeurodataWithoutBorders/pynwb.git
   cd pynwb
   python setup.py develop
