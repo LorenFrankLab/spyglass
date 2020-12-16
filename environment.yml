@@ -23,7 +23,7 @@ dependencies:
 - pytest
 - pytest-cov
 - coveralls
-- pynwb>=1.4
+#- pynwb>=1.4
 - pybind11
 - distributed
 - pip
