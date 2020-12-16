@@ -365,6 +365,7 @@ class SpikeSortingMetrics(dj.Manual):
 @schema
 class SpikeSortingParameters(dj.Manual):
     definition = """
+    Table for holding parameters for each spike sorting run
     -> SortGroup
     -> SpikeSorterParameters
     -> SortInterval # the time interval to be used for sorting
@@ -378,6 +379,7 @@ class SpikeSortingParameters(dj.Manual):
 @schema
 class SpikeSorting(dj.Computed):
     definition = """
+    # Table for holding spike sorting runs
     -> SpikeSortingParameters
     ---
     -> AnalysisNwbfile
@@ -592,6 +594,8 @@ class SpikeSorting(dj.Computed):
 
         # get labbox recording and sorting extractors
         recording, sorting = self.prepare_recording_sorting(snippets_h5_uri)
+        recording.dump_to_json('/stelmo/nwb/test_r.json')
+        sorting.dump_to_json('/stelmo/nwb/test_s.json')
 
         # Change format of metrics to list of dict
         external_unit_metrics = self.metrics_to_labbox_ephys(metrics, unit_ids)
