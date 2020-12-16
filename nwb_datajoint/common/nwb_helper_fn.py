@@ -1,6 +1,8 @@
 import numpy as np
-from operator import itemgetter 
-  
+from operator import itemgetter
+from pynwb import NWBFile
+from pynwb.ecephys import ElectricalSeries
+
 # import matplotlib.pyplot as plt
 
 #NWB helper functions for finding processing modules and data interfaces
@@ -80,15 +82,17 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
 
     return valid_times[valid_intervals,:]
 
-def get_electrode_indices(electrical_series, electrode_ids):
-    """Given an NWB file or electrical series object , returns the indices of the specified electrode_ids. 
-
-    :param electrical_series: NWB file handle or nwb electrical series object
-    :type electrical_series: 
+def get_electrode_indices(nwb_object, electrode_ids):
+    """Given an NWB file or electrical series object, returns the indices of the specified electrode_ids.
+    :param nwb_object: NWB file object or NWB electrical series object
+    :type nwb_object: NWBFile or ElectricalSeries
     :param electrode_ids: array or list of electrode_ids
     :type electrode_ids: numpy array or list
     :return: electrode_indices (numpy array of indices)
     """
-    electrode_table_region = list(electrical_series.electrodes.to_dataframe().index)
-    return [elect_idx for elect_idx, elect_id in enumerate(electrode_table_region) if elect_id in electrode_ids]
+    if isinstance(nwb_object, ElectricalSeries):
+        electrode_table_indices = nwb_object.electrodes.data[:]  # dynamictableregion of row indices
+    elif isinstance(nwb_object, NWBFile):
+        electrode_table_indices = nwb_object.electrodes.id[:]
 
+    return [elect_idx for elect_idx, elect_id in enumerate(electrode_table_indices) if elect_id in electrode_ids]
