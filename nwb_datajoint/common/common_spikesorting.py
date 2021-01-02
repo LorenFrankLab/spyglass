@@ -922,7 +922,7 @@ class CuratedSpikeSorting(dj.Computed):
         print('Done with AnalysisNwb file.')
 
         # Insert new file to AnalysisNWBfile table
-        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
+        AnalysisNwbfile().add(key['nwb_file_name'], new_analysis_nwb_filename)
         # Insert entry to CuratedSpikeSorting table
         self.insert1(dict(key, analysis_file_name = new_analysis_nwb_filename))
 
