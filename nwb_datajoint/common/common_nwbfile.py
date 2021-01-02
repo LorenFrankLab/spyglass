@@ -172,23 +172,18 @@ class AnalysisNwbfile(dj.Manual):
         # get the current number of analysis files related to this nwb file
         original_nwb_file_name = (AnalysisNwbfile &
                                   {'analysis_file_name': nwb_file_name}).fetch('nwb_file_name')[0]
-        n_analysis_files = len((AnalysisNwbfile & {'nwb_file_name': nwb_file_name}).fetch())
+        n_analysis_files = len((AnalysisNwbfile & {'nwb_file_name': original_nwb_file_name}).fetch())
         # name the file, adding the number of files with preceeding zeros
-        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_analysis_files).zfill(6) + '.nwb'
-        # key['analysis_file_name'] = analysis_file_name
-        # key['analysis_file_description'] = ''
+        analysis_file_name = os.path.splitext(original_nwb_file_name)[0] + str(n_analysis_files).zfill(6) + '.nwb'
         # write the new file
         print(f'writing new NWB file {analysis_file_name}')
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        # key['analysis_file_abs_path'] = analysis_file_abs_path
         # export the new NWB file
         with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
             export_io.export(io, nwbf)
 
         io.close()
 
-        # insert the new file
-        #self.insert1(key)
         return analysis_file_name
 
     def add(self, nwb_file_name, analysis_file_name):
