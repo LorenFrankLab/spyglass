@@ -888,7 +888,6 @@ class CuratedSpikeSorting(dj.Computed):
         # analysis NWB file
         parent_key = (SpikeSorting & key).fetch1()
         new_analysis_nwb_filename = AnalysisNwbfile.copy(parent_key['analysis_file_name'])
-        key['analysis_file_name'] = new_analysis_nwb_filename
 
         # Get labels and print
         labels = self.get_labels(parent_key['curation_feed_uri'])
@@ -925,7 +924,7 @@ class CuratedSpikeSorting(dj.Computed):
         # Insert new file to AnalysisNWBfile table
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
         # Insert entry to CuratedSpikeSorting table
-        self.insert1(key)
+        self.insert1(dict(key, analysis_file_name = new_analysis_nwb_filename))
 
         # Add entries to CuratedSpikeSorting.Units table
         print('\nAdding to dj Units table...')
