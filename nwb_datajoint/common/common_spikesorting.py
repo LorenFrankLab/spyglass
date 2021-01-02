@@ -888,14 +888,17 @@ class CuratedSpikeSorting(dj.Computed):
         # analysis NWB file
         parent_key = (SpikeSorting & key).fetch1()
         new_analysis_nwb_filename = AnalysisNwbfile.copy(parent_key['analysis_file_name'])
-        print(new_analysis_nwb_filename)
-        # insert entry to CuratedSpikeSorting table
         key['analysis_file_name'] = new_analysis_nwb_filename
-        self.insert1(key)
 
         # Get labels and print
         labels = self.get_labels(parent_key['curation_feed_uri'])
         print('Labels: ' + str(labels))
+
+        # turn labels to list of str
+        labels_concat = []
+        for idx, unitId in enumerate(labels):
+            label_concat = ','.join(labels[unitId])
+            labels_concat.append(label_concat)
 
         # Get metrics from analysis NWB file
         with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(parent_key['analysis_file_name']),
@@ -908,20 +911,8 @@ class CuratedSpikeSorting(dj.Computed):
         print('Noise overlap: ' + str(noise_overlap))
         print('Isolation score: ' + str(isolation_score))
 
-        # Add entries (including labels and metrics) to Units table
-        print('\nAdding to dj Units table...')
-        labels_concat = []
-        for idx, unitId in enumerate(labels):
-            label_concat = ','.join(labels[unitId])
-            CuratedSpikeSorting.Units.insert1(dict(key, unit_id=unitId,
-                                              label = label_concat,
-                                              noise_overlap = noise_overlap[idx],
-                                              isolation_score = isolation_score[idx]))
-            labels_concat.append(label_concat)
-        print('Done with dj Units table.\n')
-
         # Add labels to the new analysis NWB file
-        print('Saving units data to new AnalysisNwb file...')
+        print('\nSaving units data to new AnalysisNwb file...')
         with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(new_analysis_nwb_filename),
                              mode = "a") as io:
             nwbf = io.read()
@@ -932,7 +923,18 @@ class CuratedSpikeSorting(dj.Computed):
         print('Done with AnalysisNwb file.')
 
         # Insert new file to AnalysisNWBfile table
-        AnalysisNwbfile.add(key['nwb_file_name'], key['analysis_file_name'])
+        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
+        # Insert entry to CuratedSpikeSorting table
+        self.insert1(key)
+
+        # Add entries to CuratedSpikeSorting.Units table
+        print('\nAdding to dj Units table...')
+        for idx, label in enumerate(labels_concat):
+            CuratedSpikeSorting.Units.insert1(dict(key, unit_id = unitId,
+                                              label = label,
+                                              noise_overlap = noise_overlap[idx],
+                                              isolation_score = isolation_score[idx]))
+        print('Done with dj Units table.')
 
     def get_labels(self, feed_uri):
         """Parses the curation feed to get a label for each unit.
