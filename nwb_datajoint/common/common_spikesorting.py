@@ -928,9 +928,9 @@ class CuratedSpikeSorting(dj.Computed):
 
         # Add entries to CuratedSpikeSorting.Units table
         print('\nAdding to dj Units table...')
-        for idx, label in enumerate(labels_concat):
+        for idx, unitId in enumerate(labels):
             CuratedSpikeSorting.Units.insert1(dict(key, unit_id = unitId,
-                                              label = label,
+                                              label = ','.join(labels[unitId]),
                                               noise_overlap = noise_overlap[idx],
                                               isolation_score = isolation_score[idx]))
         print('Done with dj Units table.')
