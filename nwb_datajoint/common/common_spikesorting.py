@@ -884,8 +884,15 @@ class CuratedSpikeSorting(dj.Computed):
         """
 
     def make(self, key):
-        # Get labels and print
+        # Create a new analysis NWB file that is a copy of the original
+        # analysis NWB file
         parent_key = (SpikeSorting & key).fetch1()
+        new_analysis_nwb_filename = AnalysisNwbfile.create(parent_key['analysis_file_name'])
+        # insert entry to CuratedSpikeSorting table
+        key['analysis_file_name'] = new_analysis_nwb_filename
+        self.insert1(key)
+
+        # Get labels and print
         labels = self.get_labels(parent_key['curation_feed_uri'])
         print('Labels: ' + str(labels))
 
@@ -914,9 +921,6 @@ class CuratedSpikeSorting(dj.Computed):
 
         # Add labels to the new analysis NWB file
         print('Saving units data to new AnalysisNwb file...')
-        # First, create a new analysis NWB file that is a copy of the original
-        # analysis NWB file
-        new_analysis_nwb_filename = AnalysisNwbfile.create(parent_key['analysis_file_name'])
         with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(new_analysis_nwb_filename),
                              mode = "a") as io:
             nwbf = io.read()
@@ -926,10 +930,7 @@ class CuratedSpikeSorting(dj.Computed):
             io.write(nwbf)
         print('Done with AnalysisNwb file.')
 
-        # Insert new entry to CuratedSpikeSorting table and
-        # insert new file to AnalysisNWBfile table
-        key['analysis_file_name'] = new_analysis_nwb_filename
-        self.insert1(key)
+        # Insert new file to AnalysisNWBfile table
         AnalysisNwbfile.add(key['nwb_file_name'], key['analysis_file_name'])
 
     def get_labels(self, feed_uri):
