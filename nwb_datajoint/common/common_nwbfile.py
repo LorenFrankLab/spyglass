@@ -93,16 +93,18 @@ class AnalysisNwbfile(dj.Manual):
         Opens the input NWB file, creates a copy, writes out the copy to disk and return the name of the new file.
         Note that this does NOT add the file to the schema; that needs to be done after data are written to it.
         :param nwb_file_name: str
-        :return: analysis_file_name: str
+
+        Returns
+        -------
+        analysis_file_name: str
         '''
-        #
+
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
 
         io  = pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r')
         nwbf = io.read()
 
-        #  pop off the unnecessary elements to save space
-
+        # pop off the unnecessary elements to save space
         nwb_fields = nwbf.fields
         for field in nwb_fields:
             if field not in nwb_keep_fields:
@@ -111,19 +113,18 @@ class AnalysisNwbfile(dj.Manual):
                     for module in list(nwb_object.keys()):
                         mod = nwb_object.pop(module)
 
-
-        key = dict()
-        key['nwb_file_name'] = nwb_file_name
+        # key = dict()
+        # key['nwb_file_name'] = nwb_file_name
         # get the current number of analysis files related to this nwb file
         n_analysis_files = len((AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch())
         # name the file, adding the number of files with preceeding zeros
         analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_analysis_files).zfill(6) + '.nwb'
-        key['analysis_file_name'] = analysis_file_name
-        key['analysis_file_description'] = ''
+        # key['analysis_file_name'] = analysis_file_name
+        # key['analysis_file_description'] = ''
         # write the new file
         print(f'writing new NWB file {analysis_file_name}')
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        key['analysis_file_abs_path'] = analysis_file_abs_path
+        # key['analysis_file_abs_path'] = analysis_file_abs_path
         # export the new NWB file
         with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
             export_io.export(io, nwbf)
@@ -135,12 +136,14 @@ class AnalysisNwbfile(dj.Manual):
         return analysis_file_name
 
     def add(self, nwb_file_name, analysis_file_name):
-        """ Adds the specified file to the schema
-        :param nwb_file_name: the name of the parent nwb file
-        :type nwb_file_name: string
-        :param analysis_file_name: the name of the analysis nwb file that was created
-        :type analysis_file_name: string
-        :return: None
+        """Adds the specified file to AnalysisNWBfile table
+
+        Parameters
+        ----------
+        nwb_file_name : string
+            the name of the parent NWB file
+        analysis_file_name : string
+            the name of the analysis nwb file that was created
         """
         key = dict()
         key['nwb_file_name'] = nwb_file_name

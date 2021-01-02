@@ -397,7 +397,7 @@ class SpikeSorting(dj.Computed):
         Roughly, the order of operation is:
         - Create an NWB file to hold the results of spike sorting
         - Create a spikeinterface RecordingExtractor and cache it
-        - Run mountainsort4
+        - Run sorting algorithm (e.g. MountainSort4)
         - Compute quality metrics
         - Save the sorted units to AnalysisNWB file
         - Generate a feed URI to be used during curation
@@ -594,19 +594,9 @@ class SpikeSorting(dj.Computed):
 
         # get labbox recording and sorting extractors
         recording, sorting = self.prepare_recording_sorting(snippets_h5_uri)
-        recording.dump_to_json('/stelmo/nwb/test_r.json')
-        sorting.dump_to_json('/stelmo/nwb/test_s.json')
 
         # Change format of metrics to list of dict
         external_unit_metrics = self.metrics_to_labbox_ephys(metrics, unit_ids)
-
-        # test_metric = dict(
-        #     name='test_metric',
-        #     label='Test',
-        #     tooltip='Timepoint of first firing event',
-        #     data=dict(zip([str(uid) for uid in unit_ids], [sorting.get_unit_spike_train(unit_id=uid)[0] for uid in unit_ids]))
-        # )
-        # external_unit_metrics = [test_metric]
 
         # Get labbox-ephys recording and sorting extractors
         # name of analysis nwb file might be a unique label; animal - date - probe - sort group - sort interval (name)
@@ -780,15 +770,6 @@ class SpikeSorting(dj.Computed):
         output.set_times_labels(times=np.asarray(unit_timestamps),labels=np.asarray(unit_labels))
         return output
 
-#     def get_kachery_store_uri(self, path_h5file: str) -> str:
-#         """stores the .h5 snippets file to kachery storage and returns the uri
-
-#         :path_h5file: full path to the h5 file containing spike snippets
-#         """
-#         with ka.config(use_hard_links=True): # what is a hard link?
-#             kachery_path = ka.store_file(path_h5file)
-#         return kachery_path
-
     def prepare_recording_sorting(self, snippets_h5_uri):
         """
         Generates labbox-ephys recording and sorting extractors
@@ -858,14 +839,13 @@ class SpikeSorting(dj.Computed):
                 f.delete()
 
     def metrics_to_labbox_ephys(self, metrics, unit_ids):
-        """
-        Turns the metrics pandas.dataframe to a list of dict to feed to labbox
+        """Turns the metrics pandas.dataframe to a list of dict to feed to labbox
 
         Parameters
         ----------
-        metrics: pandas.DataFrame
+        metrics : pandas.DataFrame
             from spikeinterface
-        unit_ids: list
+        unit_ids : list
             from SortingExtractor
 
         Returns
@@ -888,62 +868,80 @@ class CuratedSpikeSorting(dj.Computed):
     definition = """
     # Table for holding the output of spike sorting
     -> SpikeSorting
-    curation_feed_uri = 'None': varchar(80) # labbox feed for curating sort
+    ---
+    -> AnalysisNwbfile    # New analysis NWB file to hold unit info
     """
 
     class Units(dj.Part):
         definition = """
-        # Table for holding the units
+        # Table for holding sorted units
         -> CuratedSpikeSorting
-        unit_id: int # the cluster number for this unit
+        unit_id: int            # ID for each unit
         ---
-        label: varchar(80) # label for each unit
-        noise_overlap: float # the noise overlap metric
-        isolation_score: float # the isolation score metric
+        label: varchar(80)      # label for each unit
+        noise_overlap: float    # noise overlap metric for each unit
+        isolation_score: float  # isolation score metric for each unit
         """
 
     def make(self, key):
+        # Get labels and print
         parent_key = (SpikeSorting & key).fetch1()
-        key['curation_feed_uri'] = parent_key['curation_feed_uri']
-        self.insert1(key)
+        labels = self.get_labels(parent_key['curation_feed_uri'])
+        print('Labels: ' + str(labels))
 
-        labels = self.get_labels(key['curation_feed_uri'])
-
-        print('Labels: '+str(labels))
-
-        analysis_nwb_file_name = (AnalysisNwbfile & {'nwb_file_name': key['nwb_file_name']}).fetch1('analysis_file_name')
-        with pynwb.NWBHDF5IO(path=AnalysisNwbfile.get_abs_path(analysis_nwb_file_name), mode="r") as io:
+        # Get metrics from analysis NWB file
+        with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(new_analysis_nwb_filename),
+                             mode="r") as io:
             nwbf = io.read()
             noise_overlap = nwbf.units['noise_overlap'][:]
             isolation_score = nwbf.units['nn_hit_rate'][:]
 
-        print('Noise overlap: '+str(noise_overlap))
-        print('Isolation score: '+str(isolation_score))
+        # Print metrics
+        print('Noise overlap: ' + str(noise_overlap))
+        print('Isolation score: ' + str(isolation_score))
 
-        print('Adding to dj Units table...')
-        for idx,unitId in enumerate(labels):
+        # Add entries (including labels and metrics) to Units table
+        print('\nAdding to dj Units table...')
+        labels_concat = []
+        for idx, unitId in enumerate(labels):
             label_concat = ','.join(labels[unitId])
             CuratedSpikeSorting.Units.insert1(dict(key, unit_id=unitId,
-                                                label=label_concat,
-                                                noise_overlap = noise_overlap[idx],
-                                                isolation_score = isolation_score[idx]))
-        print('Done with dj Units table.')
+                                              label = label_concat,
+                                              noise_overlap = noise_overlap[idx],
+                                              isolation_score = isolation_score[idx]))
+            labels_concat.append(label_concat)
+        print('Done with dj Units table.\n')
 
-        print('Adding to AnalysisNwb file...')
-        self.add_labels_analysisNWB(analysis_nwb_file_name, key['curation_feed_uri'])
+        # Add labels to the new analysis NWB file
+        print('Saving units data to new AnalysisNwb file...')
+        # First, create a new analysis NWB file that is a copy of the original
+        # analysis NWB file
+        new_analysis_nwb_filename = AnalysisNwbfile.create(parent_key['analysis_file_name'])
+        with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(new_analysis_nwb_filename),
+                                                                 mode="a") as io:
+            nwbf = io.read()
+            nwbf.add_unit_column(name = 'label', description='label given during curation',
+                                 data = labels_concat)
+            print(nwbf.units)
+            io.write(nwbf)
         print('Done with AnalysisNwb file.')
 
+        # Insert new entry to CuratedSpikeSorting table and
+        # insert new file to AnalysisNWBfile table
+        key['analysis_file_name'] = new_analysis_nwb_filename
+        self.insert1(key)
+        AnalysisNwbfile.add(key['nwb_file_name'], key['analysis_file_name'])
+
     def get_labels(self, feed_uri):
-        """
-        Parses the curation feed to get a label for each unit.
+        """Parses the curation feed to get a label for each unit.
 
         Parameters
         ----------
-        feed_uri: str
+        feed_uri : str
 
         Returns
         -------
-        final_labels: dict
+        final_labels : dict
             key is int (unitId), value is list of strings (labels)
         """
         f = kp.load_feed(feed_uri)
@@ -961,28 +959,26 @@ class CuratedSpikeSorting(dj.Computed):
             final_labels.update({cell: list(set(labels_added) - set(labels_removed))})
         return final_labels
 
-    def add_labels_analysisNWB(self, analysis_file_name, feed_uri):
-        """
-        Adds the labels given to each unit during curation to AnalysisNWBfile
-
-        Parameters
-        ----------
-        analysis_file_name: str
-            the name of the analysisNWB file
-        """
-        labels = self.get_labels(feed_uri)
-        for unitId, label in labels.items():
-            labels[unitId] = ','.join(label)
-
-        with pynwb.NWBHDF5IO(path=AnalysisNwbfile.get_abs_path(analysis_file_name), mode="a") as io:
-            nwbf=io.read()
-            nwbf.add_unit_column(name='label', description='label given to unit during curation',
-                                 data=list(labels.values()))
-            print(nwbf.units)
-            io.write(nwbf)
-        return None
-
-
+    # def add_labels_analysisNWB(self, analysis_file_name, feed_uri):
+    #     """
+    #     Adds the labels given to each unit during curation to AnalysisNWBfile
+    #
+    #     Parameters
+    #     ----------
+    #     analysis_file_name: str
+    #         the name of the analysisNWB file
+    #     """
+    #     labels = self.get_labels(feed_uri)
+    #     for unitId, label in labels.items():
+    #         labels[unitId] = ','.join(label)
+    #
+    #     with pynwb.NWBHDF5IO(path=AnalysisNwbfile.get_abs_path(analysis_file_name), mode="a") as io:
+    #         nwbf=io.read()
+    #         nwbf.add_unit_column(name='label', description='label given to unit during curation',
+    #                              data=list(labels.values()))
+    #         print(nwbf.units)
+    #         io.write(nwbf)
+    #     return None
 
 
 
