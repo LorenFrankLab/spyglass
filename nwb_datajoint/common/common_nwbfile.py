@@ -12,11 +12,10 @@ schema = dj.schema("common_lab", locals())
 import kachery as ka
 
 # define the fields that should be kept in AnalysisNWBFiles
-nwb_keep_fields = ('devices', 'electrode_groups', 'electrodes', 'experiment_description', 'experimenter',
-                   'file_create_date', 'identifier', 'intervals', 'institution', 'lab', 'session_description', 'session_id',
+nwb_keep_fields = ('devices', 'electrode_groups', 'electrodes', 'experiment_description',
+                   'experimenter', 'file_create_date', 'identifier', 'intervals',
+                   'institution', 'lab', 'session_description', 'session_id',
                    'session_start_time', 'subject', 'timestamps_reference_time')
-
-# TODO: make decision about docstring -- probably use :param ...:
 
 @schema
 class Nwbfile(dj.Manual):
@@ -89,8 +88,8 @@ class AnalysisNwbfile(dj.Manual):
 
 
     def create(self, nwb_file_name):
-        """ Opens the input NWB file, creates a copy, writes out the copy to
-        disk and return the name of the new file.
+        """Opens the NWB file that ends with _, creates a copy, writes out the
+        copy to disk and return the name of the new file.
         Note that this does NOT add the file to the schema; that needs to be
         done after data are written to it.
 
@@ -119,6 +118,57 @@ class AnalysisNwbfile(dj.Manual):
 
         # key = dict()
         # key['nwb_file_name'] = nwb_file_name
+        # get the current number of analysis files related to this nwb file
+        n_analysis_files = len((AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch())
+        # name the file, adding the number of files with preceeding zeros
+        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_analysis_files).zfill(6) + '.nwb'
+        # key['analysis_file_name'] = analysis_file_name
+        # key['analysis_file_description'] = ''
+        # write the new file
+        print(f'writing new NWB file {analysis_file_name}')
+        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        # key['analysis_file_abs_path'] = analysis_file_abs_path
+        # export the new NWB file
+        with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
+            export_io.export(io, nwbf)
+
+        io.close()
+
+        # insert the new file
+        #self.insert1(key)
+        return analysis_file_name
+
+    @staticmethod
+    def copy(nwb_file_name):
+        """ Opens the input NWB file, creates a copy, writes out the copy to
+        disk and return the name of the new file.
+        Note that this does NOT add the file to the schema; that needs to be
+        done after data are written to it.
+
+        Parameters
+        ----------
+        nwb_file_name : string
+            name of analysis nwb file to be copied
+
+        Returns
+        -------
+        analysis_file_name : string
+        """
+
+        nwb_file_abspath = AnalysisNwbfile.get_abs_path(nwb_file_name)
+
+        io  = pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r')
+        nwbf = io.read()
+
+        # pop off the unnecessary elements to save space
+        nwb_fields = nwbf.fields
+        for field in nwb_fields:
+            if field not in nwb_keep_fields:
+                nwb_object = getattr(nwbf, field)
+                if type(nwb_object) is pynwb.core.LabelledDict:
+                    for module in list(nwb_object.keys()):
+                        mod = nwb_object.pop(module)
+
         # get the current number of analysis files related to this nwb file
         n_analysis_files = len((AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch())
         # name the file, adding the number of files with preceeding zeros
