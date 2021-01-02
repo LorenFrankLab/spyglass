@@ -89,15 +89,19 @@ class AnalysisNwbfile(dj.Manual):
 
 
     def create(self, nwb_file_name):
-        '''
-        Opens the input NWB file, creates a copy, writes out the copy to disk and return the name of the new file.
-        Note that this does NOT add the file to the schema; that needs to be done after data are written to it.
-        :param nwb_file_name: str
+        """ Opens the input NWB file, creates a copy, writes out the copy to
+        disk and return the name of the new file.
+        Note that this does NOT add the file to the schema; that needs to be
+        done after data are written to it.
+
+        Parameters
+        ----------
+        nwb_file_name : string
 
         Returns
         -------
-        analysis_file_name: str
-        '''
+        analysis_file_name : string
+        """
 
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
 

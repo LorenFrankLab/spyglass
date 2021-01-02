@@ -887,7 +887,7 @@ class CuratedSpikeSorting(dj.Computed):
         # Create a new analysis NWB file that is a copy of the original
         # analysis NWB file
         parent_key = (SpikeSorting & key).fetch1()
-        new_analysis_nwb_filename = AnalysisNwbfile.create(parent_key['analysis_file_name'])
+        new_analysis_nwb_filename = AnalysisNwbfile().create(parent_key['analysis_file_name'])
         # insert entry to CuratedSpikeSorting table
         key['analysis_file_name'] = new_analysis_nwb_filename
         self.insert1(key)
