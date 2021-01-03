@@ -670,8 +670,7 @@ class SpikeSorting(dj.Computed):
         # but it seems to set the time of the first sample to 0, which will not match our intervals
         timestamps = np.asarray(raw_data_obj.timestamps)
         sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
-        assert sort_indices[1] - sort_indices[0] > 1000,
-            f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
+        assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
 
         # Create a NwbRecordingExtractor
         raw_data = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']),
