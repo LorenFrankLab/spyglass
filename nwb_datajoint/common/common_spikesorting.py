@@ -653,7 +653,7 @@ class SpikeSorting(dj.Computed):
 
         Returns
         -------
-        raw_data_epoch_referenced_filtered : SubRecordingExtractor
+        sub_R : SubRecordingExtractor
             for the part of recording to be sorted (referenced and filtered)
         sort_interval_valid_times : np.array
             (start, end) times for valid sorting interval
@@ -721,10 +721,10 @@ class SpikeSorting(dj.Computed):
             raw_data_epoch_referenced_filtered.load_probe_file(prb_file_name)
 
         # create a SubRecordingExtractor
-        # sub_R = se.SubRecordingExtractor(raw_data_epoch_referenced_filtered,
-        #                                  channel_ids=electrode_ids)
+        sub_R = se.SubRecordingExtractor(raw_data_epoch_referenced_filtered,
+                                         channel_ids=electrode_ids)
 
-        return raw_data_epoch_referenced_filtered, sort_interval_valid_times
+        return sub_R, sort_interval_valid_times
 
     def get_sorting_extractor(self, key, sort_interval):
         #TODO: replace with spikeinterface call if possible
