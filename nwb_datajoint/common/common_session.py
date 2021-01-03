@@ -17,6 +17,7 @@ schema = dj.schema("common_session")
 @schema
 class Session(dj.Imported):
     definition = """
+    # Table for holding experimental sessions.
     -> Nwbfile
     ---
     -> Subject

@@ -12,6 +12,7 @@ schema = dj.schema('common_interval')
 @schema
 class IntervalList(dj.Manual):
     definition = """
+    # Time intervals with data
     -> Session
     interval_list_name: varchar(200) #descriptive name of this interval list
     ---
@@ -120,12 +121,16 @@ def interval_list_intersect(interval_list1, interval_list2):
     """
     Finds the intersection (overlapping times) for two interval lists
 
-    :param interval_list1: The first interval list
-    :type interval_list1: numpy array of intervals [start, stop]
-    :param interval_list2: The second interval list
-    :type interval_list2: numpy array of intervals [start, stop]
-    :return: interval_list
-    :rtype:  numpy array of intervals [start, stop]
+    Parameters
+    ----------
+    interval_list1: np.array, (N,2) where N = number of intervals
+        first element is start time; second element is stop time
+    interval_list2: np.array, (N,2) where N = number of intervals
+        first element is start time; second element is stop time
+
+    Returns
+    -------
+    interval_list: np.array, (2,)
     """
     # x = np.array([max(interval_list1[0],interval_list2[0]),
     #               min(interval_list1[1],interval_list2[1])])

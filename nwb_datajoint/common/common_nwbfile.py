@@ -20,6 +20,7 @@ nwb_keep_fields = ('devices', 'electrode_groups', 'electrodes', 'experiment_desc
 @schema
 class Nwbfile(dj.Manual):
     definition = """
+    # Table for holding the Nwb files.
     nwb_file_name: varchar(255) #the name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
@@ -74,6 +75,7 @@ class Nwbfile(dj.Manual):
 @schema
 class AnalysisNwbfile(dj.Manual):
     definition = """
+    # Table for holding the NWB files that contain results of analysis, such as spike sorting
     analysis_file_name: varchar(255) # the name of the file
     ---
     -> Nwbfile # the name of the parent NWB file. Used for naming and metadata copy
@@ -140,8 +142,7 @@ class AnalysisNwbfile(dj.Manual):
 
     @staticmethod
     def copy(nwb_file_name):
-        """ Opens the input NWB file, creates a copy, writes out the copy to
-        disk and return the name of the new file.
+        """ Makes a copy of an analysis nwb file.
         Note that this does NOT add the file to the schema; that needs to be
         done after data are written to it.
 
@@ -160,15 +161,6 @@ class AnalysisNwbfile(dj.Manual):
         io  = pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r')
         nwbf = io.read()
 
-        # pop off the unnecessary elements to save space
-        nwb_fields = nwbf.fields
-        for field in nwb_fields:
-            if field not in nwb_keep_fields:
-                nwb_object = getattr(nwbf, field)
-                if type(nwb_object) is pynwb.core.LabelledDict:
-                    for module in list(nwb_object.keys()):
-                        mod = nwb_object.pop(module)
-
         # get the current number of analysis files related to this nwb file
         original_nwb_file_name = (AnalysisNwbfile &
                                   {'analysis_file_name': nwb_file_name}).fetch('nwb_file_name')[0]
@@ -176,7 +168,7 @@ class AnalysisNwbfile(dj.Manual):
         # name the file, adding the number of files with preceeding zeros
         analysis_file_name = os.path.splitext(original_nwb_file_name)[0] + str(n_analysis_files).zfill(6) + '.nwb'
         # write the new file
-        print(f'writing new NWB file {analysis_file_name}')
+        print(f'Writing new NWB file {analysis_file_name}...')
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         # export the new NWB file
         with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
@@ -249,8 +241,10 @@ class AnalysisNwbfile(dj.Manual):
             return nwb_object.object_id
 
 
-    def add_units(self, analysis_file_name, units, units_templates, units_valid_times, units_sort_interval, metrics=None, units_waveforms=None):
-        """[Given a units dictionary where each entry has a unit id as the key and spike times as the data
+    def add_units(self, analysis_file_name, units, units_templates,
+                  units_valid_times, units_sort_interval, metrics=None, units_waveforms=None):
+        """
+        Given a units dictionary where each entry is (unit id, spike times)
 
         :param analysis_file_name: the name of the analysis nwb file
         :type analysis_file_name: str
@@ -273,20 +267,26 @@ class AnalysisNwbfile(dj.Manual):
             sort_intervals = list()
             if len(units.keys()):
                 for id in units.keys():
-                    nwbf.add_unit(spike_times=units[id], id=id, waveform_mean=units_templates[id],
-                                  obs_intervals=units_valid_times[id])
+                    nwbf.add_unit(spike_times = units[id], id = id,
+                                  waveform_mean = units_templates[id],
+                                  obs_intervals = units_valid_times[id])
                     sort_intervals.append(units_sort_interval[id])
                 # add a column for the sort interval
-                nwbf.add_unit_column(name='sort_interval', description='the interval used for spike sorting', data=sort_intervals)
+                nwbf.add_unit_column(name='sort_interval',
+                                     description='the interval used for spike sorting',
+                                     data=sort_intervals)
                 # if metrics were specified, add one column per metric
                 if metrics is not None:
                     for metric in list(metrics):
                         print(f'adding metric {metric} : {metrics[metric].to_list()}')
-                        nwbf.add_unit_column(name=metric, description=f'{metric} sorting metric', data=metrics[metric].to_list())
+                        nwbf.add_unit_column(name=metric,
+                                             description=f'{metric} sorting metric',
+                                             data=metrics[metric].to_list())
                 # if the waveforms were specified, add them as a dataframe
                 waveforms_object_id = ''
                 if units_waveforms is not None:
-                    waveforms_df = pd.DataFrame.from_dict(units_waveforms, orient='index')
+                    waveforms_df = pd.DataFrame.from_dict(units_waveforms,
+                                                          orient='index')
                     waveforms_df.columns = ['waveforms']
                     nwbf.add_scratch(waveforms_df, name='units_waveforms', notes='')
                     waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
