@@ -481,7 +481,8 @@ class SpikeSorting(dj.Computed):
             # If tetrode and location for every channel is (0,0), give new locations
             channel_locations = recording_extractor.get_channel_locations()
             if np.all(channel_locations==0) and len(channel_locations)==4:
-                channel_locations = np.array([[0,0],[0,1],[1,0],[1,1]])
+                print('Tetrode; making up channel locations...')
+                channel_locations = [[0,0],[0,1],[1,0],[1,1]]
                 recording_extractor.set_channel_locations(channel_locations)
             # Cache the RecordingExtractor for use later
             # Saves the traces of RecordingExtractor in binary .dat format
@@ -525,7 +526,6 @@ class SpikeSorting(dj.Computed):
             templates = st.postprocessing.get_unit_templates(recording_extractor, sort, **waveform_params)
             #TODO: move these waveforms to an NWB object
             tmp_waveform_file = str(recording_extractor_path) + '_spike_waveforms.h5'
-            tmp_noise_waveform_file = str(recording_extractor_path) + '_noise_waveforms.h5'
             # Calculate the snippet length
             sampling_rate = estimate_sampling_rate(timestamps[0:100000], 1.5)
             snippet_len = (int(np.rint(sampling_rate / 1000 * waveform_params['ms_before'])),
