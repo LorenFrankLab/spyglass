@@ -478,6 +478,11 @@ class SpikeSorting(dj.Computed):
         else:
             # Get RecordingExtractor object for our sort interval
             recording_extractor, sort_interval_valid_times = self.get_recording_extractor(key, sort_interval)
+            # If tetrode and location for every channel is (0,0), give new locations
+            channel_locations = recording_extractor.get_channel_locations()
+            if np.all(channel_locations==0) and len(channel_locations)==4:
+                channel_locations = np.array([[0,0],[0,1],[1,0],[1,1]])
+                recording_extractor.set_channel_locations(channel_locations)
             # Cache the RecordingExtractor for use later
             # Saves the traces of RecordingExtractor in binary .dat format
             recording_extractor_path = (Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
@@ -488,6 +493,7 @@ class SpikeSorting(dj.Computed):
 
             # save the recording extractor modulo binary data
             # np.save('/stelmo/nwb/re.npy',recording_extractor_cached.make_serialized_dict())
+
 
             # ------------------------------------------------------------------
             # Run spike sorting!
