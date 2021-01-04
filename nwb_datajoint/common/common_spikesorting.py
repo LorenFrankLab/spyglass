@@ -62,7 +62,7 @@ class SortGroup(dj.Manual):
         Electrodes from probes with multiple shanks (e.g. polymer probes) are placed in one group per shank
         '''
         # delete any current groups
-        (SortGroup() & {'nwb_file_name' : nwb_file_name}).delete()
+        (SortGroup & {'nwb_file_name' : nwb_file_name}).delete()
         # get the electrodes from this NWB file
         electrodes = (Electrode() & {'nwb_file_name' : nwb_file_name} & {'bad_channel' : 'False'}).fetch()
         e_groups = np.unique(electrodes['electrode_group_name'])
@@ -573,6 +573,7 @@ class SpikeSorting(dj.Computed):
         print('\nGenerating feed for labbox...')
         # first, store and get URI of the snippets h5 file (soft link)
         snippets_h5_uri = ka.store_file(tmp_waveform_file)
+        print('URI to snippets.h5 file: ' + str(snippets_h5_uri))
 
         # get labbox recording and sorting extractors
         recording, sorting = self.prepare_recording_sorting(snippets_h5_uri)
@@ -722,7 +723,7 @@ class SpikeSorting(dj.Computed):
 
         # create a SubRecordingExtractor
         sub_R = se.SubRecordingExtractor(raw_data_epoch_referenced_filtered,
-                                         channel_ids=electrode_ids)
+                                         channel_ids = electrode_ids)
 
         return sub_R, sort_interval_valid_times
 
