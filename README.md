@@ -45,9 +45,9 @@
    * [Change your password](https://github.com/LorenFrankLab/nwb_datajoint/blob/develop_nwbraw/franklab_scripts/franklab_dj_initial_setup.py) for accessing Datajoint database and [set up external stores](https://github.com/LorenFrankLab/nwb_datajoint/blob/develop_nwbraw/franklab_scripts/franklab_dj_stores_setup.py). Should need to run these only once.
 9. Open up a python console and import `nwb_datajoint` to check that installation has worked.
 10. Run `populate_from_NWB_tutorial.ipynb` from the notebooks directory.
-11. Other examples:
-	`nwbdj_lfp_tutorial.ipynwb` to extract LFP
-	`nwbdj_spikeinterface.pynwb` to setup and run spikesorting
+11. Other examples:  
+	 * `nwbdj_lfp_tutorial.ipynwb` to extract LFP  
+	 * `nwbdj_spikeinterface.pynwb` to setup and run spikesorting
 
 ### Notes
 * Add environment variables (e.g. in `~/.bashrc`); note that these assume that you're interacting with DJ database from one of the lab's servers (e.g. virgas)
@@ -60,8 +60,11 @@
   export KACHERY_P2P_API_PORT="some-port-number"` (this is optional)
   ```
 * For curation with the web GUI, you must be running `kachery-p2p` and `labbox-ephys` daemons in the background
-  * kachery-p2p: `kachery-p2p-start-daemon --label franklab --config https://gist.githubusercontent.com/khl02007/b3a092ba3e590946480fb1267964a053/raw/f05eda4789e61980ce630b23ed38a7593f58a7d9/franklab_kachery-p2p_config.yaml`
-  * labbox: see instruction [here](https://github.com/laboratorybox/labbox-ephys)
+  * kachery-p2p:
+  ```bash
+  kachery-p2p-start-daemon --label franklab --config https://gist.githubusercontent.com/khl02007/b3a092ba3e590946480fb1267964a053/raw/f05eda4789e61980ce630b23ed38a7593f58a7d9/franklab_kachery-p2p_config.yaml
+  ```
+  * labbox: see instruction [here](https://github.com/laboratorybox/labbox-ephys) for launching labbox-ephys docker container
   * if running jupyter widget, see instruction [here](https://github.com/laboratorybox/labbox-ephys/blob/master/doc/labbox_ephys_widgets_jp.md)
 
 ### Troubleshooting common problems
