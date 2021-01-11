@@ -1,34 +1,19 @@
 name: nwb_datajoint
 channels:
-- defaults
-- conda-forge
-- edeno
-- franklab
-- novelakrk
+  - conda-forge
+  - defaults
 dependencies:
-- "python==3.8"
-- matplotlib
-- pandas
-- networkx
-- datajoint
-- python-dateutil
-- ipywidgets
-- ipykernel
-- nodejs
-- jupyter
-- jupyterlab
-- nb_conda
-- tqdm
-- setuptools
-- pytest
-- pytest-cov
-- coveralls
-- pynwb>=1.4
-- pybind11
-- distributed
-- pip
-- pip:
-  - ghostipy
-  - spikeinterface
-  - kachery>0.6.4
-  - ml_ms4alg
+  - python=3.8
+  - jupyterlab=3.0.*
+  - nodejs=12.4.*
+  - pydotplus>=2.0.*
+  - pip>=20.2.*
+  - pip:
+    - hither>=0.4.*
+    - ml-ms4alg>=0.3.*
+    - spikeinterface==0.10.*
+    - pynwb>=1.4
+    - datajoint==0.12.*
+    - pymysql==0.9.2
+    - h5py==2.10.*
+    - git+git://github.com/laboratorybox/labbox-launcher
