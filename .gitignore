@@ -1,7 +1,13 @@
+kyu/
 devel/data
 *-Copy*.ipynb
 Untitled.ipynb
 rec_to_nwb
+environment.yml.bakup
+nwb_datajoint.code-workspace
+mountainsort4_output/
+.idea/
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -142,3 +148,5 @@ dmypy.json
 *.DS_Store
 
 temp_nwb/*
+
+notebooks/mountainsort4_output/

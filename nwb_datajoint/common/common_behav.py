@@ -21,8 +21,8 @@ class RawPosition(dj.Imported):
     definition = """
     -> Session
     ---
-    raw_position_object_id: varchar(80)            # the object id of the data in the NWB file
-    -> IntervalList       # the list of intervals for this object
+    raw_position_object_id: varchar(80)    # the object id of the data in the NWB file
+    -> IntervalList                        # the list of intervals for this object
     """
 
     def make(self, key):
@@ -34,8 +34,8 @@ class RawPosition(dj.Imported):
             # Get the position data. FIX: change Position to position when name changed or fix helper function to allow
             # upper or lower case
             position = get_data_interface(nwbf, 'position')
- 
-            if position is not None:  
+
+            if position is not None:
                 for pos_epoch, series_name in enumerate(position.spatial_series):
                     pos_interval_name = f'pos {pos_epoch} valid times'
                     # get the valid intervals for the position data
@@ -95,7 +95,7 @@ class StateScriptFile(dj.Imported):
                     if str(key['epoch']) in epoch_list:
                         key['file_object_id'] = file_obj.object_id
                         self.insert1(key)
-   
+
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
 
@@ -111,10 +111,9 @@ class VideoFile(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         # get the interval for the current TaskEpoch
-        print(f'key = {key}')
+        #print(f'key = {key}')
         interval_list_name = (TaskEpoch() & key).fetch1('interval_list_name')
-        print(interval_list_name)
-        valid_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'], 
+        valid_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
                                        'interval_list_name' : interval_list_name}).fetch1('valid_times')
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
             nwbf = io.read()
@@ -125,8 +124,8 @@ class VideoFile(dj.Imported):
                 # check to see if the times for this video_object are largely overlapping with the task epoch times
                 if len(interval_list_contains(valid_times, video_obj.timestamps) > .9 * len(video_obj.timestamps)):
                     key['video_file_object_id'] = video_obj.object_id
-                    self.insert1(key)                    
-   
+                    self.insert1(key)
+
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
 
@@ -191,7 +190,7 @@ class LinPos(dj.Imported):
     definition = """
     -> Session
     ---
-    nwb_object_id: int  # the object id of the data in the NWB file
+    nwb_object_id: int    # the object id of the data in the NWB file
     -> IntervalList       # the list of intervals for this object
     """
 
