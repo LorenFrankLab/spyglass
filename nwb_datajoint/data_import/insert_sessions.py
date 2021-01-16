@@ -8,21 +8,25 @@ import pynwb
 conn = dj.conn()
 
 def insert_sessions(nwb_file_names):
-    """Populate the dj database with new sessions
+    """Populate the dj database with new sessions.
 
-    nwb_file_names is a list of relative file paths, relative
-    to $NWB_DATAJOINT_BASE_DIR, pointing to existing .nwb files.
-    Each file represents a session.
-
-    Args:
-        nwb_file_names (List[str]): List of relative file paths
+    Parameters
+    ----------
+    nwb_file_names : string or List of strings
+        nwb_file_names is a list of relative file paths, relative
+        to $NWB_DATAJOINT_BASE_DIR, pointing to existing .nwb files.
+        Each file represents a session.
     """
     check_env()
+
+    if type(nwb_file_names) is str:
+        nwb_file_names = [nwb_file_names]
 
     for nwb_file_name in nwb_file_names:
         assert not nwb_file_name.startswith('/'), f'You must use relative paths. nwb_file_name: {nwb_file_name}'
 
-        # make a linked file that ends with '_'. This has everything except the raw data but has a link to the raw data in the original file
+        # make a linked file that ends with '_'.
+        # This has everything except the raw data but has a link to the raw data in the original file
         out_nwb_file_name = os.path.splitext(nwb_file_name)[0] + '_.nwb'
         copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)

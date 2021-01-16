@@ -14,11 +14,16 @@ import spiketoolkit as st
 import pynwb
 import re
 import os
-import pathlib
+import socket
+import time
+from pathlib import Path
 import numpy as np
 import scipy.signal as signal
 import json
 import h5py as h5
+import kachery_p2p as kp
+import kachery as ka
+from itertools import compress
 from tempfile import NamedTemporaryFile
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices
@@ -26,24 +31,28 @@ from .dj_helper_fn import dj_replace, fetch_nwb
 
 from mountainlab_pytools.mdaio import readmda
 
+from requests.exceptions import ConnectionError
+
 used = [Session, BrainRegion, Probe, IntervalList, Raw]
 
 schema = dj.schema('common_spikesorting')
 
-@schema 
+@schema
 class SortGroup(dj.Manual):
     definition = """
+    # Table for holding the set of electrodes that will be sorted together
     -> Session
     sort_group_id: int  # identifier for a group of electrodes
     ---
-    sort_reference_electrode_id=-1: int  # the electrode to use for reference. -1: no reference, -2: common median 
+    sort_reference_electrode_id = -1: int  # the electrode to use for reference. -1: no reference, -2: common median
     """
+
     class SortGroupElectrode(dj.Part):
         definition = """
         -> master
         -> Electrode
         """
-    
+
     def set_group_by_shank(self, nwb_file_name):
         '''
         :param: nwb_file_name - the name of the NWB file whose electrodes should be put into sorting groups
@@ -53,7 +62,7 @@ class SortGroup(dj.Manual):
         Electrodes from probes with multiple shanks (e.g. polymer probes) are placed in one group per shank
         '''
         # delete any current groups
-        (SortGroup() & {'nwb_file_name' : nwb_file_name}).delete()
+        (SortGroup & {'nwb_file_name' : nwb_file_name}).delete()
         # get the electrodes from this NWB file
         electrodes = (Electrode() & {'nwb_file_name' : nwb_file_name} & {'bad_channel' : 'False'}).fetch()
         e_groups = np.unique(electrodes['electrode_group_name'])
@@ -69,12 +78,12 @@ class SortGroup(dj.Manual):
             for shank in shank_list:
                 sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
                 shank_elect_ref = electrodes['original_reference_electrode'][np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                                                    electrodes['probe_shank'] == shank)]                               
+                                                                    electrodes['probe_shank'] == shank)]
                 if np.max(shank_elect_ref) == np.min(shank_elect_ref):
-                    sg_key['sort_reference_electrode_id'] = shank_elect_ref[0] 
-                else: 
-                    ValueError(f'Error in electrode group {e_group}: reference electrodes are not all the same')  
-                self.insert1(sg_key)                   
+                    sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
+                else:
+                    ValueError(f'Error in electrode group {e_group}: reference electrodes are not all the same')
+                self.insert1(sg_key)
 
                 shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
                                                                         electrodes['probe_shank'] == shank)]
@@ -87,7 +96,7 @@ class SortGroup(dj.Manual):
         '''
         :param: nwb_file_name - the name of the nwb whose electrodes should be put into sorting groups
         :return: None
-        Assign groups to all non-bad channel electrodes based on their electrode group and sets the reference for each group 
+        Assign groups to all non-bad channel electrodes based on their electrode group and sets the reference for each group
         to the reference for the first channel of the group.
         '''
         # delete any current groups
@@ -102,21 +111,19 @@ class SortGroup(dj.Manual):
         for e_group in e_groups:
             sge_key['electrode_group_name'] = e_group
             sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
-            # get the list of references and make sure they are all the same     
-            shank_elect_ref = electrodes['original_reference_electrode'][electrodes['electrode_group_name'] == e_group]                                                           
+            # get the list of references and make sure they are all the same
+            shank_elect_ref = electrodes['original_reference_electrode'][electrodes['electrode_group_name'] == e_group]
             if np.max(shank_elect_ref) == np.min(shank_elect_ref):
-                sg_key['sort_reference_electrode_id'] = shank_elect_ref[0] 
-            else: 
-                ValueError(f'Error in electrode group {e_group}: reference electrodes are not all the same')  
+                sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
+            else:
+                ValueError(f'Error in electrode group {e_group}: reference electrodes are not all the same')
             self.insert1(sg_key)
-  
-            shank_elect = electrodes['electrode_id'][electrodes['electrode_group_name'] == e_group]            
+
+            shank_elect = electrodes['electrode_id'][electrodes['electrode_group_name'] == e_group]
             for elect in shank_elect:
                 sge_key['electrode_id'] = elect
                 self.SortGroupElectrode().insert1(sge_key)
             sort_group += 1
- 
-
 
     def set_reference_from_list(self, nwb_file_name, sort_group_ref_list):
         '''
@@ -130,19 +137,20 @@ class SortGroup(dj.Manual):
         sort_group_list = (SortGroup() & key).fetch('sort_group_id')
         for sort_group in sort_group_list:
             key['sort_group_id'] = sort_group
-            self.SortGroupElectrode().insert(dj_replace(sort_group_list, sort_group_ref_list, 
-                                             'sort_group_id', 'sort_reference_electrode_id'), 
+            self.SortGroupElectrode().insert(dj_replace(sort_group_list, sort_group_ref_list,
+                                             'sort_group_id', 'sort_reference_electrode_id'),
                                              replace="True")
-       
+
     def write_prb(self, sort_group_id, nwb_file_name, prb_file_name):
-        '''
-        Writes a prb file containing informaiton on the specified sort group and it's geometry for use with the
-        SpikeInterface package. See the SpikeInterface documentation for details on prb file format.
+        """
+        Writes a prb file containing informaiton on the specified sort group and
+        its geometry for use with the SpikeInterface package. See the
+        SpikeInterface documentation for details on prb file format.
         :param sort_group_id: the id of the sort group
         :param nwb_file_name: the name of the nwb file for the session you wish to use
         :param prb_file_name: the name of the output prb file
         :return: None
-        '''
+        """
         # try to open the output file
         try:
             prbf = open(prb_file_name, 'w')
@@ -161,7 +169,7 @@ class SortGroup(dj.Manual):
         key['sort_group_id'] = sort_group_id
         sort_group_electrodes = (SortGroup.SortGroupElectrode() & key).fetch()
         electrode_group_name = sort_group_electrodes['electrode_group_name'][0]
-        probe_type = (ElectrodeGroup & {'nwb_file_name' : nwb_file_name, 
+        probe_type = (ElectrodeGroup & {'nwb_file_name' : nwb_file_name,
                                         'electrode_group_name' : electrode_group_name}).fetch1('probe_type')
         channel_group[sort_group_id] = dict()
         channel_group[sort_group_id]['channels'] = sort_group_electrodes['electrode_id'].tolist()
@@ -170,7 +178,7 @@ class SortGroup(dj.Manual):
         for electrode_id in channel_group[sort_group_id]['channels']:
             # get the relative x and y locations of this channel from the probe table
             probe_electrode = int(electrodes['probe_electrode'][electrodes['electrode_id'] == electrode_id])
-            rel_x, rel_y = (Probe().Electrode() & {'probe_type': probe_type, 
+            rel_x, rel_y = (Probe().Electrode() & {'probe_type': probe_type,
                                                     'probe_electrode' : probe_electrode}).fetch('rel_x','rel_y')
             rel_x = float(rel_x)
             rel_y = float(rel_y)
@@ -196,11 +204,12 @@ class SortGroup(dj.Manual):
 @schema
 class SpikeSorter(dj.Manual):
     definition = """
+    # Table that holds the list of spike sorters avaialbe through spikeinterface
     sorter_name: varchar(80) # the name of the spike sorting algorithm
     """
     def insert_from_spikeinterface(self):
         '''
-        Add each of the sorters from spikeinterface.sorters 
+        Add each of the sorters from spikeinterface.sorters
         :return: None
         '''
         sorters = si.sorters.available_sorters()
@@ -210,7 +219,7 @@ class SpikeSorter(dj.Manual):
 @schema
 class SpikeSorterParameters(dj.Manual):
     definition = """
-    -> SpikeSorter 
+    -> SpikeSorter
     parameter_set_name: varchar(80) # label for this set of parameters
     ---
     parameter_dict: blob # dictionary of parameter names and values
@@ -250,29 +259,45 @@ class SpikeSortingWaveformParameters(dj.Manual):
 @schema
 class SpikeSortingMetrics(dj.Manual):
     definition = """
-    cluster_metrics_list_name: varchar(80) # the name for this list of cluster metrics 
+    # Table for holding the parameters for computing quality metrics
+    cluster_metrics_list_name: varchar(80) # the name for this list of cluster metrics
     ---
-    metrics_dict: blob # a dictionariy of SpikeInterface metrics with True / False elements to indicate whether a given metric should be computed.
-    n_noise_waveforms=1000: int # the number of random noise waveforms to use for the noise overlap
-    n_cluster_waveforms=10000: int # the maximum number of spikes / waveforms from a cluster to use for metric calculations
-    isi_threshold=0.003: float # Interspike interval threshold in s for ISI metric (default 0.003)
-    snr_mode='mad':enum('mad', 'std') # SNR mode: median absolute deviation ('mad) or standard deviation ('std') (default 'mad')
-    snr_noise_duration=10.0 : float # length of data to use for noise estimation (default 10.0)
-    max_channel_peak='both' : enum('both', 'neg', 'pos') # direction of the maximum channel peak: 'both', 'neg', or 'pos' (default 'both')
-    drift_metrics_interval_s=60: float # length of period in s for evaluating drift (default 60 s)
-    drift_metrics_min_spikes_per_interval=10: int # minimum number of spikes in an interval for evaluation of drift (default 10)
-    num_channels_to_compare=7: int # number of channels to be used for the PC extraction and comparison (default 7)
-    n_neighbors=4: int # number of nearest clusters to use for nearest neighbor calculation (default 4)
+    metrics_dict: blob # a dict of SpikeInterface metrics with True / False elements to indicate whether a given metric should be computed.
+    # n_noise_waveforms=1000: int # the number of random noise waveforms to use for the noise overlap
+    # n_cluster_waveforms=1000: int # the maximum number of spikes / waveforms from a cluster to use for metric calculations
+    isi_threshold = 0.003: float # Interspike interval threshold in s for ISI metric (default 0.003)
+    snr_mode = 'mad': enum('mad', 'std') # SNR mode: median absolute deviation ('mad) or standard deviation ('std') (default 'mad')
+    snr_noise_duration = 10.0: float # length of data to use for noise estimation (default 10.0)
+    max_spikes_per_unit_for_snr = 1000: int # Maximum number of spikes to compute templates for SNR from (default 1000)
+    template_mode = 'mean': enum('mean','median') # Use 'mean' or 'median' to compute templates
+    max_channel_peak = 'both': enum('both', 'neg', 'pos') # direction of the maximum channel peak: 'both', 'neg', or 'pos' (default 'both')
+    max_spikes_per_unit_for_noise_overlap = 1000: int # Maximum number of spikes to compute templates for noise overlap from (default 1000)
+    noise_overlap_num_features = 5: int # Number of features to use for PCA for noise overlap
+    noise_overlap_num_knn = 1000: int # Number of nearest neighbors for noise overlap
+    drift_metrics_interval_s = 60: float # length of period in s for evaluating drift (default 60 s)
+    drift_metrics_min_spikes_per_interval = 10: int # minimum number of spikes in an interval for evaluation of drift (default 10)
+    max_spikes_for_silhouette = 1000: int # Max spikes to be used for silhouette metric
+    num_channels_to_compare = 7: int # number of channels to be used for the PC extraction and comparison (default 7)
+    max_spikes_per_cluster = 1000: int # Max spikes to be used from each unit
+    max_spikes_for_nn = 1000: int # Max spikes to be used for nearest-neighbors calculation
+    n_neighbors = 4: int # number of nearest clusters to use for nearest neighbor calculation (default 4)
+    n_jobs = 96: int # Number of parallel jobs (default 96)
+    memmap = 0 : tinyint(1) # If True, waveforms are saved as memmap object (recommended for long recordings with many channels)
+    max_spikes_per_unit = 2000: int # Max spikes to use for computing waveform
+    seed = 47: int # Random seed for reproducibility
+    verbose = 1 : tinyint(1) # If nonzero (True), will be verbose in metric computation
     """
-   
+
     def get_metric_dict(self):
-        """Get the current list of metrics from spike interface and create a dictionary with all False elemnets.
-           Users should set the desired set of metrics to be true and insert a new entry for that set.
+        """Get the current list of metrics from spike interface and create a
+        dictionary with all False elemnets.
+        Users should set the desired set of metrics to be true and insert a new
+        entry for that set.
         """
         metrics_list =  st.validation.get_quality_metrics_list()
         metric_dict = dict()
         return {metric: False for metric in metrics_list}
-        
+
 
     @staticmethod
     def selected_metrics_list(metrics_dict):
@@ -297,94 +322,135 @@ class SpikeSortingMetrics(dj.Manual):
         return valid
 
     def compute_metrics(self, key, recording, sorting):
-        """Use spike interface to compute the list of selected metrics for a particular sorting
-
-        :param key: the cluster_metrics_list_name 
-        :type key: str
-        :param recording: recording object
-        :type recording: spike interface recording object
-        :param sorting: sorting object
-        :type sorting: spike interface sorting object
-        :return: metrics
-        :rtype: dataframe
         """
-        m = (self & key).fetch(as_dict=True)[0]
-        
-        return st.validation.compute_quality_metrics(sorting, 
-                                                    recording=recording, 
-                                                    metric_names=self.selected_metrics_list(m['metrics_dict']),
-                                                    as_dataframe=True,
-                                                    isi_threshold=m['isi_threshold'], 
-                                                    snr_mode=m['snr_mode'],
-                                                    snr_noise_duration=m['snr_noise_duration'], 
-                                                    max_spikes_per_unit_for_snr=m['n_cluster_waveforms'], 
-                                                    max_channel_peak=m['max_channel_peak'], 
-                                                    drift_metrics_interval_s=m['drift_metrics_interval_s'],
-                                                    drift_metrics_min_spikes_per_interval=m['drift_metrics_min_spikes_per_interval'],
-                                                    max_spikes_for_silhouette=m['n_cluster_waveforms'],
-                                                    num_channels_to_compare=m['num_channels_to_compare'],
-                                                    max_spikes_per_cluster=m['n_cluster_waveforms'],
-                                                    max_spikes_for_nn=m['n_cluster_waveforms'],
-                                                    n_neighbors=m['n_neighbors'])
+        Use spikeinterface to compute the list of selected metrics for a sorting
+
+        Parameters
+        ----------
+        key: str
+            cluster_metrics_list_name from SpikeSortingParameters
+        recording: spikeinterface RecordingExtractor
+        sorting: spikeinterface SortingExtractor
+
+        Returns
+        -------
+        metrics: pandas.dataframe
+        """
+        m = (self & {'cluster_metrics_list_name': key}).fetch(as_dict=True)[0]
+
+        return st.validation.compute_quality_metrics(sorting=sorting,
+                                                     recording=recording,
+                                                     metric_names=self.selected_metrics_list(m['metrics_dict']),
+                                                     as_dataframe=True,
+                                                     isi_threshold=m['isi_threshold'],
+                                                     snr_mode=m['snr_mode'],
+                                                     snr_noise_duration=m['snr_noise_duration'],
+                                                     max_spikes_per_unit_for_snr=m['max_spikes_per_unit_for_snr'],
+                                                     template_mode=m['template_mode'],
+                                                     max_channel_peak=m['max_channel_peak'],
+                                                     max_spikes_per_unit_for_noise_overlap=m['max_spikes_per_unit_for_noise_overlap'],
+                                                     noise_overlap_num_features=m['noise_overlap_num_features'],
+                                                     noise_overlap_num_knn=m['noise_overlap_num_knn'],
+                                                     drift_metrics_interval_s=m['drift_metrics_interval_s'],
+                                                     drift_metrics_min_spikes_per_interval=m['drift_metrics_min_spikes_per_interval'],
+                                                     max_spikes_for_silhouette=m['max_spikes_for_silhouette'],
+                                                     num_channels_to_compare=m['num_channels_to_compare'],
+                                                     max_spikes_per_cluster=m['max_spikes_per_cluster'],
+                                                     max_spikes_for_nn=m['max_spikes_for_nn'],
+                                                     n_neighbors=m['n_neighbors'],
+                                                     n_jobs=m['n_jobs'],
+                                                     memmap=bool(m['memmap']),
+                                                     max_spikes_per_unit=m['max_spikes_per_unit'],
+                                                     seed=m['seed'],
+                                                     verbose=bool(m['verbose']))
 
 @schema
 class SpikeSortingParameters(dj.Manual):
     definition = """
+    Table for holding parameters for each spike sorting run
     -> SortGroup
-    -> SpikeSorterParameters 
+    -> SpikeSorterParameters
     -> SortInterval # the time interval to be used for sorting
     ---
-    -> SpikeSortingWaveformParameters 
+    -> SpikeSortingWaveformParameters
     -> SpikeSortingMetrics
-    -> IntervalList # the valid times for the raw data (excluding artifacts, etc. if desired)  
-    import_path = '': varchar(200) #optional path to previous curated sorting output
+    -> IntervalList # the valid times for the raw data (excluding artifacts, etc. if desired)
+    import_path = '': varchar(200) # optional path to previous curated sorting output
     """
 
-@schema 
+@schema
 class SpikeSorting(dj.Computed):
     definition = """
+    # Table for holding spike sorting runs
     -> SpikeSortingParameters
     ---
     -> AnalysisNwbfile
     units_object_id: varchar(40) # the object ID for the units for this sort group
-    units_waveforms_object_id : varchar(40) # the object ID for the unit waveforms
-    noise_waveforms_object_id: varchar(40) # the object ID for the noise waveforms
+    # units_waveforms_object_id : varchar(40) # the object ID for the unit waveforms
+    # noise_waveforms_object_id: varchar(40) # the object ID for the noise waveforms
     time_of_sort = 0: int # This is when the sort was done.
+    curation_feed_uri: varchar(80) # URI of the feed to be used by labbox-ephys
     """
 
     def make(self, key):
-        print('in spike sorting')
+        """
+        Runs spike sorting on the data and parameters specified by the
+        SpikeSortingParameter table and inserts a new entry to SpikeSorting table.
+        Roughly, the order of operation is:
+        - Create an NWB file to hold the results of spike sorting
+        - Create a spikeinterface RecordingExtractor and cache it
+        - Run sorting algorithm (e.g. MountainSort4)
+        - Compute quality metrics
+        - Save the sorted units to AnalysisNWB file
+        - Generate a feed URI to be used during curation
+
+        Parameters
+        ----------
+        key: dict
+            partially filled entity; value of primary keys from key source
+            (in this case SpikeSortingParameters)
+        """
+
+        # Indicate that we're getting ready for spike sorting
+        print('Getting ready...')
+
+        # Create a new NWB file for holding the results of analysis (e.g. spike sorting).
+        # Save the name to the 'key' dict to use later.
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
- 
-        # get the sort interval 
-        sort_interval =  (SortInterval() & {'nwb_file_name' : key['nwb_file_name'],
-                                        'sort_interval_name' : key['sort_interval_name']})\
-                                            .fetch1('sort_interval')
-        interval_list_name = (SpikeSortingParameters() & key).fetch1('interval_list_name')
-        valid_times =  (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
-                                        'interval_list_name' : interval_list_name})\
-                                            .fetch('valid_times')[0]   
-        # get the raw data timestamps                                   
-        raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
+
+        # ----------------------------------------------------------------------
+        # Prepare a RecordingExtractor to pass into spike sorting
+        # ----------------------------------------------------------------------
+        # Get the sort interval
+        sort_interval =  (SortInterval & {'nwb_file_name': key['nwb_file_name'],
+                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
+        interval_list_name = (SpikeSortingParameters & key).fetch1('interval_list_name')
+        valid_times =  (IntervalList & {'nwb_file_name': key['nwb_file_name'],
+                                        'interval_list_name': interval_list_name}).fetch1('valid_times')
+
+        # Get the timestamps for the recording
+        raw_data_obj = (Raw & {'nwb_file_name': key['nwb_file_name']}).fetch_nwb()[0]['raw']
+        sampling_rate = (Raw & {'nwb_file_name': key['nwb_file_name']}).fetch1('sampling_rate')
         timestamps = np.asarray(raw_data_obj.timestamps)
 
-        # create the dictionaries for the units
+        # Create dictionaries to hold output of spike sorting
         units = dict()
         units_valid_times = dict()
         units_sort_interval = dict()
         units_templates = dict()
 
-        # check to see if import_path is not empty and if so run the import
+        # Check if spikesorting has already been run on this dataset;
+        # if import_path is not empty, that means there exists a previous spikesorting run
         import_path = (SpikeSortingParameters() & key).fetch1('import_path')
         if import_path != '':
-            sort_path = pathlib.Path(import_path)
+            sort_path = Path(import_path)
             assert sort_path.exists(), f'Error: import_path {import_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             # the following assumes very specific file names from the franklab, change as needed
             firings_path = sort_path / 'firings_processed.mda'
             assert firings_path.exists(), f'Error: {firings_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             # The firings has three rows, the electrode where the peak was detected, the sample count, and the cluster ID
             firings = readmda(str(firings_path))
-            # get the clips 
+            # get the clips
             clips_path = sort_path / 'clips.mda'
             assert clips_path.exists(), f'Error: {clips_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             clips = readmda(str(clips_path))
@@ -403,56 +469,71 @@ class SpikeSorting(dj.Computed):
                 units_valid_times[unit_id] = sort_interval_valid_times
                 units_sort_interval[unit_id] = [sort_interval]
 
-            #TODO: Process metrics and store in Units table. 
+            #TODO: Process metrics and store in Units table.
             metrics_path = (sort_path / 'metrics_processed.json').exists()
             assert metrics_path.exists(), f'Error: {metrics_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             metrics_processed = json.load(metrics_path)
-        else: 
-            metrics_key = dict(cluster_metrics_list_name = (SpikeSortingParameters() & key).fetch1('cluster_metrics_list_name'))
-            # could check that the metrics to be calculated are valid:
-            #assert SpikeSortingMetrics.validate_metrics_list(dict(cluster_metrics_list_name=cluster_metrics_list_name))
 
-            sampling_rate = estimate_sampling_rate(timestamps[0:100000], 1.5)
-            waveform_param_name = (SpikeSortingParameters() & key).fetch1('waveform_parameters_name')
-            sorting_waveform_param = (SpikeSortingWaveformParameters() & {'waveform_parameters_name' : waveform_param_name}).fetch1()
-
-            # Get the list of valid times for this sort interval
+        # If sorting for the first time:
+        else:
+            # Get RecordingExtractor object for our sort interval
             recording_extractor, sort_interval_valid_times = self.get_recording_extractor(key, sort_interval)
-            sort_parameters = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
+            # If tetrode and location for every channel is (0,0), give new locations
+            channel_locations = recording_extractor.get_channel_locations()
+            if np.all(channel_locations==0) and len(channel_locations)==4:
+                print('Tetrode; making up channel locations...')
+                channel_locations = [[0,0],[0,1],[1,0],[1,1]]
+                recording_extractor.set_channel_locations(channel_locations)
+            # Cache the RecordingExtractor for use later
+            # Saves the traces of RecordingExtractor in binary .dat format
+            recording_extractor_path = (Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
+                                       / key['analysis_file_name']
+                                       / np.array2string(sort_interval))
+            recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor,
+                                                                    save_path = recording_extractor_path)
+
+            # save the recording extractor modulo binary data
+            # np.save('/stelmo/nwb/re.npy',recording_extractor_cached.make_serialized_dict())
+
+
+            # ------------------------------------------------------------------
+            # Run spike sorting!
+            # ------------------------------------------------------------------
+            print(f'\nRunning spike sorting on {key}...')
+            sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                         'parameter_set_name': key['parameter_set_name']}).fetch1()
-            # get a name for the recording extractor for this sort interval
-            recording_extractor_path = os.path.join(os.environ['SPIKE_SORTING_STORAGE_DIR'], 
-                                                    key['analysis_file_name'], np.array2string(sort_interval))
-            recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor, save_path=recording_extractor_path)
-            print(f'Sorting {key}...')
-            sort = si.sorters.run_mountainsort4(recording=recording_extractor_cached, 
-                                                **sort_parameters['parameter_dict'], 
-                                                grouping_property='group', 
-                                                output_folder=os.getenv('SORTING_TEMP_DIR', None))
+            sort = si.sorters.run_mountainsort4(recording = recording_extractor,
+                                                **sort_parameters['parameter_dict'],
+                                                grouping_property = 'group',
+                                                output_folder = os.getenv('SORTING_TEMP_DIR', None))
 
+            # ------------------------------------------------------------------
+            # Compute quality metrics
+            # ------------------------------------------------------------------
+            print('\nComputing quality metrics...')
+            metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')
+            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording_extractor, sort)
 
-            # compute the metrics requested
-            
-            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording_extractor_cached, sort)
-            # create a stack of labelled arrays of the sorted spike times
-            timestamps = np.asarray(raw_data_obj.timestamps)
-            unit_ids = sort.get_unit_ids()
-            # get the waveforms
+            # ------------------------------------------------------------------
+            # Get waveform snippets
+            # ------------------------------------------------------------------
+            print('\nComputing waveforms...')
+            # Get parameters about waveform snippets
+            waveform_param_name = (SpikeSortingParameters & key).fetch1('waveform_parameters_name')
+            sorting_waveform_param = (SpikeSortingWaveformParameters
+                                      & {'waveform_parameters_name': waveform_param_name}).fetch1()
             waveform_params = sorting_waveform_param['waveform_parameter_dict']
-    
-            templates = st.postprocessing.get_unit_templates(recording_extractor_cached, sort, **waveform_params)
-
+            templates = st.postprocessing.get_unit_templates(recording_extractor, sort, **waveform_params)
             #TODO: move these waveforms to an NWB object
-            tmp_waveform_file = recording_extractor_path + '_' + 'spike_waveforms.h5'
-            tmp_noise_waveform_file = recording_extractor_path + '_' + 'noise_waveforms.h5'
-
-            # calculate the snippet length
-            snippet_len = (int(np.rint(sampling_rate / 1000 * waveform_params['ms_before'])), 
+            tmp_waveform_file = str(recording_extractor_path) + '_spike_waveforms.h5'
+            # Calculate the snippet length
+            sampling_rate = estimate_sampling_rate(timestamps[0:100000], 1.5)
+            snippet_len = (int(np.rint(sampling_rate / 1000 * waveform_params['ms_before'])),
                             int(np.rint(sampling_rate / 1000 * waveform_params['ms_after'])))
             #TODO: write new labbox ephys function to store waveforms in AnalysisNWBFile
             # Prepare the snippets h5 file
             le.prepare_snippets_h5_from_extractors(
-                recording=recording_extractor_cached,
+                recording=recording_extractor,
                 sorting=sort,
                 output_h5_path=tmp_waveform_file,
                 start_frame=None,
@@ -462,119 +543,183 @@ class SpikeSorting(dj.Computed):
                 max_neighborhood_size=6
             )
 
-            # generate a set of random frame numbers for noise snippets
-            # start by getting the first and last frame for this epoch
-            #frames = recording_extractor_cached.get_epoch_info(str(sort_interval_index))
-            rng = np.random.default_rng()
-            noise_frames = np.sort(np.random.randint(0, recording_extractor_cached.get_num_frames(), sorting_waveform_param['n_noise_waveforms']))
-                
-            noise_sorting=se.NumpySortingExtractor()
-            noise_sorting.set_times_labels(times=noise_frames,labels=np.zeros(noise_frames.shape))
-            le.prepare_snippets_h5_from_extractors(
-                recording=recording_extractor_cached,
-                sorting=noise_sorting,
-                output_h5_path=tmp_noise_waveform_file,
-                start_frame=None,
-                end_frame=None,
-                snippet_len = snippet_len,
-                max_events_per_unit=None,
-                max_neighborhood_size=10000
-            )
-
+            # ------------------------------------------------------------------
+            # Save sorting output
+            # ------------------------------------------------------------------
+            print('\nSaving output...')
+            # create a stack of labeled arrays of the sorted spike times
+            unit_ids = sort.get_unit_ids()
             for index, unit_id in enumerate(unit_ids):
-                unit_spike_samples = sort.get_unit_spike_train(unit_id=unit_id)  
-                #print(f'template for {unit_id}: {unit_templates[unit_id]} ')
+                unit_spike_samples = sort.get_unit_spike_train(unit_id = unit_id)
                 #TODO: check in that unit_spike_samples are actually indices into the timestamps and not some truncated version thereof
-                units[unit_id] = timestamps[unit_spike_samples]
-                # the templates are zero based, so we have to use the index here. 
+                units[unit_id] = sort_interval[0] + unit_spike_samples/sampling_rate
+                # the templates are zero based, so we have to use the index here.
                 units_templates[unit_id] = templates[index]
                 units_valid_times[unit_id] = sort_interval_valid_times
                 units_sort_interval[unit_id] = [sort_interval]
+            # save the spike train from sorting extractor
+            # np.save('/stelmo/nwb/sorted.npy',sort.get_units_spike_train())
 
-        # TODO: remove once we are saving the waveforms correctly
-        units_waveforms = None
+        # Add the units to the Analysis file
+        # TODO: consider replacing with spikeinterface call if possible
+        units_object_id, _ = AnalysisNwbfile().add_units(key['analysis_file_name'],
+                                                         units, units_templates,
+                                                         units_valid_times,
+                                                         units_sort_interval,
+                                                         metrics=metrics)
 
-        #Add the units to the Analysis file       
-        # TODO: consider replacing with spikeinterface call if possible 
-        units_object_id, units_waveforms_object_id = AnalysisNwbfile().add_units(key['analysis_file_name'], units, 
-                                                                units_templates, units_valid_times,
-                                                                units_sort_interval, metrics=metrics, units_waveforms=units_waveforms)
-
-        # Now that the Analysis NWB file is written, add it to the AnalysisNWBFile Schema:
+        # Add the new analysis NWB file to the AnalysisNWBFile table
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
 
         key['units_object_id'] = units_object_id
-        key['units_waveforms_object_id'] = units_waveforms_object_id
-        #TODO: fix once noise waveforms are saved to the file
-        key['noise_waveforms_object_id'] = ''
-        self.insert1(key)
 
- 
+        # -----------------------------------------------------------------
+        # Generate feed for labbox-ephys curation
+        # -----------------------------------------------------------------
+        print('\nGenerating feed for labbox...')
+        # first, store and get URI of the snippets h5 file (soft link)
+        snippets_h5_uri = ka.store_file(tmp_waveform_file)
+        print('URI to snippets.h5 file: ' + str(snippets_h5_uri))
+
+        # get labbox recording and sorting extractors
+        recording, sorting = self.prepare_recording_sorting(snippets_h5_uri)
+
+        # Change format of metrics to list of dict
+        external_unit_metrics = self.metrics_to_labbox_ephys(metrics, unit_ids)
+
+        # Get labbox-ephys recording and sorting extractors
+        # name of analysis nwb file might be a unique label; animal - date - probe - sort group - sort interval (name)
+        le_recordings = []
+        le_sortings = []
+        le_recordings.append(dict(
+            recordingId='loren_example1',
+            recordingLabel='loren_example1',
+            recordingPath=kp.store_object(recording.object(), basename='loren_example1.json'),
+            recordingObject=recording.object(),
+            description='''
+            Example from Loren Frank
+            '''.strip()
+        ))
+        le_sortings.append(dict(
+            sortingId='loren_example1:mountainsort4',
+            sortingLabel='loren_example1:mountainsort4',
+            sortingPath=kp.store_object(sorting.object(), basename='loren_example-mountainsort4.json'),
+            sortingObject=sorting.object(),
+            recordingId='loren_example1',
+            recordingPath=kp.store_object(recording.object(), basename='loren_example1.json'),
+            recordingObject=recording.object(),
+            externalUnitMetricsUri=kp.store_object(external_unit_metrics, basename='unit_metrics.json'),
+            description='''
+            Example from Loren Frank (MountainSort4)
+            '''.strip()
+        ))
+
+        # Check if KACHERY_P2P_API_PORT is set
+        kp_port = os.getenv('KACHERY_P2P_API_PORT', False)
+        assert kp_port, 'You must set KACHERY_P2P_API_PORT environmental variable'
+
+        # Check if the kachery-p2p daemon is running in the background
+        try:
+            kp_channel = kp.get_channels()
+        except ConnectionError:
+            raise RuntimeError(('You must have a kachery-p2p daemon running in'
+                                ' the background (kachery-p2p-start-daemon --label'
+                                ' <name-of-node> --config https://gist.githubuse'
+                                'rcontent.com/khl02007/b3a092ba3e590946480fb1267'
+                                '964a053/raw/f05eda4789e61980ce630b23ed38a7593f5'
+                                '8a7d9/franklab_kachery-p2p_config.yaml)'))
+
+        # Create the labbox-ephys feed
+        # set create_snapshot False to get a writable feed
+        feed_uri = self.create_labbox_ephys_feed(le_recordings, le_sortings,
+                                                 create_snapshot=False)
+
+        key['curation_feed_uri'] = feed_uri
+        key['time_of_sort'] = int(time.time())
+
+        # Finally, insert the entity into table
+        self.insert1(key)
+        print('\nDone - entry inserted to table!\n')
+
+        # Tell user how to access curation website
+        ipaddr = socket.getfqdn(socket.gethostname())
+        print('Launch labbox-ephys and go to '+ipaddr+':15310/default?feed='+feed_uri)
+
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
     def get_recording_extractor(self, key, sort_interval):
-        """Given a key containing the key fields for a SpikeSorting schema, and the interval to be sorted,
-         returns the recording extractor object (see the spikeinterface package for details)
-
-        :param key: key to SpikeSorting schema
-        :type key: dict
-        :param sort_interval: [start_time, end_time]
-        :type sort_interval: 1D array with the start and end times for this sort
-        :return: (recording_extractor, sort_interval_valid_times)
-        :rtype: tuple with spikeextractor recording extractor object and valid times list
         """
-        interval_list_name = (SpikeSortingParameters() & key).fetch1('interval_list_name')
-        valid_times =  (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
-                                        'interval_list_name' : interval_list_name})\
-                                            .fetch('valid_times')[0]  
-        sort_interval_valid_times = interval_list_intersect(np.array([sort_interval]), valid_times)
-                                 
-        raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
-        # get the indices of the data to use. Note that spike_extractors has a time_to_frame function, 
+        Generates a SubRecordingExtractor object for an entity from
+        SpikeSorting table
+
+        Parameters
+        ----------
+        sort_interval: np.array
+            (start, end) times for sorting interval (unit: seconds)
+
+        Returns
+        -------
+        sub_R : SubRecordingExtractor
+            for the part of recording to be sorted (referenced and filtered)
+        sort_interval_valid_times : np.array
+            (start, end) times for valid sorting interval
+        """
+
+        interval_list_name = (SpikeSortingParameters & key).fetch1('interval_list_name')
+        valid_times =  (IntervalList & {'nwb_file_name' : key['nwb_file_name'],
+                                        'interval_list_name' : interval_list_name}).fetch1('valid_times')
+        sort_interval_valid_times = interval_list_intersect(sort_interval,
+                                                            valid_times)
+
+        raw_data_obj = (Raw & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
+        # get the indices of the data to use. Note that spike_extractors has a time_to_frame function,
         # but it seems to set the time of the first sample to 0, which will not match our intervals
         timestamps = np.asarray(raw_data_obj.timestamps)
         sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
         assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
-        
-        #print(f'sample indices: {sort_indices}')
 
-        # Use spike_interface to run the sorter on the selected sort group
-        raw_data = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']), electrical_series_name='e-series')
-        
-        # Blank out non-valid times. 
-        exclude_inds = interval_list_excludes_ind(sort_interval_valid_times, timestamps[sort_indices[0]:sort_indices[1]])
-        exclude_inds = exclude_inds[exclude_inds <= sort_indices[-1]]
-        # TODO: add a blanking function to the preprocessing module 
-        raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
+        # Create a NwbRecordingExtractor
+        raw_data = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']),
+                                            electrical_series_name = 'e-series')
+
+        # Blank out non-valid times
+        # exclude_inds = interval_list_excludes_ind(sort_interval_valid_times, timestamps[sort_indices[0]:sort_indices[1]])
+        # exclude_inds = exclude_inds[exclude_inds <= sort_indices[-1]]
+        # TODO: add a blanking function to the preprocessing module
+        # TODO: write function that actually detects artifacts
+        # raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
 
         # create a group id within spikeinterface for the specified electodes
-        electrode_ids = (SortGroup.SortGroupElectrode() & {'nwb_file_name' : key['nwb_file_name'], 
-                                                        'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
-        raw_data.set_channel_groups([key['sort_group_id']]*len(electrode_ids), channel_ids=electrode_ids)
+        electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name' : key['nwb_file_name'],
+                                                         'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
+        raw_data.set_channel_groups([key['sort_group_id']]*len(electrode_ids),
+                                    channel_ids=electrode_ids)
         epoch_name = np.array2string(sort_interval)
         raw_data.add_epoch(epoch_name, sort_indices[0], sort_indices[1])
-        # restrict the raw data to the specific samples
+
+        # This is a SubRecordingExtractor
         raw_data_epoch = raw_data.get_epoch(epoch_name)
-        
+
         # get the reference for this sort group
-        sort_reference_electrode_id = (SortGroup() & {'nwb_file_name' : key['nwb_file_name'], 
-                                                    'sort_group_id' : key['sort_group_id']}
-                                                    ).fetch('sort_reference_electrode_id')           
+        sort_reference_electrode_id = (SortGroup & {'nwb_file_name' : key['nwb_file_name'],
+                                                    'sort_group_id' : key['sort_group_id']}).fetch('sort_reference_electrode_id')
         if sort_reference_electrode_id >= 0:
             raw_data_epoch_referenced = st.preprocessing.common_reference(raw_data_epoch, reference='single',
-                                                            groups=[key['sort_group_id']], ref_channels=sort_reference_electrode_id)
+                                                                          groups=[key['sort_group_id']],
+                                                                          ref_channels=sort_reference_electrode_id)
         elif sort_reference_electrode_id == -2:
             raw_data_epoch_referenced = st.preprocessing.common_reference(raw_data, reference='median')
         else:
             raw_data_epoch_referenced = raw_data_epoch
 
-        #filter the data
-        param = (SpikeSorterParameters() & {'sorter_name': key['sorter_name'],
-                                                        'parameter_set_name': key['parameter_set_name']}).fetch1()
-        raw_data_epoch_referenced_filtered = st.preprocessing.bandpass_filter(raw_data_epoch_referenced, freq_min=param['frequency_min'], 
+        # filter the data
+        param = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+                                          'parameter_set_name': key['parameter_set_name']}).fetch1()
+        raw_data_epoch_referenced_filtered = st.preprocessing.bandpass_filter(raw_data_epoch_referenced, freq_min=param['frequency_min'],
                                                                               freq_max=param['frequency_max'], freq_wid=param['filter_width'],
                                                                               chunk_size = param['filter_chunk_size'])
+
         # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
         with tempfile.TemporaryDirectory() as tmp_dir:
             prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')
@@ -582,7 +727,11 @@ class SpikeSorting(dj.Computed):
             # add the probe geometry to the raw_data recording
             raw_data_epoch_referenced_filtered.load_probe_file(prb_file_name)
 
-        return se.SubRecordingExtractor(raw_data_epoch_referenced_filtered,channel_ids=electrode_ids), sort_interval_valid_times
+        # create a SubRecordingExtractor
+        sub_R = se.SubRecordingExtractor(raw_data_epoch_referenced_filtered,
+                                         channel_ids = electrode_ids)
+
+        return sub_R, sort_interval_valid_times
 
     def get_sorting_extractor(self, key, sort_interval):
         #TODO: replace with spikeinterface call if possible
@@ -598,13 +747,13 @@ class SpikeSorting(dj.Computed):
         units = (SpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
         unit_timestamps = []
         unit_labels = []
-        
+
         raw_data_obj = (Raw() & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
-        # get the indices of the data to use. Note that spike_extractors has a time_to_frame function, 
+        # get the indices of the data to use. Note that spike_extractors has a time_to_frame function,
         # but it seems to set the time of the first sample to 0, which will not match our intervals
         timestamps = np.asarray(raw_data_obj.timestamps)
         sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
-       
+
         unit_timestamps_list = []
         # TODO: do something more efficient here; note that searching for maching sort_intervals within pandas doesn't seem to work
         for index, unit in units.iterrows():
@@ -619,22 +768,200 @@ class SpikeSorting(dj.Computed):
         output.set_times_labels(times=np.asarray(unit_timestamps),labels=np.asarray(unit_labels))
         return output
 
+    def prepare_recording_sorting(self, snippets_h5_uri):
+        """
+        Generates labbox-ephys recording and sorting extractors
+
+        Parameters
+        ----------
+        snippets_h5_uri: string
+            URI to snippets.h5 file (will call from NWB file in the future)
+        """
+        recording_obj = {
+            'recording_format': 'snippets1',
+            'data': {
+                'snippets_h5_uri': snippets_h5_uri
+            }
+        }
+        sorting_obj = {
+            'sorting_format': 'snippets1',
+            'data': {
+                'snippets_h5_uri': snippets_h5_uri
+            }
+        }
+        recording = le.LabboxEphysRecordingExtractor(recording_obj)
+        sorting = le.LabboxEphysSortingExtractor(sorting_obj)
+        return recording, sorting
+
+    def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=False):
+        """
+        Creates feed to be used by labbox-ephys during curation
+
+        Parameters
+        ----------
+        create_snapshot: bool
+            set to False if want writable feed
+
+        Returns
+        -------
+        feed uri
+        """
+        try:
+            f = kp.create_feed()
+            recordings = f.get_subfeed(dict(documentId='default', key='recordings'))
+            sortings = f.get_subfeed(dict(documentId='default', key='sortings'))
+            for le_recording in le_recordings:
+                recordings.append_message(dict(
+                    action=dict(
+                        type='ADD_RECORDING',
+                        recording=le_recording
+                    )
+                ))
+            for le_sorting in le_sortings:
+                sortings.append_message(dict(
+                    action=dict(
+                        type='ADD_SORTING',
+                        sorting=le_sorting
+                    )
+                ))
+            if create_snapshot:
+                x = f.create_snapshot([
+                    dict(documentId='default', key='recordings'),
+                    dict(documentId='default', key='sortings')
+                ])
+                return x.get_uri()
+            else:
+                return f.get_uri()
+        finally:
+            if create_snapshot:
+                f.delete()
+
+    def metrics_to_labbox_ephys(self, metrics, unit_ids):
+        """Turns the metrics pandas.dataframe to a list of dict to feed to labbox
+
+        Parameters
+        ----------
+        metrics : pandas.DataFrame
+            from spikeinterface
+        unit_ids : list
+            from SortingExtractor
+
+        Returns
+        -------
+        external_unit_metrics: list of dict
+        """
+        external_unit_metrics = []
+        for metric in metrics.columns:
+            test_metric = dict(
+                name=metric,
+                label=metric,
+                tooltip=metric,
+                data=dict(zip([str(uid) for uid in unit_ids], [i for i in metrics[metric]]))
+            )
+            external_unit_metrics.append(test_metric)
+        return external_unit_metrics
 
 @schema
 class CuratedSpikeSorting(dj.Computed):
     definition = """
+    # Table for holding the output of spike sorting
     -> SpikeSorting
+    ---
+    -> AnalysisNwbfile    # New analysis NWB file to hold unit info
     """
 
     class Units(dj.Part):
         definition = """
-        -> master
-        unit_id: int # the cluster number for this unit 
+        # Table for holding sorted units
+        -> CuratedSpikeSorting
+        unit_id: int            # ID for each unit
         ---
-        noise_overlap: float # the noise overlap metric
-        isolation_score: float # the isolation score metric
-        snr : float
-        """        
+        label: varchar(80)      # label for each unit
+        noise_overlap: float    # noise overlap metric for each unit
+        isolation_score: float  # isolation score metric for each unit
+        """
+
+    def make(self, key):
+        # Create a new analysis NWB file that is a copy of the original
+        # analysis NWB file
+        parent_key = (SpikeSorting & key).fetch1()
+        new_analysis_nwb_filename = AnalysisNwbfile.copy(parent_key['analysis_file_name'])
+
+        # Get labels and print
+        labels = self.get_labels(parent_key['curation_feed_uri'])
+        print('Labels: ' + str(labels))
+
+        # turn labels to list of str
+        labels_concat = []
+        for idx, unitId in enumerate(labels):
+            label_concat = ','.join(labels[unitId])
+            labels_concat.append(label_concat)
+
+        # Get metrics from analysis NWB file
+        with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(parent_key['analysis_file_name']),
+                             mode = "r") as io:
+            nwbf = io.read()
+            noise_overlap = nwbf.units['noise_overlap'][:]
+            isolation_score = nwbf.units['nn_hit_rate'][:]
+
+        # Print metrics
+        print('Noise overlap: ' + str(noise_overlap))
+        print('Isolation score: ' + str(isolation_score))
+
+        # Add labels to the new analysis NWB file
+        print('\nSaving units data to new AnalysisNwb file...')
+        with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(new_analysis_nwb_filename),
+                             mode = "a") as io:
+            nwbf = io.read()
+            nwbf.add_unit_column(name = 'label', description='label given during curation',
+                                 data = labels_concat)
+            print(nwbf.units)
+            io.write(nwbf)
+        print('Done with AnalysisNwb file.')
+
+        # Insert new file to AnalysisNWBfile table
+        AnalysisNwbfile().add(key['nwb_file_name'], new_analysis_nwb_filename)
+        # Insert entry to CuratedSpikeSorting table
+        self.insert1(dict(key, analysis_file_name = new_analysis_nwb_filename))
+
+        # Add entries to CuratedSpikeSorting.Units table
+        print('\nAdding to dj Units table...')
+        for idx, unitId in enumerate(labels):
+            CuratedSpikeSorting.Units.insert1(dict(key, unit_id = unitId,
+                                              label = ','.join(labels[unitId]),
+                                              noise_overlap = noise_overlap[idx],
+                                              isolation_score = isolation_score[idx]))
+        print('Done with dj Units table.')
+
+    def get_labels(self, feed_uri):
+        """Parses the curation feed to get a label for each unit.
+
+        Parameters
+        ----------
+        feed_uri : str
+
+        Returns
+        -------
+        final_labels : dict
+            key is int (unitId), value is list of strings (labels)
+        """
+        f = kp.load_feed(feed_uri)
+        sf = f.get_subfeed(dict(documentId='default', key='sortings'))
+        msgs = sf.get_next_messages()
+        label_msgs = list(compress(msgs,[(m['action']['type']=='ADD_UNIT_LABEL') or (m['action']['type']=='REMOVE_UNIT_LABEL') for m in msgs]))
+        unitIds = list(set([lm['action']['unitId'] for lm in label_msgs]))
+        final_labels = dict()
+        for cell in unitIds:
+            unit_label_msgs = list(compress(label_msgs, [lm['action']['unitId']==cell for lm in label_msgs]))
+            adds = list(compress(unit_label_msgs,[i['action']['type']=='ADD_UNIT_LABEL' for i in unit_label_msgs]))
+            removes = list(compress(unit_label_msgs,[i['action']['type']=='REMOVE_UNIT_LABEL' for i in unit_label_msgs]))
+            labels_added = [k['action']['label'] for k in adds]
+            labels_removed = [k['action']['label'] for k in removes]
+            final_labels.update({cell: list(set(labels_added) - set(labels_removed))})
+        return final_labels
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
 
 """ for curation feed reading:
@@ -650,4 +977,35 @@ During creation of feed:
 feed_uri = create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
 
 Pull option-create_snapshot branch
+----------
+metrics
+----------
+- add to units table
+- isolation score, noise overlap
+- waveform samples
+- want to recompute metrics after merge
+
+- looking at spikeinterface to figure out which metrics it is computing and where
+- SNR, dprime, drift, firing rates, nearest neighbor metrics
+- once we have sorting and recording, can just call functions to compute these
+- as soon as sorting is done we call these
+- spike sorting parameters: need a dictionary for all the metrics we compute
+- store in nwb units table
+- would have to create new units table after merges
+- can get rid of unnecessary waveforms
+- ryan will take metrics from units table to labbox ephys
+- labboxepys doesnt have noise overlap
+- noise overlap: how similar are random waveforms to your waveforms
+- mlsm4-alg has feature to toss clusters below noise overlap
+- TODO:
+- parse the feed; and add labels to units table in analysisNWB file and then maybe datajoint
+- nwb file put into kachery
+- labbox can read from this file via plugin
+- curate
+- take that feed back into datajoint
+- labels live only in datajoint units table
+- when pulling back into dj, create new units table that reflects merges
+
+labbox-launcher command:
+labbox-launcher run magland/labbox-ephys:0.4.0 --docker_run_opts "--net host -e KACHERY_P2P_API_PORT=$KACHERY_P2P_API_PORT" --kachery $KACHERY_STORAGE_DIR
 """

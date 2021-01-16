@@ -11,7 +11,9 @@ class NwbfileLock(dj.Manual):
     -> Nwbfile
     """
     def populate_from_lock_file(self):
-        """Reads from the NWB_LOCK_FILE (defined by an environment variable), adds the entries to this schema, and then removes the file
+        """
+        Reads from the NWB_LOCK_FILE (defined by an environment variable),
+        adds the entries to this schema, and then removes the file
         """
         if os.path.exists(os.getenv('NWB_LOCK_FILE')):
             lock_file = open(os.getenv('NWB_LOCK_FILE'), 'r')

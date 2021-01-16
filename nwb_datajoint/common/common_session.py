@@ -17,6 +17,7 @@ schema = dj.schema("common_session")
 @schema
 class Session(dj.Imported):
     definition = """
+    # Table for holding experimental sessions.
     -> Nwbfile
     ---
     -> Subject
@@ -39,10 +40,13 @@ class Session(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
             nwbf = io.read()
+
             print('Institution...')
             Institution().insert_from_nwbfile(nwbf)
+
             print('Lab...')
             Lab().insert_from_nwbfile(nwbf)
+
             print('LabMember...')
             LabMember().insert_from_nwbfile(nwbf)
 
@@ -51,9 +55,10 @@ class Session(dj.Imported):
 
             print('DataAcquisitionDevice...')
             DataAcquisitionDevice().insert_from_nwbfile(nwbf)
+
             print('CameraDevice...')
             CameraDevice().insert_from_nwbfile(nwbf)
- 
+
             print('Probe...')
             Probe().insert_from_nwbfile(nwbf)
 
