@@ -56,10 +56,10 @@ The Frank lab Datajoint database is designed to facilitate data storage, analysi
 
 ### Tutorials
 The tutorials are in the form of jupyter notebooks and can be found in the `notebooks` directory. We recommend opening them in the context of `jupyterlab` if you want to do curation. Some of the tutorials we recommend that you start with are:
-* `beans.ipynb`
-* `populate_from_NWB_tutorial.ipynb` for inserting data
-* `nwbdj_lfp_tutorial.ipynwb` to extract LFP  
-* `nwbdj_spikeinterface.pynwb` to run spikesorting
+* `beans.ipynb`: latest and most detailed comments
+* `populate_from_NWB_tutorial.ipynb`: for inserting data
+* `nwbdj_lfp_tutorial.ipynwb`: to extract LFP  
+* `nwbdj_spikeinterface.pynwb`: to run spikesorting
 
 ### Notes
 * The above instruction assumes that you will be using the `jupyterlab` widget for curation. For curation with the web-based GUI, you must be running `kachery-p2p` and `labbox-ephys` daemons in the background.
