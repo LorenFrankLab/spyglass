@@ -15,7 +15,6 @@ The Frank lab Datajoint database is designed to facilitate data storage, analysi
    ```
 3. Install this repository:
    ```bash
-   cd nwb_datajoint
    python setup.py develop
    ```
 4. Install [LorenFrankLab/ndx-franklab-novela](https://github.com/LorenFrankLab/ndx-franklab-novela) repository:
