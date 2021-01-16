@@ -8,6 +8,7 @@ nwb_datajoint.code-workspace
 mountainsort4_output/
 .idea/
 .vscode/
+README_old.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
