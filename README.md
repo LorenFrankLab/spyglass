@@ -15,7 +15,6 @@ The Frank lab Datajoint database is designed to facilitate data storage, analysi
    ```
 3. Install this repository:
    ```bash
-   cd nwb_datajoint
    python setup.py develop
    ```
 4. Install [LorenFrankLab/ndx-franklab-novela](https://github.com/LorenFrankLab/ndx-franklab-novela) repository:
@@ -57,10 +56,10 @@ The Frank lab Datajoint database is designed to facilitate data storage, analysi
 
 ### Tutorials
 The tutorials are in the form of jupyter notebooks and can be found in the `notebooks` directory. We recommend opening them in the context of `jupyterlab` if you want to do curation. Some of the tutorials we recommend that you start with are:
-* `beans.ipynb`
-* `populate_from_NWB_tutorial.ipynb` for inserting data
-* `nwbdj_lfp_tutorial.ipynwb` to extract LFP  
-* `nwbdj_spikeinterface.pynwb` to run spikesorting
+* `beans.ipynb`: latest and most detailed comments
+* `populate_from_NWB_tutorial.ipynb`: for inserting data
+* `nwbdj_lfp_tutorial.ipynwb`: to extract LFP  
+* `nwbdj_spikeinterface.pynwb`: to run spikesorting
 
 ### Notes
 * The above instruction assumes that you will be using the `jupyterlab` widget for curation. For curation with the web-based GUI, you must be running `kachery-p2p` and `labbox-ephys` daemons in the background.
@@ -68,7 +67,7 @@ The tutorials are in the form of jupyter notebooks and can be found in the `note
   ```bash
   kachery-p2p-start-daemon --label franklab --config https://gist.githubusercontent.com/khl02007/b3a092ba3e590946480fb1267964a053/raw/f05eda4789e61980ce630b23ed38a7593f58a7d9/franklab_kachery-p2p_config.yaml
   ```
-  * To run `labbox-ephys`, you need to first install [Docker](https://docs.docker.com/get-docker/). Make sure to enable running Docker without `sudo` (see [this](https://docs.docker.com/engine/install/linux-postinstall/). Test Docker installation with:
+  * To run `labbox-ephys`, you need to first install [Docker](https://docs.docker.com/get-docker/). Make sure to enable running Docker without `sudo` (see [this](https://docs.docker.com/engine/install/linux-postinstall/)). Test Docker installation with:
   ```bash
   docker run --rm hello-world
   ```
