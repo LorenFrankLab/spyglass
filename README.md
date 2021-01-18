@@ -67,7 +67,7 @@ The tutorials are in the form of jupyter notebooks and can be found in the `note
   ```bash
   kachery-p2p-start-daemon --label franklab --config https://gist.githubusercontent.com/khl02007/b3a092ba3e590946480fb1267964a053/raw/f05eda4789e61980ce630b23ed38a7593f58a7d9/franklab_kachery-p2p_config.yaml
   ```
-  * To run `labbox-ephys`, you need to first install [Docker](https://docs.docker.com/get-docker/). Make sure to enable running Docker without `sudo` (see [this](https://docs.docker.com/engine/install/linux-postinstall/). Test Docker installation with:
+  * To run `labbox-ephys`, you need to first install [Docker](https://docs.docker.com/get-docker/). Make sure to enable running Docker without `sudo` (see [this](https://docs.docker.com/engine/install/linux-postinstall/)). Test Docker installation with:
   ```bash
   docker run --rm hello-world
   ```

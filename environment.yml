@@ -7,6 +7,7 @@ dependencies:
   - jupyterlab=3.0.*
   - nodejs=12.4.*
   - pydotplus>=2.0.*
+  - dask>=2.30
   - pip>=20.2.*
   - pip:
     - hither>=0.4.*
