@@ -492,7 +492,7 @@ class SpikeSorting(dj.Computed):
             #                                                         save_path = recording_extractor_path)
             # Write recording extractor to NWB file
             se.NwbRecordingExtractor.write_recording(recording,
-                                                     save_path = recording_extractor_path,
+                                                     save_path = str(recording_extractor_path),
                                                      use_timestamps = True)
 
             # ------------------------------------------------------------------
@@ -507,9 +507,8 @@ class SpikeSorting(dj.Computed):
                                                    output_folder = os.getenv('SORTING_TEMP_DIR', None))
             # Save time of sort
             key['time_of_sort'] = int(time.time())
-
             # Save sorting extractor to NWB file that contains recording extractor
-            se.NwbSortingExtractor.write_sorting(sorting, save_path = recording_extractor_path)
+            se.NwbSortingExtractor.write_sorting(sorting, save_path = str(recording_extractor_path))
 
             # ------------------------------------------------------------------
             # Compute quality metrics
@@ -635,7 +634,6 @@ class SpikeSorting(dj.Computed):
         # Create the labbox-ephys feed
         # set create_snapshot False to get a writable feed
         feed_uri = self.create_labbox_ephys_feed(R, S, create_snapshot=False)
-
         key['curation_feed_uri'] = feed_uri
 
         # Finally, insert the entity into table
