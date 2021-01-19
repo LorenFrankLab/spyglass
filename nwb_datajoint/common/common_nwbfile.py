@@ -127,7 +127,7 @@ class AnalysisNwbfile(dj.Manual):
         # key['analysis_file_name'] = analysis_file_name
         # key['analysis_file_description'] = ''
         # write the new file
-        print(f'writing new NWB file {analysis_file_name}')
+        print(f'Writing new NWB file {analysis_file_name}')
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         # key['analysis_file_abs_path'] = analysis_file_abs_path
         # export the new NWB file

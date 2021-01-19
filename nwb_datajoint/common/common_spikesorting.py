@@ -484,15 +484,15 @@ class SpikeSorting(dj.Computed):
                 print('Tetrode; making up channel locations...')
                 channel_locations = [[0,0],[0,1],[1,0],[1,1]]
                 recording.set_channel_locations(channel_locations)
-            # Saves the traces of RecordingExtractor in binary .dat format
-            recording_extractor_path = (Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
+
+            recording_extractor_path = str((Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                                        / key['analysis_file_name']
-                                       / np.array2string(sort_interval))
+                                       / np.array2string(sort_interval))) + '.nwb'
             # recording_extractor_cached = se.CacheRecordingExtractor(recording_extractor,
             #                                                         save_path = recording_extractor_path)
             # Write recording extractor to NWB file
             se.NwbRecordingExtractor.write_recording(recording,
-                                                     save_path = str(recording_extractor_path),
+                                                     save_path = recording_extractor_path,
                                                      use_timestamps = True)
 
             # ------------------------------------------------------------------
@@ -508,7 +508,7 @@ class SpikeSorting(dj.Computed):
             # Save time of sort
             key['time_of_sort'] = int(time.time())
             # Save sorting extractor to NWB file that contains recording extractor
-            se.NwbSortingExtractor.write_sorting(sorting, save_path = str(recording_extractor_path))
+            se.NwbSortingExtractor.write_sorting(sorting, save_path = recording_extractor_path)
 
             # ------------------------------------------------------------------
             # Compute quality metrics
