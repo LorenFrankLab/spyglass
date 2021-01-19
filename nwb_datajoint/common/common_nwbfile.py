@@ -246,43 +246,47 @@ class AnalysisNwbfile(dj.Manual):
         """
         Given a units dictionary where each entry is (unit id, spike times)
 
-        :param analysis_file_name: the name of the analysis nwb file
-        :type analysis_file_name: str
-        :param units: dictionary of units and times with unit ids as keys
-        :type units: dict
-        :param units_templates: dictionary of units with waveform templates in each entry
-        :type units: dict
-        :param units_valid_times: dictionary of units and valid times  with unit ids as keys
-        :type units_valid_times: dict
-        :param units_sort_interval: dictionary of units and sort_interval with unit ids as keys
-        :type units_sort_interval: dict
-        :param units_waveforms: optional dictionary of unit waveforms with unit ids as keys (optional)
-        :type units_waveforms: dict
-        :param metrics: optional cluster metrics
-        :type units_waveforms: dataframe
-        :return: the nwb object id of the Units object and the object id of the waveforms object ('' if None)
+        Parameters
+        ----------
+        analysis_file_name: str
+            the name of the analysis nwb file
+        units: dict
+            dictionary of units and times with unit ids as keys
+        units_valid_times: dict
+            dictionary of units and valid times with unit ids as keys
+        units_sort_interval: dict
+            dictionary of units and sort_interval with unit ids as keys
+        units_waveforms: dataframe
+            optional dictionary of unit waveforms with unit ids as keys (optional)
+        metrics: dict
+            optional cluster metrics
+
+        Returns
+        -------
+        the nwb object id of the Units object and the object id of the waveforms object ('' if None)
         """
-        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
+        with pynwb.NWBHDF5IO(path = self.get_abs_path(analysis_file_name), mode = "a") as io:
             nwbf=io.read()
             sort_intervals = list()
             if len(units.keys()):
+                # Add spike times and valid time range for the sort
                 for id in units.keys():
                     nwbf.add_unit(spike_times = units[id], id = id,
-                                  waveform_mean = units_templates[id],
+                                  # waveform_mean = units_templates[id],
                                   obs_intervals = units_valid_times[id])
                     sort_intervals.append(units_sort_interval[id])
-                # add a column for the sort interval
-                nwbf.add_unit_column(name='sort_interval',
-                                     description='the interval used for spike sorting',
-                                     data=sort_intervals)
-                # if metrics were specified, add one column per metric
+                # Add a column for the sort interval (subset of valid time)
+                nwbf.add_unit_column(name = 'sort_interval',
+                                     description = 'the interval used for spike sorting',
+                                     data = sort_intervals)
+                # If metrics were specified, add one column per metric
                 if metrics is not None:
                     for metric in list(metrics):
-                        print(f'adding metric {metric} : {metrics[metric].to_list()}')
-                        nwbf.add_unit_column(name=metric,
-                                             description=f'{metric} sorting metric',
-                                             data=metrics[metric].to_list())
-                # if the waveforms were specified, add them as a dataframe
+                        print(f'Adding metric {metric} : {metrics[metric].to_list()}')
+                        nwbf.add_unit_column(name = metric,
+                                             description = f'{metric} sorting metric',
+                                             data = metrics[metric].to_list())
+                # If the waveforms were specified, add them as a dataframe
                 waveforms_object_id = ''
                 if units_waveforms is not None:
                     waveforms_df = pd.DataFrame.from_dict(units_waveforms,
@@ -290,6 +294,7 @@ class AnalysisNwbfile(dj.Manual):
                     waveforms_df.columns = ['waveforms']
                     nwbf.add_scratch(waveforms_df, name='units_waveforms', notes='')
                     waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
+
                 io.write(nwbf)
                 return nwbf.units.object_id, waveforms_object_id
             else:
