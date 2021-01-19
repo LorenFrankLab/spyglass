@@ -697,7 +697,7 @@ class SpikeSorting(dj.Computed):
 
         # raw_data_epoch = raw_data.get_epoch(epoch_name)
         # Create a SubRecordingExtractor for the chunk
-        sub_R = se.SubRecordingExtractor(R, channel_ids = electrode_ids,
+        sub_R = se.SubRecordingExtractor(R, channel_ids = electrode_ids.tolist(),
                                          start_frame = sort_indices[0],
                                          end_frame = sort_indices[1])
 
