@@ -707,8 +707,8 @@ class SpikeSorting(dj.Computed):
                                                     'sort_group_id' : key['sort_group_id']}).fetch('sort_reference_electrode_id')
         if sort_reference_electrode_id >= 0:
             sub_R = st.preprocessing.common_reference(sub_R, reference='single',
-                                                                          groups=[key['sort_group_id']],
-                                                                          ref_channels=sort_reference_electrode_id)
+                                                      groups=[key['sort_group_id']],
+                                                      ref_channels=sort_reference_electrode_id)
         elif sort_reference_electrode_id == -2:
             sub_R = st.preprocessing.common_reference(sub_R, reference='median')
         # else:
@@ -730,8 +730,8 @@ class SpikeSorting(dj.Computed):
             sub_R.load_probe_file(prb_file_name)
 
         # create a SubRecordingExtractor
-        # sub_R = se.SubRecordingExtractor(raw_data_epoch_referenced_filtered,
-        #                                  channel_ids = electrode_ids)
+        sub_R = se.SubRecordingExtractor(sub_R,
+                                         channel_ids = electrode_ids)
 
         return sub_R, sort_interval_valid_times
 
