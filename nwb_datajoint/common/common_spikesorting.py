@@ -699,7 +699,7 @@ class SpikeSorting(dj.Computed):
 
         # This is a SubRecordingExtractor
         # raw_data_epoch = raw_data.get_epoch(epoch_name)
-        sub_R = se.SubRecordingExtractor(R, start_frame = sort_indices[0]
+        sub_R = se.SubRecordingExtractor(R, start_frame = sort_indices[0],
                                          end_frame = sort_indices[1])
 
         # get the reference for this sort group
