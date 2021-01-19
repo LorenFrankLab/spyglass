@@ -665,19 +665,20 @@ class SpikeSorting(dj.Computed):
             (start, end) times for valid sorting interval
         """
 
+        # Start and end frames for the chunk of recording we are sorting
         interval_list_name = (SpikeSortingParameters & key).fetch1('interval_list_name')
         valid_times =  (IntervalList & {'nwb_file_name' : key['nwb_file_name'],
                                         'interval_list_name' : interval_list_name}).fetch1('valid_times')
         sort_interval_valid_times = interval_list_intersect(sort_interval,
                                                             valid_times)
-
         raw_data_obj = (Raw & {'nwb_file_name' : key['nwb_file_name']}).fetch_nwb()[0]['raw']
-        # get the indices of the data to use. Note that spike_extractors has a time_to_frame function,
-        # but it seems to set the time of the first sample to 0, which will not match our intervals
         timestamps = np.asarray(raw_data_obj.timestamps)
         sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
         assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
 
+        # Electrodes for the chunk of recording we are sorting
+        electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name' : key['nwb_file_name'],
+                                                         'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
         # Create a NwbRecordingExtractor
         R = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']),
                                      electrical_series_name = 'e-series')
@@ -689,20 +690,18 @@ class SpikeSorting(dj.Computed):
         # TODO: write function that actually detects artifacts
         # raw_data = st.preprocessing.remove_artifacts(raw_data, exclude_inds, ms_before=0.1, ms_after=0.1)
 
-        # create a group id within spikeinterface for the specified electodes
-        electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name' : key['nwb_file_name'],
-                                                         'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
-        R.set_channel_groups([key['sort_group_id']]*len(electrode_ids),
-                             channel_ids = electrode_ids)
+        # R.set_channel_groups([key['sort_group_id']]*len(electrode_ids),
+        #                      channel_ids = electrode_ids)
         # epoch_name = np.array2string(sort_interval)
         # raw_data.add_epoch(epoch_name, sort_indices[0], sort_indices[1])
 
-        # This is a SubRecordingExtractor
         # raw_data_epoch = raw_data.get_epoch(epoch_name)
-        sub_R = se.SubRecordingExtractor(R, start_frame = sort_indices[0],
+        # Create a SubRecordingExtractor for the chunk
+        sub_R = se.SubRecordingExtractor(R, channel_ids = electrode_ids,
+                                         start_frame = sort_indices[0],
                                          end_frame = sort_indices[1])
 
-        # get the reference for this sort group
+        # Reference the chunk
         sort_reference_electrode_id = (SortGroup & {'nwb_file_name' : key['nwb_file_name'],
                                                     'sort_group_id' : key['sort_group_id']}).fetch('sort_reference_electrode_id')
         if sort_reference_electrode_id >= 0:
@@ -714,7 +713,7 @@ class SpikeSorting(dj.Computed):
         # else:
         #     sub_R = raw_data_epoch
 
-        # filter the data
+        # Filter the chunk
         param = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                           'parameter_set_name': key['parameter_set_name']}).fetch1()
         sub_R = st.preprocessing.bandpass_filter(sub_R, freq_min=param['frequency_min'],
@@ -723,15 +722,15 @@ class SpikeSorting(dj.Computed):
                                                  chunk_size = param['filter_chunk_size'])
 
         # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')
-            SortGroup().write_prb(key['sort_group_id'], key['nwb_file_name'], prb_file_name)
-            # add the probe geometry to the raw_data recording
-            sub_R.load_probe_file(prb_file_name)
+        # with tempfile.TemporaryDirectory() as tmp_dir:
+        #     prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')
+        #     SortGroup().write_prb(key['sort_group_id'], key['nwb_file_name'], prb_file_name)
+        #     # add the probe geometry to the raw_data recording
+        #     sub_R.load_probe_file(prb_file_name)
 
         # create a SubRecordingExtractor
-        sub_R = se.SubRecordingExtractor(sub_R,
-                                         channel_ids = electrode_ids)
+        # sub_R = se.SubRecordingExtractor(sub_R,
+        #                                  channel_ids = electrode_ids)
 
         return sub_R, sort_interval_valid_times
 
