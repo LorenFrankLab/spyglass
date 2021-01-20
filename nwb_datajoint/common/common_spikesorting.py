@@ -584,8 +584,8 @@ class SpikeSorting(dj.Computed):
         # get labbox recording and sorting extractors
         # recording, sorting = self.prepare_recording_sorting(snippets_h5_uri)
 
-        R = le.LabboxEphysRecordingExtractor.from_memory(recording)
-        S = le.LabboxEphysSortingExtractor.from_memory(sorting)
+        # R = le.LabboxEphysRecordingExtractor.from_memory(recording)
+        # S = le.LabboxEphysSortingExtractor.from_memory(sorting)
 
         # Change format of metrics to list of dict
         # external_unit_metrics = self.metrics_to_labbox_ephys(metrics, unit_ids)
@@ -618,32 +618,35 @@ class SpikeSorting(dj.Computed):
         # ))
 
         # Check if KACHERY_P2P_API_PORT is set
-        kp_port = os.getenv('KACHERY_P2P_API_PORT', False)
-        assert kp_port, 'You must set KACHERY_P2P_API_PORT environmental variable'
+        # kp_port = os.getenv('KACHERY_P2P_API_PORT', False)
+        # assert kp_port, 'You must set KACHERY_P2P_API_PORT environmental variable'
 
         # Check if the kachery-p2p daemon is running in the background
-        try:
-            kp_channel = kp.get_channels()
-        except ConnectionError:
-            raise RuntimeError(('You must have a kachery-p2p daemon running in'
-                                ' the background (kachery-p2p-start-daemon --label'
-                                ' <name-of-node> --config https://gist.githubuse'
-                                'rcontent.com/khl02007/b3a092ba3e590946480fb1267'
-                                '964a053/raw/f05eda4789e61980ce630b23ed38a7593f5'
-                                '8a7d9/franklab_kachery-p2p_config.yaml)'))
+        # try:
+        #     kp_channel = kp.get_channels()
+        # except ConnectionError:
+        #     raise RuntimeError(('You must have a kachery-p2p daemon running in'
+        #                         ' the background (kachery-p2p-start-daemon --label'
+        #                         ' <name-of-node> --config https://gist.githubuse'
+        #                         'rcontent.com/khl02007/b3a092ba3e590946480fb1267'
+        #                         '964a053/raw/f05eda4789e61980ce630b23ed38a7593f5'
+        #                         '8a7d9/franklab_kachery-p2p_config.yaml)'))
 
         # Create the labbox-ephys feed
         # set create_snapshot False to get a writable feed
-        feed_uri = self.create_labbox_ephys_feed(R, S, create_snapshot=False)
-        key['curation_feed_uri'] = feed_uri
+        # feed_uri = self.create_labbox_ephys_feed(R, S, create_snapshot=False)
+        # key['curation_feed_uri'] = feed_uri
+        print('path to recording and sorting extractors: ', recording_extractor_path)
+        
+        key['curation_feed_uri'] = 'placeholder'
 
         # Finally, insert the entity into table
         self.insert1(key)
         print('\nDone - entry inserted to table!\n')
 
         # Tell user how to access curation website
-        ipaddr = socket.getfqdn(socket.gethostname())
-        print('Launch labbox-ephys and go to '+ipaddr+':15310/default?feed='+feed_uri)
+        # ipaddr = socket.getfqdn(socket.gethostname())
+        # print('Launch labbox-ephys and go to '+ipaddr+':15310/default?feed='+feed_uri)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
