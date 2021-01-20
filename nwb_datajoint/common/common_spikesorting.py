@@ -563,7 +563,7 @@ class SpikeSorting(dj.Computed):
 
         # Add the units to the Analysis file
         # TODO: consider replacing with spikeinterface call if possible
-        units_object_id, _ = AnalysisNwbfile().add_units(key['analysis_file_name'],
+            units_object_id, _ = AnalysisNwbfile().add_units(key['analysis_file_name'],
                                                          units, units_valid_times,
                                                          units_sort_interval,
                                                          metrics = metrics)
@@ -583,8 +583,9 @@ class SpikeSorting(dj.Computed):
 
         # get labbox recording and sorting extractors
         # recording, sorting = self.prepare_recording_sorting(snippets_h5_uri)
-        R = le.LabboxEphysRecordingExtractor(recording)
-        S = le.LabboxEphysSortingExtractor(sorting)
+
+        R = le.LabboxEphysRecordingExtractor.from_memory(recording)
+        S = le.LabboxEphysSortingExtractor.from_memory(sorting)
 
         # Change format of metrics to list of dict
         # external_unit_metrics = self.metrics_to_labbox_ephys(metrics, unit_ids)
