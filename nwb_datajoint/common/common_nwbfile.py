@@ -241,8 +241,8 @@ class AnalysisNwbfile(dj.Manual):
             return nwb_object.object_id
 
 
-    def add_units(self, analysis_file_name, units, units_templates,
-                  units_valid_times, units_sort_interval, metrics=None, units_waveforms=None):
+    def add_units(self, analysis_file_name, units, units_valid_times,
+                  units_sort_interval, metrics=None, units_waveforms=None):
         """
         Given a units dictionary where each entry is (unit id, spike times)
 
