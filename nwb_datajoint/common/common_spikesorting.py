@@ -375,7 +375,7 @@ class SpikeSortingParameters(dj.Manual):
     ---
     -> SpikeSortingWaveformParameters
     -> SpikeSortingMetrics
-    -> IntervalList # the valid times for the raw data (excluding artifacts, etc. if desired)
+    -> IntervalList
     import_path = '': varchar(200) # optional path to previous curated sorting output
     """
 
@@ -446,11 +446,14 @@ class SpikeSorting(dj.Computed):
         print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'parameter_set_name': key['parameter_set_name']}).fetch1()
-        # TODO: don't just say run mountainsort; run whatever sorter was specified
-        sorting = si.sorters.run_mountainsort4(recording,
-                                               **sort_parameters['parameter_dict'],
-                                               grouping_property = 'group',
-                                               output_folder = os.getenv('SORTING_TEMP_DIR', None))
+        # sorting = si.sorters.run_mountainsort4(recording,
+        #                                        **sort_parameters['parameter_dict'],
+        #                                        grouping_property = 'group',
+        #                                        )
+        sorting = si.sorters.run_sorter(key['sorter_name'], recording,
+                                        output_folder = os.getenv('SORTING_TEMP_DIR', None),
+                                        grouping_property = 'group',
+                                        **sort_parameters['parameter_dict'])
         # Save time of sort
         key['time_of_sort'] = int(time.time())
         # Write sorting extractor to NWB file that contains recording extractor
