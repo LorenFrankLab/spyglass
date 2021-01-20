@@ -395,13 +395,6 @@ class SpikeSorting(dj.Computed):
         """
         Runs spike sorting on the data and parameters specified by the
         SpikeSortingParameter table and inserts a new entry to SpikeSorting table.
-        Roughly, the order of operation is:
-        - Create an NWB file to hold the results of spike sorting
-        - Create a spikeinterface RecordingExtractor and cache it
-        - Run sorting algorithm (e.g. MountainSort4)
-        - Compute quality metrics
-        - Save the sorted units to AnalysisNWB file
-        - Generate a feed URI to be used during curation
 
         Parameters
         ----------
@@ -434,10 +427,12 @@ class SpikeSorting(dj.Computed):
         recording, sort_interval_valid_times = self.get_recording_extractor(key)
 
         # Path to Nwb file that will hold recording and sorting extractors
+        # TODO: store this somehow in dj
         extractor_nwb_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                                  / key['sort_name']) + '.nwb'
 
         # Write recording extractor to NWB file
+        # TODO: make overwrite true
         se.NwbRecordingExtractor.write_recording(recording,
                                                  save_path = extractor_nwb_path,
                                                  use_timestamps = True)
@@ -446,10 +441,6 @@ class SpikeSorting(dj.Computed):
         print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'parameter_set_name': key['parameter_set_name']}).fetch1()
-        # sorting = si.sorters.run_mountainsort4(recording,
-        #                                        **sort_parameters['parameter_dict'],
-        #                                        grouping_property = 'group',
-        #                                        )
         sorting = si.sorters.run_sorter(key['sorter_name'], recording,
                                         output_folder = os.getenv('SORTING_TEMP_DIR', None),
                                         grouping_property = 'group',
