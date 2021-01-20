@@ -12,9 +12,8 @@ dj.config["enable_python_native_blobs"] = True
 # Note: This is franklab-specific -- TODO: move it outside this repo
 # Note: we need to sync this with the source repo
 
-from ndx_franklab_novela import probe
+from .ndx_franklab_novela import probe
 
 from .data_import.storage_dirs import check_env, kachery_storage_dir, base_dir
 from .data_import.insert_sessions import insert_sessions
 #from .lock import file_lock as lock
-
