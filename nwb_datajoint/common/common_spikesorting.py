@@ -432,18 +432,18 @@ class SpikeSorting(dj.Computed):
         # uuid?
         extractor_nwb_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                                  / key['sort_name']) + '.nwb'
-        extractor_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
-                                 / key['sort_name'])
+        # extractor_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
+        #                          / key['sort_name'])
 
         # Write recording extractor to NWB file
         # TODO: make overwrite true
-        # se.NwbRecordingExtractor.write_recording(recording,
-        #                                          save_path = extractor_nwb_path,
-        #                                          use_timestamps = True)
-        recording_extractor_cached = se.CacheRecordingExtractor(recording,
-                                                                save_path = extractor_path+'.dat')
-        np.save(extractor_path+'.npy', recording.make_serialized_dict())
-        
+        se.NwbRecordingExtractor.write_recording(recording,
+                                                 save_path = extractor_nwb_path,
+                                                 use_timestamps = True)
+        # recording_extractor_cached = se.CacheRecordingExtractor(recording,
+        #                                                         save_path = extractor_path+'.dat')
+        # np.save(extractor_path+'.npy', recording.make_serialized_dict())
+
         # Run spike sorting
         print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
