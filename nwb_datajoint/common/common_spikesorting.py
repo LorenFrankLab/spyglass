@@ -428,6 +428,8 @@ class SpikeSorting(dj.Computed):
 
         # Path to Nwb file that will hold recording and sorting extractors
         # TODO: store this somehow in dj
+        # TODO: how to ensure sort name is unique? maybe just append attributes
+        # uuid?
         extractor_nwb_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                                  / key['sort_name']) + '.nwb'
 
@@ -464,6 +466,7 @@ class SpikeSorting(dj.Computed):
             unit_spike_samples = sorting.get_unit_spike_train(unit_id = unit_id)
             units[unit_id] = sort_interval[0] + unit_spike_samples/sampling_rate
             units_valid_times[unit_id] = sort_interval_valid_times
+            # TODO: think about whether this is necessary
             units_sort_interval[unit_id] = [sort_interval]
 
         # Add the units to the Analysis file
@@ -600,13 +603,6 @@ class SpikeSorting(dj.Computed):
         R = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']),
                                      electrical_series_name = 'e-series')
 
-        # If tetrode and location for every channel is (0,0), give new locations
-        channel_locations = R.get_channel_locations()
-        if np.all(channel_locations==0) and probe_type[:7]=='tetrode':
-            print('Tetrode; making up channel locations...')
-            channel_locations = [[0,0],[0,1],[1,0],[1,1]]
-            R.set_channel_locations(channel_locations)
-
         # R.set_channel_groups([key['sort_group_id']]*len(electrode_ids),
         #                      channel_ids = electrode_ids)
 
@@ -633,6 +629,12 @@ class SpikeSorting(dj.Computed):
                                                  freq_wid=param['filter_width'],
                                                  chunk_size = param['filter_chunk_size'])
 
+         # If tetrode and location for every channel is (0,0), give new locations
+         channel_locations = sub_R.get_channel_locations()
+         if np.all(channel_locations==0) and probe_type[:7]=='tetrode':
+             print('Tetrode; making up channel locations...')
+             channel_locations = [[0,0],[0,1],[1,0],[1,1]]
+             sub_R.set_channel_locations(channel_locations)
         # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
         # with tempfile.TemporaryDirectory() as tmp_dir:
         #     prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')

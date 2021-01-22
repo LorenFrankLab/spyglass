@@ -17,15 +17,7 @@ The Frank lab Datajoint database is designed to facilitate data storage, analysi
    ```bash
    python setup.py develop
    ```
-4. Install [LorenFrankLab/ndx-franklab-novela](https://github.com/LorenFrankLab/ndx-franklab-novela) repository:
-   * `ndx-franklab-novela` is needed to read NWB files that make use of the Frank lab extension.
-   ```bash
-   cd ..
-   git clone https://github.com/LorenFrankLab/ndx-franklab-novela.git
-   cd ndx_franklab_novela
-   python setup.py develop
-   ```
-5. Install [Labbox-ephys](https://github.com/laboratorybox/labbox-ephys):
+4. Install [Labbox-ephys](https://github.com/laboratorybox/labbox-ephys):
    * `labbox-ephys` is used for visualizing and curating spike sorting results. We will install the package as well as the `jupyterlab` widget.
    ```bash
    cd ..
@@ -43,15 +35,15 @@ The Frank lab Datajoint database is designed to facilitate data storage, analysi
 1. Ask Loren or Eric to set up an account for you on the Frank lab database (`lmf-db.cin.ucsf.edu`). Note that you have to be connected to UCSF LAN to access this server.
 2. Add the following environment variables (e.g. in `~/.bashrc`). This example assumes that you are interacting with the database on a computer that has mounted `stelmo` at `/stelmo`.
      ```
-     export LABBOX_EPHYS_DATA_DIR="/stelmo/nwb/"
      export NWB_DATAJOINT_BASE_DIR="/stelmo/nwb/"
+     export LABBOX_EPHYS_DATA_DIR="/stelmo/nwb/"
      export KACHERY_STORAGE_DIR="/stelmo/nwb/kachery-storage"
      export KACHERY_P2P_CONFIG_DIR="/your-home-directory/.kachery-p2p"
+     export KACHERY_P2P_API_PORT="some-port-number"` (optional)
      export DJ_SUPPORT_FILEPATH_MANAGEMENT=true
-     export KACHERY_P2P_API_PORT="some-port-number"` (this is optional)
      ```
 3. Configure Datajoint:
-   * [Change your password](https://github.com/LorenFrankLab/nwb_datajoint/blob/develop_nwbraw/franklab_scripts/franklab_dj_initial_setup.py) for accessing the database and [set up external stores](https://github.com/LorenFrankLab/nwb_datajoint/blob/develop_nwbraw/franklab_scripts/franklab_dj_stores_setup.py). Should need to run these only once.
+   * When your account is created, you will be given a temporary password. You can [change your password](https://github.com/LorenFrankLab/nwb_datajoint/blob/develop_nwbraw/franklab_scripts/franklab_dj_initial_setup.py) and [set up external stores](https://github.com/LorenFrankLab/nwb_datajoint/blob/develop_nwbraw/franklab_scripts/franklab_dj_stores_setup.py). Should need to run these only once.
 4. Finally, open up a python console and import `nwb_datajoint` to check that the setup has worked.
 
 ### Tutorials
