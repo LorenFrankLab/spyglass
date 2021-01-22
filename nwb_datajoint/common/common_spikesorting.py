@@ -631,7 +631,7 @@ class SpikeSorting(dj.Computed):
 
         # If tetrode and location for every channel is (0,0), give new locations
         channel_locations = sub_R.get_channel_locations()
-        if np.all(channel_locations==0) and probe_type[:7]=='tetrode':
+        if np.all(channel_locations==0) and len(channel_locations)==4 and probe_type[:7]=='tetrode':
             print('Tetrode; making up channel locations...')
             channel_locations = [[0,0],[0,1],[1,0],[1,1]]
             sub_R.set_channel_locations(channel_locations)
