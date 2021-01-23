@@ -608,13 +608,12 @@ class SpikeSorting(dj.Computed):
         R = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']),
                                      electrical_series_name = 'e-series')
 
-        # R.set_channel_groups([key['sort_group_id']]*len(electrode_ids),
-        #                      channel_ids = electrode_ids)
-
         # Create a SubRecordingExtractor for the chunk
         sub_R = se.SubRecordingExtractor(R, channel_ids = electrode_ids.tolist(),
                                          start_frame = sort_indices[0],
                                          end_frame = sort_indices[1])
+
+        sub_R.set_channel_groups([0]*len(electrode_ids), channel_ids = electrode_ids.tolist())
 
         # Reference the chunk
         sort_reference_electrode_id = (SortGroup & {'nwb_file_name' : key['nwb_file_name'],
