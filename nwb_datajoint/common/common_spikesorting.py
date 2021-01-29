@@ -33,8 +33,6 @@ from mountainlab_pytools.mdaio import readmda
 
 from requests.exceptions import ConnectionError
 
-used = [Session, BrainRegion, Probe, IntervalList, Raw]
-
 schema = dj.schema('common_spikesorting')
 
 @schema
@@ -42,9 +40,9 @@ class SortGroup(dj.Manual):
     definition = """
     # Table for holding the set of electrodes that will be sorted together
     -> Session
-    sort_group_id: int  # identifier for a group of electrodes
+    sort_group_id : int  # identifier for a group of electrodes
     ---
-    sort_reference_electrode_id = -1: int  # the electrode to use for reference. -1: no reference, -2: common median
+    sort_reference_electrode_id = -1 : int  # the electrode to use for reference. -1: no reference, -2: common median
     """
 
     class SortGroupElectrode(dj.Part):
@@ -54,13 +52,19 @@ class SortGroup(dj.Manual):
         """
 
     def set_group_by_shank(self, nwb_file_name):
-        '''
-        :param: nwb_file_name - the name of the NWB file whose electrodes should be put into sorting groups
-        :return: None
-        Assign groups to all non-bad channel electrodes based on their shank:
-        Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a single group
-        Electrodes from probes with multiple shanks (e.g. polymer probes) are placed in one group per shank
-        '''
+        """
+        Adds sort group entries in SortGroup table based on shank
+        Assigns groups to all non-bad channel electrodes based on their shank:
+        - Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
+            single group
+        - Electrodes from probes with multiple shanks (e.g. polymer probes) are
+            placed in one group per shank
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            the name of the NWB file whose electrodes should be put into sorting groups
+        """
         # delete any current groups
         (SortGroup & {'nwb_file_name' : nwb_file_name}).delete()
         # get the electrodes from this NWB file
@@ -247,7 +251,6 @@ class SpikeSorterParameters(dj.Manual):
                 print(f'Error in SpikeSorterParameter: sorter {sorter} not in SpikeSorter schema')
                 continue
 
-# Note: Unit and SpikeSorting need to be developed further and made compatible with spikeinterface
 @schema
 class SpikeSortingWaveformParameters(dj.Manual):
     definition = """
@@ -373,7 +376,6 @@ class SpikeSortingParameters(dj.Manual):
     -> SortInterval
     sort_name: varchar(200) # Name of this spike sorting run
     ---
-    -> SpikeSortingWaveformParameters
     -> SpikeSortingMetrics
     -> IntervalList
     import_path = '': varchar(200) # optional path to previous curated sorting output
@@ -431,6 +433,7 @@ class SpikeSorting(dj.Computed):
         # TODO: how to ensure sort name is unique? maybe just append attributes
         # uuid?
         extractor_nwb_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
+                                 / key['analysis_file_name']
                                  / key['sort_name']) + '.nwb'
         # extractor_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
         #                          / key['sort_name'])
@@ -440,9 +443,6 @@ class SpikeSorting(dj.Computed):
         se.NwbRecordingExtractor.write_recording(recording,
                                                  save_path = extractor_nwb_path,
                                                  use_timestamps = True)
-        # recording_extractor_cached = se.CacheRecordingExtractor(recording,
-        #                                                         save_path = extractor_path+'.dat')
-        # np.save(extractor_path+'.npy', recording.make_serialized_dict())
 
         # Run spike sorting
         print(f'\nRunning spike sorting on {key}...')
@@ -471,7 +471,6 @@ class SpikeSorting(dj.Computed):
             unit_spike_samples = sorting.get_unit_spike_train(unit_id = unit_id)
             units[unit_id] = sort_interval[0] + unit_spike_samples/sampling_rate
             units_valid_times[unit_id] = sort_interval_valid_times
-            # TODO: think about whether this is necessary
             units_sort_interval[unit_id] = [sort_interval]
 
         # Add the units to the Analysis file
@@ -612,8 +611,9 @@ class SpikeSorting(dj.Computed):
         sub_R = se.SubRecordingExtractor(R, channel_ids = electrode_ids.tolist(),
                                          start_frame = sort_indices[0],
                                          end_frame = sort_indices[1])
-
-        sub_R.set_channel_groups([0]*len(electrode_ids), channel_ids = electrode_ids.tolist())
+        # Necessary for now
+        sub_R.set_channel_groups([0]*len(electrode_ids),
+                                 channel_ids = electrode_ids.tolist())
 
         # Reference the chunk
         sort_reference_electrode_id = (SortGroup & {'nwb_file_name' : key['nwb_file_name'],
@@ -628,9 +628,9 @@ class SpikeSorting(dj.Computed):
         # Filter the chunk
         param = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                           'parameter_set_name': key['parameter_set_name']}).fetch1()
-        sub_R = st.preprocessing.bandpass_filter(sub_R, freq_min=param['frequency_min'],
-                                                 freq_max=param['frequency_max'],
-                                                 freq_wid=param['filter_width'],
+        sub_R = st.preprocessing.bandpass_filter(sub_R, freq_min = param['frequency_min'],
+                                                 freq_max = param['frequency_max'],
+                                                 freq_wid = param['filter_width'],
                                                  chunk_size = param['filter_chunk_size'])
 
         # If tetrode and location for every channel is (0,0), give new locations
@@ -639,13 +639,6 @@ class SpikeSorting(dj.Computed):
             print('Tetrode; making up channel locations...')
             channel_locations = [[0,0],[0,1],[1,0],[1,1]]
             sub_R.set_channel_locations(channel_locations)
-
-        # create a temporary file for the probe with a .prb extension and write out the channel locations in the prb file
-        # with tempfile.TemporaryDirectory() as tmp_dir:
-        #     prb_file_name = os.path.join(tmp_dir, 'sortgroup.prb')
-        #     SortGroup().write_prb(key['sort_group_id'], key['nwb_file_name'], prb_file_name)
-        #     # add the probe geometry to the raw_data recording
-        #     sub_R.load_probe_file(prb_file_name)
 
         return sub_R, sort_interval_valid_times
 

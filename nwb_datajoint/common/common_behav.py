@@ -11,9 +11,6 @@ import datajoint as dj
 from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sampling_rate
 from .dj_helper_fn import fetch_nwb
 
-# so the linter does not complain about unused variables
-used = [Session]
-
 schema = dj.schema('common_behav')
 
 @schema

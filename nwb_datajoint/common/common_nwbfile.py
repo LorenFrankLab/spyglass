@@ -7,7 +7,7 @@ import pandas as pd
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_electrode_indices
 
-schema = dj.schema("common_lab", locals())
+schema = dj.schema("common_nwbfile")
 
 import kachery as ka
 
@@ -21,15 +21,18 @@ nwb_keep_fields = ('devices', 'electrode_groups', 'electrodes', 'experiment_desc
 class Nwbfile(dj.Manual):
     definition = """
     # Table for holding the Nwb files.
-    nwb_file_name: varchar(255) #the name of the NWB file
+    nwb_file_name : varchar(255) # name of the NWB file
     ---
-    nwb_file_abs_path: filepath@raw
+    nwb_file_abs_path : filepath@raw
     """
     def insert_from_relative_file_name(self, nwb_file_name):
-        """Insert a new session from an existing nwb file.
+        """
+        Insert a new session from an existing nwb file.
 
-        Args:
-            nwb_file_name (str): Relative path to the nwb file
+        Parameters
+        ----------
+        nwb_file_name : str
+            Relative path to the nwb file
         """
         nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
         assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
@@ -50,7 +53,9 @@ class Nwbfile(dj.Manual):
 
     @staticmethod
     def add_to_lock(nwb_file_name):
-        """ Adds the specified nwbfile to the file with the list of nwb files to be locked
+        """
+        Adds the specified NWB file to the file with the list of nwb files to be
+        locked
 
         :param nwb_file_name: the name of an nwb file that has been inserted into the Nwbfile() schema
         :type nwb_file_name: string
@@ -76,12 +81,12 @@ class Nwbfile(dj.Manual):
 class AnalysisNwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting
-    analysis_file_name: varchar(255) # the name of the file
+    analysis_file_name : varchar(255) # name of the file
     ---
-    -> Nwbfile # the name of the parent NWB file. Used for naming and metadata copy
-    analysis_file_abs_path: filepath@analysis # the full path to the file
-    analysis_file_description='': varchar(255) # an optional description of this analysis
-    analysis_parameters=NULL: blob # additional relevant parmeters. Currently used only for analyses that span multiple NWB files
+    -> Nwbfile # name of the parent NWB file. Used for naming and metadata copy
+    analysis_file_abs_path : filepath@analysis # the full path to the file
+    analysis_file_description = '' : varchar(255) # an optional description of this analysis
+    analysis_parameters = NULL : blob # additional relevant parmeters. Currently used only for analyses that span multiple NWB files
     """
 
     def __init__(self, *args):
@@ -90,7 +95,8 @@ class AnalysisNwbfile(dj.Manual):
 
 
     def create(self, nwb_file_name):
-        """Opens the NWB file that ends with _, creates a copy, writes out the
+        """
+        Opens the NWB file that ends with _, creates a copy, writes out the
         copy to disk and return the name of the new file.
         Note that this does NOT add the file to the schema; that needs to be
         done after data are written to it.
@@ -142,7 +148,8 @@ class AnalysisNwbfile(dj.Manual):
 
     @staticmethod
     def copy(nwb_file_name):
-        """ Makes a copy of an analysis nwb file.
+        """
+        Makes a copy of an analysis NWB file.
         Note that this does NOT add the file to the schema; that needs to be
         done after data are written to it.
 
@@ -179,7 +186,8 @@ class AnalysisNwbfile(dj.Manual):
         return analysis_file_name
 
     def add(self, nwb_file_name, analysis_file_name):
-        """Adds the specified file to AnalysisNWBfile table
+        """
+        Adds the specified file to AnalysisNWBfile table
 
         Parameters
         ----------
@@ -222,7 +230,8 @@ class AnalysisNwbfile(dj.Manual):
     def add_nwb_object(self, analysis_file_name, nwb_object):
         #TODO: change to add_object with checks for object type and a name parameter, which should be specified if it is not
         # an NWB container
-        """Adds an nwb object to the analysis file in the scratch area and returns the nwb object id
+        """
+        Adds an nwb object to the analysis file in the scratch area and returns the nwb object id
 
         :param analysis_file_name: the name of the analysis nwb file
         :type analysis_file_name: str
@@ -301,7 +310,10 @@ class AnalysisNwbfile(dj.Manual):
                 return ''
 
     def get_electrode_indices(self, analysis_file_name, electrode_ids):
-        """Given an analysis NWB file name, returns the indices of the specified electrode_ids.
+        """
+        Given an analysis NWB file name, returns the indices of the specified
+        electrode_ids.
+        
         :param analysis_file_name: analysis NWB file name
         :type analysi_file_name: str
         :param electrode_ids: array or list of electrode_ids
@@ -313,10 +325,15 @@ class AnalysisNwbfile(dj.Manual):
             return get_electrode_indices(nwbf.electrodes, electrode_ids)
 
     def cleanup(self, delete_files=False):
-        """ Removes the filepath entries for nwb files that are not in use. Does not delete the files themselves unless
-        delete_files=True is specified. Run this after deleting the Nwbfile() entries themselves.
-        :param delete_files: True if original files be deleted (default False
-        :type delete_files: bool
+        """
+        Removes the filepath entries for nwb files that are not in use.
+        Does not delete the files themselves unless delete_files = True is
+        specified. Run this after deleting the Nwbfile() entries themselves.
+
+        Parameters
+        ----------
+        delete_files : bool
+            True if original files be deleted (default False
         """
         self.external['analysis'].delete(delete_external_files=delete_files)
 
@@ -325,7 +342,7 @@ class NwbfileKachery(dj.Computed):
     definition = """
     -> Nwbfile
     ---
-    nwb_file_sha1: varchar(40) # the sha1 hash of the NWB file for kachery
+    nwb_file_sha1 : varchar(40) # the sha1 hash of the NWB file for kachery
     """
     def make(self, key):
         print('Computing SHA-1 and storing in kachery...')
@@ -340,7 +357,7 @@ class AnalysisNwbfileKachery(dj.Computed):
     definition = """
     -> AnalysisNwbfile
     ---
-    analysis_file_sha1: varchar(40) # the sha1 hash of the file
+    analysis_file_sha1 : varchar(40) # the sha1 hash of the file
     """
     def make(self, key):
         print('Computing SHA-1 and storing in kachery...')

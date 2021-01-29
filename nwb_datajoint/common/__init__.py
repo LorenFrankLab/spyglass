@@ -9,7 +9,9 @@ from .common_spikesorting import SortGroup, SpikeSorting, SpikeSorter, SpikeSort
                                  SpikeSortingWaveformParameters, SpikeSortingParameters,\
                                  SpikeSortingMetrics, CuratedSpikeSorting
 from .common_filter import FirFilter
-from .common_interval import IntervalList, SortInterval, interval_list_contains, interval_list_contains_ind, interval_list_excludes, interval_list_excludes_ind, interval_list_intersect
+from .common_interval import IntervalList, SortInterval, interval_list_contains, \
+                             interval_list_contains_ind, interval_list_excludes, \
+                             interval_list_excludes_ind, interval_list_intersect
 from .common_lab import Lab, LabMember, Institution
 from .common_region import BrainRegion
 from .common_sensors import SensorData

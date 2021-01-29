@@ -1,4 +1,4 @@
-#set the locations of the external file stores for datajoint
+# Set the locations of the external file stores for datajoint
 
 import datajoint as dj
 import os
