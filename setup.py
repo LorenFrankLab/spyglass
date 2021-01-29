@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nwb_datajoint",
-    version="0.2.0",
+    version="0.2.1",
     author="Loren Frank, Eric Denovellis, Kyu Hyun Lee",
     author_email="loren@phy.ucsf.edu",
     description="Code for generating Datajoint pipeline for Loren Frank's lab at UCSF",
