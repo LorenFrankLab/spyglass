@@ -7,9 +7,6 @@ from .common_subject import Subject
 from .common_device import DataAcquisitionDevice, CameraDevice
 from .common_device import Probe
 
-# So that linters don't complain that these are unused
-used = [Nwbfile, Subject, Institution, Lab, LabMember]
-
 schema = dj.schema("common_session")
 
 # TODO: figure out what to do about ExperimenterList
@@ -38,7 +35,7 @@ class Session(dj.Imported):
 
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
+        with pynwb.NWBHDF5IO(path = nwb_file_abspath, mode = 'r') as io:
             nwbf = io.read()
 
             print('Institution...')

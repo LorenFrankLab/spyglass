@@ -4,7 +4,7 @@ channels:
   - defaults
 dependencies:
   - python=3.8
-  - jupyterlab=3.0.*
+  - jupyterlab=2.*
   - nodejs=12.4.*
   - pydotplus>=2.0.*
   - dask>=2.30
@@ -15,6 +15,6 @@ dependencies:
     - spikeinterface==0.10.*
     - pynwb>=1.4
     - datajoint==0.12.*
-    - pymysql==0.9.2
+    - pymysql>=1.0.*
     - h5py==2.10.*
     - git+git://github.com/laboratorybox/labbox-launcher

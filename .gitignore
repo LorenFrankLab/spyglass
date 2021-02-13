@@ -9,6 +9,8 @@ mountainsort4_output/
 .idea/
 .vscode/
 README_old.md
+mysql_config
+TODO
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -8,14 +8,9 @@ from .common_interval import IntervalList
 from .common_device import CameraDevice
 from .nwb_helper_fn import get_data_interface
 
-used = [Session, IntervalList, CameraDevice]
-
 import datajoint as dj
-# import franklabnwb.fl_extension as fl_extension
 
-
-schema = dj.schema("common_task", locals())
-
+schema = dj.schema("common_task")
 
 @schema
 class Apparatus(dj.Manual):
@@ -52,10 +47,10 @@ class Task(dj.Manual):
     definition = """
      task_name: varchar(80)
      ---
-     task_description='':   varchar(255)  # description of this task
-     task_type='': varchar(80)  # type of task
-     task_subtype='': varchar(80) # subtype of task
-     
+     task_description = '' :   varchar(255)  # description of this task
+     task_type = '' : varchar(80)  # type of task
+     task_subtype = '' : varchar(80) # subtype of task
+
      """
 
     # def insert_from_nwbfile(self, nwbf):
@@ -105,7 +100,7 @@ class TaskEpoch(dj.Imported):
                     c = str.split(d)
                     camera_name[int(c[1])] = device.camera_name
 
-            # find the task modules and for each one, add the task to the Task schema if it isn't there 
+            # find the task modules and for each one, add the task to the Task schema if it isn't there
             # and then add an entry for each epoch
             # TODO: change to new task structure
             for task_num in range(0,10):

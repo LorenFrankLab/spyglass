@@ -39,7 +39,7 @@ class IntervalList(dj.Manual):
 class SortInterval(dj.Manual):
     definition = """
     -> Session
-    sort_interval_name: varchar(200) #descriptive name for this interval
+    sort_interval_name: varchar(200) # name for this interval
     ---
     sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
