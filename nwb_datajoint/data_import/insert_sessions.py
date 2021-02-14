@@ -8,7 +8,8 @@ import pynwb
 # conn = dj.conn()
 
 def insert_sessions(nwb_file_names):
-    """Populate the dj database with new sessions.
+    """
+    Populate the dj database with new sessions.
 
     Parameters
     ----------

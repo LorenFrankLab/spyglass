@@ -8,6 +8,7 @@ from .common_dio import DIOEvents
 from .common_nwbfile import Nwbfile
 
 def populate_all_common(nwb_file_name):
+    # Insert session one by one
     fp = [(Nwbfile & {'nwb_file_name' : nwb_file_name}).proj()]
     print('Populate Session...')
     # Session().populate()
