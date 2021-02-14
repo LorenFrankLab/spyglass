@@ -30,7 +30,7 @@ def insert_sessions(nwb_file_names):
         out_nwb_file_name = os.path.splitext(nwb_file_name)[0] + '_.nwb'
         copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
-    populate_all_common()
+        populate_all_common(out_nwb_file_name)
 
 
 def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
