@@ -1,7 +1,7 @@
 # Frank lab schema: lab name and members
 import datajoint as dj
 
-schema = dj.schema("common_lab", locals())
+schema = dj.schema("common_lab"()
 
 
 @schema
