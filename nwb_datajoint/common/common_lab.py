@@ -3,7 +3,6 @@ import datajoint as dj
 
 schema = dj.schema("common_lab")
 
-
 @schema
 class LabMember(dj.Manual):
     definition = """
