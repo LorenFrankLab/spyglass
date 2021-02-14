@@ -374,7 +374,7 @@ class SpikeSortingParameters(dj.Manual):
     -> SortGroup
     -> SpikeSorterParameters
     -> SortInterval
-    sort_name: varchar(200) # Name of this spike sorting run
+    curation_workspace_name: varchar(1000) # Name of labbox-ephys workspace for curation
     ---
     -> SpikeSortingMetrics
     -> IntervalList
@@ -413,7 +413,7 @@ class SpikeSorting(dj.Computed):
         # will use these later
         sort_interval =  (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                           'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
-        sampling_rate = (Raw & {'nwb_file_name': key['nwb_file_name']}).fetch1('sampling_rate')
+        # sampling_rate = (Raw & {'nwb_file_name': key['nwb_file_name']}).fetch1('sampling_rate')
 
 
         # Create dictionaries to hold output of spike sorting
@@ -429,20 +429,18 @@ class SpikeSorting(dj.Computed):
         recording, sort_interval_valid_times = self.get_recording_extractor(key)
 
         # Path to Nwb file that will hold recording and sorting extractors
-        # TODO: store this somehow in dj
-        # TODO: how to ensure sort name is unique? maybe just append attributes
-        # uuid?
+        unique_file_name = key['nwb_file_name'] + '_' + key['sort_interval_name'] \
+                           + '_' + str(key['sort_group_id']) \
+                           + '_' + key['sorter_name'] \
+                           + '_' + str(key['parameter_set_name'])
         extractor_nwb_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                                  / key['analysis_file_name']
-                                 / key['sort_name']) + '.nwb'
-        # extractor_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
-        #                          / key['sort_name'])
+                                 / unique_file_name) + '.nwb'
 
         # Write recording extractor to NWB file
-        # TODO: make overwrite true
         se.NwbRecordingExtractor.write_recording(recording,
                                                  save_path = extractor_nwb_path,
-                                                 use_timestamps = True)
+                                                 overwrite = True)
 
         # Run spike sorting
         print(f'\nRunning spike sorting on {key}...')
@@ -466,14 +464,15 @@ class SpikeSorting(dj.Computed):
         print('\nSaving sorting results...')
         # Create a stack of labeled arrays of the sorted spike times
         unit_ids = sorting.get_unit_ids()
-        for index, unit_id in enumerate(unit_ids):
+        for unit_id in unit_ids:
             # spike times in samples; 0 is first sample
             unit_spike_samples = sorting.get_unit_spike_train(unit_id = unit_id)
-            units[unit_id] = sort_interval[0] + unit_spike_samples/sampling_rate
+            units[unit_id] = recording.timestamps[unit_spike_samples]
+            # units[unit_id] = sort_interval[0] + unit_spike_samples/sampling_rate
             units_valid_times[unit_id] = sort_interval_valid_times
             units_sort_interval[unit_id] = [sort_interval]
 
-        # Add the units to the Analysis file
+        # Add the units to the Analysis Nwb file
         # TODO: consider replacing with spikeinterface call if possible
         units_object_id, _ = AnalysisNwbfile().add_units(key['analysis_file_name'],
                                                          units, units_valid_times,
@@ -485,81 +484,36 @@ class SpikeSorting(dj.Computed):
 
         key['units_object_id'] = units_object_id
 
-        # -----------------------------------------------------------------
-        # Generate feed for labbox-ephys curation
-        # -----------------------------------------------------------------
-        # print('\nGenerating feed for labbox...')
-        # first, store and get URI of the snippets h5 file (soft link)
-        # snippets_h5_uri = ka.store_file(tmp_waveform_file)
-        # print('URI to snippets.h5 file: ' + str(snippets_h5_uri))
-
-        # get labbox recording and sorting extractors
-        # recording, sorting = self.prepare_recording_sorting(snippets_h5_uri)
-
-        # R = le.LabboxEphysRecordingExtractor.from_memory(recording)
-        # S = le.LabboxEphysSortingExtractor.from_memory(sorting)
-
-        # Change format of metrics to list of dict
-        # external_unit_metrics = self.metrics_to_labbox_ephys(metrics, unit_ids)
-
-        # Get labbox-ephys recording and sorting extractors
-        # name of analysis nwb file might be a unique label; animal - date - probe - sort group - sort interval (name)
-        # le_recordings = []
-        # le_sortings = []
-        # le_recordings.append(dict(
-        #     recordingId='loren_example1',
-        #     recordingLabel='loren_example1',
-        #     recordingPath=kp.store_object(recording.object(), basename='loren_example1.json'),
-        #     recordingObject=recording.object(),
-        #     description='''
-        #     Example from Loren Frank
-        #     '''.strip()
-        # ))
-        # le_sortings.append(dict(
-        #     sortingId='loren_example1:mountainsort4',
-        #     sortingLabel='loren_example1:mountainsort4',
-        #     sortingPath=kp.store_object(sorting.object(), basename='loren_example-mountainsort4.json'),
-        #     sortingObject=sorting.object(),
-        #     recordingId='loren_example1',
-        #     recordingPath=kp.store_object(recording.object(), basename='loren_example1.json'),
-        #     recordingObject=recording.object(),
-        #     externalUnitMetricsUri=kp.store_object(external_unit_metrics, basename='unit_metrics.json'),
-        #     description='''
-        #     Example from Loren Frank (MountainSort4)
-        #     '''.strip()
-        # ))
+        # print('\nPath to recording and sorting extractors: ', extractor_nwb_path)
 
         # Check if KACHERY_P2P_API_PORT is set
-        # kp_port = os.getenv('KACHERY_P2P_API_PORT', False)
-        # assert kp_port, 'You must set KACHERY_P2P_API_PORT environmental variable'
+        kp_port = os.getenv('KACHERY_P2P_API_PORT', False)
+        assert kp_port, 'You must set KACHERY_P2P_API_PORT environmental variable'
 
         # Check if the kachery-p2p daemon is running in the background
-        # try:
-        #     kp_channel = kp.get_channels()
-        # except ConnectionError:
-        #     raise RuntimeError(('You must have a kachery-p2p daemon running in'
-        #                         ' the background (kachery-p2p-start-daemon --label'
-        #                         ' <name-of-node> --config https://gist.githubuse'
-        #                         'rcontent.com/khl02007/b3a092ba3e590946480fb1267'
-        #                         '964a053/raw/f05eda4789e61980ce630b23ed38a7593f5'
-        #                         '8a7d9/franklab_kachery-p2p_config.yaml)'))
+        try:
+            kp_channel = kp.get_channels()
+        except ConnectionError:
+            raise RuntimeError(('You must have a kachery-p2p daemon running in'
+                                ' the background (kachery-p2p-start-daemon --label'
+                                ' <name-of-node> --config https://gist.githubuse'
+                                'rcontent.com/khl02007/b3a092ba3e590946480fb1267'
+                                '964a053/raw/f05eda4789e61980ce630b23ed38a7593f5'
+                                '8a7d9/franklab_kachery-p2p_config.yaml)'))
 
-        # Create the labbox-ephys feed
-        # set create_snapshot False to get a writable feed
-        # feed_uri = self.create_labbox_ephys_feed(R, S, create_snapshot=False)
-        # key['curation_feed_uri'] = feed_uri
+        # Create workspace and feed
+        recording_label = key['nwb_file_name'] + '_' + key['sort_interval_name'] \
+                          + '_' + str(key['sort_group_id'])
+        sorting_label = key['sorter_name']+  '_' + str(key['parameter_set_name'])
+        prepare_labbox_curation(recording_label, sorting_label,
+                                extractor_nwb_path, extractor_nwb_path,
+                                key['analysis_file_name'], unique_file_name)
 
-        print('\nPath to recording and sorting extractors: ', extractor_nwb_path)
-
-        key['curation_feed_uri'] = 'placeholder'
+        key['curation_workspace_name'] = unique_file_name
 
         # Finally, insert the entity into table
         self.insert1(key)
         print('\nDone - entry inserted to table!\n')
-
-        # Tell user how to access curation website
-        # ipaddr = socket.getfqdn(socket.gethostname())
-        # print('Launch labbox-ephys and go to '+ipaddr+':15310/default?feed='+feed_uri)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
@@ -640,6 +594,9 @@ class SpikeSorting(dj.Computed):
             channel_locations = [[0,0],[0,1],[1,0],[1,1]]
             sub_R.set_channel_locations(channel_locations)
 
+        # give timestamps for the SubRecordingExtractor
+        sub_R.timestamps = timestamps[sort_indices[0]:sort_indices[1]]
+
         return sub_R, sort_interval_valid_times
 
     def get_sorting_extractor(self, key, sort_interval):
@@ -714,30 +671,52 @@ class SpikeSorting(dj.Computed):
             assert metrics_path.exists(), f'Error: {metrics_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             metrics_processed = json.load(metrics_path)
 
-    def prepare_recording_sorting(self, snippets_h5_uri):
+    def prepare_labbox_curation(recording_label, sorting_label,
+                                recording_nwb_path, sorting_nwb_path,
+                                feed_name, workspace_name):
         """
-        Generates labbox-ephys recording and sorting extractors
+        Creates labbox-ephys feed and workspace; adds recording and sorting
 
         Parameters
         ----------
-        snippets_h5_uri: string
-            URI to snippets.h5 file (will call from NWB file in the future)
+        recording_label: string
+            name given to recording
+        sorting_label: str
+            name given to sorting
+        recording_nwb_path: str
+            path to nwb file containing recording
+        sorting_nwb_path: str
+            path to nwb file containing sorting
+        feed_uri: str
+            default: name of analysisNWB file
+        workspace_name: str
+            default: concatenated SpikeSortingParameter primary key
         """
-        recording_obj = {
-            'recording_format': 'snippets1',
+
+        recording_uri = ka.store_object({
+            'recording_format': 'nwb',
             'data': {
-                'snippets_h5_uri': snippets_h5_uri
+                'path': recording_nwb_path
             }
-        }
-        sorting_obj = {
-            'sorting_format': 'snippets1',
+        })
+        sorting_uri = ka.store_object({
+            'sorting_format': 'nwb',
             'data': {
-                'snippets_h5_uri': snippets_h5_uri
+                'path': sorting_nwb_path
             }
-        }
-        recording = le.LabboxEphysRecordingExtractor(recording_obj)
-        sorting = le.LabboxEphysSortingExtractor(sorting_obj)
-        return recording, sorting
+        })
+
+        sorting = le.LabboxEphysSortingExtractor(sorting_uri)
+        recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
+
+        feed = kp.load_feed(feed_uri, create=True)
+        workspace = le.load_workspace(workspace_name=workspace_name, feed=feed)
+
+        print(f'Feed URI: {feed.get_uri()}')
+        R_id = workspace.add_recording(recording=recording, label=recording_label)
+        S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
+
+        return None
 
     def create_labbox_ephys_feed(self, le_recordings, le_sortings, create_snapshot=False):
         """
