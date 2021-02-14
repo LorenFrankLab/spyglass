@@ -1,7 +1,7 @@
 import datajoint as dj
 import re
 
-schema = dj.schema("common_device", locals())
+schema = dj.schema("common_device")
 
 
 @schema
@@ -18,7 +18,7 @@ class DataAcquisitionDevice(dj.Manual):
         # do your custom stuff here
         super().__init__(*args)  # call the base implementation
 
-    def insert_from_nwbfile(self, nwbf): 
+    def insert_from_nwbfile(self, nwbf):
         """Insert a data acquisition device from an nwb file
 
         :param nwbf: NWB file object
@@ -39,14 +39,14 @@ class DataAcquisitionDevice(dj.Manual):
                 self.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['device_name'])
         return device_name_list
-        
-@schema              
+
+@schema
 class CameraDevice(dj.Manual):
     definition = """
     camera_name: varchar(80)
     ---
     meters_per_pixel = 0 : float # height / width of pixel in meters
-    manufacturer='' : varchar(80) 
+    manufacturer='' : varchar(80)
     model='' : varchar(80)
     lens='': varchar(80)
     camera_id=-1 : int
@@ -56,7 +56,7 @@ class CameraDevice(dj.Manual):
         # TODO: move to initialization script so it doesn't get called every time
         self.insert1({'camera_name': 'none'}, skip_duplicates='True')
 
-    def insert_from_nwbfile(self, nwbf): 
+    def insert_from_nwbfile(self, nwbf):
         """Insert a camera device from an nwb file
 
         :param nwbf: NWB file object
@@ -82,7 +82,7 @@ class CameraDevice(dj.Manual):
                 device_name_list.append(device_dict['camera_name'])
         print(f'Inserted {device_name_list}')
 
-     
+
 
 
 @schema
