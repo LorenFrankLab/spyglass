@@ -5,6 +5,7 @@ from .common_sensors import SensorData
 from .common_task import TaskEpoch
 from .common_behav import RawPosition, HeadDir, Speed, LinPos, StateScriptFile, VideoFile
 from .common_dio import DIOEvents
+from .common_nwbfile import Nwbfile
 
 def populate_all_common(nwb_file_name):
     fp = [(Nwbfile & {'nwb_file_name' : nwb_file_name}).proj()]
