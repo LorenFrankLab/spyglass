@@ -374,7 +374,6 @@ class SpikeSortingParameters(dj.Manual):
     -> SortGroup
     -> SpikeSorterParameters
     -> SortInterval
-    curation_workspace_name: varchar(1000) # Name of labbox-ephys workspace for curation
     ---
     -> SpikeSortingMetrics
     -> IntervalList
@@ -390,7 +389,7 @@ class SpikeSorting(dj.Computed):
     -> AnalysisNwbfile
     units_object_id: varchar(40) # the object ID for the units for this sort group
     time_of_sort = 0: int # This is when the sort was done.
-    curation_feed_uri: varchar(80) # URI of the feed to be used by labbox-ephys
+    curation_workspace_name: varchar(1000) # Name of labbox-ephys workspace for curation
     """
 
     def make(self, key):
