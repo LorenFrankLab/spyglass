@@ -499,7 +499,8 @@ class SpikeSorting(dj.Computed):
                                 '8a7d9/franklab_kachery-p2p_config.yaml)'))
 
         # Create workspace and feed
-        feed = kp.load_feed(key['analysis_file_name'], create=True)
+        fname, _ = os.path.splitext(key['analysis_file_name'])
+        feed = kp.load_feed(fname, create=True)
         workspace_name = unique_file_name
         workspace = le.load_workspace(workspace_name=workspace_name, feed=feed)
 
