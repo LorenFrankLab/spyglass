@@ -566,8 +566,8 @@ class SpikeSorting(dj.Computed):
                                          start_frame = sort_indices[0],
                                          end_frame = sort_indices[1])
         # Necessary for now
-        sub_R.set_channel_groups([0]*len(electrode_ids),
-                                 channel_ids = electrode_ids.tolist())
+        # sub_R.set_channel_groups([0]*len(electrode_ids),
+        #                          channel_ids = electrode_ids.tolist())
 
         # Reference the chunk
         sort_reference_electrode_id = (SortGroup & {'nwb_file_name' : key['nwb_file_name'],
@@ -716,6 +716,8 @@ class SpikeSorting(dj.Computed):
         print(f'Feed URI: {feed.get_uri()}')
         R_id = workspace.add_recording(recording=recording, label=recording_label)
         S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
+        print(R_id)
+        print(S_id)
 
         return None
 
