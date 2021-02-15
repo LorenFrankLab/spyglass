@@ -53,18 +53,16 @@ The tutorials are in the form of Jupyter Notebooks and can be found in the `note
 * `1_spikesorting.ipynb`: how to run spike sorting
 
 ### Notes
-* The above instruction assumes that you will be using the `jupyterlab` widget for curation. For curation with the web-based GUI, you must be running `kachery-p2p` and `labbox-ephys` daemons in the background.
-  * To run `kachery-p2p`, use the following command after activating the `nwb_datajoint` environment. You should keep this running in the background using a tool like `tmux`.
+* For curation, you must be running `kachery-p2p` daemon in the background. This manages file storage an lookup. To run `kachery-p2p`, use the following command after activating the `nwb_datajoint` environment. Keep this running in the background using a tool like `tmux`.
   ```bash
   kachery-p2p-start-daemon --label franklab --config https://gist.githubusercontent.com/khl02007/b3a092ba3e590946480fb1267964a053/raw/f05eda4789e61980ce630b23ed38a7593f58a7d9/franklab_kachery-p2p_config.yaml
   ```
-  * To run `labbox-ephys`, you need to first install [Docker](https://docs.docker.com/get-docker/). Make sure to enable running Docker without `sudo` (see [this](https://docs.docker.com/engine/install/linux-postinstall/)). Test Docker installation with:
+* If you want to use the web-GUI, you will run `labbox-ephys` using the launcher. To do so you need to first install [Docker](https://docs.docker.com/get-docker/). Make sure to enable running Docker without `sudo` (see [this](https://docs.docker.com/engine/install/linux-postinstall/)). Test Docker installation with:
   ```bash
   docker run --rm hello-world
   ```
-  See instruction [here](https://github.com/laboratorybox/labbox-ephys) for launching `labbox-ephys` Docker container.
+Then follow the instruction [here](https://github.com/laboratorybox/labbox-ephys) for launching `labbox-ephys` Docker container.
 
 ### Troubleshooting common problems
-* If you cannot connect to DataJoint, then downgrade pymysql to 0.9.2
 * If you have an error writing NWB files, then downgrade h5py to 2.10.0
-* If spike sorting stalls, then install [ml_ms4alg from our fork](https://github.com/LorenFrankLab/ml_ms4alg) and upgrade numpy to 1.19.4
+* If Mountainsort4 stalls, then install [ml_ms4alg from our fork](https://github.com/LorenFrankLab/ml_ms4alg) and upgrade numpy to 1.19.4
