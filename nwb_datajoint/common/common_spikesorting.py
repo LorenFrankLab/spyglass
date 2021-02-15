@@ -432,7 +432,6 @@ class SpikeSorting(dj.Computed):
                            + '_' + str(key['sort_group_id']) \
                            + '_' + key['sorter_name'] \
                            + '_' + str(key['parameter_set_name'])
-        print(unique_file_name)
         extractor_nwb_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                                  / key['analysis_file_name']
                                  / unique_file_name) + '.nwb'
@@ -504,14 +503,11 @@ class SpikeSorting(dj.Computed):
         # Create workspace and feed
         recording_label = key['nwb_file_name'] + '_' + key['sort_interval_name'] \
                           + '_' + str(key['sort_group_id'])
-        sorting_label = key['sorter_name'] +  '_' + str(key['parameter_set_name'])
-        print(recording_label)
-        print(sorting_label)
-        print(extractor_nwb_path)
-        print(key['analysis_file_name'])
+        sorting_label = key['sorter_name'] +  '_' + key['parameter_set_name']
+
         self.prepare_labbox_curation(recording_label, sorting_label,
-                                extractor_nwb_path, extractor_nwb_path,
-                                key['analysis_file_name'], unique_file_name)
+                                     extractor_nwb_path, extractor_nwb_path,
+                                     key['analysis_file_name'], unique_file_name)
 
         key['curation_workspace_name'] = unique_file_name
 
@@ -691,7 +687,7 @@ class SpikeSorting(dj.Computed):
             path to nwb file containing recording
         sorting_nwb_path: str
             path to nwb file containing sorting
-        feed_uri: str
+        feed_name: str
             default: name of analysisNWB file
         workspace_name: str
             default: concatenated SpikeSortingParameter primary key
@@ -713,7 +709,7 @@ class SpikeSorting(dj.Computed):
         sorting = le.LabboxEphysSortingExtractor(sorting_uri)
         recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
 
-        feed = kp.load_feed(feed_uri, create=True)
+        feed = kp.load_feed(feed_name, create=True)
         workspace = le.load_workspace(workspace_name=workspace_name, feed=feed)
 
         print(f'Feed URI: {feed.get_uri()}')
