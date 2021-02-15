@@ -504,7 +504,7 @@ class SpikeSorting(dj.Computed):
         recording_label = key['nwb_file_name'] + '_' + key['sort_interval_name'] \
                           + '_' + str(key['sort_group_id'])
         sorting_label = key['sorter_name']+  '_' + str(key['parameter_set_name'])
-        prepare_labbox_curation(recording_label, sorting_label,
+        self.prepare_labbox_curation(recording_label, sorting_label,
                                 extractor_nwb_path, extractor_nwb_path,
                                 key['analysis_file_name'], unique_file_name)
 
