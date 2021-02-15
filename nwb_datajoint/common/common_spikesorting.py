@@ -432,6 +432,7 @@ class SpikeSorting(dj.Computed):
                            + '_' + str(key['sort_group_id']) \
                            + '_' + key['sorter_name'] \
                            + '_' + str(key['parameter_set_name'])
+        print(unique_file_name)
         extractor_nwb_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                                  / key['analysis_file_name']
                                  / unique_file_name) + '.nwb'
@@ -503,7 +504,11 @@ class SpikeSorting(dj.Computed):
         # Create workspace and feed
         recording_label = key['nwb_file_name'] + '_' + key['sort_interval_name'] \
                           + '_' + str(key['sort_group_id'])
-        sorting_label = key['sorter_name']+  '_' + str(key['parameter_set_name'])
+        sorting_label = key['sorter_name'] +  '_' + str(key['parameter_set_name'])
+        print(recording_label)
+        print(sorting_label)
+        print(extractor_nwb_path)
+        print(key['analysis_file_name'])
         self.prepare_labbox_curation(recording_label, sorting_label,
                                 extractor_nwb_path, extractor_nwb_path,
                                 key['analysis_file_name'], unique_file_name)
