@@ -671,6 +671,7 @@ class SpikeSorting(dj.Computed):
             assert metrics_path.exists(), f'Error: {metrics_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             metrics_processed = json.load(metrics_path)
 
+    @staticmethod
     def prepare_labbox_curation(recording_label, sorting_label,
                                 recording_nwb_path, sorting_nwb_path,
                                 feed_name, workspace_name):
