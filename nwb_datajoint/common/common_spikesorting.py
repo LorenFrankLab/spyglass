@@ -483,8 +483,6 @@ class SpikeSorting(dj.Computed):
 
         key['units_object_id'] = units_object_id
 
-        # print('\nPath to recording and sorting extractors: ', extractor_nwb_path)
-
         # Check if KACHERY_P2P_API_PORT is set
         kp_port = os.getenv('KACHERY_P2P_API_PORT', False)
         assert kp_port, 'You must set KACHERY_P2P_API_PORT environmental variable'
@@ -501,13 +499,34 @@ class SpikeSorting(dj.Computed):
                                 '8a7d9/franklab_kachery-p2p_config.yaml)'))
 
         # Create workspace and feed
+        feed = kp.load_feed(key['analysis_file_name'], create=True)
+        workspace_name = unique_file_name
+        workspace = le.load_workspace(workspace_name=workspace_name, feed=feed)
+
+        recording_uri = ka.store_object({
+            'recording_format': 'nwb',
+            'data': {
+                'path': extractor_nwb_path
+            }
+        })
+        sorting_uri = ka.store_object({
+            'sorting_format': 'nwb',
+            'data': {
+                'path': extractor_nwb_path
+            }
+        })
+
+        sorting = le.LabboxEphysSortingExtractor(sorting_uri)
+        recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
+
+        print(f'Feed URI: {feed.get_uri()}')
+
         recording_label = key['nwb_file_name'] + '_' + key['sort_interval_name'] \
                           + '_' + str(key['sort_group_id'])
         sorting_label = key['sorter_name'] +  '_' + key['parameter_set_name']
 
-        self.prepare_labbox_curation(recording_label, sorting_label,
-                                     extractor_nwb_path, extractor_nwb_path,
-                                     key['analysis_file_name'], unique_file_name)
+        R_id = workspace.add_recording(recording=recording, label=recording_label)
+        S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
 
         key['curation_workspace_name'] = unique_file_name
 
@@ -716,8 +735,6 @@ class SpikeSorting(dj.Computed):
         print(f'Feed URI: {feed.get_uri()}')
         R_id = workspace.add_recording(recording=recording, label=recording_label)
         S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
-        print(R_id)
-        print(S_id)
 
         return None
 
