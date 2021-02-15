@@ -61,7 +61,7 @@ The tutorials are in the form of Jupyter Notebooks and can be found in the `note
   ```bash
   docker run --rm hello-world
   ```
-Then follow the instruction [here](https://github.com/laboratorybox/labbox-ephys) for launching `labbox-ephys` Docker container.
+  Then follow the instruction [here](https://github.com/laboratorybox/labbox-ephys) for launching `labbox-ephys` Docker container.
 
 ### Troubleshooting common problems
 * If you have an error writing NWB files, then downgrade h5py to 2.10.0

@@ -588,6 +588,8 @@ class SpikeSorting(dj.Computed):
         # sub_R.set_channel_groups([0]*len(electrode_ids),
         #                          channel_ids = electrode_ids.tolist())
 
+        # TODO: add a step where large transients are masked
+
         # Reference the chunk
         sort_reference_electrode_id = (SortGroup & {'nwb_file_name' : key['nwb_file_name'],
                                                     'sort_group_id' : key['sort_group_id']}).fetch('sort_reference_electrode_id')
