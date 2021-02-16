@@ -495,7 +495,7 @@ class SpikeSorting(dj.Computed):
         except ConnectionError:
             raise RuntimeError(('You must have a kachery-p2p daemon running in'
                                 ' the background (kachery-p2p-start-daemon --label'
-                                ' <name-of-node> --config https://gist.githubuse'
+                                ' franklab --config https://gist.githubuse'
                                 'rcontent.com/khl02007/b3a092ba3e590946480fb1267'
                                 '964a053/raw/f05eda4789e61980ce630b23ed38a7593f5'
                                 '8a7d9/franklab_kachery-p2p_config.yaml)'))
