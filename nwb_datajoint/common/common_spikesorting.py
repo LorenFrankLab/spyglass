@@ -435,7 +435,7 @@ class SpikeSorting(dj.Computed):
         analysis_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                             / key['analysis_file_name'])
         os.mkdir(analysis_path)
-        extractor_nwb_path = str(Path(analysis_path / unique_file_name) + '.nwb'
+        extractor_nwb_path = str(Path(analysis_path) / unique_file_name) + '.nwb'
 
         # Write recording extractor to NWB file
         se.NwbRecordingExtractor.write_recording(recording,
