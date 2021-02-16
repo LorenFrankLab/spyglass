@@ -432,9 +432,10 @@ class SpikeSorting(dj.Computed):
                            + '_' + str(key['sort_group_id']) \
                            + '_' + key['sorter_name'] \
                            + '_' + str(key['parameter_set_name'])
-        extractor_nwb_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
-                                 / key['analysis_file_name']
-                                 / unique_file_name) + '.nwb'
+        analysis_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
+                            / key['analysis_file_name'])
+        os.mkdir(analysis_path)
+        extractor_nwb_path = str(Path(analysis_path / unique_file_name) + '.nwb'
 
         # Write recording extractor to NWB file
         se.NwbRecordingExtractor.write_recording(recording,
@@ -452,7 +453,8 @@ class SpikeSorting(dj.Computed):
         # Save time of sort
         key['time_of_sort'] = int(time.time())
         # Write sorting extractor to NWB file that contains recording extractor
-        se.NwbSortingExtractor.write_sorting(sorting, save_path = extractor_nwb_path)
+        se.NwbSortingExtractor.write_sorting(sorting, save_path = extractor_nwb_path,
+                                             timestamps = recording.timestamps)
 
         # Compute quality metrics
         print('\nComputing quality metrics...')
@@ -501,7 +503,9 @@ class SpikeSorting(dj.Computed):
         # Create workspace and feed
         fname, _ = os.path.splitext(key['analysis_file_name'])
         feed = kp.load_feed(fname, create=True)
+        print(fname)
         workspace_name = unique_file_name
+        print(workspace_name)
         workspace = le.load_workspace(workspace_name=workspace_name, feed=feed)
 
         recording_uri = ka.store_object({
