@@ -20,7 +20,7 @@ class Subject(dj.Manual):
         super().__init__(*args)  # call the base implementation
 
     def insert_from_nwbfile(self, nwbf):
-        #get the subject information and create a dictionary from it
+        # get the subject information and create a dictionary from it
         sub = nwbf.subject
         subject_dict = dict()
         subject_dict['subject_id'] = sub.subject_id
@@ -36,4 +36,4 @@ class Subject(dj.Manual):
             sex = 'U'
         subject_dict['sex'] = sex
         subject_dict['species'] = sub.species
-        self.insert1(subject_dict, skip_duplicates = True)
+        self.insert1(subject_dict, skip_duplicates=True)

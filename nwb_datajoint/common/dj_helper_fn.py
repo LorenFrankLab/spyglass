@@ -3,6 +3,7 @@ import numpy as np
 import pynwb
 import re
 
+
 def dj_replace(original_table, new_values, key_column, replace_column):
     '''
     Given the output of a fetch() call from a schema and a 2D array made up of (key_value, replace_value) tuples,
@@ -23,8 +24,8 @@ def dj_replace(original_table, new_values, key_column, replace_column):
         new_values = tmp
 
     new_val_array = np.asarray(new_values)
-    replace_ind = np.where(np.isin(original_table[key_column], new_val_array[:,0]))
-    original_table[replace_column][replace_ind] = new_val_array[:,1]
+    replace_ind = np.where(np.isin(original_table[key_column], new_val_array[:, 0]))
+    original_table[replace_column][replace_ind] = new_val_array[:, 1]
     return original_table
 
 
@@ -50,7 +51,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     ret = []
     for rec_dict in rec_dicts:
         with pynwb.NWBHDF5IO(rec_dict.pop('nwb2load_filepath'), mode='r') as io:
-        # io = pynwb.NWBHDF5IO(rec_dict.pop('nwb2load_filepath'), mode='r')
+            # io = pynwb.NWBHDF5IO(rec_dict.pop('nwb2load_filepath'), mode='r')
             nwbf = io.read()
             nwb_objs = {re.sub('(_?)object_id', '', id_attr): nwbf.objects[rec_dict[id_attr]]
                         for id_attr in attrs if 'object_id' in id_attr and rec_dict[id_attr] != ''}

@@ -7,15 +7,16 @@ from .common_behav import RawPosition, HeadDir, Speed, LinPos, StateScriptFile, 
 from .common_dio import DIOEvents
 from .common_nwbfile import Nwbfile
 
+
 def populate_all_common(nwb_file_name):
     # Insert session one by one
-    fp = [(Nwbfile & {'nwb_file_name' : nwb_file_name}).proj()]
+    fp = [(Nwbfile & {'nwb_file_name': nwb_file_name}).proj()]
     print('Populate Session...')
     # Session().populate()
     Session.populate(fp)
-    #If we use Kachery for data sharing we can uncomment the following two lines. TBD
-    #print('Populate NwbfileKachery...')
-    #NwbfileKachery.populate()
+    # If we use Kachery for data sharing we can uncomment the following two lines. TBD
+    # print('Populate NwbfileKachery...')
+    # NwbfileKachery.populate()
     print('Populate ExperimenterList...')
     ExperimenterList.populate(fp)
     print('Populate ElectrodeGroup...')
@@ -38,9 +39,9 @@ def populate_all_common(nwb_file_name):
     VideoFile.populate(fp)
     print('RawPosition...')
     RawPosition.populate(fp)
-    #print('HeadDir...')
-    #HeadDir().populate()
-    #print('Speed...')
-    #Speed().populate()
-    #print('LinPos...')
-    #LinPos().populate()
+    # print('HeadDir...')
+    # HeadDir().populate()
+    # print('Speed...')
+    # Speed().populate()
+    # print('LinPos...')
+    # LinPos().populate()
