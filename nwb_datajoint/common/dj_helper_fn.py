@@ -1,4 +1,4 @@
-# helper functions for manipulating information from DataJoing fetch calls
+"""Helper functions for manipulating information from DataJoint fetch calls."""
 import numpy as np
 import pynwb
 import re

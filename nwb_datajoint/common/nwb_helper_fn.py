@@ -1,9 +1,5 @@
+"""NWB helper functions for finding processing modules and data interfaces."""
 import numpy as np
-from operator import itemgetter
-
-# import matplotlib.pyplot as plt
-
-# NWB helper functions for finding processing modules and data interfaces
 
 
 def get_data_interface(nwbf, data_interface_name):
@@ -43,9 +39,6 @@ def estimate_sampling_rate(timestamps, multiplier):
     nsmooth = 10
     smoother = np.ones(nsmooth) / nsmooth
     smooth_diff = np.convolve(sample_diff, smoother, mode='same')
-#    plt.figure()
-#    plt.plot(timestamps)
-#    plt.show()
     # we histogram with 100 bins out to 3 * mean, which should be fine for any reasonable number of samples
     hist, bins = np.histogram(smooth_diff, bins=100, range=[0, 3 * np.mean(smooth_diff)])
     mode = bins[np.where(hist == np.max(hist))]

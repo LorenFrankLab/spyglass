@@ -1,9 +1,9 @@
 from .common_session import Session, ExperimenterList
-from .common_nwbfile import NwbfileKachery
+# from .common_nwbfile import NwbfileKachery
 from .common_ephys import ElectrodeGroup, Electrode, Raw, SampleCount
 from .common_sensors import SensorData
 from .common_task import TaskEpoch
-from .common_behav import RawPosition, HeadDir, Speed, LinPos, StateScriptFile, VideoFile
+from .common_behav import RawPosition, StateScriptFile, VideoFile  # HeadDir, Speed, LinPos,
 from .common_dio import DIOEvents
 from .common_nwbfile import Nwbfile
 

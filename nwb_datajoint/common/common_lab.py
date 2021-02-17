@@ -1,4 +1,4 @@
-# Frank lab schema: lab name and members
+"""Schema for institution name, lab name, and lab members (experimenters)."""
 import datajoint as dj
 
 schema = dj.schema("common_lab")

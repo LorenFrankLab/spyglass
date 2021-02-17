@@ -1,12 +1,11 @@
-import os
-import pathlib
 import datajoint as dj
-import pynwb
-import numpy as np
-import pandas as pd
-from .dj_helper_fn import dj_replace, fetch_nwb
-from .nwb_helper_fn import get_electrode_indices
 import kachery as ka
+import os
+import pandas as pd
+import pathlib
+import pynwb
+
+from .nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_nwbfile")
 
@@ -21,9 +20,9 @@ nwb_keep_fields = ('devices', 'electrode_groups', 'electrodes', 'experiment_desc
 class Nwbfile(dj.Manual):
     definition = """
     # Table for holding the Nwb files.
-    nwb_file_name : varchar(255) # name of the NWB file
+    nwb_file_name: varchar(255) # name of the NWB file
     ---
-    nwb_file_abs_path : filepath@raw
+    nwb_file_abs_path: filepath@raw
     """
 
     def insert_from_relative_file_name(self, nwb_file_name):
@@ -83,11 +82,11 @@ class AnalysisNwbfile(dj.Manual):
     # Table for holding the NWB files that contain results of analysis, such as spike sorting
     analysis_file_name : varchar(255) # name of the file
     ---
-    -> Nwbfile # name of the parent NWB file. Used for naming and metadata copy
-    analysis_file_abs_path : filepath@analysis # the full path to the file
-    analysis_file_description = '' : varchar(255) # an optional description of this analysis
-    analysis_parameters = NULL : blob # additional relevant parmeters. Currently used only for analyses that span
-    multiple NWB files
+    -> Nwbfile                                    # name of the parent NWB file. Used for naming and metadata copy
+    analysis_file_abs_path: filepath@analysis     # the full path to the file
+    analysis_file_description = '': varchar(255)  # an optional description of this analysis
+    analysis_parameters = NULL: blob              # additional relevant parmeters. Currently used only for analyses
+                                                  # that span multiple NWB files
     """
 
     def __init__(self, *args):
@@ -122,7 +121,7 @@ class AnalysisNwbfile(dj.Manual):
                 nwb_object = getattr(nwbf, field)
                 if type(nwb_object) is pynwb.core.LabelledDict:
                     for module in list(nwb_object.keys()):
-                        mod = nwb_object.pop(module)
+                        nwb_object.pop(module)
 
         # key = dict()
         # key['nwb_file_name'] = nwb_file_name
@@ -291,17 +290,18 @@ class AnalysisNwbfile(dj.Manual):
                 # If metrics were specified, add one column per metric
                 if metrics is not None:
                     for metric in list(metrics):
-                        print(f'Adding metric {metric} : {metrics[metric].to_list()}')
+                        metric_data = metrics[metric].to_list()
+                        print(f'Adding metric {metric} : {metric_data}')
                         nwbf.add_unit_column(name=metric,
                                              description=f'{metric} sorting metric',
-                                             data=metrics[metric].to_list())
+                                             data=metric_data)
                 # If the waveforms were specified, add them as a dataframe
                 waveforms_object_id = ''
                 if units_waveforms is not None:
                     waveforms_df = pd.DataFrame.from_dict(units_waveforms,
                                                           orient='index')
                     waveforms_df.columns = ['waveforms']
-                    nwbf.add_scratch(waveforms_df, name='units_waveforms', notes='')
+                    nwbf.add_scratch(waveforms_df, name='units_waveforms', notes='spike waveforms for each unit')
                     waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
 
                 io.write(nwbf)
@@ -343,7 +343,7 @@ class NwbfileKachery(dj.Computed):
     definition = """
     -> Nwbfile
     ---
-    nwb_file_sha1 : varchar(40) # the sha1 hash of the NWB file for kachery
+    nwb_file_sha1: varchar(40)  # the sha1 hash of the NWB file for kachery
     """
 
     def make(self, key):
@@ -360,7 +360,7 @@ class AnalysisNwbfileKachery(dj.Computed):
     definition = """
     -> AnalysisNwbfile
     ---
-    analysis_file_sha1 : varchar(40) # the sha1 hash of the file
+    analysis_file_sha1: varchar(40)  # the sha1 hash of the file
     """
 
     def make(self, key):

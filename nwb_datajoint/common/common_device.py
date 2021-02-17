@@ -10,8 +10,8 @@ class DataAcquisitionDevice(dj.Manual):
     device_name: varchar(80)
     ---
     system: enum('SpikeGadgets','TDT_Rig1','TDT_Rig2','PCS','RCS','RNS','NeuroOmega','Other')
-    amplifier='Other': enum('Intan','PZ5_Amp1','PZ5_Amp2','Other')
-    adc_circuit = NULL : varchar(80)
+    amplifier = 'Other': enum('Intan','PZ5_Amp1','PZ5_Amp2','Other')
+    adc_circuit = NULL: varchar(80)
     """
 
     def __init__(self, *args):
@@ -46,11 +46,11 @@ class CameraDevice(dj.Manual):
     definition = """
     camera_name: varchar(80)
     ---
-    meters_per_pixel = 0 : float # height / width of pixel in meters
-    manufacturer='' : varchar(80)
-    model='' : varchar(80)
-    lens='': varchar(80)
-    camera_id=-1 : int
+    meters_per_pixel = 0 : float  # height / width of pixel in meters
+    manufacturer = '': varchar(80)
+    model = '': varchar(80)
+    lens = '': varchar(80)
+    camera_id = -1: int
     """
 
     def initialize(self):
@@ -69,9 +69,9 @@ class CameraDevice(dj.Manual):
         device_dict = dict()
         device_name_list = list()
         for d in nwbf.devices:
-            if 'camera_device' in d:
+            if 'camera_device' in d:  # TODO instead of name check, check type ndx_franklab_novela.CameraDevice
                 c = str.split(d)
-                device_dict['camera_id'] = c[1]
+                device_dict['camera_id'] = c[1]  # TODO this is limited to 9 camera IDs. also ideally an attribute
                 device = nwbf.devices[d]
                 # TODO: fix camera name and add fields when new extension is available
                 device_dict['camera_name'] = device.camera_name
@@ -92,13 +92,13 @@ class Probe(dj.Manual):
     ---
     probe_description: varchar(80)  # description of this probe
     num_shanks: int                 # number of shanks on this device
-    contact_side_numbering: enum('True', 'False') # electrode numbers from contact side of the device
+    contact_side_numbering: enum('True', 'False')  # electrode numbers from contact side of the device
     """
 
     class Shank(dj.Part):
         definition = """
         -> master
-        probe_shank: int              # shank number within probe
+        probe_shank: int            # shank number within probe
         """
 
     class Electrode(dj.Part):
@@ -106,21 +106,17 @@ class Probe(dj.Manual):
         -> master.Shank
         probe_electrode: int        # electrode
         ---
-        contact_size=NULL: float # (um) contact size
-        rel_x=NULL: float   # (um) x coordinate of the electrode within the probe
-        rel_y=NULL: float   # (um) y coordinate of the electrode within the probe
-        rel_z=NULL: float   # (um) z coordinate of the electrode within the probe
+        contact_size=NULL: float    # (um) contact size
+        rel_x=NULL: float           # (um) x coordinate of the electrode within the probe
+        rel_y=NULL: float           # (um) y coordinate of the electrode within the probe
+        rel_z=NULL: float           # (um) z coordinate of the electrode within the probe
         """
-
-    def __init__(self, *args):
-        # do your custom stuff here
-        super().__init__(*args)  # call the base implementation
 
     def insert_from_nwbfile(self, nwbf):
         probe_dict = dict()
         probe_re = re.compile("probe")
         for d in nwbf.devices:
-            if probe_re.search(d):
+            if probe_re.search(d):  # TODO instead of name check, check type ndx_franklab_novela.Probe
                 p = nwbf.devices[d]
                 # add this probe if it's not already here
                 if {'probe_type': p.probe_type} not in Probe():
@@ -134,16 +130,15 @@ class Probe(dj.Manual):
                     elect_dict = dict()
                     shank_dict['probe_type'] = probe_dict['probe_type']
                     elect_dict['probe_type'] = probe_dict['probe_type']
+
                     # go through the shanks and add each one to the Shank table
-                    for s_num in p.shanks:
-                        shank = p.shanks[s_num]
+                    for shank in p.shanks.values():
                         shank_dict['probe_shank'] = int(shank.name)
                         Probe().Shank().insert1(shank_dict)
                         elect_dict['probe_shank'] = shank_dict['probe_shank']
                         # FIX name when fixed
                         # go through the electrodes and add each one to the Electrode table
-                        for e_num in shank.shanks_electrodes:
-                            electrode = shank.shanks_electrodes[e_num]
+                        for electrode in shank.shanks_electrodes.values():
                             # the next line will need to be fixed if we have different sized contacts on a shank
                             elect_dict['contact_size'] = p.contact_size
                             elect_dict['probe_electrode'] = int(electrode.name)

@@ -1,17 +1,14 @@
-"""
-Schema for headstage or other environmental sensors
-"""
+"""Schema for headstage or other environmental sensors."""
 
 import pynwb
 import datajoint as dj
-from .common_session import Session
-from .common_nwbfile import Nwbfile
-from .common_interval import IntervalList
-from .common_ephys import Raw
-from .nwb_helper_fn import get_data_interface
-from .dj_helper_fn import fetch_nwb
 
-used = [Session, IntervalList]
+from .common_ephys import Raw
+from .common_interval import IntervalList  # noqa: F401
+from .common_nwbfile import Nwbfile
+from .common_session import Session  # noqa: F401
+from .dj_helper_fn import fetch_nwb
+from .nwb_helper_fn import get_data_interface
 
 schema = dj.schema('common_sensors')
 

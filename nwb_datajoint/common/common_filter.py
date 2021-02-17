@@ -1,14 +1,12 @@
 # code to define filters that can be applied to continuous time data
 import datajoint as dj
-import pynwb
-import scipy.signal as signal
-import numpy as np
 import ghostipy as gsp
 import matplotlib.pyplot as plt
-import uuid
-import h5py as h5
+import numpy as np
+import pynwb
+import scipy.signal as signal
+
 from .nwb_helper_fn import get_electrode_indices
-from .common_nwbfile import AnalysisNwbfile
 
 schema = dj.schema('common_filter')
 
@@ -28,10 +26,6 @@ class FirFilter(dj.Manual):
     filter_band_edges: blob         # numpy array containing the filter bands (redundant with individual parameters)
     filter_coeff: blob               # numpy array containing the filter coefficients
     """
-
-    def __init__(self, *args):
-        # do your custom stuff here
-        super().__init__(*args)  # call the base implementation
 
     def add_filter(self, filter_name, fs, filter_type, band_edges, comments=''):
         # add an FIR bandpass filter of the specified type ('lowpass', 'highpass', or 'bandpass').
@@ -113,7 +107,7 @@ class FirFilter(dj.Manual):
         f = filter[0]
         plt.figure()
         plt.clf()
-        b = plt.plot(f['filter_coeff'], 'k')
+        plt.plot(f['filter_coeff'], 'k')
         plt.xlabel('Coefficient')
         plt.ylabel('Magnitude')
         plt.title('Filter Taps')
@@ -122,7 +116,6 @@ class FirFilter(dj.Manual):
     def filter_delay(self, filter_name, fs):
         # return the filter delay
         filter = (self & {'filter_name': filter_name} & {'filter_sampling_rate': fs}).fetch(as_dict=True)
-        f = filter[0]
         return self.calc_filter_delay(filter['filter_coeff'])
 
     def filter_data_nwb(self, analysis_file_abs_path, eseries, filter_coeff, valid_times, electrode_ids,

@@ -1,5 +1,3 @@
-import os
-
 # Configure datajoint
 # You can use:
 # export DJ_HOST=...
