@@ -2,16 +2,17 @@
 import pynwb
 import numpy as np
 
-from .common_session import Session
+from .common_session import Session  # noqa: F401
 from .common_interval import IntervalList, interval_list_contains
 from .common_nwbfile import Nwbfile
-from .common_ephys import Raw
+from .common_ephys import Raw  # noqa: F401
 from .common_task import TaskEpoch
 import datajoint as dj
 from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sampling_rate
 from .dj_helper_fn import fetch_nwb
 
 schema = dj.schema('common_behav')
+
 
 @schema
 class RawPosition(dj.Imported):
@@ -73,6 +74,7 @@ class StateScriptFile(dj.Imported):
     ---
     file_object_id: varchar(40)  # the object id of the file object
     """
+
     def make(self, key):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
@@ -96,6 +98,7 @@ class StateScriptFile(dj.Imported):
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
 
+
 @schema
 class VideoFile(dj.Imported):
     definition = """
@@ -104,17 +107,18 @@ class VideoFile(dj.Imported):
     ---
     video_file_object_id: varchar(40)  # the object id of the file object
     """
+
     def make(self, key):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         # get the interval for the current TaskEpoch
-        #print(f'key = {key}')
+        # print(f'key = {key}')
         interval_list_name = (TaskEpoch() & key).fetch1('interval_list_name')
         valid_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
-                                       'interval_list_name' : interval_list_name}).fetch1('valid_times')
+                                       'interval_list_name': interval_list_name}).fetch1('valid_times')
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
             nwbf = io.read()
-            video = get_data_interface(nwbf,'video')
+            video = get_data_interface(nwbf, 'video')
             video_files = video.time_series.keys()
             for video_file in video_files:
                 video_obj = video.time_series[video_file]
@@ -145,7 +149,7 @@ class HeadDir(dj.Imported):
             try:
                 behav_mod = nwbf.get_processing_module("Behavior")
                 headdir = behav_mod.data_interfaces['Head Direction']
-            except:
+            except Exception:  # TODO: use more precise error check
                 print(f'Unable to import HeadDir: no Behavior module found in {nwb_file_name}')
                 return
             key['nwb_object_id'] = -1
@@ -172,8 +176,7 @@ class Speed(dj.Imported):
             try:
                 behav_mod = nwbf.get_processing_module("Behavior")
                 speed = behav_mod.data_interfaces['Speed']
-
-            except:
+            except Exception:  # TODO: use more precise error check
                 print(f'Unable to import Speed: no Behavior module found in {nwb_file_name}')
                 return
             key['nwb_object_id'] = -1
@@ -200,8 +203,7 @@ class LinPos(dj.Imported):
             try:
                 behav_mod = nwbf.get_processing_module("Behavior")
                 linpos = behav_mod.data_interfaces['Linearized Position']
-
-            except:
+            except Exception:  # TODO: use more precise error check
                 print(f'Unable to import LinPos: no Behavior module found in {nwb_file_name}')
                 return
             key['nwb_object_id'] = -1

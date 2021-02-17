@@ -7,6 +7,7 @@ import pynwb
 
 # conn = dj.conn()
 
+
 def insert_sessions(nwb_file_names):
     """
     Populate the dj database with new sessions.
@@ -35,7 +36,7 @@ def insert_sessions(nwb_file_names):
 
 
 def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
-    #TODO: check if file exists and perhaps prompt user?
+    # TODO: check if file exists and perhaps prompt user?
     print(f'Creating a copy of NWB file {nwb_file_name} with link to raw ephys data: {out_nwb_file_name}')
     nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
     assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'

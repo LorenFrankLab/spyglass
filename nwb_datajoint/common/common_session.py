@@ -11,6 +11,7 @@ schema = dj.schema("common_session")
 
 # TODO: figure out what to do about ExperimenterList
 
+
 @schema
 class Session(dj.Imported):
     definition = """
@@ -31,11 +32,11 @@ class Session(dj.Imported):
         # These imports must go here to avoid cyclic dependencies
         from .common_task import Task, TaskEpoch
         from .common_interval import IntervalList
-        #from .common_ephys import Unit
+        # from .common_ephys import Unit
 
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        with pynwb.NWBHDF5IO(path = nwb_file_abspath, mode = 'r') as io:
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
             nwbf = io.read()
 
             print('Institution...')
@@ -79,6 +80,7 @@ class Session(dj.Imported):
 
             # print('Unit...')
             # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
+
 
 @schema
 class ExperimenterList(dj.Imported):

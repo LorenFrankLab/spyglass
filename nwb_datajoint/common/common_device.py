@@ -40,6 +40,7 @@ class DataAcquisitionDevice(dj.Manual):
                 device_name_list.append(device_dict['device_name'])
         return device_name_list
 
+
 @schema
 class CameraDevice(dj.Manual):
     definition = """
@@ -51,6 +52,7 @@ class CameraDevice(dj.Manual):
     lens='': varchar(80)
     camera_id=-1 : int
     """
+
     def initialize(self):
         # create a "none" camera
         # TODO: move to initialization script so it doesn't get called every time
@@ -73,7 +75,7 @@ class CameraDevice(dj.Manual):
                 device = nwbf.devices[d]
                 # TODO: fix camera name and add fields when new extension is available
                 device_dict['camera_name'] = device.camera_name
-                #device_dict['manufacturer'] = device.manufacturer
+                # device_dict['manufacturer'] = device.manufacturer
                 device_dict['model'] = device.model
                 device_dict['lens'] = device.lens
                 device_dict['meters_per_pixel'] = device.meters_per_pixel
@@ -81,8 +83,6 @@ class CameraDevice(dj.Manual):
                 self.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['camera_name'])
         print(f'Inserted {device_name_list}')
-
-
 
 
 @schema

@@ -3,6 +3,7 @@ import datajoint as dj
 
 schema = dj.schema("common_lab")
 
+
 @schema
 class LabMember(dj.Manual):
     definition = """
@@ -11,6 +12,7 @@ class LabMember(dj.Manual):
     first_name: varchar(80)
     last_name: varchar(80)
     """
+
     def insert_from_nwbfile(self, nwbf):
         '''
         Insert lab member information from NWB file
@@ -31,6 +33,7 @@ class Institution(dj.Manual):
     institution_name: varchar(80)
     ---
     """
+
     def insert_from_nwbfile(self, nwbf):
         '''
         Insert institution information from NWB file
@@ -39,12 +42,14 @@ class Institution(dj.Manual):
         '''
         self.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
 
+
 @schema
 class Lab(dj.Manual):
     definition = """
     lab_name: varchar(80)
     ---
     """
+
     def insert_from_nwbfile(self, nwbf):
         '''
         Insert Lab name information from NWB file

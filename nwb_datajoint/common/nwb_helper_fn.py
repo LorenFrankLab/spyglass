@@ -3,7 +3,8 @@ from operator import itemgetter
 
 # import matplotlib.pyplot as plt
 
-#NWB helper functions for finding processing modules and data interfaces
+# NWB helper functions for finding processing modules and data interfaces
+
 
 def get_data_interface(nwbf, data_interface_name):
     """ Search for a specified data interface in an NWB file
@@ -22,6 +23,7 @@ def get_data_interface(nwbf, data_interface_name):
             return module.get(data_interface_name)
     return None
 
+
 def estimate_sampling_rate(timestamps, multiplier):
     '''Estimate the sampling rate given a list of timestamps. Assumes that the most common temporal differences
        between timestamps approximate the sampling rate. Note that this can fail for very high sampling rates and
@@ -30,7 +32,7 @@ def estimate_sampling_rate(timestamps, multiplier):
     :return: estimated_rate: float
     '''
 
-    #approach:
+    # approach:
     # 1. use a box car smoother and a histogram to get the modal value
     # 2. identify adjacent samples as those that have a time difference < the multiplier * the modal value
     # 3. average the time differences between adjacent samples
@@ -66,7 +68,7 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
 
     gap = np.diff(timestamps) > 1.0 / sampling_rate * gap_proportion
 
-    #all true entries of gap represent gaps. Get the times bounding these intervals.
+    # all true entries of gap represent gaps. Get the times bounding these intervals.
     gapind = np.asarray(np.where(gap))
     # The end of each valid interval are the indices of the gaps and the final value
     valid_end = np.append(gapind, np.asarray(len(timestamps)-1))
@@ -78,12 +80,12 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
 
     valid_times = timestamps[valid_indices]
     # adjust the times to deal with single valid samples
-    valid_times[:,0] = valid_times[:,0] - eps
-    valid_times[:,1] = valid_times[:,1] + eps
+    valid_times[:, 0] = valid_times[:, 0] - eps
+    valid_times[:, 1] = valid_times[:, 1] + eps
 
-    valid_intervals = (valid_times[:,1] - valid_times[:,0]) > min_valid_len
+    valid_intervals = (valid_times[:, 1] - valid_times[:, 0]) > min_valid_len
 
-    return valid_times[valid_intervals,:]
+    return valid_times[valid_intervals, :]
 
 
 def get_electrode_indices(electrical_series, electrode_ids):

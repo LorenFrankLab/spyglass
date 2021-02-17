@@ -8,6 +8,7 @@ schema = dj.schema('common_interval')
 
 # TODO: ADD export to NWB function to save relevant intervals in an NWB file
 
+
 # define the schema for intervals
 @schema
 class IntervalList(dj.Manual):
@@ -44,7 +45,8 @@ class SortInterval(dj.Manual):
     sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
 
-#TODO: make all of the functions below faster if possible
+
+# TODO: make all of the functions below faster if possible
 def interval_list_contains_ind(valid_times, timestamps):
     """Returns the indices for the timestamps that are contained within the valid_times intervals
 
@@ -60,6 +62,7 @@ def interval_list_contains_ind(valid_times, timestamps):
                                                    timestamps <= valid_time[1]))).tolist()
     return np.asarray(ind)
 
+
 def interval_list_contains(valid_times, timestamps):
     """Returns the timestamps that are contained within the valid_times intervals
 
@@ -74,6 +77,7 @@ def interval_list_contains(valid_times, timestamps):
         ind += np.ravel(np.argwhere(np.logical_and(timestamps >= valid_time[0],
                                                    timestamps <= valid_time[1]))).tolist()
     return timestamps[ind]
+
 
 def interval_list_excludes_ind(valid_times, timestamps):
     """Returns the indices of the timestamps that are excluded from the valid_times intervals
@@ -96,6 +100,7 @@ def interval_list_excludes_ind(valid_times, timestamps):
                                                    timestamps < invalid_time[1]))).tolist()
     return np.asarray(ind)
 
+
 def interval_list_excludes(valid_times, timestamps):
     """Returns the indices of the timestamps that are excluded from the valid_times intervals
 
@@ -116,6 +121,7 @@ def interval_list_excludes(valid_times, timestamps):
         ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0],
                                                    timestamps < invalid_time[1]))).tolist()
     return timestamps[ind]
+
 
 def interval_list_intersect(interval_list1, interval_list2):
     """
@@ -138,8 +144,8 @@ def interval_list_intersect(interval_list1, interval_list2):
     #     x = np.array([])
     # return x
 
-    #print(f'interval list 1 {interval_list1}')
-    #print(f'interval list 2 {interval_list2}')
+    # print(f'interval list 1 {interval_list1}')
+    # print(f'interval list 2 {interval_list2}')
 
     interval_list1 = np.ravel(interval_list1)
     # create a parallel list where 1 indicates the start and -1 the end of an interval
@@ -152,7 +158,7 @@ def interval_list_intersect(interval_list1, interval_list2):
     interval_list2_start_end[1::2] = -2
 
     # concatenate the two lists so we can resort the intervals and apply the same sorting to the start-stop arrays
-    combined_intervals = np.concatenate((interval_list1,interval_list2))
+    combined_intervals = np.concatenate((interval_list1, interval_list2))
     ss = np.concatenate((interval_list1_start_end, interval_list2_start_end))
     sort_ind = np.argsort(combined_intervals)
     combined_intervals = combined_intervals[sort_ind]
@@ -164,7 +170,8 @@ def interval_list_intersect(interval_list1, interval_list2):
         intersect.append([combined_intervals[start], combined_intervals[stop]])
     return np.asarray(intersect)
 
-#TODO: test interval_list_union code
+
+# TODO: test interval_list_union code
 def interval_list_union(interval_list1, interval_list2):
     """Finds the union (all times in one or both) for two interval lists
 
@@ -188,7 +195,7 @@ def interval_list_union(interval_list1, interval_list2):
     interval_list2_start_end[1::2] = -1
 
     # concatenate the two lists so we can resort the intervals and apply the same sorting to the start-end arrays
-    combined_intervals = np.concatenate((interval_list1,interval_list2))
+    combined_intervals = np.concatenate((interval_list1, interval_list2))
     ss = np.concatenate((interval_list1_start_end, interval_list2_start_end))
     sort_ind = np.argsort(combined_intervals)
     combined_intervals = combined_intervals[sort_ind]
