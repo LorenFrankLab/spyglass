@@ -18,3 +18,4 @@ dependencies:
     - pymysql>=1.0.*
     - h5py==2.10.*
     - git+git://github.com/laboratorybox/labbox-launcher
+    - git+git://github.com/LorenFrankLab/ndx-franklab-novela

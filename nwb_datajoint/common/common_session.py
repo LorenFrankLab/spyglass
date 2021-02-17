@@ -1,11 +1,10 @@
 import datajoint as dj
 import pynwb
 
-from .common_nwbfile import Nwbfile
+from .common_device import DataAcquisitionDevice, CameraDevice, Probe
 from .common_lab import Lab, Institution, LabMember
+from .common_nwbfile import Nwbfile
 from .common_subject import Subject
-from .common_device import DataAcquisitionDevice, CameraDevice
-from .common_device import Probe
 
 schema = dj.schema("common_session")
 

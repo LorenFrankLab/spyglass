@@ -1,15 +1,11 @@
-import pynwb
-import numpy as np
-
-from .common_session import Session
-from .common_interval import IntervalList
-from .common_nwbfile import Nwbfile
-from .common_ephys import Raw
 import datajoint as dj
-from .nwb_helper_fn import get_data_interface
+import pynwb
 
-# so the linter does not complain about unused variables
-used = [Session, IntervalList]
+from .common_ephys import Raw
+from .common_interval import IntervalList  # noqa: F401
+from .common_nwbfile import Nwbfile
+from .common_session import Session  # noqa: F401
+from .nwb_helper_fn import get_data_interface
 
 schema = dj.schema('common_dio')
 
@@ -18,10 +14,10 @@ schema = dj.schema('common_dio')
 class DIOEvents(dj.Imported):
     definition = """
     -> Session
-    dio_event_name: varchar(80) # the name assigned to this DIO event
+    dio_event_name: varchar(80)  # the name assigned to this DIO event
     ---
-    nwb_object_id: varchar(80)            # the object id of the data in the NWB file
-    -> IntervalList       # the list of intervals for this object
+    nwb_object_id: varchar(80)   # the object id of the data in the NWB file
+    -> IntervalList              # the list of intervals for this object
     """
 
     def make(self, key):

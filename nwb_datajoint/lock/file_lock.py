@@ -1,8 +1,6 @@
 import datajoint as dj
 import os
 
-from ..common import Nwbfile, AnalysisNwbfile
-
 schema = dj.schema('file_lock')
 
 

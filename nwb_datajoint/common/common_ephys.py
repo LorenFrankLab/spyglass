@@ -1,28 +1,17 @@
 import datajoint as dj
-import tempfile
-
-from .common_session import Session
-from .common_region import BrainRegion
-from .common_device import Probe
-from .common_interval import IntervalList, SortInterval, interval_list_intersect, interval_list_excludes_ind
-from .common_filter import FirFilter
-
-import spikeinterface as si
-import spikeextractors as se
-import spiketoolkit as st
+import numpy as np
 import pynwb
 import re
-import os
-import numpy as np
-import scipy.signal as signal
-import json
-import h5py as h5
-from tempfile import NamedTemporaryFile
-from .common_nwbfile import Nwbfile, AnalysisNwbfile
-from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices, get_data_interface
-from .dj_helper_fn import dj_replace, fetch_nwb
 
-used = [Session, BrainRegion, Probe, IntervalList]
+from .common_device import Probe  # noqa: F401
+from .common_filter import FirFilter
+from .common_interval import IntervalList    # noqa: F401
+# SortInterval, interval_list_intersect, interval_list_excludes_ind
+from .common_nwbfile import Nwbfile, AnalysisNwbfile
+from .common_region import BrainRegion  # noqa: F401
+from .common_session import Session  # noqa: F401
+from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices, get_data_interface
+from .dj_helper_fn import fetch_nwb  # dj_replace
 
 schema = dj.schema('common_ephys')
 

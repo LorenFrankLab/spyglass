@@ -1,15 +1,13 @@
-from .common_session import Session
 import datajoint as dj
 import numpy as np
 
-used = [Session]
+from .common_session import Session  # noqa: F401
 
 schema = dj.schema('common_interval')
 
 # TODO: ADD export to NWB function to save relevant intervals in an NWB file
 
 
-# define the schema for intervals
 @schema
 class IntervalList(dj.Manual):
     definition = """

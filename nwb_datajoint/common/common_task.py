@@ -1,5 +1,3 @@
-# Test of automatic datajoint schema generation from NWB file
-import numpy as np
 import pynwb
 
 from .common_session import Session  # noqa: F401
@@ -19,7 +17,7 @@ class Apparatus(dj.Manual):
      apparatus_name: varchar(80)
      ---
      #-> AnalysisNWBFile
-     nwb_object_id='': varchar(255)  #the NWB object identifier for a class that describes this apparatus
+     nwb_object_id='': varchar(255)  # the NWB object identifier for a class that describes this apparatus
      """
 
     # def insert_from_nwbfile(self, nwbf):
@@ -49,9 +47,9 @@ class Task(dj.Manual):
     definition = """
      task_name: varchar(80)
      ---
-     task_description = '' :   varchar(255)  # description of this task
-     task_type = '' : varchar(80)  # type of task
-     task_subtype = '' : varchar(80) # subtype of task
+     task_description = '': varchar(255)  # description of this task
+     task_type = '': varchar(80)          # type of task
+     task_subtype = '': varchar(80)       # subtype of task
 
      """
 
@@ -80,7 +78,7 @@ class TaskEpoch(dj.Imported):
     # Tasks, session and time intervals
     definition = """
      -> Session
-     epoch: int  #the session epoch for this task and apparatus(1 based)
+     epoch: int  # the session epoch for this task and apparatus (1-based)
      ---
      -> Task
      -> CameraDevice

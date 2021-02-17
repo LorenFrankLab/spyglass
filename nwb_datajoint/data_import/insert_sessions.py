@@ -1,11 +1,8 @@
-from ..common.common_nwbfile import Nwbfile
-from ..common import populate_all_common
-from .storage_dirs import check_env
-import datajoint as dj
 import os
 import pynwb
 
-# conn = dj.conn()
+from ..common import Nwbfile, populate_all_common
+from .storage_dirs import check_env
 
 
 def insert_sessions(nwb_file_names):

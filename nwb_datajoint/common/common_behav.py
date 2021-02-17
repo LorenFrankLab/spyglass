@@ -1,15 +1,14 @@
-
-import pynwb
+import datajoint as dj
 import numpy as np
+import pynwb
 
-from .common_session import Session  # noqa: F401
+from .common_ephys import Raw  # noqa: F401
 from .common_interval import IntervalList, interval_list_contains
 from .common_nwbfile import Nwbfile
-from .common_ephys import Raw  # noqa: F401
+from .common_session import Session  # noqa: F401
 from .common_task import TaskEpoch
-import datajoint as dj
-from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sampling_rate
 from .dj_helper_fn import fetch_nwb
+from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sampling_rate
 
 schema = dj.schema('common_behav')
 
@@ -103,7 +102,7 @@ class StateScriptFile(dj.Imported):
 class VideoFile(dj.Imported):
     definition = """
     -> TaskEpoch
-    video_file_num = 0 : int
+    video_file_num = 0: int
     ---
     video_file_object_id: varchar(40)  # the object id of the file object
     """
@@ -136,7 +135,7 @@ class HeadDir(dj.Imported):
     definition = """
     -> Session
     ---
-    nwb_object_id: int  # the object id of the data in the NWB file
+    nwb_object_id: int    # the object id of the data in the NWB file
     -> IntervalList       # the list of intervals for this object
     """
 
@@ -163,7 +162,7 @@ class Speed(dj.Imported):
     definition = """
     -> Session
     ---
-    nwb_object_id: int  # the object id of the data in the NWB file
+    nwb_object_id: int    # the object id of the data in the NWB file
     -> IntervalList       # the list of intervals for this object
     """
 
