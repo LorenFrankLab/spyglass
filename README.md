@@ -66,3 +66,4 @@ The tutorials are in the form of Jupyter Notebooks and can be found in the `note
 ### Troubleshooting common problems
 * If you have an error writing NWB files, then downgrade h5py to 2.10.0
 * If Mountainsort4 stalls, then install [ml_ms4alg from our fork](https://github.com/LorenFrankLab/ml_ms4alg) and upgrade numpy to 1.19.4
+* If you have an error installing labbox-ephys Jupyter widget, run `export NODE_OPTIONS="--max-old-space-size=8192` and then try again.
