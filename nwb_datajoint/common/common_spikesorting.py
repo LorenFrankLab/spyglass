@@ -440,7 +440,8 @@ class SpikeSorting(dj.Computed):
         # Write recording extractor to NWB file
         se.NwbRecordingExtractor.write_recording(recording,
                                                  save_path = extractor_nwb_path,
-                                                 overwrite = True)
+                                                 # overwrite = True)
+                                                 )
 
         # Run spike sorting
         print(f'\nRunning spike sorting on {key}...')
