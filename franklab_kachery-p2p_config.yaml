@@ -1,0 +1,13 @@
+---
+bootstrapAddresses:
+  -
+    hostName: 45.33.92.31
+    port: 46103
+  -
+    hostName: 45.33.92.33
+    port: 46103
+channels:
+  -
+    channelName: franklab
+  -
+    channelName: flatiron3
