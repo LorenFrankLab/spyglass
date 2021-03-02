@@ -42,7 +42,7 @@ The Frank lab Datajoint database is designed to facilitate data storage, analysi
    # Install spiketoolkit
    cd ..
    git clone https://github.com/SpikeInterface/spiketoolkit.git
-   cd spikeextractors
+   cd spiketoolkit
    pip install -e .
    ```
 
