@@ -35,6 +35,9 @@ from requests.exceptions import ConnectionError
 
 schema = dj.schema('common_spikesorting')
 
+_OVERWRITE_SORTING_RESULTS = True
+
+
 @schema
 class SortGroup(dj.Manual):
     definition = """
@@ -434,13 +437,14 @@ class SpikeSorting(dj.Computed):
                            + '_' + str(key['parameter_set_name'])
         analysis_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                             / key['analysis_file_name'])
-        os.mkdir(analysis_path)
+        os.makedirs(analysis_path, exist_ok=_OVERWRITE_SORTING_RESULTS)
+        # os.mkdir(analysis_path)
         extractor_nwb_path = str(Path(analysis_path) / unique_file_name) + '.nwb'
 
         # Write recording extractor to NWB file
         se.NwbRecordingExtractor.write_recording(recording,
                                                  save_path = extractor_nwb_path,
-                                                 overwrite = True)
+                                                 overwrite = _OVERWRITE_SORTING_RESULTS)
 
         # Run spike sorting
         print(f'\nRunning spike sorting on {key}...')
