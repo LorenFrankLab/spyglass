@@ -31,6 +31,20 @@ The Frank lab Datajoint database is designed to facilitate data storage, analysi
    jupyter labextension install @jupyter-widgets/jupyterlab-manager --no-build
    jupyter labextension install jupyterlab/labbox_ephys_widgets_jp
    ```
+5. Install latest versions of spikeextractors and spiketoolkit packages.
+   * For now we will install these packages locally, because some of the pre-release features are useful for us.
+   ```bash
+   # Install spikeextractors
+   cd ..
+   git clone https://github.com/SpikeInterface/spikeextractors.git
+   cd spikeextractors
+   pip install -e .
+   # Install spiketoolkit
+   cd ..
+   git clone https://github.com/SpikeInterface/spiketoolkit.git
+   cd spiketoolkit
+   pip install -e .
+   ```
 
 ### Setting up database access
 1. Ask Loren or Eric to set up an account for you on the Frank lab database (`lmf-db.cin.ucsf.edu`). Note that you have to be connected to UCSF LAN to access this server.
