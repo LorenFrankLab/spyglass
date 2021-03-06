@@ -1,10 +1,7 @@
 import datajoint as dj
-import tempfile
 
-from .common_session import Session
-from .common_region import BrainRegion
 from .common_device import Probe
-from .common_interval import IntervalList, SortInterval, interval_list_intersect, interval_list_excludes_ind
+from .common_interval import IntervalList, SortInterval, interval_list_intersect
 from .common_ephys import Raw, Electrode, ElectrodeGroup
 
 import labbox_ephys as le
@@ -12,21 +9,15 @@ import spikeinterface as si
 import spikeextractors as se
 import spiketoolkit as st
 import pynwb
-import re
 import os
-import socket
 import time
 from pathlib import Path
 import numpy as np
-import scipy.signal as signal
 import json
-import h5py as h5
 import kachery_p2p as kp
 import kachery as ka
 from itertools import compress
-from tempfile import NamedTemporaryFile
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
-from .nwb_helper_fn import get_valid_intervals, estimate_sampling_rate, get_electrode_indices
 from .dj_helper_fn import dj_replace, fetch_nwb
 
 from mountainlab_pytools.mdaio import readmda
@@ -69,9 +60,9 @@ class SortGroup(dj.Manual):
             the name of the NWB file whose electrodes should be put into sorting groups
         """
         # delete any current groups
-        (SortGroup & {'nwb_file_name' : nwb_file_name}).delete()
+        (SortGroup & {'nwb_file_name': nwb_file_name}).delete()
         # get the electrodes from this NWB file
-        electrodes = (Electrode() & {'nwb_file_name' : nwb_file_name} & {'bad_channel' : 'False'}).fetch()
+        electrodes = (Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}).fetch()
         e_groups = np.unique(electrodes['electrode_group_name'])
         sort_group = 0
         sg_key = dict()
@@ -107,7 +98,7 @@ class SortGroup(dj.Manual):
         to the reference for the first channel of the group.
         '''
         # delete any current groups
-        (SortGroup & {'nwb_file_name' : nwb_file_name}).delete()
+        (SortGroup & {'nwb_file_name': nwb_file_name}).delete()
         # get the electrodes from this NWB file
         electrodes = (Electrode() & {'nwb_file_name': nwb_file_name} & {'bad_channel': 'False'}).fetch()
         e_groups = np.unique(electrodes['electrode_group_name'])
@@ -615,7 +606,8 @@ class SpikeSorting(dj.Computed):
         sub_R = st.preprocessing.bandpass_filter(sub_R, freq_min=filter_params['frequency_min'],
                                                  freq_max=filter_params['frequency_max'],
                                                  freq_wid=filter_params['filter_width'],
-                                                 chunk_size=filter_params['filter_chunk_size'])
+                                                 chunk_size=filter_params['filter_chunk_size'],
+                                                 dtype='float32')
 
         # TODO: handle better the random seed for filtering
         sub_R = st.preprocessing.whiten(sub_R, seed=0)
@@ -923,50 +915,3 @@ class CuratedSpikeSorting(dj.Computed):
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
-
-
-""" for curation feed reading:
-import kachery_p2p as kp
-a = kp.load_feed('feed://...')
-b= a.get_subfeed(dict(documentId='default', key='sortings'))
-b.get_next_messages()
-
-result is list of dictionaries
-
-
-During creation of feed:
-feed_uri = create_labbox_ephys_feed(le_recordings, le_sortings, create_snapshot=False)
-
-Pull option-create_snapshot branch
-----------
-metrics
-----------
-- add to units table
-- isolation score, noise overlap
-- waveform samples
-- want to recompute metrics after merge
-
-- looking at spikeinterface to figure out which metrics it is computing and where
-- SNR, dprime, drift, firing rates, nearest neighbor metrics
-- once we have sorting and recording, can just call functions to compute these
-- as soon as sorting is done we call these
-- spike sorting parameters: need a dictionary for all the metrics we compute
-- store in nwb units table
-- would have to create new units table after merges
-- can get rid of unnecessary waveforms
-- ryan will take metrics from units table to labbox ephys
-- labboxepys doesnt have noise overlap
-- noise overlap: how similar are random waveforms to your waveforms
-- mlsm4-alg has feature to toss clusters below noise overlap
-- TODO:
-- parse the feed; and add labels to units table in analysisNWB file and then maybe datajoint
-- nwb file put into kachery
-- labbox can read from this file via plugin
-- curate
-- take that feed back into datajoint
-- labels live only in datajoint units table
-- when pulling back into dj, create new units table that reflects merges
-
-labbox-launcher command:
-labbox-launcher run magland/labbox-ephys:0.4.0 --docker_run_opts "--net host -e KACHERY_P2P_API_PORT=$KACHERY_P2P_API_PORT" --kachery $KACHERY_STORAGE_DIR
-"""
