@@ -355,6 +355,7 @@ class SpikeSortingMetrics(dj.Manual):
                                                      max_spikes_per_cluster=m['max_spikes_per_cluster'],
                                                      max_spikes_for_nn=m['max_spikes_for_nn'],
                                                      n_neighbors=m['n_neighbors'],
+                                                     apply_filter=False,
                                                      n_jobs=m['n_jobs'],
                                                      memmap=bool(m['memmap']),
                                                      max_spikes_per_unit=m['max_spikes_per_unit'],
