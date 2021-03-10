@@ -12,7 +12,7 @@ dependencies:
   - pip:
     - hither>=0.4.*
     - ml-ms4alg>=0.3.*
-    - spikeinterface==0.10.*
+    - spikeinterface>=0.11
     - pynwb>=1.4
     - datajoint==0.12.*
     - pymysql>=1.0.*
