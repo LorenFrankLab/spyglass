@@ -4,7 +4,7 @@ channels:
   - defaults
 dependencies:
   - python=3.8
-  - jupyterlab=2.*
+  - jupyterlab>=3.*
   - nodejs=12.4.*
   - pydotplus>=2.0.*
   - dask>=2.30
