@@ -43,7 +43,7 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=pynwb.
     Warns
     -----
     UserWarning
-        Warning is raised if multiple data interfaces with the matching name are found.
+        If multiple data interfaces with the matching name are found.
 
     Returns
     -------
@@ -88,8 +88,7 @@ def estimate_sampling_rate(timestamps, multiplier):
     # 3. average the time differences between adjacent samples
     sample_diff = np.diff(timestamps[~np.isnan(timestamps)])
     if len(sample_diff) < 10:
-        print(f'Error in estimate_sampling_rate: only {len(sample_diff)} timestamps are valid. Check the data.')
-        return -1
+        raise ValueError(f'Only {len(sample_diff)} timestamps are valid. Check the data.')
     nsmooth = 10
     smoother = np.ones(nsmooth) / nsmooth
     smooth_diff = np.convolve(sample_diff, smoother, mode='same')
@@ -103,13 +102,15 @@ def estimate_sampling_rate(timestamps, multiplier):
 
 
 def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len):
-    """ Given a list of timestamps from sampled data, and the sampling rate of the data, find all gaps >
-    gap_proporition * sampling rate and return a set of valid times excluding these gaps.
+    """Given a list of timestamps from sampled data, and the sampling rate of the data, find all gaps >
+    gap_proportion * sampling rate and return a set of valid times excluding these gaps.
 
     Parameters
     ----------
     timestamps : numpy.ndarray
         1D numpy array of timestamp values.
+    sampling_rate : float
+        Sampling rate of the data.
     gap_proportion : float
         Multiple of inferred sampling rate for gap detection.
     min_valid_len : float
@@ -118,7 +119,7 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
     Returns
     -------
     valid_times : np.ndarray
-        2D array of start and stop times for valid data.
+        Array of start and stop times of shape (N, 2) for valid data.
     """
 
     eps = 0.0000001
@@ -148,16 +149,15 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
 
 
 def get_electrode_indices(nwb_object, electrode_ids):
-    """Given an NWB file or electrical series object, return the indices of the specified electrode_ids.
+    """Given an NWB file or electrical series object, return the indices of the specified electrode_ids from the
+    NWB file electrodes table.
 
     Parameters
     ----------
     nwb_object : pynwb.NWBFile or pynwb.ecephys.ElectricalSeries
         The NWB file object or NWB electrical series object.
     electrode_ids : np.ndarray or list
-        Array or list of electrode_ids.
-    min_valid_len : float
-        Length of smallest valid interval.
+        Array or list of electrode IDs.
 
     Returns
     -------
