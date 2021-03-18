@@ -55,7 +55,7 @@ class RawPosition(dj.Imported):
                 # TODO why is the SpatialSeries object_id not stored?
                 # this is created when we populate the Task schema
                 key['interval_list_name'] = pos_interval_name
-                self.insert1(key, skip_duplicates='True')
+                self.insert1(key, skip_duplicates=True)
 
         else:
             print('No position data interface found in  {}\n'.format(key['nwb_file_name']))

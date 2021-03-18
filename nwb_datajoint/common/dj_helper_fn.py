@@ -1,21 +1,32 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
 import numpy as np
-import pynwb
 import re
+
+from .nwb_helper_fn import get_nwb_file
 
 
 def dj_replace(original_table, new_values, key_column, replace_column):
-    '''
-    Given the output of a fetch() call from a schema and a 2D array made up of (key_value, replace_value) tuples,
-    finds each instance of key_value in the key_column of the original table and replaces the specified replace_column
+    """Given the output of a fetch() call from a schema and a 2D array made up of (key_value, replace_value) tuples,
+    find each instance of key_value in the key_column of the original table and replace the specified replace_column
     with the associated replace_value.
     Key values must be unique.
-    :param original_table: result of a datajoint .fetch() call on a schema query
-    :param new_values: list of tuples, each containing (key_value, replace_value)
-    :param index_column: string - the name of the column where the key_values are located
-    :param replace_column: string - the name of the column where to-be-replaced values are located
-    :return: structured array of new table entries that can be inserted back into the schema
-    '''
+
+    Parameters
+    ----------
+    original_table
+        Result of a datajoint .fetch() call on a schema query.
+    new_values : list
+        List of tuples, each containing (key_value, replace_value).
+    index_column : str
+        The name of the column where the key_values are located.
+    replace_column : str
+        The name of the column where to-be-replaced values are located.
+
+    Returns
+    -------
+    original_table
+        Structured array of new table entries that can be inserted back into the schema
+    """
 
     # check to make sure the new_values are a list or array of tuples and fix if not
     if type(new_values) is tuple:
@@ -30,12 +41,23 @@ def dj_replace(original_table, new_values, key_column, replace_column):
 
 
 def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
-    """
-    :param query_expression: a DJ query expression (e.g. join, restrict) or a table to call fetch on
-    :param nwb_master: tuple of (table, attr) to get the NWB filepath from
-    :param attrs: attrs from normal fetch()
-    :param kwargs: kwargs from normal fetch()
-    :return: fetched list of dict
+    """Get an NWB object from the given DataJoint query.
+
+    Parameters
+    ----------
+    query_expression
+        A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.
+    nwb_master : tuple
+        Tuple (table, attr) to get the NWB filepath from.
+    attrs : list
+        Attributes from normal DataJoint fetch call.
+    kwargs : dict
+        Keyword arguments from normal DataJoint fetch call.
+
+    Returns
+    -------
+    nwb_objects : list
+        List of dicts containing fetch results and NWB objects.
     """
     kwargs['as_dict'] = True  # force return as dictionary
     tbl, attr_name = nwb_master
@@ -50,10 +72,10 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
 
     ret = []
     for rec_dict in rec_dicts:
-        with pynwb.NWBHDF5IO(rec_dict.pop('nwb2load_filepath'), mode='r') as io:
-            # io = pynwb.NWBHDF5IO(rec_dict.pop('nwb2load_filepath'), mode='r')
-            nwbf = io.read()
-            nwb_objs = {re.sub('(_?)object_id', '', id_attr): nwbf.objects[rec_dict[id_attr]]
-                        for id_attr in attrs if 'object_id' in id_attr and rec_dict[id_attr] != ''}
-            ret.append({**rec_dict, **nwb_objs})
+        nwbf = get_nwb_file(rec_dict.pop('nwb2load_filepath'))
+        # for each attr that contains substring 'object_id', store key-value: attr name to NWB object
+        # remove '_object_id' from attr name
+        nwb_objs = {re.sub('(_?)object_id', '', id_attr): nwbf.objects[rec_dict[id_attr]]
+                    for id_attr in attrs if 'object_id' in id_attr and rec_dict[id_attr] != ''}
+        ret.append({**rec_dict, **nwb_objs})
     return ret

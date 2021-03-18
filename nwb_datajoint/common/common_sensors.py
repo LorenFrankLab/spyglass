@@ -1,14 +1,14 @@
 """Schema for headstage or other environmental sensors."""
 
-import pynwb
 import datajoint as dj
+import pynwb
 
 from .common_ephys import Raw
 from .common_interval import IntervalList  # noqa: F401
 from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .dj_helper_fn import fetch_nwb
-from .nwb_helper_fn import get_data_interface
+from .nwb_helper_fn import get_data_interface, get_nwb_file
 
 schema = dj.schema('common_sensors')
 
@@ -25,13 +25,12 @@ class SensorData(dj.Imported):
     def make(self, key):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
-            nwbf = io.read()
-            sensor = get_data_interface(nwbf, 'analog')
-            if sensor is not None:
-                key['sensor_data_object_id'] = sensor.time_series['analog'].object_id
-                key['interval_list_name'] = (Raw & {'nwb_file_name': nwb_file_name}).fetch1('interval_list_name')
-                self.insert1(key)
+        nwbf = get_nwb_file(nwb_file_abspath)
+        sensor = get_data_interface(nwbf, 'analog', pynwb.behavior.BehavioralEvents)
+        if sensor is not None:
+            key['sensor_data_object_id'] = sensor.time_series['analog'].object_id
+            key['interval_list_name'] = (Raw & {'nwb_file_name': nwb_file_name}).fetch1('interval_list_name')
+            self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
