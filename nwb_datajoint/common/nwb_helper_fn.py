@@ -20,7 +20,7 @@ def get_nwb_file(nwb_file_path):
     nwbfile : pynwb.NWBFile
         NWB file object for the given path opened in read mode.
     """
-    _, nwbfile = __open_nwb_files.get(nwb_file_path, None)
+    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
     if nwbfile is None:
         io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r')  # keep file open
         nwbfile = io.read()
