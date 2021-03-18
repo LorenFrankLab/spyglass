@@ -86,7 +86,9 @@ class Nwbfile(dj.Manual):
     def cleanup(self, delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
-        This does not delete the files themselves. Run this after deleting the Nwbfile() entries themselves."""
+        This does not delete the files themselves unless delete_files=True is specified
+        Run this after deleting the Nwbfile() entries themselves.
+        """
         self.external['raw'].delete(delete_external_files=delete_files)
 
 
