@@ -3,6 +3,7 @@ import datajoint as dj
 from .common_device import Probe
 from .common_interval import IntervalList, SortInterval, interval_list_intersect
 from .common_ephys import Raw, Electrode, ElectrodeGroup
+from .common_session import Session  # noqa: F401
 
 import labbox_ephys as le
 import spikeinterface as si
@@ -392,7 +393,7 @@ class SpikeSorting(dj.Computed):
         """
         Runs spike sorting on the data and parameters specified by the
         SpikeSortingParameter table and inserts a new entry to SpikeSorting table.
-        Specifically, 
+        Specifically,
 
         (1) Creates a new NWB file (analysis NWB file) that will hold the results of
             the sort (in .../analysis/)
@@ -434,7 +435,7 @@ class SpikeSorting(dj.Computed):
 
         if not os.path.isdir(analysis_path):
             os.mkdir(analysis_path)
-        
+
         extractor_nwb_path = str(Path(analysis_path) / unique_file_name)
 
         # Write recording extractor to NWB file
@@ -536,7 +537,7 @@ class SpikeSorting(dj.Computed):
         ----------
         key: dict
             specifies a (partially filled) entry of SpikeSorting table
-        
+
         Returns
         -------
         sort_interval_valid_times: ndarray of tuples
