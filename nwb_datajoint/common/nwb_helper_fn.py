@@ -52,7 +52,7 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=pynwb.
     """
     ret = []
     for module in nwbfile.processing.values():
-        match = module.get(data_interface_name, None)
+        match = module.data_interfaces.get(data_interface_name, None)
         if match is not None and isinstance(match, data_interface_class):
             ret.append(match)
     if len(ret) > 1:
