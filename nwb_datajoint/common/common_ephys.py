@@ -169,7 +169,7 @@ class Raw(dj.Imported):
             return
         print('Estimating sampling rate...')
         # NOTE: Only use first 1e6 timepoints to save time
-        sampling_rate = estimate_sampling_rate(np.asarray(rawdata.timestamps[:1e6]), 1.5)
+        sampling_rate = estimate_sampling_rate(np.asarray(rawdata.timestamps[:int(1e6)]), 1.5)
         print(f'Estimated sampling rate: {sampling_rate}')
         key['sampling_rate'] = sampling_rate
 
