@@ -4,7 +4,7 @@ channels:
   - defaults
 dependencies:
   - python=3.8
-  - jupyterlab=2.*
+  - jupyterlab>=3.*
   - nodejs=12.4.*
   - pydotplus>=2.0.*
   - dask>=2.30
@@ -12,7 +12,7 @@ dependencies:
   - pip:
     - hither>=0.4.*
     - ml-ms4alg>=0.3.*
-    - spikeinterface==0.10.*
+    - spikeinterface>=0.11
     - pynwb>=1.4
     - datajoint==0.12.*
     - pymysql>=1.0.*

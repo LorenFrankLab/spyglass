@@ -31,6 +31,20 @@ The Frank lab Datajoint database is designed to facilitate data storage, analysi
    jupyter labextension install @jupyter-widgets/jupyterlab-manager --no-build
    jupyter labextension install jupyterlab/labbox_ephys_widgets_jp
    ```
+5. Install latest versions of spikeextractors and spiketoolkit packages.
+   * For now we will install these packages locally, because some of the pre-release features are useful for us.
+   ```bash
+   # Install spikeextractors
+   cd ..
+   git clone https://github.com/SpikeInterface/spikeextractors.git
+   cd spikeextractors
+   pip install -e .
+   # Install spiketoolkit
+   cd ..
+   git clone https://github.com/SpikeInterface/spiketoolkit.git
+   cd spiketoolkit
+   pip install -e .
+   ```
 
 ### Setting up database access
 1. Ask Loren or Eric to set up an account for you on the Frank lab database (`lmf-db.cin.ucsf.edu`). Note that you have to be connected to UCSF LAN to access this server.
@@ -66,3 +80,4 @@ The tutorials are in the form of Jupyter Notebooks and can be found in the `note
 ### Troubleshooting common problems
 * If you have an error writing NWB files, then downgrade h5py to 2.10.0
 * If Mountainsort4 stalls, then install [ml_ms4alg from our fork](https://github.com/LorenFrankLab/ml_ms4alg) and upgrade numpy to 1.19.4
+* If you have an error installing labbox-ephys Jupyter widget, run `export NODE_OPTIONS="--max-old-space-size=8192` and then try again.
