@@ -31,7 +31,7 @@ def get_nwb_file(nwb_file_path):
 def close_nwb_files():
     for io, _ in __open_nwb_files.values():
         io.close()
-    __open_nwb_files = dict()
+    __open_nwb_files.clear()
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=pynwb.core.NWBDataInterface):
