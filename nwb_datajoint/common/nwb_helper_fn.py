@@ -4,7 +4,7 @@ import numpy as np
 import pynwb
 import warnings
 
-__open_nwb_files = dict()  # dict mapping file path to open NWBFile objects in read mode
+__open_nwb_files = dict()  # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 
 
 def get_nwb_file(nwb_file_path):
@@ -20,12 +20,17 @@ def get_nwb_file(nwb_file_path):
     nwbfile : pynwb.NWBFile
         NWB file object for the given path opened in read mode.
     """
-    ret = __open_nwb_files.get(nwb_file_path, None)
-    if ret is None:
+    _, nwbfile = __open_nwb_files.get(nwb_file_path, None)
+    if nwbfile is None:
         io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r')  # keep file open
-        ret = io.read()
-        __open_nwb_files[nwb_file_path] = ret
-    return ret
+        nwbfile = io.read()
+        __open_nwb_files[nwb_file_path] = (io, nwbfile)
+    return nwbfile
+
+
+def close_nwb_files():
+    for io, _ in __open_nwb_files.values():
+        io.close()
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=pynwb.core.NWBDataInterface):

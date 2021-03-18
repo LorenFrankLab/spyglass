@@ -194,14 +194,9 @@ class Raw(dj.Imported):
     def nwb_object(self, key):
         # TODO return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
         # so we can modify the other one.
-        # NOTE: This leaves the file open, which means that it cannot be appended to. This should be fine normally
         nwb_file_name = key['nwb_file_name']
-
-        # TO DO: This likely leaves the io object in place and the file open. Fix
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        io = pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r')
-        nwbf = io.read()
-        # get the object id
+        nwbf = get_nwb_file(nwb_file_abspath)
         raw_object_id = (self & {'nwb_file_name': key['nwb_file_name']}).fetch1('raw_object_id')
         return nwbf.objects[raw_object_id]
 
@@ -329,8 +324,7 @@ class LFP(dj.Imported):
         # return the nwb_object.
         lfp_file_name = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1('analysis_file_name')
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
-        io = pynwb.NWBHDF5IO(path=lfp_file_abspath, mode='r')
-        nwbf = io.read()
+        nwbf = get_nwb_file(lfp_file_abspath)
         # get the object id
         nwb_object_id = (self & {'analysis_file_name': lfp_file_name}).fetch1('filtered_data_object_id')
         return nwbf.objects[nwb_object_id]
