@@ -13,9 +13,8 @@ def insert_sessions(nwb_file_names):
     Parameters
     ----------
     nwb_file_names : string or List of strings
-        nwb_file_names is a list of relative file paths, relative
-        to $NWB_DATAJOINT_BASE_DIR, pointing to existing .nwb files.
-        Each file represents a session.
+        nwb_file_names is a list of relative file paths, relative to $NWB_DATAJOINT_BASE_DIR, pointing to
+        existing .nwb files. Each file represents a session.
     """
     check_env()
 
@@ -30,7 +29,7 @@ def insert_sessions(nwb_file_names):
 
         # Check whether the file already exists in the Nwbfile table
         if len(Nwbfile() & {'nwb_file_name': out_nwb_file_name}):
-            warnings.warn(f'Cannot insert data from {out_nwb_file_name} - file name is already in Nwbfile.')
+            warnings.warn(f'Cannot insert data from {nwb_file_name}: {out_nwb_file_name} is already in Nwbfile table.')
             continue
 
         # Make a copy of the NWB file that ends with '_'.
