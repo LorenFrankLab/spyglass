@@ -25,10 +25,32 @@ from mountainlab_pytools.mdaio import readmda
 
 from requests.exceptions import ConnectionError
 
+class Timer:
+    """
+    Timer context manager for measuring time taken by each sorting step
+    """
+    def __init__(self, *, label='', verbose=False):
+      self._label = label
+      self._start_time = None
+      self._stop_time = None
+      self._verbose = verbose
+
+    def elapsed(self):
+      if self._stop_time is None:
+        return time.time() - self._start_time
+      else:
+        return self._stop_time - self._start_time
+
+    def __enter__(self):
+      self._start_time = time.time()
+      return self
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+      self._stop_time = time.time()
+      if self._verbose:
+        print(f"Elapsed time for {self._label}: {self.elapsed()} sec")
+
 schema = dj.schema('common_spikesorting')
-
-_OVERWRITE_SORTING_RESULTS = True
-
 
 @schema
 class SortGroup(dj.Manual):
@@ -437,28 +459,31 @@ class SpikeSorting(dj.Computed):
         
         extractor_nwb_path = str(Path(analysis_path) / unique_file_name)
 
+        # TODO: this step is omitted for now because it takes a long time. decide whether it's necesary to save
+        #       a recording extractor
         # Write recording extractor to NWB file
-        se.NwbRecordingExtractor.write_recording(recording,
-                                                 save_path=extractor_nwb_path,
-                                                 overwrite=_OVERWRITE_SORTING_RESULTS)
-
+        # se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path)
 
         print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'parameter_set_name': key['parameter_set_name']}).fetch1()
+        
+        # TODO: figure out the effect of `grouping_property`
         sorting = ss.run_sorter(key['sorter_name'], recording,
                                 output_folder=os.getenv('SORTING_TEMP_DIR', None),
                                 # grouping_property='group',
                                 **sort_parameters['parameter_dict'])
 
         key['time_of_sort'] = int(time.time())
-
-        se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path,
-                                             timestamps=recording._timestamps)
+        
+        # TODO: check that the latest version of SE supports the timestamps
+        se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
+                                            #  timestamps=recording._timestamps)
 
         print('\nComputing quality metrics...')
-        metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')
-        metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+        with Timer(label='compute metrics', verbose=True):
+            metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')     
+            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
 
         print('\nSaving sorting results...')
         units = dict()
@@ -483,43 +508,40 @@ class SpikeSorting(dj.Computed):
             kp_channel = kp.get_channels()
         except ConnectionError:
             raise RuntimeError(('You must have a kachery-p2p daemon running in'
-                                ' the background. Run `kachery-p2p-start-daemon --label franklab`.'
-                                ' Ask Kyu to add your node to franklab channel.'
-                                ' Then run `kachery-p2p-join-channel https://gist.githubuse'
-                                'rcontent.com/khl02007/b3a092ba3e590946480fb1267'
-                                '964a053/raw/f05eda4789e61980ce630b23ed38a7593f5'
-                                '8a7d9/franklab_kachery-p2p_config.yaml`'))
+                                ' the background.'))
 
-        print('\nGenerating feed for curation...')
-        feed = kp.load_feed(key['analysis_file_name'], create=True)
-        workspace = le.load_workspace(workspace_name='default', feed=feed)
+        # TODO: redo this so that it works with latest version of labbox-ephys
+        # print('\nGenerating feed for curation...')
+        # feed = kp.load_feed(key['analysis_file_name'], create=True)
+        # workspace = le.load_workspace(workspace_uri=f'workspace://{feed}/default')
 
-        recording_uri = ka.store_object({
-            'recording_format': 'nwb',
-            'data': {
-                'path': extractor_nwb_path
-            }
-        })
-        sorting_uri = ka.store_object({
-            'sorting_format': 'nwb',
-            'data': {
-                'path': extractor_nwb_path
-            }
-        })
+        # recording_uri = ka.store_object({
+        #     'recording_format': 'nwb',
+        #     'data': {
+        #         'path': extractor_nwb_path
+        #     }
+        # })
+        # sorting_uri = ka.store_object({
+        #     'sorting_format': 'nwb',
+        #     'data': {
+        #         'path': extractor_nwb_path
+        #     }
+        # })
 
-        sorting = le.LabboxEphysSortingExtractor(sorting_uri)
-        recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
+        # sorting = le.LabboxEphysSortingExtractor(sorting_uri)
+        # recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
 
-        print(f'\nFeed URI: {feed.get_uri()}')
+        # print(f'\nFeed URI: {feed.get_uri()}')
 
-        recording_label = key['nwb_file_name']+'_'+key['sort_interval_name'] \
-                          +'_'+str(key['sort_group_id'])
-        sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
+        # recording_label = key['nwb_file_name']+'_'+key['sort_interval_name'] \
+        #                   +'_'+str(key['sort_group_id'])
+        # sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
 
-        R_id = workspace.add_recording(recording=recording, label=recording_label)
-        S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
+        # R_id = workspace.add_recording(recording=recording, label=recording_label)
+        # S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
 
-        key['curation_feed_uri'] = feed.get_uri()
+        # key['curation_feed_uri'] = feed.get_uri()
+        key['curation_feed_uri'] = ''
 
         self.insert1(key)
         print('\nDone - entry inserted to table.')
@@ -584,7 +606,7 @@ class SpikeSorting(dj.Computed):
         probe_type = (Electrode & {'nwb_file_name': key['nwb_file_name'],
                                    'electrode_group_name': electrode_group_name,
                                    'electrode_id': electrode_ids[0]}).fetch1('probe_type')
-
+        
         R = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']),
                                      electrical_series_name = 'e-series')
 
