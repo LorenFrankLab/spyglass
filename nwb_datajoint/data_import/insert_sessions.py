@@ -1,5 +1,6 @@
 import os
 import pynwb
+import warnings
 
 from ..common import Nwbfile, populate_all_common
 from .storage_dirs import check_env
@@ -12,9 +13,8 @@ def insert_sessions(nwb_file_names):
     Parameters
     ----------
     nwb_file_names : string or List of strings
-        nwb_file_names is a list of relative file paths, relative
-        to $NWB_DATAJOINT_BASE_DIR, pointing to existing .nwb files.
-        Each file represents a session.
+        nwb_file_names is a list of relative file paths, relative to $NWB_DATAJOINT_BASE_DIR, pointing to
+        existing .nwb files. Each file represents a session.
     """
     check_env()
 
@@ -24,9 +24,16 @@ def insert_sessions(nwb_file_names):
     for nwb_file_name in nwb_file_names:
         assert not nwb_file_name.startswith('/'), f'You must use relative paths. nwb_file_name: {nwb_file_name}'
 
+        # file name for the copied raw data
+        out_nwb_file_name = os.path.splitext(nwb_file_name)[0] + '_.nwb'
+
+        # Check whether the file already exists in the Nwbfile table
+        if len(Nwbfile() & {'nwb_file_name': out_nwb_file_name}):
+            warnings.warn(f'Cannot insert data from {nwb_file_name}: {out_nwb_file_name} is already in Nwbfile table.')
+            continue
+
         # Make a copy of the NWB file that ends with '_'.
         # This has everything except the raw data but has a link to the raw data in the original file
-        out_nwb_file_name = os.path.splitext(nwb_file_name)[0] + '_.nwb'
         copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
         populate_all_common(out_nwb_file_name)

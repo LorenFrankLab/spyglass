@@ -14,17 +14,18 @@ class DataAcquisitionDevice(dj.Manual):
     adc_circuit = NULL: varchar(80)
     """
 
-    def __init__(self, *args):
-        # do your custom stuff here
-        super().__init__(*args)  # call the base implementation
-
     def insert_from_nwbfile(self, nwbf):
-        """Insert a data acquisition device from an nwb file
+        """Insert a data acquisition device from an NWB file.
 
-        :param nwbf: NWB file object
-        :type nwbf: file object
-        :return: list of data acquisition object names
-        :rtype: list
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            The source NWB file object.
+
+        Returns
+        -------
+        device_name_list : list
+            List of data acquisition object names found in the NWB file.
         """
         device_dict = dict()
         device_name_list = list()
@@ -59,12 +60,17 @@ class CameraDevice(dj.Manual):
         self.insert1({'camera_name': 'none'}, skip_duplicates='True')
 
     def insert_from_nwbfile(self, nwbf):
-        """Insert a camera device from an nwb file
+        """Insert camera devices from an NWB file
 
-        :param nwbf: NWB file object
-        :type nwbf: file object
-        :return: None
-        :rtype: None
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            The source NWB file object.
+
+        Returns
+        -------
+        device_name_list : list
+            List of camera device object names found in the NWB file.
         """
         device_dict = dict()
         device_name_list = list()
@@ -113,6 +119,13 @@ class Probe(dj.Manual):
         """
 
     def insert_from_nwbfile(self, nwbf):
+        """Insert probe devices from an NWB file
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            The source NWB file object.
+        """
         probe_dict = dict()
         probe_re = re.compile("probe")
         for d in nwbf.devices:

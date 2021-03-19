@@ -5,7 +5,7 @@ import pandas as pd
 import pathlib
 import pynwb
 
-from .nwb_helper_fn import get_electrode_indices
+from .nwb_helper_fn import get_electrode_indices, get_nwb_file
 
 schema = dj.schema("common_nwbfile")
 
@@ -19,20 +19,19 @@ nwb_keep_fields = ('devices', 'electrode_groups', 'electrodes', 'experiment_desc
 @schema
 class Nwbfile(dj.Manual):
     definition = """
-    # Table for holding the Nwb files.
+    # Table for holding the NWB files.
     nwb_file_name: varchar(255) # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
     """
 
     def insert_from_relative_file_name(self, nwb_file_name):
-        """
-        Insert a new session from an existing nwb file.
+        """Insert a new session from an existing NWB file.
 
         Parameters
         ----------
         nwb_file_name : str
-            Relative path to the nwb file
+            The relative path to the NWB file.
         """
         nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
         assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
@@ -44,6 +43,20 @@ class Nwbfile(dj.Manual):
 
     @staticmethod
     def get_abs_path(nwb_file_name):
+        """Return the absolute path for a stored raw NWB file given just the file name.
+
+        The NWB_DATAJOINT_BASE_DIR environment variable must be set.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of an NWB file that has been inserted into the Nwbfile() schema.
+
+        Returns
+        -------
+        nwb_file_abspath : str
+            The absolute path for the given file name.
+        """
         base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
         assert base_dir is not None, 'You must set NWB_DATAJOINT_BASE_DIR or provide the base_dir argument'
 
@@ -52,25 +65,30 @@ class Nwbfile(dj.Manual):
 
     @staticmethod
     def add_to_lock(nwb_file_name):
-        """
-        Adds the specified NWB file to the file with the list of nwb files to be
-        locked
+        """Add the specified NWB file to the file with the list of NWB files to be locked.
 
-        :param nwb_file_name: the name of an nwb file that has been inserted into the Nwbfile() schema
-        :type nwb_file_name: string
-        :return: None
+        The NWB_LOCK_FILE environment variable must be set.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of an NWB file that has been inserted into the Nwbfile() schema.
         """
         key = {'nwb_file_name': nwb_file_name}
         # check to make sure the file exists
-        assert len((Nwbfile() & key).fetch()) > 0, f'Error adding {nwb_file_name} to lock file, not in Nwbfile() schema'
+        assert len((Nwbfile() & key).fetch()) > 0, \
+            f'Error adding {nwb_file_name} to lock file, not in Nwbfile() schema'
 
         lock_file = open(os.getenv('NWB_LOCK_FILE'), 'a+')
         lock_file.write(f'{nwb_file_name}\n')
         lock_file.close()
 
     def cleanup(self, delete_files=False):
-        """ Removes the filepath entries for nwb files that are not in use. Does not delete the files themselves.
-        Run this after deleting the Nwbfile() entries themselves."""
+        """Remove the filepath entries for NWB files that are not in use.
+
+        This does not delete the files themselves unless delete_files=True is specified
+        Run this after deleting the Nwbfile() entries themselves.
+        """
         self.external['raw'].delete(delete_external_files=delete_files)
 
 
@@ -79,8 +97,8 @@ class Nwbfile(dj.Manual):
 @schema
 class AnalysisNwbfile(dj.Manual):
     definition = """
-    # Table for holding the NWB files that contain results of analysis, such as spike sorting
-    analysis_file_name : varchar(255) # name of the file
+    # Table for holding the NWB files that contain results of analysis, such as spike sorting.
+    analysis_file_name : varchar(255)             # name of the file
     ---
     -> Nwbfile                                    # name of the parent NWB file. Used for naming and metadata copy
     analysis_file_abs_path: filepath@analysis     # the full path to the file
@@ -89,135 +107,133 @@ class AnalysisNwbfile(dj.Manual):
                                                   # that span multiple NWB files
     """
 
-    def __init__(self, *args):
-        # do your custom stuff here
-        super().__init__(*args)  # call the base implementation
-
     def create(self, nwb_file_name):
-        """
-        Opens the NWB file that ends with _, creates a copy, writes out the
-        copy to disk and return the name of the new file.
-        Note that this does NOT add the file to the schema; that needs to be
-        done after data are written to it.
+        """Open the NWB file, create a copy, write the copy to disk and return the name of the new file.
+
+        Note that this does NOT add the file to the schema; that needs to be done after data are written to it.
 
         Parameters
         ----------
-        nwb_file_name : string
+        nwb_file_name : str
+            The name of an NWB file to be copied.
 
         Returns
         -------
-        analysis_file_name : string
+        analysis_file_name : str
+            The name of the new NWB file.
         """
-
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
+            nwbf = io.read()
+            # pop off the unnecessary elements to save space
+            nwb_fields = nwbf.fields
+            for field in nwb_fields:
+                if field not in nwb_keep_fields:
+                    nwb_object = getattr(nwbf, field)
+                    if type(nwb_object) is pynwb.core.LabelledDict:
+                        for module in list(nwb_object.keys()):
+                            nwb_object.pop(module)
 
-        io = pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r')
-        nwbf = io.read()
+            analysis_file_name = self.__get_new_file_name(nwb_file_name)
+            # write the new file
+            print(f'Writing new NWB file {analysis_file_name}')
+            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            # key['analysis_file_abs_path'] = analysis_file_abs_path
+            # export the new NWB file
+            with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
+                export_io.export(io, nwbf)
 
-        # pop off the unnecessary elements to save space
-        nwb_fields = nwbf.fields
-        for field in nwb_fields:
-            if field not in nwb_keep_fields:
-                nwb_object = getattr(nwbf, field)
-                if type(nwb_object) is pynwb.core.LabelledDict:
-                    for module in list(nwb_object.keys()):
-                        nwb_object.pop(module)
+        return analysis_file_name
 
-        # key = dict()
-        # key['nwb_file_name'] = nwb_file_name
+    @classmethod
+    def __get_new_file_name(cls, nwb_file_name):
         # get the current number of analysis files related to this nwb file
         n_analysis_files = len((AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch())
         # name the file, adding the number of files with preceeding zeros
         analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_analysis_files).zfill(6) + '.nwb'
-        # key['analysis_file_name'] = analysis_file_name
-        # key['analysis_file_description'] = ''
-        # write the new file
-        print(f'Writing new NWB file {analysis_file_name}')
-        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        # key['analysis_file_abs_path'] = analysis_file_abs_path
-        # export the new NWB file
-        with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
-            export_io.export(io, nwbf)
-
-        io.close()
-
-        # insert the new file
-        # self.insert1(key)
         return analysis_file_name
 
-    @staticmethod
-    def copy(nwb_file_name):
-        """
-        Makes a copy of an analysis NWB file.
-        Note that this does NOT add the file to the schema; that needs to be
-        done after data are written to it.
+    @classmethod
+    def copy(cls, nwb_file_name):
+        """Make a copy of an analysis NWB file.
+
+        Note that this does NOT add the file to the schema; that needs to be done after data are written to it.
 
         Parameters
         ----------
-        nwb_file_name : string
-            name of analysis nwb file to be copied
+        nwb_file_name : str
+            The name of the analysis NWB file to be copied.
 
         Returns
         -------
-        analysis_file_name : string
+        analysis_file_name : str
+            The name of the new NWB file.
         """
-
         nwb_file_abspath = AnalysisNwbfile.get_abs_path(nwb_file_name)
-
-        io = pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r')
-        nwbf = io.read()
-
-        # get the current number of analysis files related to this nwb file
-        original_nwb_file_name = (AnalysisNwbfile &
-                                  {'analysis_file_name': nwb_file_name}).fetch('nwb_file_name')[0]
-        n_analysis_files = len((AnalysisNwbfile & {'nwb_file_name': original_nwb_file_name}).fetch())
-        # name the file, adding the number of files with preceeding zeros
-        analysis_file_name = os.path.splitext(original_nwb_file_name)[0] + str(n_analysis_files).zfill(6) + '.nwb'
-        # write the new file
-        print(f'Writing new NWB file {analysis_file_name}...')
-        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        # export the new NWB file
-        with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
-            export_io.export(io, nwbf)
-
-        io.close()
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
+            nwbf = io.read()
+            # get the current number of analysis files related to this nwb file
+            original_nwb_file_name = (AnalysisNwbfile &
+                                      {'analysis_file_name': nwb_file_name}).fetch('nwb_file_name')[0]
+            analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
+            # write the new file
+            print(f'Writing new NWB file {analysis_file_name}...')
+            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            # export the new NWB file
+            with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
+                export_io.export(io, nwbf)
 
         return analysis_file_name
 
     def add(self, nwb_file_name, analysis_file_name):
-        """
-        Adds the specified file to AnalysisNWBfile table
+        """Add the specified file to AnalysisNWBfile table.
 
         Parameters
         ----------
-        nwb_file_name : string
-            the name of the parent NWB file
-        analysis_file_name : string
-            the name of the analysis nwb file that was created
+        nwb_file_name : str
+            The name of the parent NWB file.
+        analysis_file_name : str
+            The name of the analysis NWB file that was created.
         """
         key = dict()
         key['nwb_file_name'] = nwb_file_name
         key['analysis_file_name'] = analysis_file_name
         key['analysis_file_description'] = ''
-        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        key['analysis_file_abs_path'] = analysis_file_abs_path
+        key['analysis_file_abs_path'] = AnalysisNwbfile.get_abs_path(analysis_file_name)
         self.insert1(key)
 
     @staticmethod
     def get_abs_path(analysis_nwb_file_name):
-        base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
-        assert base_dir is not None, 'You must set NWB_DATAJOINT_BASE_DIR or provide the base_dir argument'
+        """Return the absolute path for a stored analysis NWB file given just the file name.
 
-        analysis_nwb_file_abspath = base_dir / 'analysis' / analysis_nwb_file_name
-        return str(analysis_nwb_file_abspath)
+        The NWB_DATAJOINT_BASE_DIR environment variable must be set.
+
+        Parameters
+        ----------
+        analysis_nwb_file_name : str
+            The name of the NWB file that has been inserted into the AnalysisNwbfile() schema
+
+        Returns
+        -------
+        analysis_nwb_file_abspath : str
+            The absolute path for the given file name.
+        """
+        base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
+        assert base_dir is not None, 'You must set NWB_DATAJOINT_BASE_DIR environment variable.'
+
+        analysis_nwb_file_abspath = str(base_dir / 'analysis' / analysis_nwb_file_name)
+        return analysis_nwb_file_abspath
 
     @staticmethod
     def add_to_lock(analysis_file_name):
-        """ Adds the specified analysis nwbfile to the file with the list of nwb files to be locked
+        """Add the specified analysis NWB file to the file with the list of nwb files to be locked.
 
-        :param analysis_file_name: the name of an nwb file that has been inserted into the Nwbfile() schema
-        :type nwb_file_name: string
-        :return: None
+        The ANALYSIS_LOCK_FILE environment variable must be set.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            The name of the NWB file that has been inserted into the AnalysisNwbfile() schema
         """
         key = {'analysis_file_name': analysis_file_name}
         # check to make sure the file exists
@@ -230,19 +246,20 @@ class AnalysisNwbfile(dj.Manual):
     def add_nwb_object(self, analysis_file_name, nwb_object):
         # TODO: change to add_object with checks for object type and a name parameter, which should be specified if
         # it is not an NWB container
-        """
-        Adds an nwb object to the analysis file in the scratch area and returns the nwb object id
+        """Add an NWB object to the analysis file in the scratch area and returns the NWB object ID
 
-        :param analysis_file_name: the name of the analysis nwb file
-        :type analysis_file_name: str
-        :param nwb_object: the nwb object created by pynwb
-        :type nwb_object: NWBDataInterface
-        :param processing_module: the name of the processing module to create, defaults to 'analysis'
-        :type processing_module: str, optional
-        :return: the nwb object id of the added object
-        :rtype: str
+        Parameters
+        ----------
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        nwb_object : pynwb.core.NWBDataInterface
+            The NWB object created by PyNWB.
+
+        Returns
+        -------
+        nwb_object_id : str
+            The NWB object ID of the added object.
         """
-        # open the file, write the new object and return the object id
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf = io.read()
             nwbf.add_scratch(nwb_object)
@@ -251,27 +268,27 @@ class AnalysisNwbfile(dj.Manual):
 
     def add_units(self, analysis_file_name, units, units_valid_times,
                   units_sort_interval, metrics=None, units_waveforms=None):
-        """
-        Given a units dictionary where each entry is (unit id, spike times)
+        """Add units, given a units dictionary where each entry is (unit id, spike times).
 
         Parameters
         ----------
-        analysis_file_name: str
-            the name of the analysis nwb file
-        units: dict
-            dictionary of units and times with unit ids as keys
-        units_valid_times: dict
-            dictionary of units and valid times with unit ids as keys
-        units_sort_interval: dict
-            dictionary of units and sort_interval with unit ids as keys
-        units_waveforms: dataframe
-            optional dictionary of unit waveforms with unit ids as keys (optional)
-        metrics: dict
-            optional cluster metrics
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        units : dict
+            Dictionary of units and times with unit ids as keys.
+        units_valid_times : dict
+            Dictionary of units and valid times with unit ids as keys.
+        units_sort_interval : dict
+            Dictionary of units and sort_interval with unit ids as keys.
+        units_waveforms : dataframe, optional
+            Dictionary of unit waveforms with unit ids as keys.
+        metrics : dict, optional
+            Cluster metrics.
 
         Returns
         -------
-        the nwb object id of the Units object and the object id of the waveforms object ('' if None)
+        units_object_id, waveforms_object_id : str, str
+            The NWB object id of the Units object and the object id of the waveforms object ('' if None)
         """
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
             nwbf = io.read()
@@ -295,7 +312,7 @@ class AnalysisNwbfile(dj.Manual):
                         nwbf.add_unit_column(name=metric,
                                              description=f'{metric} sorting metric',
                                              data=metric_data)
-                # If the waveforms were specified, add them as a dataframe
+                # If the waveforms were specified, add them as a dataframe to scratch
                 waveforms_object_id = ''
                 if units_waveforms is not None:
                     waveforms_df = pd.DataFrame.from_dict(units_waveforms,
@@ -309,31 +326,35 @@ class AnalysisNwbfile(dj.Manual):
             else:
                 return ''
 
-    def get_electrode_indices(self, analysis_file_name, electrode_ids):
-        """
-        Given an analysis NWB file name, returns the indices of the specified
-        electrode_ids.
-
-        :param analysis_file_name: analysis NWB file name
-        :type analysi_file_name: str
-        :param electrode_ids: array or list of electrode_ids
-        :type electrode_ids: numpy array or list
-        :return: electrode_indices (numpy array of indices)
-        """
-        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
-            nwbf = io.read()
-            return get_electrode_indices(nwbf.electrodes, electrode_ids)
-
-    def cleanup(self, delete_files=False):
-        """
-        Removes the filepath entries for nwb files that are not in use.
-        Does not delete the files themselves unless delete_files = True is
-        specified. Run this after deleting the Nwbfile() entries themselves.
+    @classmethod
+    def get_electrode_indices(cls, analysis_file_name, electrode_ids):
+        """Given an analysis NWB file name, returns the indices of the specified electrode_ids.
 
         Parameters
         ----------
-        delete_files : bool
-            True if original files be deleted (default False
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        electrode_ids : numpy array or list
+            Array or list of electrode IDs.
+
+        Returns
+        -------
+        electrode_indices : numpy array
+            Array of indices in the electrodes table for the given electrode IDs.
+        """
+        nwbf = get_nwb_file(cls.get_abs_path(analysis_file_name))
+        return get_electrode_indices(nwbf.electrodes, electrode_ids)
+
+    def cleanup(self, delete_files=False):
+        """Remove the filepath entries for NWB files that are not in use.
+
+        Does not delete the files themselves unless delete_files=True is specified.
+        Run this after deleting the Nwbfile() entries themselves.
+
+        Parameters
+        ----------
+        delete_files : bool, optional
+            Whether the original files should be deleted (default False).
         """
         self.external['analysis'].delete(delete_external_files=delete_files)
 

@@ -19,6 +19,7 @@ from .common_session import Session, ExperimenterList
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
 from .common_nwbfile import Nwbfile, AnalysisNwbfile, NwbfileKachery, AnalysisNwbfileKachery
-from .nwb_helper_fn import get_data_interface, estimate_sampling_rate, get_valid_intervals, get_electrode_indices
+from .nwb_helper_fn import (get_data_interface, estimate_sampling_rate, get_valid_intervals, get_electrode_indices,
+                            get_nwb_file, close_nwb_files)
 
 from .populate_all_common import populate_all_common
