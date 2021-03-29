@@ -14,7 +14,7 @@ dependencies:
     - ml-ms4alg>=0.3.*
     - spikeinterface>=0.11
     - pynwb>=1.4
-    - datajoint==0.12.*
+    - datajoint==0.13.*
     - pymysql>=1.0.*
     - h5py==2.10.*
     - git+git://github.com/laboratorybox/labbox-launcher
