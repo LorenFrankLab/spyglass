@@ -1,4 +1,5 @@
 import datajoint as dj
+from numpy.core.records import record
 
 from .common_device import Probe
 from .common_interval import IntervalList, SortInterval, interval_list_intersect
@@ -387,6 +388,41 @@ class SpikeSortingMetrics(dj.Manual):
                                                      verbose=bool(m['verbose']))
 
 @schema
+class SpikeSortingArtifactParameters(dj.Manual):
+    definition = """
+    # Table for holding parameters related to artifact detection
+    artifact_param_name: varchar(200) #name for this set of parameters
+    ---
+    parameter_dict: BLOB    #dictionary of parameters for get_no_artifact_times() function
+    """
+
+    def get_no_artifact_times(self, recording, zscore_thresh=-1.0, amplitude_thresh=-1.0, fraction_chan_above_thresh = 1):
+        """returns an interval list of valid times, excluding detected artifacts found in data within recording extractor. 
+        Artifacts are defined as periods where the absolute amplitude of the signal exceeds one 
+        or both specified thresholds on the fraction of channels specified, with the period extended 
+        to the zero crossing of the signal on either side. 
+        Threshold values <0 are ignored.
+
+        :param recording: recording extractor 
+        :type recording: SpikeInterface recording extractor object
+        :param zscore_thresh: Stdev threshold for exclusion, defaults to -1.0
+        :type zscore_thresh: float, optional
+        :param amplitude_thresh: Amplitude threshold for exclusion, defaults to -1.0
+        :type amplitude_thresh: float, optional
+        :return: [array of valid times]
+        :rtype: [numpy array]
+        """
+        # if no thresholds were specified, we return an array with the timestamps of the first and last samples
+        if zscore_thresh <= 0 and amplitude_thresh <=0:
+            return np.asarray([[recording._timestamps[0], recording._timestamps[recording.get_num_frames()]]])   
+
+        data = recording.get_traces()
+              
+
+
+
+
+@schema
 class SpikeSortingParameters(dj.Manual):
     definition = """
     # Table for holding parameters for each spike sorting run
@@ -394,10 +430,13 @@ class SpikeSortingParameters(dj.Manual):
     -> SpikeSorterParameters
     -> SortInterval
     ---
+    -> SpikeSortingArtifactParameters
     -> SpikeSortingMetrics
     -> IntervalList
     import_path = '': varchar(200) # optional path to previous curated sorting output
     """
+
+
 
 @schema
 class SpikeSorting(dj.Computed):
@@ -406,6 +445,7 @@ class SpikeSorting(dj.Computed):
     -> SpikeSortingParameters
     ---
     -> AnalysisNwbfile
+    -> IntervalList
     units_object_id: varchar(40)           # Object ID for the units in NWB file
     time_of_sort=0: int                    # This is when the sort was done
     curation_feed_uri='': varchar(1000)    # Labbox-ephys feed for curation
@@ -443,8 +483,13 @@ class SpikeSorting(dj.Computed):
 
         # TODO: finish `import_sorted_data` function below
 
-        # Prepare a RecordingExtractor to pass into spike sorting
-        recording = self.get_recording_extractor(key)
+        # Prepare a RecordingExtractor to write to disk 
+        recording = self.get_filtered_recording_extractor(key)
+
+        # get the artifact detection parameters and apply artifact detection to zero out artifacts
+        artifact_key = (SpikeSortingParameters & key).fetch1('artifact_param_name')
+        artifact_param_dict = (SpikeSortingArtifactParameters & {'artifact_param_name': artifact_key}).fetch1('parameter_dict')
+        recording_valid_times = SpikeSortingArtifactParameters.get_no_artifact_times(recording, **artifact_param_dict)
 
         # Path to Nwb file that will hold recording and sorting extractors
         unique_file_name = key['nwb_file_name'] \
@@ -463,8 +508,15 @@ class SpikeSorting(dj.Computed):
         # TODO: this step is omitted for now because it takes a long time. decide whether it's necesary to save
         #       a recording extractor
         # Write recording extractor to NWB file
-        # se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path)
+        #print(f'Writing NWB recording extractor')
+        #se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path)
 
+        # whiten the extractor for sorting and metric calculations
+        print(f'Whitening data')
+        filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+                                                  'parameter_set_name': key['parameter_set_name']}).fetch1()
+        recording = st.preprocessing.whiten(recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
+        
         print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'parameter_set_name': key['parameter_set_name']}).fetch1()
@@ -573,7 +625,7 @@ class SpikeSorting(dj.Computed):
         sort_interval_valid_times = interval_list_intersect(sort_interval, valid_times)
         return sort_interval_valid_times
 
-    def get_recording_extractor(self, key):
+    def get_filtered_recording_extractor(self, key):
         """
         Generates a RecordingExtractor object based on parameters in key.
         (1) Loads the NWB file created during insertion as a NwbRecordingExtractor
@@ -614,7 +666,7 @@ class SpikeSorting(dj.Computed):
         sub_R = se.SubRecordingExtractor(R, channel_ids=electrode_ids.tolist(),
                                          start_frame=sort_indices[0],
                                          end_frame=sort_indices[1])
-
+        
         # TODO: add a step where large transients are masked
 
         sort_reference_electrode_id = (SortGroup & {'nwb_file_name': key['nwb_file_name'],
@@ -632,10 +684,7 @@ class SpikeSorting(dj.Computed):
                                                  freq_max=filter_params['frequency_max'],
                                                  freq_wid=filter_params['filter_width'],
                                                  chunk_size=filter_params['filter_chunk_size'],
-                                                 dtype='float32')
-
-        # TODO: handle better the random seed for filtering
-        sub_R = st.preprocessing.whiten(sub_R, seed=0)
+                                                 dtype='float32', )
 
         # If tetrode and location for every channel is (0,0), give new locations
         # TODO: remove this once the tetrodes are given positions
