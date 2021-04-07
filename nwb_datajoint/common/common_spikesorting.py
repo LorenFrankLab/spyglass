@@ -423,12 +423,12 @@ class SpikeSortingArtifactParameters(dj.Manual):
             return np.asarray([[recording._timestamps[0], recording._timestamps[recording.get_num_frames()]]])   
 
         half_window_points = np.round(recording.get_sampling_frequency() * 1000 * zero_window_len / 2)
-        nelect_above = np.round(proportion_above_thresh * data.shape[0]
+        nelect_above = np.round(proportion_above_thresh * data.shape[0])
         # get the data traces
         data = recording.get_traces()
         
         # compute the number of electrodes that have to be above threshold based on the number of rows of data
-        nelect_above = np.round(proportion_above_thresh * len(recording.get_channel_ids())
+        nelect_above = np.round(proportion_above_thresh * len(recording.get_channel_ids()))
 
         # apply the amplitude threshold
         above_a = np.abs(data) > amplitude_thresh
@@ -514,6 +514,7 @@ class SpikeSorting(dj.Computed):
 
         # Prepare a RecordingExtractor to write to disk 
         recording = self.get_filtered_recording_extractor(key)
+        recording_timestamps = recording._timestamps
 
         # get the artifact detection parameters and apply artifact detection to zero out artifacts
         artifact_key = (SpikeSortingParameters & key).fetch1('artifact_param_name')
@@ -528,7 +529,7 @@ class SpikeSorting(dj.Computed):
         recording = st.preprocessing.mask(recording, mask)
 
         # Path to Nwb file that will hold recording and sorting extractors
-        unique_name = key['nwb_file_name'] \
+        unique_file_name = key['nwb_file_name'] \
                            + '_' + key['sort_interval_name'] \
                            + '_' + str(key['sort_group_id']) \
                            + '_' + key['sorter_name'] \
@@ -552,7 +553,9 @@ class SpikeSorting(dj.Computed):
         filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                   'parameter_set_name': key['parameter_set_name']}).fetch1()
         recording = st.preprocessing.whiten(recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
-        
+        #TODO: get rid of recording_timestamps when it exists by default in the recording extractor
+        recording._timestamps = recording_timestamps
+
         print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'parameter_set_name': key['parameter_set_name']}).fetch1()
