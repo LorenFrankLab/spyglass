@@ -16,12 +16,14 @@ import os
 import time
 from pathlib import Path
 import numpy as np
+import scipy.stats as stats
 import json
 import kachery_p2p as kp
 import kachery as ka
 from itertools import compress
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .dj_helper_fn import dj_replace, fetch_nwb
+from .nwb_helper_fn import get_valid_intervals
 
 from mountainlab_pytools.mdaio import readmda
 
@@ -249,7 +251,7 @@ class SpikeSorterParameters(dj.Manual):
     frequency_min=300: int # high pass filter value
     frequency_max=6000: int # low pass filter value
     filter_width=1000: int # the number of coefficients in the filter
-    filter_chunk_size=30000: int # the size of the chunk for the filtering
+    filter_chunk_size=2000000: int # the size of the chunk for the filtering
     """
 
     def insert_from_spikeinterface(self):
@@ -396,11 +398,11 @@ class SpikeSortingArtifactParameters(dj.Manual):
     parameter_dict: BLOB    #dictionary of parameters for get_no_artifact_times() function
     """
 
-    def get_no_artifact_times(self, recording, zscore_thresh=-1.0, amplitude_thresh=-1.0, fraction_chan_above_thresh = 1):
+    def get_no_artifact_times(self, recording, zscore_thresh=-1.0, amplitude_thresh=-1.0, proportion_above_thresh = 1.0, zero_window_len = 1.0):
         """returns an interval list of valid times, excluding detected artifacts found in data within recording extractor. 
         Artifacts are defined as periods where the absolute amplitude of the signal exceeds one 
-        or both specified thresholds on the fraction of channels specified, with the period extended 
-        to the zero crossing of the signal on either side. 
+        or both specified thresholds on the proportion of channels specified, with the period extended 
+        by the zero_window/2 samples on each side 
         Threshold values <0 are ignored.
 
         :param recording: recording extractor 
@@ -409,6 +411,10 @@ class SpikeSortingArtifactParameters(dj.Manual):
         :type zscore_thresh: float, optional
         :param amplitude_thresh: Amplitude threshold for exclusion, defaults to -1.0
         :type amplitude_thresh: float, optional
+        :param proportion_above_thresh: 
+        :type float, optional
+        :param zero_window_len: the width of the window in milliseconds to zero out (window/2 on each side of threshold crossing)
+        :type int, optional
         :return: [array of valid times]
         :rtype: [numpy array]
         """
@@ -416,7 +422,30 @@ class SpikeSortingArtifactParameters(dj.Manual):
         if zscore_thresh <= 0 and amplitude_thresh <=0:
             return np.asarray([[recording._timestamps[0], recording._timestamps[recording.get_num_frames()]]])   
 
+        half_window_points = np.round(recording.get_sampling_frequency() * 1000 * zero_window_len / 2)
+        nelect_above = np.round(proportion_above_thresh * data.shape[0]
+        # get the data traces
         data = recording.get_traces()
+        
+        # compute the number of electrodes that have to be above threshold based on the number of rows of data
+        nelect_above = np.round(proportion_above_thresh * len(recording.get_channel_ids())
+
+        # apply the amplitude threshold
+        above_a = np.abs(data) > amplitude_thresh
+
+        #zscore the data and get the absolute value for thresholding
+        dataz = np.abs(stats.zscore(data, axis=1))
+        above_z = dataz > zscore_thresh
+
+        above_both = np.ravel(np.argwhere(np.sum(np.logical_and(above_z, above_a), axis=0) >= nelect_above))
+        valid_timestamps = recording._timestamps
+        # for each above threshold point, set the timestamps on either side of it to -1
+        for a in above_both:
+            valid_timestamps[a-half_window_points:a+half_window_points] = -1
+        
+        # use get_valid_intervals to find all of the resulting valid times. 
+        return get_valid_intervals(valid_timestamps[valid_timestamps !=-1 ], recoring.get_sampling_frequency(), 1.5, 0.001)
+
               
 
 
@@ -631,7 +660,7 @@ class SpikeSorting(dj.Computed):
         (1) Loads the NWB file created during insertion as a NwbRecordingExtractor
         (2) Slices the NwbRecordingExtractor in time (interval) and space (channels) to
             get a SubRecordingExtractor
-        (3) Applies referencing, bandpass filter, whitening
+        (3) Applies referencing, and bandpass filtering
 
         Parameters
         ----------
