@@ -2,7 +2,7 @@ import datajoint as dj
 from numpy.core.records import record
 
 from .common_device import Probe
-from .common_interval import IntervalList, SortInterval, interval_list_intersect
+from .common_interval import IntervalList, SortInterval, interval_list_intersect, interval_list_excludes_ind
 from .common_ephys import Raw, Electrode, ElectrodeGroup
 from .common_session import Session  # noqa: F401
 
@@ -519,7 +519,12 @@ class SpikeSorting(dj.Computed):
         artifact_key = (SpikeSortingParameters & key).fetch1('artifact_param_name')
         artifact_param_dict = (SpikeSortingArtifactParameters & {'artifact_param_name': artifact_key}).fetch1('parameter_dict')
         recording_valid_times = SpikeSortingArtifactParameters.get_no_artifact_times(recording, **artifact_param_dict)
+        #
 
+        # exclude the invalid times
+        mask = np.full(recording.get_num_frames(), True, dtype='bool')
+        mask[interval_list_excludes_ind(recording_valid_times, recording._timestamps)] = False
+        recording = st.preprocessing.mask(recording, mask)
         # Path to Nwb file that will hold recording and sorting extractors
         unique_file_name = key['nwb_file_name'] \
                            + '_' + key['sort_interval_name'] \
