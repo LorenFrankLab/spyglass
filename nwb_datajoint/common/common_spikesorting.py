@@ -518,15 +518,19 @@ class SpikeSorting(dj.Computed):
         # get the artifact detection parameters and apply artifact detection to zero out artifacts
         artifact_key = (SpikeSortingParameters & key).fetch1('artifact_param_name')
         artifact_param_dict = (SpikeSortingArtifactParameters & {'artifact_param_name': artifact_key}).fetch1('parameter_dict')
-        recording_valid_times = SpikeSortingArtifactParameters.get_no_artifact_times(recording, **artifact_param_dict)
-        #
-
+        no_artifact_valid_times = SpikeSortingArtifactParameters.get_no_artifact_times(recording, **artifact_param_dict)
+  
+        interval_key={'nwb_file_name' : nwb_file_name}
+        interval_key['interval_list_name'] = sort_interval + '_no_artifacts'
+        
         # exclude the invalid times
         mask = np.full(recording.get_num_frames(), True, dtype='bool')
-        mask[interval_list_excludes_ind(recording_valid_times, recording._timestamps)] = False
+        mask[interval_list_excludes_ind(sort_interval_valid_times, recording._timestamps)] = False
         recording = st.preprocessing.mask(recording, mask)
+
+
         # Path to Nwb file that will hold recording and sorting extractors
-        unique_file_name = key['nwb_file_name'] \
+        unique_name = key['nwb_file_name'] \
                            + '_' + key['sort_interval_name'] \
                            + '_' + str(key['sort_group_id']) \
                            + '_' + key['sorter_name'] \
