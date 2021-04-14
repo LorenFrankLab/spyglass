@@ -138,7 +138,6 @@ class AnalysisNwbfile(dj.Manual):
             # write the new file
             print(f'Writing new NWB file {analysis_file_name}')
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-            # key['analysis_file_abs_path'] = analysis_file_abs_path
             # export the new NWB file
             with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
                 export_io.export(io, nwbf)

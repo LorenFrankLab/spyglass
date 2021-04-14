@@ -460,10 +460,8 @@ class SpikeSorting(dj.Computed):
 
         extractor_nwb_path = str(Path(analysis_path) / unique_file_name)
 
-        # TODO: this step is omitted for now because it takes a long time. decide whether it's necesary to save
-        #       a recording extractor
         # Write recording extractor to NWB file
-        # se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path)
+        se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path)
 
         print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
@@ -512,37 +510,37 @@ class SpikeSorting(dj.Computed):
                                 ' the background.'))
 
         # TODO: redo this so that it works with latest version of labbox-ephys
-        # print('\nGenerating feed for curation...')
-        # feed = kp.load_feed(key['analysis_file_name'], create=True)
-        # workspace = le.load_workspace(workspace_uri=f'workspace://{feed}/default')
+        print('\nGenerating feed for curation...')
 
-        # recording_uri = ka.store_object({
-        #     'recording_format': 'nwb',
-        #     'data': {
-        #         'path': extractor_nwb_path
-        #     }
-        # })
-        # sorting_uri = ka.store_object({
-        #     'sorting_format': 'nwb',
-        #     'data': {
-        #         'path': extractor_nwb_path
-        #     }
-        # })
+        feed = kp.load_feed(key['analysis_file_name'], create=True)
+        workspace = le.load_workspace(workspace_uri=f'workspace://{feed.get_feed_id()}/default')
+        print(f'Workspace URI: {workspace.get_uri()}')
 
-        # sorting = le.LabboxEphysSortingExtractor(sorting_uri)
-        # recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
+        recording_uri = kp.store_object({
+            'recording_format': 'nwb',
+            'data': {
+                'path': extractor_nwb_path
+            }
+        })
+        sorting_uri = kp.store_object({
+            'sorting_format': 'nwb',
+            'data': {
+                'path': extractor_nwb_path
+            }
+        })
 
-        # print(f'\nFeed URI: {feed.get_uri()}')
+        sorting = le.LabboxEphysSortingExtractor(sorting_uri)
+        recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
 
-        # recording_label = key['nwb_file_name']+'_'+key['sort_interval_name'] \
-        #                   +'_'+str(key['sort_group_id'])
-        # sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
+        recording_label = key['nwb_file_name']+'_'+key['sort_interval_name'] \
+                          +'_'+str(key['sort_group_id'])
+        sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
 
-        # R_id = workspace.add_recording(recording=recording, label=recording_label)
-        # S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
+        R_id = workspace.add_recording(recording=recording, label=recording_label)
+        S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
 
-        # key['curation_feed_uri'] = feed.get_uri()
-        key['curation_feed_uri'] = ''
+        key['curation_feed_uri'] = feed.get_feed_id()
+        # key['curation_feed_uri'] = ''
 
         self.insert1(key)
         print('\nDone - entry inserted to table.')
@@ -634,8 +632,7 @@ class SpikeSorting(dj.Computed):
                                                  chunk_size=filter_params['filter_chunk_size'],
                                                  dtype='float32')
 
-        # TODO: handle better the random seed for filtering
-        sub_R = st.preprocessing.whiten(sub_R, seed=0)
+        sub_R = st.preprocessing.whiten(sub_R, chunk_size=filter_params['filter_chunk_size'], seed=0)
 
         # If tetrode and location for every channel is (0,0), give new locations
         # TODO: remove this once the tetrodes are given positions
