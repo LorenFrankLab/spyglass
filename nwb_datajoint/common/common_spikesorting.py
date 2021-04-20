@@ -4,7 +4,6 @@ from numpy.core.records import record
 from .common_device import Probe
 from .common_interval import IntervalList, SortInterval, interval_list_intersect, interval_list_excludes_ind
 from .common_ephys import Raw, Electrode, ElectrodeGroup
-from .common_session import Session  # noqa: F401
 
 import labbox_ephys as le
 import spikeinterface as si
@@ -19,13 +18,12 @@ import numpy as np
 import scipy.stats as stats
 import json
 import kachery_p2p as kp
-import kachery as ka
 from itertools import compress
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
 
-from mountainlab_pytools.mdaio import readmda
+from mountainsort4._mdaio_impl import readmda
 
 from requests.exceptions import ConnectionError
 
@@ -834,13 +832,13 @@ class SpikeSorting(dj.Computed):
             default: concatenated SpikeSortingParameter primary key
         """
 
-        recording_uri = ka.store_object({
+        recording_uri = kp.store_object({
             'recording_format': 'nwb',
             'data': {
                 'path': recording_nwb_path
             }
         })
-        sorting_uri = ka.store_object({
+        sorting_uri = kp.store_object({
             'sorting_format': 'nwb',
             'data': {
                 'path': sorting_nwb_path
