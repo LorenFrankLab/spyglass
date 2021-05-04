@@ -13,7 +13,7 @@ class IntervalList(dj.Manual):
     definition = """
     # Time intervals with data
     -> Session
-    interval_list_name: varchar(200) #descriptive name of this interval list
+    interval_list_name: varchar(200) # descriptive name of this interval list
     ---
     valid_times: longblob # numpy array with start and end times for each interval
     """
