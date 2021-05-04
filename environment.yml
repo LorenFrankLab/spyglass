@@ -12,10 +12,12 @@ dependencies:
   - pip:
     - labbox-ephys>=0.5
     - labbox-ephys-widgets-jp>=0.1
+    - kachery
     - mountainsort4
+    - ml_ms4alg
     - spikeinterface>=0.12
     - pynwb>=1.4
-    - datajoint==0.13.*
+    - datajoint>=0.13.*
     - ghostipy
     - pymysql>=1.0.*
     - h5py==2.10.*

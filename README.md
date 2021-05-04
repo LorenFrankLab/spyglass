@@ -1,6 +1,6 @@
 # nwb_datajoint
 
-The Frank lab Datajoint pipeline is designed to facilitate data storage, analysis, and sharing.
+The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing of neuroscience data to support reproducible research. It integrates existing open-source projects into a coherent framework so that they can be easily used. 
 
 ## Setup
 
@@ -23,8 +23,9 @@ The Frank lab Datajoint pipeline is designed to facilitate data storage, analysi
 3. Install this repository:
 
    ```bash
-   # This is preferred to `python setup.py develop`
-   # Note the dot (.) at the end
+   # to use the package
+   pip install nwb_datajoint
+   # if you're a developer:
    pip install -e .
    ```
 
