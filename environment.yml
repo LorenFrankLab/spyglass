@@ -10,12 +10,15 @@ dependencies:
   - dask>=2.30
   - pip>=20.2.*
   - pip:
-    - hither>=0.4.*
-    - ml-ms4alg>=0.3.*
-    - spikeinterface>=0.11
+    - labbox-ephys>=0.5
+    - labbox-ephys-widgets-jp>=0.1
+    - kachery
+    - mountainsort4
+    - ml_ms4alg
+    - spikeinterface>=0.12
     - pynwb>=1.4
-    - datajoint==0.13.*
+    - datajoint>=0.13.*
+    - ghostipy
     - pymysql>=1.0.*
     - h5py==2.10.*
-    - git+git://github.com/laboratorybox/labbox-launcher
     - git+git://github.com/LorenFrankLab/ndx-franklab-novela

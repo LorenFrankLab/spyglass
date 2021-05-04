@@ -3,7 +3,7 @@ import datetime
 import pynwb
 import pytest
 import shutil
-
+import os
 
 @pytest.fixture()
 def new_nwbfile_raw_file_name():
@@ -37,10 +37,10 @@ def new_nwbfile_no_ephys_file_name():
 
 @pytest.fixture()
 def moved_nwbfile_no_ephys_file_path(tmp_dir):
-    return tmp_path / 'raw_no_ephys.nwb'
+    return tmp_dir / 'raw_no_ephys.nwb'
 
 def test_copy_nwb(new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name, moved_nwbfile_no_ephys_file_path):
-    copy_all_but_raw_ephys(new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name)
+    copy_nwb_link_raw_ephys(new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name)
 
     base_dir = os.getenv('NWB_DATAJOINT_BASE_DIR', None)
     out_nwb_file_abspath = base_dir / new_nwbfile_no_ephys_file_name
