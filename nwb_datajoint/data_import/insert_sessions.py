@@ -2,7 +2,7 @@ import os
 import pynwb
 import warnings
 
-from ..common import Nwbfile, populate_all_common
+from ..common import Nwbfile, populate_all_common, get_raw_eseries
 from .storage_dirs import check_env
 
 
@@ -46,23 +46,25 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
     assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
     out_nwb_file_abs_path = Nwbfile.get_abs_path(out_nwb_file_name)
 
-    with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r') as input_io:
+    # TODO clean up this whole export process
+
+    with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r', load_namespaces=True) as input_io:
         nwbf = input_io.read()
 
         # pop off the unnecessary elements to save space
-        nwbf.acquisition.pop('e-series')
+        eseries = get_raw_eseries(nwbf)
+        nwbf.acquisition.pop(eseries.name)
 
         # export the new NWB file
-        with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='w') as export_io:
+        with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='w', manager=input_io.manager) as export_io:
             export_io.export(input_io, nwbf)
 
     # add link from new file back to raw ephys data in raw data file
-    manager = pynwb.get_manager()
-    with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r', manager=manager) as input_io:
+    with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r', load_namespaces=True) as input_io:
         nwbf_raw = input_io.read()
-        raw_ephys = nwbf_raw.acquisition['e-series']
+        raw_ephys = nwbf_raw.acquisition[eseries.name]
 
-        with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='a', manager=manager) as export_io:
+        with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='a', manager=input_io.manager) as export_io:
             nwbf_export = export_io.read()
 
             # add link to raw ephys ElectricalSeries from raw data file
