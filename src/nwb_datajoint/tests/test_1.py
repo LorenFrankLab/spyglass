@@ -11,20 +11,21 @@ import kachery as ka
 from ._temporarydirectory import TemporaryDirectory
 
 def test_1(tmp_path, datajoint_server):
+    from nwb_datajoint.common import Session, DataAcquisitionDevice, CameraDevice, Probe
     from nwb_datajoint.data_import import insert_sessions
-    from nwb_datajoint.common import Session, Device, Probe
     tmpdir = str(tmp_path)
     os.environ['NWB_DATAJOINT_BASE_DIR'] = tmpdir + '/nwb-data'
     os.environ['KACHERY_STORAGE_DIR'] = tmpdir + '/nwb-data/kachery-storage'
     os.mkdir(os.environ['NWB_DATAJOINT_BASE_DIR'])
     os.mkdir(os.environ['KACHERY_STORAGE_DIR'])
 
-    nwb_fname = os.environ['NWB_DATAJOINT_BASE_DIR'] + '/test.nwb'  
+    os.mkdir(os.environ['NWB_DATAJOINT_BASE_DIR'] + '/raw')  # TODO cleanup
+    nwb_fname = os.environ['NWB_DATAJOINT_BASE_DIR'] + '/raw/test.nwb'  
 
     with ka.config(fr='default_readonly'):
         ka.load_file('sha1://8ed68285c327b3766402ee75730d87994ac87e87/beans20190718_no_eseries_no_behavior.nwb', dest=nwb_fname)
 
-    with pynwb.NWBHDF5IO(path=nwb_fname, mode='r') as io:
+    with pynwb.NWBHDF5IO(path=nwb_fname, mode='r', load_namespaces=True) as io:
         nwbf = io.read()
 
     insert_sessions(['test.nwb'])
@@ -40,8 +41,12 @@ def test_1(tmp_path, datajoint_server):
     assert x['timestamps_reference_time'] == datetime(1970, 1, 1, 0, 0)
     assert x['experiment_description'] == 'Reinforcement learning'
 
-    x = Device().fetch()
-    # No devices?
+    x = DataAcquisitionDevice().fetch()
+    # TODO No data acquisition devices?
+    assert len(x) == 0
+    
+    x = CameraDevice().fetch()
+    # TODO No camera devices?
     assert len(x) == 0
 
     x = Probe().fetch()
