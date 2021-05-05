@@ -1,9 +1,13 @@
-from nwb_datajoint.data_import.insert_sessions import copy_nwb_link_raw_ephys
 import datetime
+from hdmf.backends.warnings import BrokenLinkWarning
+import pathlib
 import pynwb
 import pytest
 import shutil
 import os
+
+from nwb_datajoint.data_import.insert_sessions import copy_nwb_link_raw_ephys
+
 
 @pytest.fixture()
 def new_nwbfile_raw_file_name():
@@ -21,7 +25,7 @@ def new_nwbfile_raw_file_name():
     )
     nwbfile.add_acquisition(ts)
 
-    base_dir = os.getenv('NWB_DATAJOINT_BASE_DIR', None)
+    base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
     assert base_dir is not None, 'You must set NWB_DATAJOINT_BASE_DIR or provide the base_dir argument'
 
     file_name = 'raw.nwb'
@@ -31,25 +35,29 @@ def new_nwbfile_raw_file_name():
 
     return file_name
 
+
 @pytest.fixture()
 def new_nwbfile_no_ephys_file_name():
     return 'raw_no_ephys.nwb'
 
+
 @pytest.fixture()
-def moved_nwbfile_no_ephys_file_path(tmp_dir):
-    return tmp_dir / 'raw_no_ephys.nwb'
+def moved_nwbfile_no_ephys_file_path(tmp_dir, new_nwbfile_no_ephys_file_name):
+    return tmp_dir / new_nwbfile_no_ephys_file_name
+
 
 def test_copy_nwb(new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name, moved_nwbfile_no_ephys_file_path):
     copy_nwb_link_raw_ephys(new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name)
 
-    base_dir = os.getenv('NWB_DATAJOINT_BASE_DIR', None)
+    base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
     out_nwb_file_abspath = base_dir / new_nwbfile_no_ephys_file_name
     with pynwb.NWBHDF5IO(path=out_nwb_file_abspath, mode='r') as io:
         nwbfile = io.read()
-        assert 'e-series' not in nwbfile.acquisition
+        assert 'test_ts' not in nwbfile.acquisition
 
     # test readability after move
     shutil.move(out_nwb_file_abspath, moved_nwbfile_no_ephys_file_path)
     with pynwb.NWBHDF5IO(path=moved_nwbfile_no_ephys_file_path, mode='r') as io:
-        nwbfile = io.read()  # should raise BrokenLinkWarning
-        assert 'e-series' not in nwbfile.acquisition
+        with pytest.warns(BrokenLinkWarning):
+            nwbfile = io.read()  # should raise BrokenLinkWarning
+        assert 'test_ts' not in nwbfile.acquisition
