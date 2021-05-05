@@ -40,11 +40,14 @@ def insert_sessions(nwb_file_names):
 
 
 def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
-    # TODO: check if file exists and perhaps prompt user?
     print(f'Creating a copy of NWB file {nwb_file_name} with link to raw ephys data: {out_nwb_file_name}')
+
     nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
     assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
+
     out_nwb_file_abs_path = Nwbfile.get_abs_path(out_nwb_file_name)
+    if os.path.exists(out_nwb_file_name):
+        warnings.warn(f'Output file {out_nwb_file_abs_path} exists and will be overwritten.')
 
     with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r') as input_io:
         nwbf = input_io.read()
