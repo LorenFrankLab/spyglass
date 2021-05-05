@@ -1,15 +1,18 @@
-import pytest
-import sys
+# directory-specific hook implementations
 import os
-from .fixtures._datajoint_server import datajoint_server
+import sys
+
+from .fixtures._datajoint_server import datajoint_server  # noqa: F401
 
 
 thisdir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(thisdir)
 
+
 def pytest_addoption(parser):
     parser.addoption('--current', action='store_true', dest="current",
-                 default=False, help="run only tests marked as current")
+                     default=False, help="run only tests marked as current")
+
 
 def pytest_configure(config):
     config.addinivalue_line(
