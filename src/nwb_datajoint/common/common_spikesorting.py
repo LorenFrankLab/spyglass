@@ -4,6 +4,7 @@ import datajoint as dj
 from .common_device import Probe
 from .common_interval import IntervalList, SortInterval, interval_list_intersect, interval_list_excludes_ind
 from .common_ephys import Raw, Electrode, ElectrodeGroup
+from .common_session import Session
 from .common_nwbfile import Nwbfile, AnalysisNwbfile
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
