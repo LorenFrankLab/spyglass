@@ -30,7 +30,7 @@ def new_nwbfile_raw_file_name():
 
     file_name = 'raw.nwb'
     file_path = base_dir / file_name
-    with pynwb.NWBHDF5IO(file_path, mode='w') as io:
+    with pynwb.NWBHDF5IO(str(file_path), mode='w') as io:
         io.write(nwbfile)
 
     return file_name
@@ -51,13 +51,13 @@ def test_copy_nwb(new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name, mov
 
     base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
     out_nwb_file_abspath = base_dir / new_nwbfile_no_ephys_file_name
-    with pynwb.NWBHDF5IO(path=out_nwb_file_abspath, mode='r') as io:
+    with pynwb.NWBHDF5IO(path=str(out_nwb_file_abspath), mode='r') as io:
         nwbfile = io.read()
         assert 'test_ts' not in nwbfile.acquisition
 
     # test readability after move
     shutil.move(out_nwb_file_abspath, moved_nwbfile_no_ephys_file_path)
-    with pynwb.NWBHDF5IO(path=moved_nwbfile_no_ephys_file_path, mode='r') as io:
+    with pynwb.NWBHDF5IO(path=str(moved_nwbfile_no_ephys_file_path), mode='r') as io:
         with pytest.warns(BrokenLinkWarning):
             nwbfile = io.read()  # should raise BrokenLinkWarning
         assert 'test_ts' not in nwbfile.acquisition
