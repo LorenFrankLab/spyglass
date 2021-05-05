@@ -1,9 +1,9 @@
 kyu/
+environment2.yml
 devel/data
 *-Copy*.ipynb
 Untitled.ipynb
 rec_to_nwb
-environment.yml.bakup
 nwb_datajoint.code-workspace
 mountainsort4_output/
 .idea/
