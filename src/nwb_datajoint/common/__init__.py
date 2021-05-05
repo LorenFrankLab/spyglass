@@ -6,8 +6,8 @@ from .common_dio import DIOEvents
 from .common_ephys import ElectrodeGroup, Electrode, Raw, SampleCount
 from .common_ephys import LFPSelection, LFP, LFPBandSelection, LFPBand
 from .common_spikesorting import (SortGroup, SpikeSorting, SpikeSorter, SpikeSorterParameters,
-                                  SpikeSortingWaveformParameters, SpikeSortingParameters,
-                                  SpikeSortingMetrics, CuratedSpikeSorting)
+                                  SpikeSortingWaveformParameters, SpikeSortingArtifactParameters,
+                                  SpikeSortingParameters,SpikeSortingMetrics, CuratedSpikeSorting)
 from .common_filter import FirFilter
 from .common_interval import (IntervalList, SortInterval, interval_list_contains,
                               interval_list_contains_ind, interval_list_excludes,
