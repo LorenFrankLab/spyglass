@@ -40,20 +40,24 @@ def insert_sessions(nwb_file_names):
 
 
 def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
-    # TODO: check if file exists and perhaps prompt user?
     print(f'Creating a copy of NWB file {nwb_file_name} with link to raw ephys data: {out_nwb_file_name}')
+
     nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
     assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
+
     out_nwb_file_abs_path = Nwbfile.get_abs_path(out_nwb_file_name)
+    if os.path.exists(out_nwb_file_name):
+        warnings.warn(f'Output file {out_nwb_file_abs_path} exists and will be overwritten.')
 
     # TODO clean up this whole export process
 
     with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r', load_namespaces=True) as input_io:
         nwbf = input_io.read()
 
-        # pop off the unnecessary elements to save space
-        eseries = get_raw_eseries(nwbf)
-        nwbf.acquisition.pop(eseries.name)
+        # pop off acquisition electricalseries
+        eseries_list = get_raw_eseries(nwbf)
+        for eseries in eseries_list:
+            nwbf.acquisition.pop(eseries.name)
 
         # export the new NWB file
         with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='w', manager=input_io.manager) as export_io:
@@ -62,13 +66,14 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
     # add link from new file back to raw ephys data in raw data file
     with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r', load_namespaces=True) as input_io:
         nwbf_raw = input_io.read()
-        raw_ephys = nwbf_raw.acquisition[eseries.name]
+        eseries_list = get_raw_eseries(nwbf_raw)
 
         with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='a', manager=input_io.manager) as export_io:
             nwbf_export = export_io.read()
 
-            # add link to raw ephys ElectricalSeries from raw data file
-            nwbf_export.add_acquisition(raw_ephys)
+            # add link to raw ephys ElectricalSeries in raw data file
+            for eseries in eseries_list:
+                nwbf_export.add_acquisition(eseries)
             nwbf_export.set_modified()  # workaround until the above sets modified=True on the file
 
             export_io.write(nwbf_export)

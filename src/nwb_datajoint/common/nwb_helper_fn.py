@@ -71,22 +71,19 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=pynwb.
 
 
 def get_raw_eseries(nwbfile):
-    """Search for an ElectricalSeries in the acquisition group of an NWB file.
+    """Return all ElectricalSeries in the acquisition group of an NWB file.
+
+    ElectricalSeries found within LFP objects in the acquisition will also be returned.
 
     Parameters
     ----------
     nwbfile : pynwb.NWBFile
         The NWB file object to search in.
 
-    Warns
-    -----
-    UserWarning
-        If multiple ElectricalSeries are found.
-
     Returns
     -------
-    eseries : ElectricalSeries
-        The first ElectricalSeries object found, or None if not found.
+    ret : list
+        A list of all ElectricalSeries in the acquisition group of an NWB file
     """
     ret = []
     for nwb_object in nwbfile.acquisition.values():
@@ -94,13 +91,7 @@ def get_raw_eseries(nwbfile):
             ret.append(nwb_object)
         elif isinstance(nwb_object, pynwb.ecephys.LFP):
             ret.extend(nwb_object.electrical_series.values())
-    if len(ret) > 1:
-        warnings.warn(f"Multiple ElectricalSeries types found in the acquisition group of the NWB file"
-                      f"with identifier {nwbfile.identifier}. Using the first one found.")
-    if len(ret) >= 1:
-        return ret[0]
-    else:
-        return None
+    return ret
 
 
 def estimate_sampling_rate(timestamps, multiplier):
