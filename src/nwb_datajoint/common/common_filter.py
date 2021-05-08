@@ -178,7 +178,7 @@ class FirFilter(dj.Manual):
             output_shape_list[time_axis] += shape[time_axis]
 
         # open the nwb file to create the dynamic table region and electrode series, then write and close the file
-        with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a") as io:
+        with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             # get the indices of the electrodes in the electrode table
             elect_ind = get_electrode_indices(nwbf, electrode_ids)
@@ -195,7 +195,7 @@ class FirFilter(dj.Manual):
             io.write(nwbf)
 
         # reload the NWB file to get the h5py objects for the data and the timestamps
-        with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a") as io:
+        with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             es = nwbf.objects[es.object_id]
             filtered_data = es.data
