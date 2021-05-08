@@ -49,8 +49,6 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
     if os.path.exists(out_nwb_file_name):
         warnings.warn(f'Output file {out_nwb_file_abs_path} exists and will be overwritten.')
 
-    # TODO clean up this whole export process
-
     with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r', load_namespaces=True) as input_io:
         nwbf = input_io.read()
 
@@ -63,7 +61,8 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
         with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='w', manager=input_io.manager) as export_io:
             export_io.export(input_io, nwbf)
 
-    # add link from new file back to raw ephys data in raw data file
+    # add link from new file back to raw ephys data in raw data file using fresh build manager and container cache
+    # where the acquisition electricalseries objects have not been removed
     with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r', load_namespaces=True) as input_io:
         nwbf_raw = input_io.read()
         eseries_list = get_raw_eseries(nwbf_raw)
