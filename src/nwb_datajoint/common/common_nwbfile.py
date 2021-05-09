@@ -123,7 +123,7 @@ class AnalysisNwbfile(dj.Manual):
             The name of the new NWB file.
         """
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r', load_namespaces=True) as io:
             nwbf = io.read()
             # pop off the unnecessary elements to save space
             nwb_fields = nwbf.fields
@@ -139,7 +139,7 @@ class AnalysisNwbfile(dj.Manual):
             print(f'Writing new NWB file {analysis_file_name}')
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
             # export the new NWB file
-            with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
+            with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w', manager=io.manager) as export_io:
                 export_io.export(io, nwbf)
 
         return analysis_file_name
@@ -169,7 +169,7 @@ class AnalysisNwbfile(dj.Manual):
             The name of the new NWB file.
         """
         nwb_file_abspath = AnalysisNwbfile.get_abs_path(nwb_file_name)
-        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r') as io:
+        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r', load_namespaces=True) as io:
             nwbf = io.read()
             # get the current number of analysis files related to this nwb file
             original_nwb_file_name = (AnalysisNwbfile &
@@ -179,7 +179,7 @@ class AnalysisNwbfile(dj.Manual):
             print(f'Writing new NWB file {analysis_file_name}...')
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
             # export the new NWB file
-            with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w') as export_io:
+            with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w', manager=io.manager) as export_io:
                 export_io.export(io, nwbf)
 
         return analysis_file_name
@@ -259,7 +259,7 @@ class AnalysisNwbfile(dj.Manual):
         nwb_object_id : str
             The NWB object ID of the added object.
         """
-        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
+        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             nwbf.add_scratch(nwb_object)
             io.write(nwbf)
@@ -289,7 +289,7 @@ class AnalysisNwbfile(dj.Manual):
         units_object_id, waveforms_object_id : str, str
             The NWB object id of the Units object and the object id of the waveforms object ('' if None)
         """
-        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a") as io:
+        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             sort_intervals = list()
             if len(units.keys()):

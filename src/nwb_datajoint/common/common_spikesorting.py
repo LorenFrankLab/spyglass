@@ -852,7 +852,7 @@ class CuratedSpikeSorting(dj.Computed):
 
         # Get metrics from analysis NWB file
         with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(parent_key['analysis_file_name']),
-                             mode = "r") as io:
+                             mode = "r", load_namespaces=True) as io:
             nwbf = io.read()
             noise_overlap = nwbf.units['noise_overlap'][:]
             isolation_score = nwbf.units['nn_hit_rate'][:]
@@ -864,7 +864,7 @@ class CuratedSpikeSorting(dj.Computed):
         # Add labels to the new analysis NWB file
         print('\nSaving units data to new AnalysisNwb file...')
         with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(new_analysis_nwb_filename),
-                             mode = "a") as io:
+                             mode = "a", load_namespaces=True) as io:
             nwbf = io.read()
             nwbf.add_unit_column(name = 'label', description='label given during curation',
                                  data = labels_concat)

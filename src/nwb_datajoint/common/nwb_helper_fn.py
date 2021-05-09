@@ -22,7 +22,7 @@ def get_nwb_file(nwb_file_path):
     """
     _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
     if nwbfile is None:
-        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r')  # keep file open
+        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r', load_namespaces=True)  # keep file open
         nwbfile = io.read()
         __open_nwb_files[nwb_file_path] = (io, nwbfile)
     return nwbfile
@@ -68,6 +68,30 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=pynwb.
         return ret[0]
     else:
         return None
+
+
+def get_raw_eseries(nwbfile):
+    """Return all ElectricalSeries in the acquisition group of an NWB file.
+
+    ElectricalSeries found within LFP objects in the acquisition will also be returned.
+
+    Parameters
+    ----------
+    nwbfile : pynwb.NWBFile
+        The NWB file object to search in.
+
+    Returns
+    -------
+    ret : list
+        A list of all ElectricalSeries in the acquisition group of an NWB file
+    """
+    ret = []
+    for nwb_object in nwbfile.acquisition.values():
+        if isinstance(nwb_object, pynwb.ecephys.ElectricalSeries):
+            ret.append(nwb_object)
+        elif isinstance(nwb_object, pynwb.ecephys.LFP):
+            ret.extend(nwb_object.electrical_series.values())
+    return ret
 
 
 def estimate_sampling_rate(timestamps, multiplier):
