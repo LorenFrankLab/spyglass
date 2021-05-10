@@ -1,37 +1,54 @@
-import os
-import shutil
-import uuid
+import datajoint as dj
 from datetime import datetime
-import pynwb
-from pynwb.file import Subject
-import pytz
-import numpy as np
 import kachery as ka
+import os
+import pynwb
+import pytz
+import uuid
 
-from ._temporarydirectory import TemporaryDirectory
 
 def test_1(tmp_path, datajoint_server):
     from nwb_datajoint.common import Session, DataAcquisitionDevice, CameraDevice, Probe
     from nwb_datajoint.data_import import insert_sessions
-    tmpdir = str(tmp_path)
-    os.environ['NWB_DATAJOINT_BASE_DIR'] = tmpdir + '/nwb-data'
-    os.environ['KACHERY_STORAGE_DIR'] = tmpdir + '/nwb-data/kachery-storage'
+    nwb_datajoint_base_dir = tmp_path / 'nwb-data'
+    os.environ['NWB_DATAJOINT_BASE_DIR'] = str(nwb_datajoint_base_dir)
+    os.environ['KACHERY_STORAGE_DIR'] = str(nwb_datajoint_base_dir / 'kachery-storage')
     os.mkdir(os.environ['NWB_DATAJOINT_BASE_DIR'])
     os.mkdir(os.environ['KACHERY_STORAGE_DIR'])
 
-    os.mkdir(os.environ['NWB_DATAJOINT_BASE_DIR'] + '/raw')  # TODO cleanup
-    nwb_fname = os.environ['NWB_DATAJOINT_BASE_DIR'] + '/raw/test.nwb'  
+    raw_dir = nwb_datajoint_base_dir / 'raw'
+    analysis_dir = nwb_datajoint_base_dir / 'analysis'
+    os.mkdir(raw_dir)
+    os.mkdir(analysis_dir)
+
+    dj.config['stores'] = {
+        'raw': {
+            'protocol': 'file',
+            'location': str(raw_dir),
+            'stage': str(raw_dir)
+        },
+        'analysis': {
+            'protocol': 'file',
+            'location': str(analysis_dir),
+            'stage': str(analysis_dir)
+        }
+    }
+
+    nwb_fname = str(raw_dir / 'test.nwb')
 
     with ka.config(fr='default_readonly'):
-        ka.load_file('sha1://8ed68285c327b3766402ee75730d87994ac87e87/beans20190718_no_eseries_no_behavior.nwb', dest=nwb_fname)
+        ka.load_file('sha1://8ed68285c327b3766402ee75730d87994ac87e87/beans20190718_no_eseries_no_behavior.nwb',
+                     dest=nwb_fname)
 
+    # test that the file can be read. this is not used otherwise
     with pynwb.NWBHDF5IO(path=nwb_fname, mode='r', load_namespaces=True) as io:
-        nwbf = io.read()
+        nwbfile = io.read()
+        assert nwbfile is not None
 
     insert_sessions(['test.nwb'])
 
-    x = (Session() & {'nwb_file_name': 'test.nwb'}).fetch1()
-    assert x['nwb_file_name'] == 'test.nwb'
+    x = (Session() & {'nwb_file_name': 'test_.nwb'}).fetch1()
+    assert x['nwb_file_name'] == 'test_.nwb'
     assert x['subject_id'] == 'Beans'
     assert x['institution_name'] == 'University of California, San Francisco'
     assert x['lab_name'] == 'Loren Frank'
@@ -44,23 +61,22 @@ def test_1(tmp_path, datajoint_server):
     x = DataAcquisitionDevice().fetch()
     # TODO No data acquisition devices?
     assert len(x) == 0
-    
+
     x = CameraDevice().fetch()
-    # TODO No camera devices?
-    assert len(x) == 0
+    assert len(x) == 2
+    # TODO check camera devices
 
     x = Probe().fetch()
     assert len(x) == 1
-    assert x[0]['probe_type'] == '128c-4s8mm6cm-20um-40um-sl' 
+    assert x[0]['probe_type'] == '128c-4s8mm6cm-20um-40um-sl'
     assert x[0]['probe_description'] == '128 channel polyimide probe'
     assert x[0]['num_shanks'] == 4
     assert x[0]['contact_side_numbering'] == 'True'
 
+
 # This is how I created the file: beans20190718_no_eseries_no_behavior.nwb
 def _create_beans20190718_no_eseries_no_behavior():
     # Use: pip install git+https://github.com/flatironinstitute/h5_to_json
-    import os
-    import shutil
     import h5_to_json as h5j
 
     basepath = '/workspaces/nwb_datajoint/devel/data/nwb_builder_test_data/'
@@ -71,6 +87,7 @@ def _create_beans20190718_no_eseries_no_behavior():
         include_datasets=True
     )
     h5j.dict_to_h5(x, basepath + '/beans20190718_no_eseries_no_behavior.nwb')
+
 
 def _old_method_for_creating_test_file():
     nwb_content = pynwb.NWBFile(
@@ -84,7 +101,7 @@ def _old_method_for_creating_test_file():
         session_id='test-session-id',
         notes='test-notes',
         experiment_description='test-experiment-description',
-        subject=Subject(
+        subject=pynwb.file.Subject(
             description='test-subject-description',
             genotype='test-subject-genotype',
             sex='female',
@@ -94,8 +111,8 @@ def _old_method_for_creating_test_file():
         ),
     )
     nwb_content.add_epoch(
-        start_time=float(0), # start time
-        stop_time=float(100), # end time (what are the units?)
+        start_time=float(0),   # start time in seconds
+        stop_time=float(100),  # end time in seconds
         tags='epoch1'
     )
 
@@ -121,7 +138,7 @@ def _old_method_for_creating_test_file():
             filtering='none',
             group=grp
         )
-    nwb_fname = os.environ['NWB_DATAJOINT_BASE_DIR'] + '/test.nwb'  
+    nwb_fname = os.environ['NWB_DATAJOINT_BASE_DIR'] + '/test.nwb'
     with pynwb.NWBHDF5IO(path=nwb_fname, mode='w') as io:
         io.write(nwb_content)
         io.close()
