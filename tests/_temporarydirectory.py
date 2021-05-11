@@ -5,7 +5,7 @@ import time
 
 
 class TemporaryDirectory():
-    def __init__(self, remove: bool=True, prefix: str='tmp'):
+    def __init__(self, remove: bool = True, prefix: str = 'tmp'):
         self._remove = remove
         self._prefix = prefix
 
@@ -19,10 +19,10 @@ class TemporaryDirectory():
             if not os.path.exists(dirpath):
                 try:
                     os.mkdir(dirpath)
-                except:
+                except FileExistsError as e:
                     # maybe somebody else created this directory
                     if not os.path.exists:
-                        raise Exception(f'Unexpected problem creating temporary directory: {dirpath}')
+                        raise Exception(f'Unexpected problem creating temporary directory: {dirpath}') from e
         else:
             dirpath = None
         self._path = str(tempfile.mkdtemp(prefix=self._prefix, dir=dirpath))
@@ -36,16 +36,16 @@ class TemporaryDirectory():
         return self._path
 
 
-def _rmdir_with_retries(dirname: str, num_retries: int, delay_between_tries: float=1):
+def _rmdir_with_retries(dirname: str, num_retries: int, delay_between_tries: float = 1):
     for retry_num in range(1, num_retries + 1):
         if not os.path.exists(dirname):
             return
         try:
             shutil.rmtree(dirname)
             break
-        except: # pragma: no cover
+        except Exception as e:  # pragma: no cover
             if retry_num < num_retries:
                 print('Retrying to remove directory: {}'.format(dirname))
                 time.sleep(delay_between_tries)
             else:
-                raise Exception('Unable to remove directory after {} tries: {}'.format(num_retries, dirname))
+                raise Exception('Unable to remove directory after {} tries: {}'.format(num_retries, dirname)) from e

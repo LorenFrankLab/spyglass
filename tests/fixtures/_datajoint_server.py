@@ -1,10 +1,11 @@
-import os
-import multiprocessing
-import pytest
-import time
 import hither as hi
-from urllib import request
+import multiprocessing
+import os
+import pytest
+
+import time
 from ._config import DATAJOINT_SERVER_PORT
+
 
 def run_service_datajoint_server():
     # The following cleanup is needed because we terminate this compute resource process
@@ -22,9 +23,10 @@ def run_service_datajoint_server():
         docker kill datajoint-server-fixture > /dev/null 2>&1 || true
         docker rm datajoint-server-fixture > /dev/null 2>&1 || true
         exec docker run --name datajoint-server-fixture -e MYSQL_ROOT_PASSWORD=tutorial -p {DATAJOINT_SERVER_PORT}:3306 datajoint/mysql
-        """, redirect_output_to_stdout=True)
+        """, redirect_output_to_stdout=True)  # noqa: E501
         ss.start()
         ss.wait()
+
 
 @pytest.fixture()
 def datajoint_server():
@@ -41,17 +43,18 @@ def datajoint_server():
 
     process = multiprocessing.Process(target=run_service_datajoint_server, kwargs=dict())
     process.start()
-    
+
     try:
         _wait_for_datajoint_server_to_start()
-    except:
+    except Exception:
         _kill_datajoint_server()
         raise
 
     yield process
 
-    process.terminate()    
+    process.terminate()
     _kill_datajoint_server()
+
 
 def _kill_datajoint_server():
     print('Terminating datajoint server')
@@ -67,13 +70,14 @@ def _kill_datajoint_server():
     ss2.start()
     ss2.wait()
 
+
 def _wait_for_datajoint_server_to_start():
     timer = time.time()
     while True:
         try:
-            from nwb_datajoint.common import Session
+            from nwb_datajoint.common import Session  # noqa: F401
             return
-        except:
+        except Exception:
             pass
         elapsed = time.time() - timer
         if elapsed > 300:
