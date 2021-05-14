@@ -30,35 +30,34 @@ class RawPosition(dj.Imported):
         # Get the position data. FIX: change Position to position when name changed or fix helper function to allow
         # upper or lower case
         position = get_data_interface(nwbf, 'position', pynwb.behavior.Position)
+        if position is None:
+            print(f'No position data interface found in {nwb_file_name}\n')
+            return
 
-        if position is not None:
-            for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
-                pos_interval_name = f'pos {pos_epoch} valid times'
-                # get the valid intervals for the position data
-                timestamps = np.asarray(spatial_series.timestamps)
+        for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
+            pos_interval_name = f'pos {pos_epoch} valid times'
+            # get the valid intervals for the position data
+            timestamps = np.asarray(spatial_series.timestamps)
 
-                # estimate the sampling rate
-                sampling_rate = estimate_sampling_rate(timestamps, 1.75)
-                if sampling_rate < 0:
-                    raise ValueError(f'Error adding position data for position epoch {pos_epoch}')
-                print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
+            # estimate the sampling rate
+            sampling_rate = estimate_sampling_rate(timestamps, 1.75)
+            if sampling_rate < 0:
+                raise ValueError(f'Error adding position data for position epoch {pos_epoch}')
+            print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
 
-                # add the valid intervals to the Interval list
-                interval_dict = dict()
-                interval_dict['nwb_file_name'] = key['nwb_file_name']
-                interval_dict['interval_list_name'] = pos_interval_name
-                # allow single skipped frames
-                interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 2.5, 0)
-                IntervalList().insert1(interval_dict, skip_duplicates=True)
+            # add the valid intervals to the Interval list
+            interval_dict = dict()
+            interval_dict['nwb_file_name'] = key['nwb_file_name']
+            interval_dict['interval_list_name'] = pos_interval_name
+            # allow single skipped frames
+            interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 2.5, 0)
+            IntervalList().insert1(interval_dict, skip_duplicates=True)
 
-                key['raw_position_object_id'] = position.object_id
-                # TODO why is the SpatialSeries object_id not stored?
-                # this is created when we populate the Task schema
-                key['interval_list_name'] = pos_interval_name
-                self.insert1(key, skip_duplicates=True)
-
-        else:
-            print('No position data interface found in  {}\n'.format(key['nwb_file_name']))
+            key['raw_position_object_id'] = position.object_id
+            # TODO why is the SpatialSeries object_id not stored?
+            # this is created when we populate the Task schema
+            key['interval_list_name'] = pos_interval_name
+            self.insert1(key, skip_duplicates=True)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)

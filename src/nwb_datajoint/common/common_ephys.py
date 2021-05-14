@@ -165,7 +165,7 @@ class Raw(dj.Imported):
             rawdata = nwbf.get_acquisition()
             assert isinstance(rawdata, pynwb.ecephys.ElectricalSeries)
         except Exception:  # TODO: use more precise error check
-            warnings.warn(f'WARNING: Unable to get aquisition object in: {nwb_file_abspath}')
+            warnings.warn(f'WARNING: Unable to get acquisition object in: {nwb_file_abspath}')
             return
         print('Estimating sampling rate...')
         # NOTE: Only use first 1e6 timepoints to save time

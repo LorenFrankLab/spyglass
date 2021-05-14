@@ -27,7 +27,7 @@ def populate_all_common(nwb_file_name):
     Raw.populate(fp)
     print('Populate SampleCount...')
     SampleCount.populate(fp)
-    print('Populate DIOEvants...')
+    print('Populate DIOEvents...')
     DIOEvents.populate(fp)
     print('Populate SensorData')
     SensorData.populate(fp)
