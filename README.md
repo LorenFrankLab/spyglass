@@ -29,6 +29,12 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
    pip install -e .
    ```
 
+4. Enable `labbox` server extension on `Jupyter Lab`. This is necessary for curation of spike sorted data with `labbox-ephys-widgets-jp`.
+
+   ```bash
+   jupyter serverextension enable labbox --sys-prefix
+   ```
+
 ### Setting up database access
 
 1. Ask Loren or Eric to set up an account for you on the Frank lab database. Note that you have to be connected to UCSF LAN to access this server.
