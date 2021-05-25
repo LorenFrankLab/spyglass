@@ -5,7 +5,7 @@ dj.config['database.host'] = 'lmf-db.cin.ucsf.edu'
 dj.config['database.port'] = 3306
 
 # to prevent connection error for pymysql>=0.10; may omit in future
-dj.config['database.use_tls'] = False
+#dj.config['database.use_tls'] = False
 
 # CHANGE HERE: define user name
 dj.config['database.user'] = 'your_user_name'
