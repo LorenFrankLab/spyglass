@@ -25,6 +25,9 @@ class IntervalList(dj.Manual):
         :return: None
         Adds each of the entries in the nwb epochs table to the Interval list
         '''
+        if nwbf.epochs is None:
+            print('No epochs found in NWB file.')
+            return
         epochs = nwbf.epochs.to_dataframe()
         epoch_dict = dict()
         epoch_dict['nwb_file_name'] = nwb_file_name

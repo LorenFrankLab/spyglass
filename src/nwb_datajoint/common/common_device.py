@@ -9,7 +9,7 @@ class DataAcquisitionDevice(dj.Manual):
     definition = """
     device_name: varchar(80)
     ---
-    system: enum('SpikeGadgets','TDT_Rig1','TDT_Rig2','PCS','RCS','RNS','NeuroOmega','Other')
+    system = 'Other': enum('SpikeGadgets','TDT_Rig1','TDT_Rig2','PCS','RCS','RNS','NeuroOmega','Other')
     amplifier = 'Other': enum('Intan','PZ5_Amp1','PZ5_Amp2','Other')
     adc_circuit = NULL: varchar(80)
     """
@@ -47,7 +47,7 @@ class CameraDevice(dj.Manual):
     definition = """
     camera_name: varchar(80)
     ---
-    meters_per_pixel = 0 : float  # height / width of pixel in meters
+    meters_per_pixel = 0: float  # height / width of pixel in meters
     manufacturer = '': varchar(80)
     model = '': varchar(80)
     lens = '': varchar(80)
@@ -96,9 +96,9 @@ class Probe(dj.Manual):
     definition = """
     probe_type: varchar(80)
     ---
-    probe_description: varchar(80)  # description of this probe
-    num_shanks: int                 # number of shanks on this device
-    contact_side_numbering: enum('True', 'False')  # electrode numbers from contact side of the device
+    probe_description=NULL: varchar(80)  # description of this probe
+    num_shanks=NULL: int                 # number of shanks on this device
+    contact_side_numbering=NULL: enum('True', 'False')  # electrode numbers from contact side of the device
     """
 
     class Shank(dj.Part):
@@ -106,6 +106,8 @@ class Probe(dj.Manual):
         -> master
         probe_shank: int            # shank number within probe
         """
+
+        UNKNOWN = -1
 
     class Electrode(dj.Part):
         definition = """
@@ -118,6 +120,10 @@ class Probe(dj.Manual):
         rel_z=NULL: float           # (um) z coordinate of the electrode within the probe
         """
 
+        UNKNOWN = -1
+
+    UNKNOWN = 'unknown'
+
     def insert_from_nwbfile(self, nwbf):
         """Insert probe devices from an NWB file
 
@@ -126,8 +132,23 @@ class Probe(dj.Manual):
         nwbf : pynwb.NWBFile
             The source NWB file object.
         """
+        # initialize with an unknown probe type for use when NWB file does not contain a compatible probe device
+        if {'probe_type': Probe.UNKNOWN} not in Probe():
+            probe_dict = dict()
+            probe_dict['probe_type'] = Probe.UNKNOWN
+            Probe.insert1(probe_dict)
+            shank_dict = dict()
+            shank_dict['probe_type'] = probe_dict['probe_type']
+            shank_dict['probe_shank'] = Probe.Shank.UNKNOWN
+            Probe.Shank.insert1(shank_dict)
+            electrode_dict = dict()
+            electrode_dict['probe_type'] = probe_dict['probe_type']
+            electrode_dict['probe_shank'] = shank_dict['probe_shank']
+            electrode_dict['probe_electrode'] = Probe.Electrode.UNKNOWN
+            Probe.Electrode.insert1(electrode_dict)
+
         probe_dict = dict()
-        probe_re = re.compile("probe")
+        probe_re = re.compile('probe')
         for d in nwbf.devices:
             if probe_re.search(d):  # TODO instead of name check, check type ndx_franklab_novela.Probe
                 p = nwbf.devices[d]

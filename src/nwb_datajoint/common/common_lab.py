@@ -21,6 +21,9 @@ class LabMember(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with experimenter information.
         """
+        if nwbf.experimenter is None:
+            print('No experimenter metadata found.\n')
+            return
         for labmember in nwbf.experimenter:
             labmember_dict = dict()
             labmember_dict['lab_member_name'] = str(labmember)
@@ -44,6 +47,9 @@ class Institution(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with institution information.
         """
+        if nwbf.institution is None:
+            print('No institution metadata found.\n')
+            return
         self.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
 
 
@@ -62,4 +68,7 @@ class Lab(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with lab name information.
         """
+        if nwbf.lab is None:
+            print('No lab metadata found.\n')
+            return
         self.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)

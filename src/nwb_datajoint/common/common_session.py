@@ -99,6 +99,9 @@ class ExperimenterList(dj.Imported):
         self.insert1({'nwb_file_name': nwb_file_name}, skip_duplicates=True)
         nwbf = get_nwb_file(nwb_file_abspath)
 
+        if nwbf.experimenter is None:
+            return
+
         for e in nwbf.experimenter:
             # check to see if the experimenter is in the lab member list, and if not add her / him
             if {'lab_member_name': e} not in LabMember():

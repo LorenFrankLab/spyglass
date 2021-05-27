@@ -3,7 +3,7 @@ from pathlib import Path
 
 # CHANGE ME TO THE BASE DIRECTORY FOR DATA STORAGE ON YOUR SYSTEM
 # data_dir = Path('/Users/loren/data/nwb_builder_test_data')
-data_dir = Path('/mnt/c/Users/Ryan/Documents/NWB_Data/Frank Lab Data/')
+data_dir = Path('/mnt/c/Users/Ryan/Documents/NWB_Data/Frank_Lab/')
 # data_dir = Path('/stelmo/nwb/')
 
 os.environ['NWB_DATAJOINT_BASE_DIR'] = str(data_dir)
@@ -32,4 +32,12 @@ dj.config['stores'] = {
 
 import nwb_datajoint as nd
 
-nd.insert_sessions(['beans20190718-trim.nwb'])
+try:
+    # nd.insert_sessions(['beans20190718-trim.nwb'])
+    nd.insert_sessions(['dandiset53-trim.nwb'])
+finally:
+    # clean up database and created files
+    from nwb_datajoint.common import Session, Nwbfile
+    Session.delete(safemode=False)
+    Nwbfile.delete(safemode=False)
+    Nwbfile().cleanup(delete_files=True)

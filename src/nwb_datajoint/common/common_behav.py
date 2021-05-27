@@ -1,4 +1,5 @@
 import datajoint as dj
+import ndx_franklab_novela
 import numpy as np
 import pynwb
 
@@ -77,15 +78,19 @@ class StateScriptFile(dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         # TODO change to associated_files when NWB file changed.
         associated_files = nwbf.processing.get('associated files')
-        if associated_files is not None:
-            # TODO type checking that associated_file_obj is of type ndx_franklab_novela.AssociatedFiles
-            for associated_file_obj in associated_files.data_interfaces.values():
-                # parse the task_epochs string
-                epoch_list = associated_file_obj.task_epochs.split(',')
-                # find the file associated with this epoch
-                if str(key['epoch']) in epoch_list:
-                    key['file_object_id'] = associated_file_obj.object_id
-                    self.insert1(key)
+        if associated_files is None:
+            print(f'No associated_files processing module found in {nwb_file_name}\n')
+            return
+        if not isinstance(associated_files, ndx_franklab_novela.AssociatedFiles):
+            print(f"Processing module {associated_files} is not of type ndx_franklab_novela.AssociatedFiles\n")
+            return
+        for associated_file_obj in associated_files.data_interfaces.values():
+            # parse the task_epochs string
+            epoch_list = associated_file_obj.task_epochs.split(',')
+            # find the file associated with this epoch
+            if str(key['epoch']) in epoch_list:
+                key['file_object_id'] = associated_file_obj.object_id
+                self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
@@ -105,6 +110,10 @@ class VideoFile(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
         video = get_data_interface(nwbf, 'video')
+
+        if video is None:
+            print(f'No video data interface found in {nwb_file_name}\n')
+            return
 
         # get the interval for the current TaskEpoch
         interval_list_name = (TaskEpoch() & key).fetch1('interval_list_name')

@@ -1,10 +1,11 @@
 import datajoint as dj
+import ndx_franklab_novela
 import numpy as np
 import pynwb
 import re
 import warnings
 
-from .common_device import Probe  # noqa: F401
+from .common_device import Probe
 from .common_filter import FirFilter
 from .common_interval import IntervalList    # noqa: F401
 # SortInterval, interval_list_intersect, interval_list_excludes_ind
@@ -46,16 +47,12 @@ class ElectrodeGroup(dj.Imported):
             # check to see if the location is listed in the region.BrainRegion schema, and if not add it
             region_dict = dict()
             region_dict['region_name'] = electrode_group.location
-            region_dict['subregion_name'] = ''
-            region_dict['subsubregion_name'] = ''
             query = BrainRegion() & region_dict
             if len(query) == 0:
                 # this region isn't in the list, so add it
                 BrainRegion().insert1(region_dict)
                 query = BrainRegion() & region_dict
-                # we also need to get the region_id for this new region or find the right region_id
-            region_id_dict = query.fetch1()
-            key['region_id'] = region_id_dict['region_id']
+            key['region_id'] = query.fetch1('region_id')
             key['description'] = electrode_group.description
             # the following should probably be a function that returns the probe devices from the file
             # TODO check and replace this with
@@ -63,7 +60,7 @@ class ElectrodeGroup(dj.Imported):
             # key['probe_type'] = electrode_group.device.probe_type
             # else:
             # key['probe_type'] = 'unknown-probe-type'
-            probe_re = re.compile("probe")
+            probe_re = re.compile('probe')
             for d in nwbf.devices:
                 if probe_re.search(d):
                     if nwbf.devices[d] == electrode_group.device:
@@ -71,7 +68,7 @@ class ElectrodeGroup(dj.Imported):
                         key['probe_type'] = electrode_group.device.probe_type
                         break
             if 'probe_type' not in key:
-                key['probe_type'] = 'unknown-probe-type'
+                key['probe_type'] = Probe.UNKNOWN
             self.insert1(key, skip_duplicates=True)
 
 
@@ -111,32 +108,33 @@ class Electrode(dj.Imported):
         # assigned as empty if they don't exist in the nwb file in case
         # people are not using our column names.
 
-        for elect in electrodes.iterrows():
-            key['electrode_group_name'] = elect[1].group_name
-            key['electrode_id'] = elect[0]
-            key['name'] = str(elect[0])
-            key['probe_type'] = elect[1].group.device.probe_type
-            key['probe_shank'] = elect[1].probe_shank
-            key['probe_electrode'] = elect[1].probe_electrode
-            key['bad_channel'] = 'True' if elect[1].bad_channel else 'False'
-            # look up the region
-            region_dict = dict()
-            region_dict['region_name'] = elect[1].group.location
-            region_dict['subregion_name'] = ''
-            region_dict['subsubregion_name'] = ''
-            key['region_id'] = (BrainRegion() & region_dict).fetch1('region_id')
-            key['x'] = elect[1].x
-            key['y'] = elect[1].y
-            key['z'] = elect[1].z
+        for elect_id, elect_data in electrodes.iterrows():
+            key['electrode_id'] = elect_id
+            key['name'] = str(elect_id)
+            key['electrode_group_name'] = elect_data.group_name
+            if isinstance(elect_data.group, ndx_franklab_novela.nwb_electrode_group.NwbElectrodeGroup):
+                key['probe_type'] = elect_data.group.device.probe_type
+                key['probe_shank'] = elect_data.probe_shank
+                key['probe_electrode'] = elect_data.probe_electrode
+                key['bad_channel'] = 'True' if elect_data.bad_channel else 'False'
+            else:
+                key['probe_type'] = Probe.UNKNOWN
+                key['probe_shank'] = Probe.Shank.UNKNOWN
+                key['probe_electrode'] = Probe.Electrode.UNKNOWN
+                key['bad_channel'] = 'False'
+            key['region_id'] = BrainRegion.fetch_add(region_name=elect_data.group.location)
+            key['x'] = elect_data.x
+            key['y'] = elect_data.y
+            key['z'] = elect_data.z
             key['x_warped'] = 0
             key['y_warped'] = 0
             key['z_warped'] = 0
             key['contacts'] = ''
-            key['filtering'] = elect[1].filtering
-            key['impedance'] = elect[1].imp
-            try:
-                key['original_reference_electrode'] = elect[1].ref_elect
-            except Exception:  # TODO: use more precise error check
+            key['filtering'] = elect_data.filtering
+            key['impedance'] = elect_data.imp
+            if 'ref_elect' in elect_data:
+                key['original_reference_electrode'] = elect_data.ref_elect
+            else:
                 key['original_reference_electrode'] = -1
             self.insert1(key, skip_duplicates=True)
 
@@ -165,20 +163,26 @@ class Raw(dj.Imported):
             rawdata = nwbf.get_acquisition()
             assert isinstance(rawdata, pynwb.ecephys.ElectricalSeries)
         except Exception:  # TODO: use more precise error check
-            warnings.warn(f'WARNING: Unable to get acquisition object in: {nwb_file_abspath}')
+            warnings.warn(f'Unable to get acquisition object in: {nwb_file_abspath}')
             return
         print('Estimating sampling rate...')
         # NOTE: Only use first 1e6 timepoints to save time
-        sampling_rate = estimate_sampling_rate(np.asarray(rawdata.timestamps[:int(1e6)]), 1.5)
-        print(f'Estimated sampling rate: {sampling_rate}')
+        if rawdata.rate is not None:
+            sampling_rate = rawdata.rate
+        else:
+            sampling_rate = estimate_sampling_rate(np.asarray(rawdata.timestamps[:int(1e6)]), 1.5)
+            print(f'Estimated sampling rate: {sampling_rate}')
         key['sampling_rate'] = sampling_rate
 
         interval_dict = dict()
         interval_dict['nwb_file_name'] = key['nwb_file_name']
         interval_dict['interval_list_name'] = raw_interval_name
-        # get the list of valid times given the specified sampling rate.
-        interval_dict['valid_times'] = get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
-                                                           1.75, 0)
+        if rawdata.rate is not None:  # TODO
+            interval_dict['valid_times'] = np.array([0, len(rawdata.data)*rawdata.rate])
+        else:
+            # get the list of valid times given the specified sampling rate.
+            interval_dict['valid_times'] = get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
+                                                               1.75, 0)
         IntervalList().insert1(interval_dict, skip_duplicates=True)
 
         # now insert each of the electrodes as an individual row, but with the same nwb_object_id
