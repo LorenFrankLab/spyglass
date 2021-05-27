@@ -599,34 +599,38 @@ class SpikeSorting(dj.Computed):
         nwb_uri = kp.store_file(extractor_nwb_path)
         print(f'NWB file stored to kachery with URI: {nwb_uri}')
 
-        # create feed
-        feed = kp.load_feed(key['analysis_file_name']+'.feed', create=True)
         # create workspace
-        workspace = le.load_workspace(workspace_uri=f'workspace://{feed.get_feed_id()}/default')
+        workspace_uri = kp.get(key['analysis_file_name'])
+        if not workspace_uri:
+            workspace_uri = le.create_workspace(label=key['analysis_file_name']).uri
+            kp.set(key['analysis_file_name'], workspace_uri)
+        workspace = le.load_workspace(workspace_uri)
         print(f'Workspace URI: {workspace.get_uri()}')
+        
+        recording_label = key['nwb_file_name']+'_'+key['sort_interval_name']+'_'+str(key['sort_group_id'])
+        sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
 
-        labbox_recording = le.LabboxEphysRecordingExtractor({
+        recording_uri = kp.store_object({
             'recording_format': 'nwb',
             'data': {
                 'path': nwb_uri
             }
         })
-        labbox_sorting = le.LabboxEphysSortingExtractor({
+        sorting_uri = kp.store_object({
             'sorting_format': 'nwb',
             'data': {
                 'path': nwb_uri
             }
         })
 
-        recording_label = key['nwb_file_name']+'_'+key['sort_interval_name']+'_'+str(key['sort_group_id'])
-        sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
+        labbox_sorting = le.LabboxEphysSortingExtractor(sorting_uri)
+        labbox_recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
 
         R_id = workspace.add_recording(recording=labbox_recording, label=recording_label)
-        S_id = workspace.add_sorting(sorting=labbox_sorting, recording_id=R_id, label=sorting_label)
+        S_id = workspace.add_sorting(sorting=labbox_sorting, recording_id=R_id, label=sorting_label)               
 
         key['curation_feed_uri'] = workspace.get_uri()
         
-
         # Set external metrics that will appear in the units table
         external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
                              'data': metrics[metric].to_dict()} for metric in metrics.columns]
