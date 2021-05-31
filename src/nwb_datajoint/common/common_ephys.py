@@ -135,7 +135,7 @@ class Electrode(dj.Imported):
             key['filtering'] = elect[1].filtering
             key['impedance'] = elect[1].imp
             try:
-                key['original_reference_electrode'] = elect[1].ref_elect
+                key['original_reference_electrode'] = elect[1].ref_elect_id
             except Exception:  # TODO: use more precise error check
                 key['original_reference_electrode'] = -1
             self.insert1(key, skip_duplicates=True)
