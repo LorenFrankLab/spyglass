@@ -373,34 +373,36 @@ class SpikeSortingMetrics(dj.Manual):
         -------
         metrics: pandas.dataframe
         """
-        m = (self & {'cluster_metrics_list_name': key}).fetch(as_dict=True)[0]
+        m = (self & {'cluster_metrics_list_name': key}).fetch()
+        metric_dict = m['metric_dict']
+        metric_parameter_dict = m['metric_parameter_dict']
 
         return st.validation.compute_quality_metrics(sorting=sorting,
                                                      recording=recording,
-                                                     metric_names=self.selected_metrics_list(m['metrics_dict']),
+                                                     metric_names=self.selected_metrics_list(metric_dict),
                                                      as_dataframe=True,
-                                                     isi_threshold=m['isi_threshold'],
-                                                     snr_mode=m['snr_mode'],
-                                                     snr_noise_duration=m['snr_noise_duration'],
-                                                     max_spikes_per_unit_for_snr=m['max_spikes_per_unit_for_snr'],
-                                                     template_mode=m['template_mode'],
-                                                     max_channel_peak=m['max_channel_peak'],
-                                                     max_spikes_per_unit_for_noise_overlap=m['max_spikes_per_unit_for_noise_overlap'],
-                                                     noise_overlap_num_features=m['noise_overlap_num_features'],
-                                                     noise_overlap_num_knn=m['noise_overlap_num_knn'],
-                                                     drift_metrics_interval_s=m['drift_metrics_interval_s'],
-                                                     drift_metrics_min_spikes_per_interval=m['drift_metrics_min_spikes_per_interval'],
-                                                     max_spikes_for_silhouette=m['max_spikes_for_silhouette'],
-                                                     num_channels_to_compare=m['num_channels_to_compare'],
-                                                     max_spikes_per_cluster=m['max_spikes_per_cluster'],
-                                                     max_spikes_for_nn=m['max_spikes_for_nn'],
-                                                     n_neighbors=m['n_neighbors'],
+                                                     isi_threshold=metric_parameter_dict['isi_threshold'],
+                                                     snr_mode=metric_parameter_dict['snr_mode'],
+                                                     snr_noise_duration=metric_parameter_dict['snr_noise_duration'],
+                                                     max_spikes_per_unit_for_snr=metric_parameter_dict['max_spikes_per_unit_for_snr'],
+                                                     template_mode=metric_parameter_dict['template_mode'],
+                                                     max_channel_peak=metric_parameter_dict['max_channel_peak'],
+                                                     max_spikes_per_unit_for_noise_overlap=metric_parameter_dict['max_spikes_per_unit_for_noise_overlap'],
+                                                     noise_overlap_num_features=metric_parameter_dict['noise_overlap_num_features'],
+                                                     noise_overlap_num_knn=metric_parameter_dict['noise_overlap_num_knn'],
+                                                     drift_metrics_interval_s=metric_parameter_dict['drift_metrics_interval_s'],
+                                                     drift_metrics_min_spikes_per_interval=metric_parameter_dict['drift_metrics_min_spikes_per_interval'],
+                                                     max_spikes_for_silhouette=metric_parameter_dict['max_spikes_for_silhouette'],
+                                                     num_channels_to_compare=metric_parameter_dict['num_channels_to_compare'],
+                                                     max_spikes_per_cluster=metric_parameter_dict['max_spikes_per_cluster'],
+                                                     max_spikes_for_nn=metric_parameter_dict['max_spikes_for_nn'],
+                                                     n_neighbors=metric_parameter_dict['n_neighbors'],
                                                      apply_filter=False,
-                                                     n_jobs=m['n_jobs'],
-                                                     memmap=bool(m['memmap']),
-                                                     max_spikes_per_unit=m['max_spikes_per_unit'],
-                                                     seed=m['seed'],
-                                                     verbose=bool(m['verbose']))
+                                                     n_jobs=metric_parameter_dict['n_jobs'],
+                                                     memmap=metric_parameter_dict['memmap'],
+                                                     max_spikes_per_unit=metric_parameter_dict['max_spikes_per_unit'],
+                                                     seed=metric_parameter_dict['seed'],
+                                                     verbose=metric_parameter_dict['verbose'])
 
 @schema
 class SpikeSortingArtifactParameters(dj.Manual):
@@ -554,7 +556,7 @@ class SpikeSorting(dj.Computed):
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
         filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
-                                                  'parameter_set_name': key['parameter_set_name']}).fetch1()['filter_parameter_dict']
+                                                  'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
         recording = st.preprocessing.whiten(recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
 
         print(f'\nRunning spike sorting on {key}...')
@@ -732,7 +734,7 @@ class SpikeSorting(dj.Computed):
             sub_R = st.preprocessing.common_reference(sub_R, reference='median')
 
         filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
-                                                  'parameter_set_name': key['parameter_set_name']}).fetch1()['filter_parameter_dict']
+                                                  'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
         sub_R = st.preprocessing.bandpass_filter(sub_R, freq_min=filter_params['frequency_min'],
                                                  freq_max=filter_params['frequency_max'],
                                                  freq_wid=filter_params['filter_width'],
