@@ -554,7 +554,7 @@ class SpikeSorting(dj.Computed):
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
         filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
-                                                  'parameter_set_name': key['parameter_set_name']}).fetch1()
+                                                  'parameter_set_name': key['parameter_set_name']}).fetch1()['filter_parameter_dict']
         recording = st.preprocessing.whiten(recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
 
         print(f'\nRunning spike sorting on {key}...')
