@@ -377,7 +377,7 @@ class SpikeSortingMetrics(dj.Manual):
         -------
         metrics: pandas.dataframe
         """
-        m = (self & {'cluster_metrics_list_name': key}).fetch()
+        m = (self & {'cluster_metrics_list_name': key}).fetch1()
         metric_dict = m['metric_dict']
         metric_parameter_dict = m['metric_parameter_dict']
 
