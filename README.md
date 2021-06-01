@@ -39,7 +39,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 
 1. Ask Loren or Eric to set up an account for you on the Frank lab database. Note that you have to be connected to UCSF LAN to access this server.
 
-   > If you're not affiliated with UCSF or if you are just looking to try out `nwb_datajoint`, then you will need to set up a different MySQL server. For example, you can set up your own local server with a Docker image of a MySQL server configured for Datajoint (see instructions [here](https://tutorials.datajoint.io/setting-up/local-database.html)
+   > If you're not affiliated with UCSF or if you are just looking to try out `nwb_datajoint`, then you will need to set up a different MySQL server. For example, you can set up your own local server with a Docker image of a MySQL server configured for Datajoint (see instructions [here](https://tutorials.datajoint.io/setting-up/local-database.html))
 
 2. Add the following environment variables (e.g. in `~/.bashrc`). This example assumes that you are interacting with the database on a computer that has mounted `stelmo` at `/stelmo` (if the mount location is different, change accordingly).
 
@@ -66,3 +66,4 @@ The tutorials for `nwb_datajoint` is currently in the form of Jupyter Notebooks 
 
 * `0_intro.ipynb`: general introduction to the database
 * `1_spikesorting.ipynb`: how to run spike sorting
+* `2_curation.ipynb`: how to curate spike sorted data
