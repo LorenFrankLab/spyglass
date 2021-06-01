@@ -732,7 +732,7 @@ class SpikeSorting(dj.Computed):
             sub_R = st.preprocessing.common_reference(sub_R, reference='median')
 
         filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
-                                                  'parameter_set_name': key['parameter_set_name']}).fetch1()
+                                                  'parameter_set_name': key['parameter_set_name']}).fetch1()['filter_parameter_dict']
         sub_R = st.preprocessing.bandpass_filter(sub_R, freq_min=filter_params['frequency_min'],
                                                  freq_max=filter_params['frequency_max'],
                                                  freq_wid=filter_params['filter_width'],
