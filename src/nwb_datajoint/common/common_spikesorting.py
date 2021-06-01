@@ -263,11 +263,15 @@ class SpikeSorterParameters(dj.Manual):
         # check to see that the sorter is listed in the SpikeSorter schema
         sort_param_dict = dict()
         sort_param_dict['parameter_set_name'] = 'default'
+        sort_param_dict['filter_parameter_dict'] = {'frequency_min': 300,
+                                                    'frequency_max': 6000,
+                                                    'filter_width': 1000,
+                                                    'filter_chunk_size': 2000000}
         for sorter in sorters:
             if len((SpikeSorter() & {'sorter_name' : sorter}).fetch()):
                 sort_param_dict['sorter_name'] = sorter
                 sort_param_dict['parameter_dict'] = ss.get_default_params(sorter)
-                self.insert1(sort_param_dict, skip_duplicates="True")
+                self.insert1(sort_param_dict, skip_duplicates=True)
             else:
                 print(f'Error in SpikeSorterParameter: sorter {sorter} not in SpikeSorter schema')
                 continue
