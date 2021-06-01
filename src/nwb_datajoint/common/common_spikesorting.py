@@ -24,6 +24,7 @@ import pynwb
 import kachery_p2p as kp
 import labbox_ephys as le
 import labbox_ephys_widgets_jp as lew
+import sortingview
 
 from itertools import compress
 
@@ -628,8 +629,14 @@ class SpikeSorting(dj.Computed):
 
         R_id = workspace.add_recording(recording=labbox_recording, label=recording_label)
         S_id = workspace.add_sorting(sorting=labbox_sorting, recording_id=R_id, label=sorting_label)               
-
+        
         key['curation_feed_uri'] = workspace.get_uri()
+
+        # add to the web app as well
+        import getpass
+        workspace_name = getpass.getuser()
+        workspace_list = sortingview.WorkspaceList(backend_uri='gs://labbox-franklab/sortingview-backends/franklab.json')
+        workspace_list.add_workspace(name=workspace_name, workspace=workspace)
         
         # Set external metrics that will appear in the units table
         external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
