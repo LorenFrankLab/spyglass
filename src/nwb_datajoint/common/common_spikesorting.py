@@ -386,28 +386,7 @@ class SpikeSortingMetrics(dj.Manual):
                                                      metric_names=self.selected_metrics_list(m['metric_dict']),
                                                      as_dataframe=True,
                                                      **m['metric_parameter_dict']);
-                                                    #  isi_threshold=mp['isi_threshold'],
-                                                    #  snr_mode=m['snr_mode'],
-                                                    #  snr_noise_duration=m['snr_noise_duration'],
-                                                    #  max_spikes_per_unit_for_snr=m['max_spikes_per_unit_for_snr'],
-                                                    #  template_mode=m['template_mode'],
-                                                    #  max_channel_peak=m['max_channel_peak'],
-                                                    #  max_spikes_per_unit_for_noise_overlap=m['max_spikes_per_unit_for_noise_overlap'],
-                                                    #  noise_overlap_num_features=m['noise_overlap_num_features'],
-                                                    #  noise_overlap_num_knn=m['noise_overlap_num_knn'],
-                                                    #  drift_metrics_interval_s=m['drift_metrics_interval_s'],
-                                                    #  drift_metrics_min_spikes_per_interval=m['drift_metrics_min_spikes_per_interval'],
-                                                    #  max_spikes_for_silhouette=m['max_spikes_for_silhouette'],
-                                                    #  num_channels_to_compare=m['num_channels_to_compare'],
-                                                    #  max_spikes_per_cluster=m['max_spikes_per_cluster'],
-                                                    #  max_spikes_for_nn=m['max_spikes_for_nn'],
-                                                    #  n_neighbors=m['n_neighbors'],
-                                                    #  apply_filter=False,
-                                                    #  n_jobs=m['n_jobs'],
-                                                    #  memmap=bool(m['memmap']),
-                                                    #  max_spikes_per_unit=m['max_spikes_per_unit'],
-                                                    #  seed=m['seed'],
-                                                    #  verbose=bool(m['verbose']))
+                                               
 
 @schema
 class SpikeSortingArtifactParameters(dj.Manual):
@@ -558,7 +537,7 @@ class SpikeSorting(dj.Computed):
         se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
                                                  buffer_mb=1000, overwrite=True)
 
-        #TEST
+        #TEST: Reload recording from saved extractor
         recording = se.NwbRecordingExtractor(extractor_nwb_path)
 
         # whiten the extractor for sorting and metric calculations
@@ -579,12 +558,18 @@ class SpikeSorting(dj.Computed):
         key['time_of_sort'] = int(time.time())
         
         # TODO: save timestamps
-        #se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
+        se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
+
+        #test: write recording an sorting to cached extractor
 
         print('\nComputing quality metrics...')
         with Timer(label='compute metrics', verbose=True):
+            #Test: save recording to temporary file
+            import tempfile
+            tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
+            metrics_recording = se.CacheRecordingExtractor(recording, save_path='tmpfile')
             metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')     
-            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, metrics_recording, sorting)
         
         print('\nSaving sorting results...')
         units = dict()
@@ -622,13 +607,14 @@ class SpikeSorting(dj.Computed):
         recording_label = key['nwb_file_name']+'_'+key['sort_interval_name']+'_'+str(key['sort_group_id'])
         sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
 
-        recording_uri = kp.store_object({
+        recording_uri = kp.store_json({
             'recording_format': 'nwb',
             'data': {
-                'path': nwb_uri
+                'path': nwb_uri,
+                'electrical_series_name' : 'ElectricalSeries_raw'
             }
         })
-        sorting_uri = kp.store_object({
+        sorting_uri = kp.store_json({
             'sorting_format': 'nwb',
             'data': {
                 'path': nwb_uri
