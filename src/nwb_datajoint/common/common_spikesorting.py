@@ -537,7 +537,7 @@ class SpikeSorting(dj.Computed):
         se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
                                                  buffer_mb=1000, overwrite=True)
 
-        #TEST: Reload recording from saved extractor
+        print(f'Rereading NWB recording extractor from {extractor_nwb_path}')
         recording = se.NwbRecordingExtractor(extractor_nwb_path)
 
         # whiten the extractor for sorting and metric calculations
