@@ -518,27 +518,34 @@ class SpikeSorting(dj.Computed):
             mask[interval_list_excludes_ind(sort_interval_valid_times, recording_timestamps)] = False
             recording = st.preprocessing.mask(recording, mask)
 
-        # Path to NWB file that will hold recording and sorting extractors
-        unique_file_name = key['nwb_file_name'] \
+        # Path to files that will hold recording and sorting extractors
+        base_file_name = key['nwb_file_name'] \
                            + '_' + key['sort_interval_name'] \
                            + '_' + str(key['sort_group_id']) \
                            + '_' + key['sorter_name'] \
-                           + '_' + key['parameter_set_name'] + '.nwb'
+                           + '_' + key['parameter_set_name']
+        recording_file_name = base_file_name + "_recording"
+        sorting_file_name = base_file_name + "_sorting.nwb"
         analysis_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                             / key['analysis_file_name'])
 
         if not os.path.isdir(analysis_path):
             os.mkdir(analysis_path)
 
-        extractor_nwb_path = str(Path(analysis_path) / unique_file_name)
+        recording_path = str(Path(analysis_path) / recording_file_name)
+        sorting_path =  str(Path(analysis_path) / sorting_file_name)
+        
+        
+        with Timer(label='caching extractor', verbose=True):
+            # cache the recording extractor
+            recording = se.CacheRecordingExtractor(recording, chunk_size=100000000, chunk_mb=10000)
+        
+        with Timer(label='writing numpy extractor', verbose=True):
+            #se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
+            #                                     buffer_mb=10000, overwrite=True)
+            se.NumpyRecordingExtractor.write_recording(recording, recording_path)
 
-        print(f'Writing NWB recording extractor to {extractor_nwb_path}')
-        # TODO: save timestamps together
-        se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
-                                                 buffer_mb=1000, overwrite=True)
-
-        print(f'Rereading NWB recording extractor from {extractor_nwb_path}')
-        recording = se.NwbRecordingExtractor(extractor_nwb_path)
+        #recording = se.NwbRecordingExtractor(extractor_nwb_path)
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
@@ -558,13 +565,13 @@ class SpikeSorting(dj.Computed):
         key['time_of_sort'] = int(time.time())
         
         # TODO: save timestamps
-        se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
-
+        se.NwbSortingExtractor.write_sorting(sorting, save_path=sorting_path)
+    
         #test: write recording an sorting to cached extractor
 
         print('\nComputing quality metrics...')
         with Timer(label='compute metrics', verbose=True):
-            #Test: save recording to temporary file
+            #Tsave recording to temporary file
             import tempfile
             tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
             metrics_recording = se.CacheRecordingExtractor(recording, save_path='tmpfile')
@@ -591,11 +598,11 @@ class SpikeSorting(dj.Computed):
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
         key['units_object_id'] = units_object_id
 
-        # TODO: redo this so that it works with latest version of labbox-ephys
         print('\nGenerating feed for curation...')
-        nwb_uri = kp.store_file(extractor_nwb_path)
-        print(f'NWB file stored to kachery with URI: {nwb_uri}')
-
+        recording_uri = kp.store_file(recording_path+'.npy')
+        print(f'recording file stored to kachery with URI: {recording_uri}')
+        sorting_uri = kp.store_file(sorting_path)
+        print(f'sorting file stored to kachery with URI: {sorting_uri}')
         # create workspace
         workspace_uri = kp.get(key['analysis_file_name'])
         if not workspace_uri:
@@ -608,16 +615,15 @@ class SpikeSorting(dj.Computed):
         sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
 
         recording_uri = kp.store_json({
-            'recording_format': 'nwb',
+            'recording_format': 'npy',
             'data': {
-                'path': nwb_uri,
-                'electrical_series_name' : 'ElectricalSeries_raw'
+                'path': recording_uri,
             }
         })
         sorting_uri = kp.store_json({
             'sorting_format': 'nwb',
             'data': {
-                'path': nwb_uri
+                'path': sorting_uri
             }
         })
 
@@ -685,26 +691,28 @@ class SpikeSorting(dj.Computed):
         -------
         sub_R: se.SubRecordingExtractor
         """
+        print('In get_filtered_recording_extractor')
+        with Timer(label='filtered recording extractor setup', verbose=True):
+            raw_data_obj = (Raw & {'nwb_file_name': key['nwb_file_name']}).fetch_nwb()[0]['raw']
+            timestamps = np.asarray(raw_data_obj.timestamps)
 
-        raw_data_obj = (Raw & {'nwb_file_name': key['nwb_file_name']}).fetch_nwb()[0]['raw']
-        timestamps = np.asarray(raw_data_obj.timestamps)
+            sort_interval =  (SortInterval & {'nwb_file_name': key['nwb_file_name'],
+                                            'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
 
-        sort_interval =  (SortInterval & {'nwb_file_name': key['nwb_file_name'],
-                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
+            sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
+            assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
 
-        sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
-        assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
+            electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name' : key['nwb_file_name'],
+                                                            'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
+            electrode_group_name = (SortGroup.SortGroupElectrode & {'nwb_file_name' : key['nwb_file_name'],
+                                                                    'sort_group_id' : key['sort_group_id']}).fetch('electrode_group_name')
+            electrode_group_name = np.int(electrode_group_name[0])
+            probe_type = (Electrode & {'nwb_file_name': key['nwb_file_name'],
+                                    'electrode_group_name': electrode_group_name,
+                                    'electrode_id': electrode_ids[0]}).fetch1('probe_type')
 
-        electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name' : key['nwb_file_name'],
-                                                         'sort_group_id' : key['sort_group_id']}).fetch('electrode_id')
-        electrode_group_name = (SortGroup.SortGroupElectrode & {'nwb_file_name' : key['nwb_file_name'],
-                                                                'sort_group_id' : key['sort_group_id']}).fetch('electrode_group_name')
-        electrode_group_name = np.int(electrode_group_name[0])
-        probe_type = (Electrode & {'nwb_file_name': key['nwb_file_name'],
-                                   'electrode_group_name': electrode_group_name,
-                                   'electrode_id': electrode_ids[0]}).fetch1('probe_type')
-        
-        R = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']),
+        with Timer(label='NWB recording extractor create from file', verbose=True):
+            R = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']),
                                      electrical_series_name = 'e-series')
         
         sort_reference_electrode_id = int((SortGroup & {'nwb_file_name': key['nwb_file_name'],
@@ -715,41 +723,44 @@ class SpikeSorting(dj.Computed):
         if sort_reference_electrode_id >= 0:
             # make a list of the channels in the sort group and the reference channel if it exists
             channel_ids.append(sort_reference_electrode_id) 
-        
-
+    
        
         sub_R = se.SubRecordingExtractor(R, channel_ids=channel_ids,
                                          start_frame=sort_indices[0],
-                                         end_frame=sort_indices[1])       
-        if sort_reference_electrode_id >= 0:
-            sub_R = st.preprocessing.common_reference(sub_R, reference='single',
-                                                        ref_channels=sort_reference_electrode_id)
-            # now restrict it to just the electrode IDs in the sort group
-            sub_R = se.SubRecordingExtractor(sub_R, channel_ids=electrode_ids.tolist())
+                                         end_frame=sort_indices[1])    
+        with Timer(label='caching first recording extractor', verbose=True):
+            sub_R = se.CacheRecordingExtractor(sub_R, chunk_mb=1000)
+         
+        with Timer(label='building sub extractors', verbose=True):
+            if sort_reference_electrode_id >= 0:
+                sub_R = st.preprocessing.common_reference(sub_R, reference='single',
+                                                            ref_channels=sort_reference_electrode_id)
+                # now restrict it to just the electrode IDs in the sort group
+                sub_R = se.SubRecordingExtractor(sub_R, channel_ids=electrode_ids.tolist())
 
-        elif sort_reference_electrode_id == -2:
-            sub_R = st.preprocessing.common_reference(sub_R, reference='median')
+            elif sort_reference_electrode_id == -2:
+                sub_R = st.preprocessing.common_reference(sub_R, reference='median')
 
-        
-        filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
-                                                  'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
-        sub_R = st.preprocessing.bandpass_filter(sub_R, freq_min=filter_params['frequency_min'],
-                                                 freq_max=filter_params['frequency_max'],
-                                                 freq_wid=filter_params['filter_width'],
-                                                 chunk_size=filter_params['filter_chunk_size'],
-                                                 dtype='float32', )
+            
+            filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+                                                    'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
+            sub_R = st.preprocessing.bandpass_filter(sub_R, freq_min=filter_params['frequency_min'],
+                                                    freq_max=filter_params['frequency_max'],
+                                                    freq_wid=filter_params['filter_width'],
+                                                    chunk_size=filter_params['filter_chunk_size'],
+                                                    dtype='float32', )
 
-        # If tetrode and location for every channel is (0,0), give new locations
-        # TODO: remove this once the tetrodes are given positions
-        channel_locations = sub_R.get_channel_locations()
-        if np.all(channel_locations==0) and len(channel_locations)==4 and probe_type[:7]=='tetrode':
-            print('Tetrode; making up channel locations...')
-            channel_locations = [[0,0],[0,1],[1,0],[1,1]]
-            sub_R.set_channel_locations(channel_locations)
+            # If tetrode and location for every channel is (0,0), give new locations
+            # TODO: remove this once the tetrodes are given positions
+            channel_locations = sub_R.get_channel_locations()
+            if np.all(channel_locations==0) and len(channel_locations)==4 and probe_type[:7]=='tetrode':
+                print('Tetrode; making up channel locations...')
+                channel_locations = [[0,0],[0,1],[1,0],[1,1]]
+                sub_R.set_channel_locations(channel_locations)
 
-        # give timestamps for the SubRecordingExtractor
-        # TODO: change this once spikeextractors is updated
-        sub_R._timestamps = timestamps[sort_indices[0]:sort_indices[1]]
+            # give timestamps for the SubRecordingExtractor
+            # TODO: change this once spikeextractors is updated
+            sub_R._timestamps = timestamps[sort_indices[0]:sort_indices[1]]
 
         return sub_R
 
