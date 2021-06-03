@@ -519,33 +519,27 @@ class SpikeSorting(dj.Computed):
             recording = st.preprocessing.mask(recording, mask)
 
         # Path to files that will hold recording and sorting extractors
-        base_file_name = key['nwb_file_name'] \
+        extractor_file_name = key['nwb_file_name'] \
                            + '_' + key['sort_interval_name'] \
                            + '_' + str(key['sort_group_id']) \
                            + '_' + key['sorter_name'] \
-                           + '_' + key['parameter_set_name']
-        recording_file_name = base_file_name + "_recording"
-        sorting_file_name = base_file_name + "_sorting.nwb"
+                           + '_' + key['parameter_set_name'] + '.nwb'
         analysis_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                             / key['analysis_file_name'])
 
         if not os.path.isdir(analysis_path):
             os.mkdir(analysis_path)
 
-        recording_path = str(Path(analysis_path) / recording_file_name)
-        sorting_path =  str(Path(analysis_path) / sorting_file_name)
+        extractor_nwb_path = str(Path(analysis_path) / extractor_file_name)
         
         
         with Timer(label='caching extractor', verbose=True):
             # cache the recording extractor
             recording = se.CacheRecordingExtractor(recording, chunk_size=100000000, chunk_mb=10000)
         
-        with Timer(label='writing numpy extractor', verbose=True):
-            #se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
-            #                                     buffer_mb=10000, overwrite=True)
-            se.NumpyRecordingExtractor.write_recording(recording, recording_path)
-
-        #recording = se.NwbRecordingExtractor(extractor_nwb_path)
+        with Timer(label='writing NWB extractor', verbose=True):
+            se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
+                                                 buffer_mb=100000, overwrite=True)
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
@@ -565,16 +559,15 @@ class SpikeSorting(dj.Computed):
         key['time_of_sort'] = int(time.time())
         
         # TODO: save timestamps
-        se.NwbSortingExtractor.write_sorting(sorting, save_path=sorting_path)
+        se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
     
-        #test: write recording an sorting to cached extractor
 
         print('\nComputing quality metrics...')
         with Timer(label='compute metrics', verbose=True):
-            #Tsave recording to temporary file
+            #save recording to temporary file
             import tempfile
             tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
-            metrics_recording = se.CacheRecordingExtractor(recording, save_path='tmpfile')
+            metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile)
             metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')     
             metrics = SpikeSortingMetrics().compute_metrics(metrics_key, metrics_recording, sorting)
         
@@ -599,10 +592,9 @@ class SpikeSorting(dj.Computed):
         key['units_object_id'] = units_object_id
 
         print('\nGenerating feed for curation...')
-        recording_uri = kp.store_file(recording_path+'.npy')
-        print(f'recording file stored to kachery with URI: {recording_uri}')
-        sorting_uri = kp.store_file(sorting_path)
-        print(f'sorting file stored to kachery with URI: {sorting_uri}')
+        extractor_nwb_uri = kp.store_file(extractor_nwb_path)
+        print(f'extractor NWB file stored to kachery with URI: {extractor_nwb_uri}')
+        
         # create workspace
         workspace_uri = kp.get(key['analysis_file_name'])
         if not workspace_uri:
@@ -615,18 +607,17 @@ class SpikeSorting(dj.Computed):
         sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
 
         recording_uri = kp.store_json({
-            'recording_format': 'npy',
+            'recording_format': 'nwb',
             'data': {
-                'path': recording_uri,
+                'path': extractor_nwb_path,
             }
         })
         sorting_uri = kp.store_json({
             'sorting_format': 'nwb',
             'data': {
-                'path': sorting_uri
+                'path': extractor_nwb_path
             }
         })
-
         labbox_sorting = le.LabboxEphysSortingExtractor(sorting_uri)
         labbox_recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
 
