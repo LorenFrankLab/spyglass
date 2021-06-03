@@ -339,7 +339,20 @@ class SpikeSortingMetrics(dj.Manual):
                                 'seed': 47,                             # Random seed for reproducibility
                                 'verbose': True}                        # If nonzero (True), will be verbose in metric computation
         return metric_params_dict
-        
+    
+    def get_default_metrics_entry(self):
+        """
+        Re-inserts the entry for Frank lab default parameters
+        (run in case it gets accidentally deleted)
+        """
+        cluster_metrics_list_name = 'franklab_default_cluster_metrics'
+        metric_dict = self.get_metric_dict()
+        metric_dict['firing_rate'] = True
+        metric_dict['nn_hit_rate'] = True
+        metric_dict['noise_overlap'] = True
+        metric_parameter_dict = self.get_metric_parameter_dict()
+        self.insert1([cluster_metrics_list_name,metric_dict,metric_parameter_dict], replace=True)
+
     @staticmethod
     def selected_metrics_list(metric_dict):
         return [metric for metric in metric_dict.keys() if metric_dict[metric]]
@@ -489,7 +502,7 @@ class SpikeSorting(dj.Computed):
             partially filled entity; value of primary keys from key source
             (in this case SpikeSortingParameters)
         """
-        with Timer(label='creating copy of nwb file', verbose=True):
+        with Timer(label='\nCreating copy of nwb file...', verbose=True):
             # Create a new NWB file for holding the results of analysis (e.g. spike sorting).
             # Save the name to the 'key' dict to use later.
             key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
@@ -529,19 +542,24 @@ class SpikeSorting(dj.Computed):
 
         extractor_nwb_path = str(Path(analysis_path) / unique_file_name)
 
-        print(f'Writing NWB recording extractor to {extractor_nwb_path}')
-        # TODO: save timestamps together
-        se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
-                                                 buffer_mb=1000, overwrite=True)
+        with Timer(label=f'\nWriting filtered NWB recording extractor to {extractor_nwb_path}', verbose=True):
+            # TODO: save timestamps together
+            metadata = {}
+            metadata['Ecephys'] = {'ElectricalSeries': {'name': 'ElectricalSeries',
+                                                        'description': key['nwb_file_name'] + \
+                                                                    '_' + key['sort_interval_name'] + \
+                                                                    '_' + str(key['sort_group_id'])}}
+            se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
+                                                    buffer_mb=1000, overwrite=True, metadata=metadata,
+                                                    es_key='ElectricalSeries')
 
-        #TEST
-        recording = se.NwbRecordingExtractor(extractor_nwb_path)
+        # reload filtered recording
+        # recording = se.NwbRecordingExtractor(extractor_nwb_path)
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
         filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                   'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
-        print(filter_params)
         recording = st.preprocessing.whiten(recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
 
         print(f'\nRunning spike sorting on {key}...')
@@ -554,12 +572,12 @@ class SpikeSorting(dj.Computed):
 
         key['time_of_sort'] = int(time.time())
         
-        # TODO: save timestamps
-        #se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
-
-        print('\nComputing quality metrics...')
-        with Timer(label='compute metrics', verbose=True):
-            metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')     
+        se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
+        
+        with Timer(label='\nComputing quality metrics...', verbose=True):
+            metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')    
+            metric_info = (SpikeSortingMetrics & {'cluster_metrics_list_name': metrics_key }).fetch1()
+            print(metric_info)
             metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
         
         print('\nSaving sorting results...')
@@ -593,18 +611,18 @@ class SpikeSorting(dj.Computed):
             workspace_uri = le.create_workspace(label=key['analysis_file_name']).uri
             kp.set(key['analysis_file_name'], workspace_uri)
         workspace = le.load_workspace(workspace_uri)
-        print(f'Workspace URI: {workspace.get_uri()}')
+        print(f'Workspace URI: {workspace.uri}')
         
         recording_label = key['nwb_file_name']+'_'+key['sort_interval_name']+'_'+str(key['sort_group_id'])
         sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
 
-        recording_uri = kp.store_object({
+        recording_uri = kp.store_json({
             'recording_format': 'nwb',
             'data': {
                 'path': nwb_uri
             }
         })
-        sorting_uri = kp.store_object({
+        sorting_uri = kp.store_json({
             'sorting_format': 'nwb',
             'data': {
                 'path': nwb_uri
@@ -617,14 +635,8 @@ class SpikeSorting(dj.Computed):
         R_id = workspace.add_recording(recording=labbox_recording, label=recording_label)
         S_id = workspace.add_sorting(sorting=labbox_sorting, recording_id=R_id, label=sorting_label)               
         
-        key['curation_feed_uri'] = workspace.get_uri()
+        key['curation_feed_uri'] = workspace.uri
 
-        # add to the web app as well
-        import getpass
-        workspace_name = getpass.getuser()
-        workspace_list = sortingview.WorkspaceList(backend_uri='gs://labbox-franklab/sortingview-backends/franklab.json')
-        workspace_list.add_workspace(name=workspace_name, workspace=workspace)
-        
         # Set external metrics that will appear in the units table
         external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
                              'data': metrics[metric].to_dict()} for metric in metrics.columns]
@@ -633,6 +645,10 @@ class SpikeSorting(dj.Computed):
             for old_unit_id in metrics.index:
                 external_metrics[metric_ind]['data'][str(old_unit_id)] = external_metrics[metric_ind]['data'].pop(old_unit_id)
         workspace.set_unit_metrics_for_sorting(sorting_id=S_id, metrics=external_metrics)
+        
+        # add to the web app as well
+        workspace_list = sortingview.WorkspaceList(backend_uri='gs://labbox-franklab/sortingview-backends/franklab.json')
+        workspace_list.add_workspace(name=key['analysis_file_name'], workspace=workspace)
         
         # TODO: extract labels 
 
@@ -703,29 +719,17 @@ class SpikeSorting(dj.Computed):
         R = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']),
                                      electrical_series_name = 'e-series')
         
+        sub_R = se.SubRecordingExtractor(R, start_frame=sort_indices[0], end_frame=sort_indices[1])  
+        
         sort_reference_electrode_id = int((SortGroup & {'nwb_file_name': key['nwb_file_name'],
                                                     'sort_group_id': key['sort_group_id']}).fetch('sort_reference_electrode_id'))
-        # make a list of the channels in the sort group and the reference channel if it exists
-        channel_ids = electrode_ids.tolist()
-
-        if sort_reference_electrode_id >= 0:
-            # make a list of the channels in the sort group and the reference channel if it exists
-            channel_ids.append(sort_reference_electrode_id) 
-        
-
-       
-        sub_R = se.SubRecordingExtractor(R, channel_ids=channel_ids,
-                                         start_frame=sort_indices[0],
-                                         end_frame=sort_indices[1])       
         if sort_reference_electrode_id >= 0:
             sub_R = st.preprocessing.common_reference(sub_R, reference='single',
-                                                        ref_channels=sort_reference_electrode_id)
-            # now restrict it to just the electrode IDs in the sort group
-            sub_R = se.SubRecordingExtractor(sub_R, channel_ids=electrode_ids.tolist())
-
+                                                      ref_channels=sort_reference_electrode_id)
         elif sort_reference_electrode_id == -2:
             sub_R = st.preprocessing.common_reference(sub_R, reference='median')
-
+        
+        sub_R = se.SubRecordingExtractor(sub_R, channel_ids=electrode_ids.tolist())  
         
         filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                   'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
@@ -733,8 +737,8 @@ class SpikeSorting(dj.Computed):
                                                  freq_max=filter_params['frequency_max'],
                                                  freq_wid=filter_params['filter_width'],
                                                  chunk_size=filter_params['filter_chunk_size'],
-                                                 dtype='float32', )
-
+                                                 dtype='float32',)
+                
         # If tetrode and location for every channel is (0,0), give new locations
         # TODO: remove this once the tetrodes are given positions
         channel_locations = sub_R.get_channel_locations()
