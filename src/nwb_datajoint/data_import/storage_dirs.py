@@ -6,7 +6,7 @@ def check_env():
     Raise an exception if not.
     """
     base_dir()
-    kachery_storage_dir()
+    # kachery_storage_dir()
 
 
 def base_dir():
