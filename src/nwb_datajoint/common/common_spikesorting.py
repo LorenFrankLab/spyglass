@@ -502,7 +502,7 @@ class SpikeSorting(dj.Computed):
             partially filled entity; value of primary keys from key source
             (in this case SpikeSortingParameters)
         """
-        with Timer(label='\nCreating copy of nwb file...', verbose=True):
+        with Timer(label='creating analysis NWB file', verbose=True):
             # Create a new NWB file for holding the results of analysis (e.g. spike sorting).
             # Save the name to the 'key' dict to use later.
             key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
@@ -536,25 +536,24 @@ class SpikeSorting(dj.Computed):
                            + '_' + key['parameter_set_name'] + '.nwb'
         analysis_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
                             / key['analysis_file_name'])
-
+        
         if not os.path.isdir(analysis_path):
             os.mkdir(analysis_path)
-
         extractor_nwb_path = str(Path(analysis_path) / unique_file_name)
 
-        with Timer(label=f'\nWriting filtered NWB recording extractor to {extractor_nwb_path}', verbose=True):
+        metadata = {}
+        metadata['Ecephys'] = {'ElectricalSeries': {'name': 'ElectricalSeries',
+                                                    'description': key['nwb_file_name'] + \
+                                                                   '_' + key['sort_interval_name'] + \
+                                                                   '_' + str(key['sort_group_id'])}}
+        with Timer(label=f'writing filtered NWB recording extractor to {extractor_nwb_path}', verbose=True):
             # TODO: save timestamps together
-            metadata = {}
-            metadata['Ecephys'] = {'ElectricalSeries': {'name': 'ElectricalSeries',
-                                                        'description': key['nwb_file_name'] + \
-                                                                    '_' + key['sort_interval_name'] + \
-                                                                    '_' + str(key['sort_group_id'])}}
             se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
-                                                    buffer_mb=1000, overwrite=True, metadata=metadata,
+                                                    buffer_mb=5000, overwrite=True, metadata=metadata,
                                                     es_key='ElectricalSeries')
 
-        # reload filtered recording
-        # recording = se.NwbRecordingExtractor(extractor_nwb_path)
+        print(f'Rereading NWB recording extractor from {extractor_nwb_path}')
+        recording = se.NwbRecordingExtractor(extractor_nwb_path)
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
@@ -572,13 +571,20 @@ class SpikeSorting(dj.Computed):
 
         key['time_of_sort'] = int(time.time())
         
+        # TODO: save timestamps
         se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
-        
-        with Timer(label='\nComputing quality metrics...', verbose=True):
+
+        with Timer(label='computing quality metrics', verbose=True):
+            #Test: save recording to temporary file
+            # import tempfile
+            # tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
+            # metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name)
             metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')    
             metric_info = (SpikeSortingMetrics & {'cluster_metrics_list_name': metrics_key }).fetch1()
-            print(metric_info)
+            print(metric_info) 
+            # metrics = SpikeSortingMetrics().compute_metrics(metrics_key, metrics_recording, sorting)
             metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+
         
         print('\nSaving sorting results...')
         units = dict()
@@ -619,7 +625,7 @@ class SpikeSorting(dj.Computed):
         recording_uri = kp.store_json({
             'recording_format': 'nwb',
             'data': {
-                'path': nwb_uri
+                'path': nwb_uri,
             }
         })
         sorting_uri = kp.store_json({
