@@ -165,22 +165,15 @@ class SortGroup(dj.Manual):
                                              'sort_group_id', 'sort_reference_electrode_id'),
                                              replace="True")
 
-    def write_prb(self, sort_group_id, nwb_file_name, prb_file_name):
+    def get_geometry(self, sort_group_id, nwb_file_name):
         """
-        Writes a prb file containing informaiton on the specified sort group and
-        its geometry for use with the SpikeInterface package. See the
-        SpikeInterface documentation for details on prb file format.
+        Returns a list with the x,y coordinates of the electrodes in the sort group
+        for use with the SpikeInterface package. Converts z locations to y where appropriate
         :param sort_group_id: the id of the sort group
         :param nwb_file_name: the name of the nwb file for the session you wish to use
         :param prb_file_name: the name of the output prb file
-        :return: None
+        :return: geometry: list of coordinate pairs, one per electrode
         """
-        # try to open the output file
-        try:
-            prbf = open(prb_file_name, 'w')
-        except:
-            print(f'Error opening prb file {prb_file_name}')
-            return
 
         # create the channel_groups dictiorary
         channel_group = dict()
@@ -197,33 +190,33 @@ class SortGroup(dj.Manual):
                                         'electrode_group_name' : electrode_group_name}).fetch1('probe_type')
         channel_group[sort_group_id] = dict()
         channel_group[sort_group_id]['channels'] = sort_group_electrodes['electrode_id'].tolist()
-        geometry = list()
+        
         label = list()
-        for electrode_id in channel_group[sort_group_id]['channels']:
+        n_chan = len(channel_group[sort_group_id]['channels'])
+        
+        geometry = np.zeros((n_chan,2), dtype='float')
+        tmp_geom = np.zeros((n_chan,3), dtype='float')
+        for i, electrode_id in enumerate(channel_group[sort_group_id]['channels']):
             # get the relative x and y locations of this channel from the probe table
             probe_electrode = int(electrodes['probe_electrode'][electrodes['electrode_id'] == electrode_id])
-            rel_x, rel_y = (Probe().Electrode() & {'probe_type': probe_type,
-                                                    'probe_electrode' : probe_electrode}).fetch('rel_x','rel_y')
+            rel_x, rel_y, rel_z = (Probe().Electrode() & {'probe_type': probe_type,
+                                                    'probe_electrode' : probe_electrode}).fetch('rel_x','rel_y', 'rel_z')
+            #TODO: Fix this HACK when we can use probeinterface:
             rel_x = float(rel_x)
             rel_y = float(rel_y)
-            geometry.append([rel_x, rel_y])
-            label.append(str(electrode_id))
-        channel_group[sort_group_id]['geometry'] = geometry
-        channel_group[sort_group_id]['label'] = label
-        # write the prf file in their odd format. Note that we only have one group, but the code below works for multiple groups
-        prbf.write('channel_groups = {\n')
-        for group in channel_group.keys():
-            prbf.write(f'    {int(group)}:\n')
-            prbf.write('        {\n')
-            for field in channel_group[group]:
-                prbf.write("          '{}': ".format(field))
-                prbf.write(json.dumps(channel_group[group][field]) + ',\n')
-            if int(group) != max_group:
-                prbf.write('        },\n')
-            else:
-                prbf.write('        }\n')
-        prbf.write('    }\n')
-        prbf.close()
+            rel_z = float(rel_z)
+            tmp_geom[i,:] = [rel_x, rel_y, rel_z]
+
+        #figure out which columns have coordinates
+        n_found = 0
+        for i in range(3):
+            if np.any(np.nonzero(tmp_geom[:,i])):
+                if n_found < 2:
+                    geometry[:,n_found] = tmp_geom[:,i]
+                    n_found+=1
+                else:
+                    Warning(f'Relative electrode locations have three coordinates; only two are currenlty supported')
+        return np.ndarray.tolist(geometry)
 
 @schema
 class SpikeSorter(dj.Manual):
