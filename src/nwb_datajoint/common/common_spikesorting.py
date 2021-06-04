@@ -240,7 +240,8 @@ class SpikeSorterParameters(dj.Manual):
     parameter_set_name: varchar(80) # label for this set of parameters
     ---
     parameter_dict: blob # dictionary of parameter names and values
-    frequency_min=300: int # high pass filter value
+    
+frequency_min=300: int # high pass filter value
     frequency_max=6000: int # low pass filter value
     filter_width=1000: int # the number of coefficients in the filter
     filter_chunk_size=2000000: int # the size of the chunk for the filtering
@@ -725,6 +726,8 @@ class SpikeSorting(dj.Computed):
                                                  chunk_size=filter_params['filter_chunk_size'],
                                                  dtype='float32', )
 
+        
+        
         # If tetrode and location for every channel is (0,0), give new locations
         # TODO: remove this once the tetrodes are given positions
         channel_locations = sub_R.get_channel_locations()
