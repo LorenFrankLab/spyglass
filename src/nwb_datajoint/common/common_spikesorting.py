@@ -688,10 +688,10 @@ class SpikeSorting(dj.Computed):
         -------
         sub_R: se.SubRecordingExtractor
         """
-        print('In get_filtered_recording_extractor')
+        #print('In get_filtered_recording_extractor')
         with Timer(label='filtered recording extractor setup', verbose=True):
-            with pynwb.NWBHDF5IO(os.environ['NWB_DATAJOINT_BASE_DIR']+'raw/'+key['nwb_file_name'],
-                                 'r', load_namespaces=True) as io:
+            nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
+            with pynwb.NWBHDF5IO(nwb_file_abs_path,'r', load_namespaces=True) as io:
                 nwbfile = io.read()
                 timestamps = nwbfile.acquisition['e-series'].timestamps[:]
             
@@ -732,6 +732,9 @@ class SpikeSorting(dj.Computed):
         sub_R = se.SubRecordingExtractor(R, channel_ids=channel_ids,
                                          start_frame=sort_indices[0],
                                          end_frame=sort_indices[1]) 
+
+        #Caching the extractor GREATLY speeds up the subsequent processing and NWB writing
+        sub_R = se.CacheRecordingExtractor(sub_R, chunk_mb=10000)
          
         if sort_reference_electrode_id >= 0:
             sub_R = st.preprocessing.common_reference(sub_R, reference='single',
@@ -752,13 +755,8 @@ class SpikeSorting(dj.Computed):
 
         
         
-        # If tetrode and location for every channel is (0,0), give new locations
-        # TODO: remove this once the tetrodes are given positions
-        channel_locations = sub_R.get_channel_locations()
-        if np.all(channel_locations==0) and len(channel_locations)==4 and probe_type[:7]=='tetrode':
-            print('Tetrode; making up channel locations...')
-            channel_locations = [[0,0],[0,1],[1,0],[1,1]]
-            sub_R.set_channel_locations(channel_locations)
+        # Make sure the locations are set correctly
+        sub_R.set_channel_locations(SortGroup().get_geometry(key['sort_group_id'],key['nwb_file_name']))
 
         # give timestamps for the SubRecordingExtractor
         # TODO: change this once spikeextractors is updated
