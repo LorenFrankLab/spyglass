@@ -552,9 +552,6 @@ class SpikeSorting(dj.Computed):
                                                     buffer_mb=5000, overwrite=True, metadata=metadata,
                                                     es_key='ElectricalSeries')
 
-        print(f'Rereading NWB recording extractor from {extractor_nwb_path}')
-        recording = se.NwbRecordingExtractor(extractor_nwb_path)
-
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
         filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
@@ -576,16 +573,14 @@ class SpikeSorting(dj.Computed):
 
         with Timer(label='computing quality metrics', verbose=True):
             #Test: save recording to temporary file
-            # import tempfile
-            # tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
-            # metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name)
+            import tempfile
+            tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
+            metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=5000)
             metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')    
             metric_info = (SpikeSortingMetrics & {'cluster_metrics_list_name': metrics_key }).fetch1()
             print(metric_info) 
-            # metrics = SpikeSortingMetrics().compute_metrics(metrics_key, metrics_recording, sorting)
-            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, metrics_recording, sorting)
 
-        
         print('\nSaving sorting results...')
         units = dict()
         units_valid_times = dict()
