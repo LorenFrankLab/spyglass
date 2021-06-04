@@ -357,6 +357,17 @@ class AnalysisNwbfile(dj.Manual):
         """
         self.external['analysis'].delete(delete_external_files=delete_files)
 
+        # the usage of the above function to clean up AnalysisNwbfile table is as follows:  
+
+    def nightly_cleanup():
+        from nwb_datajoint.common import common_nwbfile
+        child_tables = get_child_tables(common_nwbfile.AnalysisNwbfile)
+        (common_nwbfile.AnalysisNwbfile - child_tables).delete_quick()
+
+        # a separate external files clean up required - this is to be done during times when no other transactions are in progress.
+        common_nwbfile.schema.external['analysis'].delete(delete_external_files=True)
+
+
 
 @schema
 class NwbfileKachery(dj.Computed):

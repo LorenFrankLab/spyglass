@@ -20,6 +20,7 @@ import numpy as np
 import scipy.stats as stats
 import json
 import pynwb
+import tempfile
 
 import kachery_p2p as kp
 import labbox_ephys as le
@@ -565,9 +566,8 @@ class SpikeSorting(dj.Computed):
         se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
 
         with Timer(label='computing quality metrics', verbose=True):
-            import tempfile
             tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
-            metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=5000)
+            metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
             metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')    
             metric_info = (SpikeSortingMetrics & {'cluster_metrics_list_name': metrics_key }).fetch1()
             print(metric_info) 
@@ -734,7 +734,8 @@ class SpikeSorting(dj.Computed):
                                          end_frame=sort_indices[1]) 
 
         #Caching the extractor GREATLY speeds up the subsequent processing and NWB writing
-        sub_R = se.CacheRecordingExtractor(sub_R, chunk_mb=10000)
+        tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
+        sub_R = se.CacheRecordingExtractor(sub_R, save_path=tmpfile.name, chunk_mb=10000)
          
         if sort_reference_electrode_id >= 0:
             sub_R = st.preprocessing.common_reference(sub_R, reference='single',
