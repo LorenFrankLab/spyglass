@@ -270,7 +270,7 @@ class AnalysisNwbfile(dj.Manual):
             return nwb_object.object_id
 
     def add_units(self, analysis_file_name, units, units_valid_times,
-                  units_sort_interval, metrics=None, units_waveforms=None):
+                  units_sort_interval, metrics=None, units_waveforms=None, labels=None):
         """Add units, given a units dictionary where each entry is (unit id, spike times).
 
         Parameters
@@ -287,6 +287,8 @@ class AnalysisNwbfile(dj.Manual):
             Dictionary of unit waveforms with unit ids as keys.
         metrics : dict, optional
             Cluster metrics.
+        labels : dict, optional
+            Curation labels for clusters
 
         Returns
         -------
@@ -315,6 +317,8 @@ class AnalysisNwbfile(dj.Manual):
                         nwbf.add_unit_column(name=metric,
                                              description=f'{metric} sorting metric',
                                              data=metric_data)
+                if labels is not None:
+                    nwbf.add_unit_column(name = 'label', description='label given during curation', data = labels)
                 # If the waveforms were specified, add them as a dataframe to scratch
                 waveforms_object_id = ''
                 if units_waveforms is not None:

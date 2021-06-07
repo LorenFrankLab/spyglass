@@ -496,10 +496,8 @@ class SpikeSorting(dj.Computed):
             partially filled entity; value of primary keys from key source
             (in this case SpikeSortingParameters)
         """
-        with Timer(label='creating analysis NWB file', verbose=True):
-            # Create a new NWB file for holding the results of analysis (e.g. spike sorting).
-            # Save the name to the 'key' dict to use later.
-            key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
+        
+        key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
 
         sort_interval =  (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                           'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
@@ -604,6 +602,8 @@ class SpikeSorting(dj.Computed):
             kp.set(key['analysis_file_name'], workspace_uri)
         workspace = le.load_workspace(workspace_uri)
         print(f'Workspace URI: {workspace.uri}')
+
+        
         
         recording_label = key['nwb_file_name']+'_'+key['sort_interval_name']+'_'+str(key['sort_group_id'])
         sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
@@ -645,6 +645,15 @@ class SpikeSorting(dj.Computed):
 
         self.insert1(key)
         print('\nDone - entry inserted to table.')
+
+    def get_stored_recording_sorting(self, key):
+        """Retrieves the stored recording and sorting extractors given the key to a SpikeSorting
+
+        Args:
+            key (dict): key to retrieve one SpikeSorting entry
+        """
+        #TODO write this function
+    
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
@@ -765,6 +774,28 @@ class SpikeSorting(dj.Computed):
 
         return sub_R
 
+    def get_recording_timestamps(self, key):
+        """Returns the timestamps for the specified SpikeSorting entry
+
+        Args:
+            key (dict): the SpikeSorting key
+        Returns:
+            timestamps (numpy array)
+        """
+        nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
+        #TODO fix to work with any electrical series object
+        with pynwb.NWBHDF5IO(nwb_file_abs_path,'r', load_namespaces=True) as io:
+            nwbfile = io.read()
+            timestamps = nwbfile.acquisition['e-series'].timestamps[:]
+        
+        sort_interval =  (SortInterval & {'nwb_file_name': key['nwb_file_name'],
+                                            'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
+
+        sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
+        timestamps = timestamps[sort_indices[0]:sort_indices[1]]
+        return timestamps
+
+        
     def get_sorting_extractor(self, key, sort_interval):
         #TODO: replace with spikeinterface call if possible
         """Generates a numpy sorting extractor given a key that retrieves a SpikeSorting and a specified sort interval
@@ -852,61 +883,98 @@ class CuratedSpikeSorting(dj.Computed):
         -> CuratedSpikeSorting
         unit_id: int            # ID for each unit
         ---
-        label: varchar(80)      # label for each unit
-        noise_overlap: float    # noise overlap metric for each unit
-        isolation_score: float  # isolation score metric for each unit
+        label:='' varchar(80)      # label for each unit
+        noise_overlap=-1: float    # noise overlap metric for each unit
+        isolation_score=-1: float  # isolation score metric for each unit
+        isi_violation_score=-1: float # ISI violation score for each unit
+        firing_rate=-1:    float   # firing rate
+        num_spikes=-1: int          # total number of spikes
         """
 
     def make(self, key):
-        # Create a new analysis NWB file that is a copy of the original
-        # analysis NWB file
-        parent_key = (SpikeSorting & key).fetch1()
-        new_analysis_nwb_filename = AnalysisNwbfile.copy(parent_key['analysis_file_name'])
+        #define the list of properties. TODO: get this from table definition.
+        unit_properties = ['label', 'isolation_score', 'noise_overlap', 'isi_violation_score', 'firing_rate', 'num_spikes']
 
+
+        #Creating the curated units table involves 4 steps:
+        # 1. Merging units labeled for merge
+        # 2. Recalculate metrics 
+        # 3. Removing units labeled as noise / reject
+        # 4. Inserting units into new analysis NWB file and into the Curated Units table.
+
+        #1. Merge
+        # We can get the new curated soring from the workspace.
+        workspace_uri = (SpikeSorting & key).fetch1('curation_feed_uri')
+        workspace = le.load_workspace(workspace_uri=workspace_uri[0])
+        sorting = workspace.get_curated_sorting_extractor(workspace.sorting_ids[0])
+
+        #2. Recalucate metrics for curated units to account for merges
+        # get the recording extractor
+        recording = workspace.get_recording_extractor(workspace.recording_ids[0])
+        #metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
+        metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')    
+        metric_info = (SpikeSortingMetrics & {'cluster_metrics_list_name': metrics_key }).fetch1()
+        print(metric_info) 
+        metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+        
+        #3. Remove noise units. To do this we need the labels, but this may happen automatically later with a new version
+        # of get_curated_sorting_extractor
         # Get labels and print
         labels = self.get_labels(parent_key['curation_feed_uri'])
         print('Labels: ' + str(labels))
 
         # turn labels to list of str
         labels_concat = []
+        accepted_units = []
         for idx, unitId in enumerate(labels):
             label_concat = ','.join(labels[unitId])
             labels_concat.append(label_concat)
+            if 'accepted' in labels[unitId]:
+                accepted_units.append(unitId)
 
-        # Get metrics from analysis NWB file
-        with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(parent_key['analysis_file_name']),
-                             mode = "r", load_namespaces=True) as io:
-            nwbf = io.read()
-            noise_overlap = nwbf.units['noise_overlap'][:]
-            isolation_score = nwbf.units['nn_hit_rate'][:]
+        # Create a new analysis NWB file 
+        parent_key = (SpikeSorting & key).fetch1()
+        key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
 
-        # Print metrics
-        print('Noise overlap: ' + str(noise_overlap))
-        print('Isolation score: ' + str(isolation_score))
+        # load the AnalysisNWBFile from the original sort to get the sort_interval_valid times and the sort_interval
+        orig_units = (SpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
+        sort_interval = orig_units.iloc[1]['sort_interval']
+        sort_interval_valid_times = orig_units.iloc[1]['obs_intervals']
 
-        # Add labels to the new analysis NWB file
-        print('\nSaving units data to new AnalysisNwb file...')
-        with pynwb.NWBHDF5IO(path = AnalysisNwbfile.get_abs_path(new_analysis_nwb_filename),
-                             mode = "a", load_namespaces=True) as io:
-            nwbf = io.read()
-            nwbf.add_unit_column(name = 'label', description='label given during curation',
-                                 data = labels_concat)
-            print(nwbf.units)
-            io.write(nwbf)
-        print('Done with AnalysisNwb file.')
+        # add the units with the metrics and labels to the file.
+        print('\nSaving curated sorting results...')
+        timestamps = SpikeSorting.get_recording_timestamps(key)
+        units = dict()
+        units_valid_times = dict()
+        units_sort_interval = dict()
+        unit_ids = sorting.get_unit_ids()
+        for unit_id in unit_ids:
+            spike_times_in_samples = sorting.get_unit_spike_train(unit_id = unit_id)
+            units[unit_id] = timestamps[spike_times_in_samples]
+            units_valid_times[unit_id] = sort_interval_valid_times
+            units_sort_interval[unit_id] = [sort_interval]
 
-        # Insert new file to AnalysisNWBfile table
-        AnalysisNwbfile().add(key['nwb_file_name'], new_analysis_nwb_filename)
+        # TODO: consider replacing with spikeinterface call if possible
+        units_object_id, _ = AnalysisNwbfile().add_units(key['analysis_file_name'],
+                                                         units, units_valid_times,
+                                                         units_sort_interval,
+                                                         metrics=metrics, labels=labels_concat)
+
         # Insert entry to CuratedSpikeSorting table
-        self.insert1(dict(key, analysis_file_name = new_analysis_nwb_filename))
+        self.insert1(key)
+
+        units_table = (CuratedSpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
 
         # Add entries to CuratedSpikeSorting.Units table
         print('\nAdding to dj Units table...')
-        for idx, unitId in enumerate(labels):
-            CuratedSpikeSorting.Units.insert1(dict(key, unit_id = unitId,
-                                              label = ','.join(labels[unitId]),
-                                              noise_overlap = noise_overlap[idx],
-                                              isolation_score = isolation_score[idx]))
+        unit_key = dict()
+        for unit_num, unit in units_table.iterrows():
+            unit_key['unit_id'] = unit_num
+            for property in unit_properties:
+                if property in unit:
+                    unit_key[property] = unit[property]
+            CuratedSpikeSorting.Units.insert1(unit_key)
+
         print('Done with dj Units table.')
 
     def get_labels(self, feed_uri):
