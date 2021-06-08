@@ -319,7 +319,7 @@ class SpikeSortingMetrics(dj.Manual):
                                 'max_channel_peak': 'both',             # direction of the maximum channel peak: 'both', 'neg', or 'pos' (default 'both')
                                 'max_spikes_per_unit_for_noise_overlap': 1000, # Maximum number of spikes to compute templates for noise overlap from (default 1000)
                                 'noise_overlap_num_features': 5,        # Number of features to use for PCA for noise overlap
-                                'noise_overlap_num_knn' : 1000,         # Number of nearest neighbors for noise overlap
+                                'noise_overlap_num_knn' : 1,            # Number of nearest neighbors for noise overlap
                                 'drift_metrics_interval_s': 60,         # length of period in s for evaluating drift (default 60 s)
                                 'drift_metrics_min_spikes_per_interval': 10,    # Minimum number of spikes in an interval for evaluation of drift (default 10)
                                 'max_spikes_for_silhouette': 1000,      # Max spikes to be used for silhouette metric
@@ -774,7 +774,8 @@ class SpikeSorting(dj.Computed):
 
         return sub_R
 
-    def get_recording_timestamps(self, key):
+    @staticmethod
+    def get_recording_timestamps(key):
         """Returns the timestamps for the specified SpikeSorting entry
 
         Args:
@@ -875,20 +876,21 @@ class CuratedSpikeSorting(dj.Computed):
     -> SpikeSorting
     ---
     -> AnalysisNwbfile    # New analysis NWB file to hold unit info
+    units_object_id: varchar(40)           # Object ID for the units in NWB file
     """
 
-    class Units(dj.Part):
+    class Unit(dj.Part):
         definition = """
         # Table for holding sorted units
-        -> CuratedSpikeSorting
+        -> master
         unit_id: int            # ID for each unit
         ---
-        label:='' varchar(80)      # label for each unit
-        noise_overlap=-1: float    # noise overlap metric for each unit
-        isolation_score=-1: float  # isolation score metric for each unit
+        label='' :              varchar(80)      # optional label for each unit
+        noise_overlap=-1 :      float    # noise overlap metric for each unit
+        isolation_score=-1:     float  # isolation score metric for each unit
         isi_violation_score=-1: float # ISI violation score for each unit
-        firing_rate=-1:    float   # firing rate
-        num_spikes=-1: int          # total number of spikes
+        firing_rate=-1:         float   # firing rate
+        num_spikes=-1:          int          # total number of spikes
         """
 
     def make(self, key):
@@ -899,43 +901,46 @@ class CuratedSpikeSorting(dj.Computed):
         #Creating the curated units table involves 4 steps:
         # 1. Merging units labeled for merge
         # 2. Recalculate metrics 
-        # 3. Removing units labeled as noise / reject
-        # 4. Inserting units into new analysis NWB file and into the Curated Units table.
+        # 3. Inserting accepted units into new analysis NWB file and into the Curated Units table.
 
         #1. Merge
         # We can get the new curated soring from the workspace.
         workspace_uri = (SpikeSorting & key).fetch1('curation_feed_uri')
-        workspace = le.load_workspace(workspace_uri=workspace_uri[0])
+        workspace = le.load_workspace(workspace_uri=workspace_uri)
         sorting = workspace.get_curated_sorting_extractor(workspace.sorting_ids[0])
+       
+        # Get labels 
+        labels = workspace.get_sorting_curation(workspace.sorting_ids[0])
+
+        # turn labels to list of str, only including accepted units.
+        labels_concat = []
+        accepted_units = []
+        unit_labels = labels['labelsByUnit']
+        for idx, unitId in enumerate(unit_labels):
+            if 'accept' in unit_labels[unitId]:
+                accepted_units.append(unitId)
+                label_concat = ','.join(unit_labels[unitId])
+                labels_concat.append(label_concat)
+        print(f'Found {len(accepted_units)} accepted units')
+
+        #exit out if there are no labels or no accepted units
+        if len(unit_labels) == 0 or len(accepted_units) == 0:
+            print(f'{key}: no curation found or no accepted units')
+            return
 
         #2. Recalucate metrics for curated units to account for merges
         # get the recording extractor
-        recording = workspace.get_recording_extractor(workspace.recording_ids[0])
-        #metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
-        metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')    
-        metric_info = (SpikeSortingMetrics & {'cluster_metrics_list_name': metrics_key }).fetch1()
-        print(metric_info) 
-        metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+        with Timer(label=f'Recomputing metrics', verbose=True):
+            recording = workspace.get_recording_extractor(workspace.recording_ids[0])
+            tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
+            recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
+            metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')    
+            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+
+        #Limit the metrics to accepted units
+        metrics = metrics.loc[accepted_units]
         
-        #3. Remove noise units. To do this we need the labels, but this may happen automatically later with a new version
-        # of get_curated_sorting_extractor
-        # Get labels and print
-        labels = self.get_labels(parent_key['curation_feed_uri'])
-        print('Labels: ' + str(labels))
-
-        # turn labels to list of str
-        labels_concat = []
-        accepted_units = []
-        for idx, unitId in enumerate(labels):
-            label_concat = ','.join(labels[unitId])
-            labels_concat.append(label_concat)
-            if 'accepted' in labels[unitId]:
-                accepted_units.append(unitId)
-
-        # Create a new analysis NWB file 
-        parent_key = (SpikeSorting & key).fetch1()
-        key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
-
+        #3. Save the accepted, merged units and their metrics
         # load the AnalysisNWBFile from the original sort to get the sort_interval_valid times and the sort_interval
         orig_units = (SpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
         sort_interval = orig_units.iloc[1]['sort_interval']
@@ -949,60 +954,43 @@ class CuratedSpikeSorting(dj.Computed):
         units_sort_interval = dict()
         unit_ids = sorting.get_unit_ids()
         for unit_id in unit_ids:
-            spike_times_in_samples = sorting.get_unit_spike_train(unit_id = unit_id)
-            units[unit_id] = timestamps[spike_times_in_samples]
-            units_valid_times[unit_id] = sort_interval_valid_times
-            units_sort_interval[unit_id] = [sort_interval]
+            if unit_id in accepted_units:
+                spike_times_in_samples = sorting.get_unit_spike_train(unit_id = unit_id)
+                units[unit_id] = timestamps[spike_times_in_samples]
+                units_valid_times[unit_id] = sort_interval_valid_times
+                units_sort_interval[unit_id] = [sort_interval]
 
-        # TODO: consider replacing with spikeinterface call if possible
+        # Create a new analysis NWB file 
+        key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
+ 
         units_object_id, _ = AnalysisNwbfile().add_units(key['analysis_file_name'],
                                                          units, units_valid_times,
                                                          units_sort_interval,
                                                          metrics=metrics, labels=labels_concat)
+        # add the analysis file to the table
+        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
+        key['units_object_id'] = units_object_id
 
         # Insert entry to CuratedSpikeSorting table
         self.insert1(key)
 
+        #Remove the AnalysisNWBFile and the units_object_id entries.
+        del key['units_object_id']
+        del key['analysis_file_name']
+
         units_table = (CuratedSpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
 
         # Add entries to CuratedSpikeSorting.Units table
-        print('\nAdding to dj Units table...')
-        unit_key = dict()
+        print('\nAdding to dj Unit table...')
+        unit_key = key
         for unit_num, unit in units_table.iterrows():
             unit_key['unit_id'] = unit_num
             for property in unit_properties:
                 if property in unit:
                     unit_key[property] = unit[property]
-            CuratedSpikeSorting.Units.insert1(unit_key)
+            CuratedSpikeSorting.Unit.insert1(unit_key)
 
-        print('Done with dj Units table.')
-
-    def get_labels(self, feed_uri):
-        """Parses the curation feed to get a label for each unit.
-
-        Parameters
-        ----------
-        feed_uri : str
-
-        Returns
-        -------
-        final_labels : dict
-            key is int (unitId), value is list of strings (labels)
-        """
-        f = kp.load_feed(feed_uri)
-        sf = f.get_subfeed(dict(documentId='default', key='sortings'))
-        msgs = sf.get_next_messages()
-        label_msgs = list(compress(msgs,[(m['action']['type']=='ADD_UNIT_LABEL') or (m['action']['type']=='REMOVE_UNIT_LABEL') for m in msgs]))
-        unitIds = list(set([lm['action']['unitId'] for lm in label_msgs]))
-        final_labels = dict()
-        for cell in unitIds:
-            unit_label_msgs = list(compress(label_msgs, [lm['action']['unitId']==cell for lm in label_msgs]))
-            adds = list(compress(unit_label_msgs,[i['action']['type']=='ADD_UNIT_LABEL' for i in unit_label_msgs]))
-            removes = list(compress(unit_label_msgs,[i['action']['type']=='REMOVE_UNIT_LABEL' for i in unit_label_msgs]))
-            labels_added = [k['action']['label'] for k in adds]
-            labels_removed = [k['action']['label'] for k in removes]
-            final_labels.update({cell: list(set(labels_added) - set(labels_removed))})
-        return final_labels
+        print('Done with dj Unit table.')
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
