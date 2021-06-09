@@ -44,15 +44,8 @@ class ElectrodeGroup(dj.Imported):
             # as the ElectrodeGroup
             electrode_group = nwbf.get_electrode_group(eg_name)
             key['electrode_group_name'] = eg_name
-            # check to see if the location is listed in the region.BrainRegion schema, and if not add it
-            region_dict = dict()
-            region_dict['region_name'] = electrode_group.location
-            query = BrainRegion() & region_dict
-            if len(query) == 0:
-                # this region isn't in the list, so add it
-                BrainRegion().insert1(region_dict)
-                query = BrainRegion() & region_dict
-            key['region_id'] = query.fetch1('region_id')
+            # add elcetrode group location if it does not exist, and fetch the row
+            key['region_id'] = BrainRegion.fetch_add(region_name=electrode_group.location)
             key['description'] = electrode_group.description
             # the following should probably be a function that returns the probe devices from the file
             # TODO check and replace this with
