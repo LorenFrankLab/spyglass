@@ -131,7 +131,7 @@ class AnalysisNwbfile(dj.Manual):
             for field in nwb_fields:
                 if field not in nwb_keep_fields:
                     nwb_object = getattr(nwbf, field)
-                    if type(nwb_object) is pynwb.core.LabelledDict:
+                    if isinstance(nwb_object, pynwb.core.LabelledDict):
                         for module in list(nwb_object.keys()):
                             nwb_object.pop(module)
 
