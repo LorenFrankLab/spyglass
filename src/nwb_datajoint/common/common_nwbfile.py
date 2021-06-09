@@ -150,7 +150,10 @@ class AnalysisNwbfile(dj.Manual):
         # get the list of names of analysis files related to this nwb file
         names = (AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch('analysis_file_name')
         n1 = [str.replace(name, os.path.splitext(nwb_file_name)[0], '') for name in names]
-        max_analysis_file_num = max([int(str.replace(ext, '.nwb', '')) for ext in n1])
+        try:
+            max_analysis_file_num = max([int(str.replace(ext, '.nwb', '')) for ext in n1])
+        except ValueError:
+            max_analysis_file_num = 0
         # name the file, adding the number of files with preceeding zeros
         analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(max_analysis_file_num+1).zfill(6) + '.nwb'
         print(analysis_file_name)
@@ -361,7 +364,7 @@ class AnalysisNwbfile(dj.Manual):
         """
         self.external['analysis'].delete(delete_external_files=delete_files)
 
-        # the usage of the above function to clean up AnalysisNwbfile table is as follows:  
+        # the usage of the above function to clean up AnalysisNwbfile table is as follows:
     @staticmethod
     def nightly_cleanup():
         from nwb_datajoint.common import common_nwbfile
