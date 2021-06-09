@@ -11,7 +11,7 @@ from .dj_helper_fn import get_child_tables
 schema = dj.schema("common_nwbfile")
 
 # define the fields that should be kept in AnalysisNWBFiles
-nwb_keep_fields = ('devices', 'electrode_groups', 'electrodes', 'experiment_description',
+NWB_KEEP_FIELDS = ('devices', 'electrode_groups', 'electrodes', 'experiment_description',
                    'experimenter', 'file_create_date', 'identifier', 'intervals',
                    'institution', 'lab', 'session_description', 'session_id',
                    'session_start_time', 'subject', 'timestamps_reference_time')
@@ -129,7 +129,7 @@ class AnalysisNwbfile(dj.Manual):
             # pop off the unnecessary elements to save space
             nwb_fields = nwbf.fields
             for field in nwb_fields:
-                if field not in nwb_keep_fields:
+                if field not in NWB_KEEP_FIELDS:
                     nwb_object = getattr(nwbf, field)
                     if isinstance(nwb_object, pynwb.core.LabelledDict):
                         for module in list(nwb_object.keys()):
