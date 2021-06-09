@@ -1,6 +1,8 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
 import numpy as np
 import re
+import inspect
+import datajoint as dj
 
 from .nwb_helper_fn import get_nwb_file
 
@@ -79,3 +81,11 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
                     for id_attr in attrs if 'object_id' in id_attr and rec_dict[id_attr] != ''}
         ret.append({**rec_dict, **nwb_objs})
     return ret
+
+
+def get_child_tables(table):
+    table = table() if inspect.isclass(table) else table
+    return [dj.FreeTable(table.connection, s if not s.isdigit() else next(iter(table.connection.dependencies.children(s))))
+            for s in table.children()]
+
+

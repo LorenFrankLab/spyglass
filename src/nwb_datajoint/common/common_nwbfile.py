@@ -6,6 +6,7 @@ import pathlib
 import pynwb
 
 from .nwb_helper_fn import get_electrode_indices, get_nwb_file
+from .dj_helper_fn import get_child_tables
 
 schema = dj.schema("common_nwbfile")
 
@@ -146,10 +147,13 @@ class AnalysisNwbfile(dj.Manual):
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
-        # get the current number of analysis files related to this nwb file
-        n_analysis_files = len((AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch())
+        # get the list of names of analysis files related to this nwb file
+        names = (AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch('analysis_file_name')
+        n1 = [str.replace(name, os.path.splitext(nwb_file_name)[0], '') for name in names]
+        max_analysis_file_num = max([int(str.replace(ext, '.nwb', '')) for ext in n1])
         # name the file, adding the number of files with preceeding zeros
-        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(n_analysis_files).zfill(6) + '.nwb'
+        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(max_analysis_file_num+1).zfill(6) + '.nwb'
+        print(analysis_file_name)
         return analysis_file_name
 
     @classmethod
@@ -356,6 +360,17 @@ class AnalysisNwbfile(dj.Manual):
             Whether the original files should be deleted (default False).
         """
         self.external['analysis'].delete(delete_external_files=delete_files)
+
+        # the usage of the above function to clean up AnalysisNwbfile table is as follows:  
+    @staticmethod
+    def nightly_cleanup():
+        from nwb_datajoint.common import common_nwbfile
+        child_tables = get_child_tables(common_nwbfile.AnalysisNwbfile)
+        (common_nwbfile.AnalysisNwbfile - child_tables).delete_quick()
+
+        # a separate external files clean up required - this is to be done during times when no other transactions are in progress.
+        common_nwbfile.schema.external['analysis'].delete(delete_external_files=True)
+
 
 
 @schema

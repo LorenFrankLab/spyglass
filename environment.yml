@@ -23,3 +23,4 @@ dependencies:
     - pymysql>=1.0.*
     - h5py==2.10.*
     - git+git://github.com/LorenFrankLab/ndx-franklab-novela
+    - git+git://github.com/magland/sortingview#egg=sortingview&subdirectory=src/python
