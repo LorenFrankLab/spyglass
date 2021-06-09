@@ -44,7 +44,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 2. Add the following environment variables (e.g. in `~/.bashrc`). This example assumes that you are interacting with the database on a computer that has mounted `stelmo` at `/stelmo` (if the mount location is different, change accordingly).
 
      ```bash
-     export NWB_DATAJOINT_BASE_DIR="/stelmo/nwb/" 
+     export NWB_DATAJOINT_BASE_DIR="/stelmo/nwb/"
      export SPIKE_SORTING_STORAGE_DIR="/stelmo/nwb/spikesorting"
      export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
      export KACHERY_P2P_API_HOST="typhoon"
@@ -54,7 +54,12 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 
    > If you're not connected to UCSF network, then you will have to run your own `kachery-p2p` daemon for curating spike sorting. Consult the guide [here](https://github.com/flatironinstitute/kachery-p2p/blob/main/doc/setup_and_installation.md).
 
-3. Configure DataJoint. To connect to the Datajoint database, we have to specify information about it such as the hostname and the port. You should also change your password from the temporary one you were given. To do so, open up [`dj_config.py`](https://github.com/LorenFrankLab/nwb_datajoint/blob/master/config/dj_config.py), change the user name, and run it.
+3. Configure DataJoint. To connect to the Datajoint database, we have to specify information about it such as the hostname and the port. You should also change your password from the temporary one you were given. Go to the config directory, and run [`dj_config.py`](https://github.com/LorenFrankLab/nwb_datajoint/blob/master/config/dj_config.py) in the command line with your username:
+
+    ```bash
+    cd config # change to the config directory
+    python dj_config.py <username> # run the configuration script
+    ```
 
    > Again, if you're using your own MySQL server, then you may need to change the other settings as well.
 
