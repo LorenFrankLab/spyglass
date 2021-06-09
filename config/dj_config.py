@@ -1,8 +1,10 @@
 import datajoint as dj
 
-# define the hostname and port to connect
+# define connection info
 dj.config['database.host'] = 'lmf-db.cin.ucsf.edu'
 dj.config['database.port'] = 3306
+dj.config['database.use_tls'] = True
+dj.config["enable_python_native_blobs"] = True
 
 # CHANGE HERE: define user name
 dj.config['database.user'] = 'your_user_name'
