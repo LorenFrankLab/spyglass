@@ -44,7 +44,7 @@ class RawPosition(dj.Imported):
             sampling_rate = estimate_sampling_rate(timestamps, 1.75)
             if sampling_rate < 0:
                 raise ValueError(f'Error adding position data for position epoch {pos_epoch}')
-            print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
+            print('Processing raw position data. Estimated sampling rate: {} Hz'.format(sampling_rate))
 
             # add the valid intervals to the Interval list
             interval_dict = dict()
@@ -73,6 +73,7 @@ class StateScriptFile(dj.Imported):
     """
 
     def make(self, key):
+        """Add a new row to the StateScriptFile table. Requires keys "nwb_file_name", "file_object_id"."""
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -81,10 +82,11 @@ class StateScriptFile(dj.Imported):
         if associated_files is None:
             print(f'No associated_files processing module found in {nwb_file_name}\n')
             return
-        if not isinstance(associated_files, ndx_franklab_novela.AssociatedFiles):
-            print(f"Processing module {associated_files} is not of type ndx_franklab_novela.AssociatedFiles\n")
-            return
         for associated_file_obj in associated_files.data_interfaces.values():
+            if not isinstance(associated_file_obj, ndx_franklab_novela.AssociatedFiles):
+                print(f'Data interface {associated_file_obj} within "associated files" processing module is not of '
+                      f'type ndx_franklab_novela.AssociatedFiles\n')
+                return
             # parse the task_epochs string
             epoch_list = associated_file_obj.task_epochs.split(',')
             # find the file associated with this epoch
@@ -109,7 +111,7 @@ class VideoFile(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        video = get_data_interface(nwbf, 'video')
+        video = get_data_interface(nwbf, 'video', pynwb.behavior.BehavioralEvents)
 
         if video is None:
             print(f'No video data interface found in {nwb_file_name}\n')

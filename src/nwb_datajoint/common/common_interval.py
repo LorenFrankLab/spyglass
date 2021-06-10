@@ -19,20 +19,32 @@ class IntervalList(dj.Manual):
     """
 
     def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
-        '''
-        :param nwbf:
-        :param nwb_file_name:
-        :return: None
-        Adds each of the entries in the nwb epochs table to the Interval list
-        '''
+        """Add each entry in the NWB file epochs table to the IntervalList table.
+
+        The first tag for each epoch is used as the interval list name. If there are no tags, then 'interval_x'
+        will be used as the interval list name, where x is the index of the epoch in the epochs table.
+
+        Start time and stop time are stored in the valid_times field as a numpy array of [start time, stop time]
+        for each epoch.
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            The source NWB file object.
+        nwb_file_name : str
+            The file name of the NWB file, used as a primary key to the Session table.
+        """
         if nwbf.epochs is None:
             print('No epochs found in NWB file.')
             return
         epochs = nwbf.epochs.to_dataframe()
-        epoch_dict = dict()
-        epoch_dict['nwb_file_name'] = nwb_file_name
         for e in epochs.iterrows():
-            epoch_dict['interval_list_name'] = e[1].tags[0]
+            epoch_dict = dict()
+            epoch_dict['nwb_file_name'] = nwb_file_name
+            if e[1].tags[0]:
+                epoch_dict['interval_list_name'] = e[1].tags[0]
+            else:
+                epoch_dict['interval_list_name'] = 'interval_' + str(e[0])
             epoch_dict['valid_times'] = np.asarray([[e[1].start_time, e[1].stop_time]])
             self.insert1(epoch_dict, skip_duplicates=True)
 

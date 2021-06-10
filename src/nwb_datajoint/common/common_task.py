@@ -1,10 +1,11 @@
 import datajoint as dj
+import pynwb
 
 from .common_session import Session  # noqa: F401
 from .common_nwbfile import Nwbfile
 from .common_interval import IntervalList
 from .common_device import CameraDevice
-from .nwb_helper_fn import get_data_interface, get_nwb_file
+from .nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_task")
 
@@ -45,30 +46,63 @@ class Task(dj.Manual):
     definition = """
      task_name: varchar(80)
      ---
-     task_description = '': varchar(255)  # description of this task
-     task_type = '': varchar(80)          # type of task
-     task_subtype = '': varchar(80)       # subtype of task
-
+     task_description = NULL: varchar(255)  # description of this task
+     task_type = NULL: varchar(80)          # type of task
+     task_subtype = NULL: varchar(80)       # subtype of task
      """
 
-    # def insert_from_nwbfile(self, nwbf):
-    #     task_dict = dict()
-    #     #search through he processing modules to see if we can find a behavior module. This should probably be a
-    #     # general function
-    #     task_interface = get_data_interface(nwbf, 'task')
-    #     if task_interface is not None:
-    #         # check the datatype
-    #         if task_interface.data_type == 'DynamicTable':
-    #             taskdf = task_interface.to_dataframe()
-    #             # go through the rows of the dataframe and add the task if it doesn't exist
-    #             for task_entry in taskdf.iterrows():
-    #                 task_dict['task_name'] = task_entry[1].task_name
-    #                 task_dict['task_description'] = task_entry[1].task_description
-    #                 # FIX if types are defined and NWB object exist
-    #                 task_dict['task_type'] = ''
-    #                 task_dict['task_subtype'] = ''
-    #                 task_dict['nwb_object_id'] = ''
-    #                 self.insert1(task_dict, skip_duplicates='True')
+    def insert_from_nwbfile(self, nwbf):
+        """Insert tasks from an NWB file.
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            The source NWB file object.
+        """
+        tasks_mod = nwbf.processing.get('tasks')
+        if tasks_mod is None:
+            print(f'No tasks processing module found in {nwbf}\n')
+            return
+        for task in tasks_mod.data_interfaces.values():
+            if isinstance(task, pynwb.core.DynamicTable):
+                self.insert_from_task_table(task)
+
+    def insert_from_task_table(self, task_table):
+        """Insert tasks from a pynwb DynamicTable containing task metadata.
+
+        Duplicate tasks will not be added.
+
+        Parameters
+        ----------
+        task_table : pynwb.core.DynamicTable
+            The table representing task metadata.
+        """
+        taskdf = task_table.to_dataframe()
+        for task_entry in taskdf.iterrows():
+            task_dict = dict()
+            task_dict['task_name'] = task_entry[1].task_name
+            task_dict['task_description'] = task_entry[1].task_description
+            self.insert1(task_dict, skip_duplicates=True)
+
+    @classmethod
+    def check_task_table(cls, task_table):
+        """Check whether the pynwb DynamicTable containing task metadata conforms to the expected format.
+
+        The table should be an instance of pynwb.core.DynamicTable and contain the columns 'task_name' and
+        'task_description'.
+
+        Parameters
+        ----------
+        task_table : pynwb.core.DynamicTable
+            The table representing task metadata.
+
+        Returns
+        -------
+        bool
+            Whether the DynamicTable conforms to the expected format for loading data into the Task table.
+        """
+        return (isinstance(task_table, pynwb.core.DynamicTable) and hasattr(task_table, 'task_name') and
+                hasattr(task_table, 'task_description'))
 
 
 @schema
@@ -89,7 +123,8 @@ class TaskEpoch(dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         camera_name = dict()
         # the tasks refer to the camera_id which is unique for the NWB file but not for CameraDevice schema, so we
-        # need to look up the right camer
+        # need to look up the right camera
+        # map camera ID (in camera name) to camera_name
         for d in nwbf.devices:
             if 'camera_device' in d:
                 device = nwbf.devices[d]
@@ -99,33 +134,56 @@ class TaskEpoch(dj.Imported):
 
         # find the task modules and for each one, add the task to the Task schema if it isn't there
         # and then add an entry for each epoch
-        # TODO: change to new task structure
-        for task_num in range(0, 10):
-            task_str = 'task_' + str(task_num)
-            task = get_data_interface(nwbf, task_str)
-            if task is not None:
+        tasks_mod = nwbf.processing.get('tasks')
+        if tasks_mod is None:
+            print(f'No tasks processing module found in {nwbf}\n')
+            return
+        for task in tasks_mod.data_interfaces.values():
+            if self.check_task_table(task):
                 # check if the task is in the Task table and if not, add it
-                if len(((Task() & {'task_name': task.task_name[0]}).fetch())) == 0:
-                    Task().insert1({'task_name': task.task_name[0],
-                                    'task_description': task.task_description[0]})
+                Task.insert_from_task_table(task)
                 key['task_name'] = task.task_name[0]
+
                 # get the camera used for this task. Use 'none' if there was no camera
-                try:
+                # TODO is there ever no camera?
+                if hasattr(task, 'camera_id'):
                     camera_id = int(task.camera_id[0])
                     key['camera_name'] = camera_name[camera_id]
-                except Exception:  # TODO: use more precise error check
-                    key['camera_name'] = 'none'
-                # make sure the 'none' camera is in the CameraDevice table and add if not
-                if len((CameraDevice() & {'camera_name': 'none'}).fetch()) == 0:
-                    CameraDevice().insert1({'camera_name': 'none'})
+                else:
+                    key['camera_name'] = CameraDevice.UNKNOWN
+
                 # get the interval list for this task, which corresponds to the matching epoch for the raw data.
-                # Users should define more restrictive intervals as required for analyses
+                # users should define more restrictive intervals as required for analyses
                 session_intervals = (IntervalList() & {'nwb_file_name': nwb_file_name}).fetch('interval_list_name')
                 for epoch in task.task_epochs[0]:
+                    # TODO in beans file, task_epochs[0] is 1x2 dset of ints, so epoch would be an int
                     key['epoch'] = epoch
                     target_interval = str(epoch).zfill(2)
                     for interval in session_intervals:
-                        if target_interval in interval:
+                        if target_interval in interval:  # TODO this is not true for the beans file
                             break
+                    # TODO case when interval is not found is not handled
                     key['interval_list_name'] = interval
                     self.insert1(key)
+
+    @classmethod
+    def check_task_table(cls, task_table):
+        """Check whether the pynwb DynamicTable containing task metadata conforms to the expected format.
+
+        The table should be an instance of pynwb.core.DynamicTable and contain the columns 'task_name',
+        'task_description', 'camera_id', 'and 'task_epochs'.
+
+        Parameters
+        ----------
+        task_table : pynwb.core.DynamicTable
+            The table representing task metadata.
+
+        Returns
+        -------
+        bool
+            Whether the DynamicTable conforms to the expected format for loading data into the TaskEpoch table.
+        """
+
+        # TODO this could be more strict and check data types, but really it should be schematized
+        return (Task.check_task_table(task_table) and hasattr(task_table, 'camera_id') and
+                hasattr(task_table, 'task_epochs'))

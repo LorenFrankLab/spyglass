@@ -85,7 +85,6 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
 
 def get_child_tables(table):
     table = table() if inspect.isclass(table) else table
-    return [dj.FreeTable(table.connection, s if not s.isdigit() else next(iter(table.connection.dependencies.children(s))))
+    return [dj.FreeTable(table.connection,
+                         s if not s.isdigit() else next(iter(table.connection.dependencies.children(s))))
             for s in table.children()]
-
-

@@ -25,18 +25,24 @@ class Session(dj.Imported):
     session_description: varchar(80)
     session_start_time: datetime
     timestamps_reference_time: datetime
-    experiment_description: varchar(80)
+    experiment_description = NULL: varchar(80)
     """
 
     def make(self, key):
         # These imports must go here to avoid cyclic dependencies
-        # from .common_task import Task, TaskEpoch
         from .common_interval import IntervalList
+        from .common_task import Task
         # from .common_ephys import Unit
+        # TODO add Task
 
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
+
+        # certain data should not be associated with a single NWB file / session because they may apply to
+        # multiple sessions. these data go into dj.Manual tables
+        # e.g., a lab member may be associated with multiple experiments, so the lab member table should not
+        # be dependent on (contain a primary key for) a session
 
         print('Institution...')
         Institution().insert_from_nwbfile(nwbf)
@@ -59,12 +65,20 @@ class Session(dj.Imported):
         print('Probe...')
         Probe().insert_from_nwbfile(nwbf)
 
-        self.insert1({
+        print('Task...')
+        Task().insert_from_nwbfile(nwbf)
+
+        if nwbf.subject is not None and nwbf.subject.subject_id is not None:
+            subject_id = nwbf.subject.subject_id
+        else:
+            subject_id = 'UNKNOWN'
+
+        Session().insert1({
             'nwb_file_name': nwb_file_name,
-            'subject_id': nwbf.subject.subject_id,
+            'subject_id': subject_id,
             'institution_name': nwbf.institution,
             'lab_name': nwbf.lab,
-            'session_id': nwbf.session_id if nwbf.session_id is not None else 'tmp_id',
+            'session_id': nwbf.session_id if nwbf.session_id is not None else 'UNKNOWN',
             'session_description': nwbf.session_description,
             'session_start_time': nwbf.session_start_time,
             'timestamps_reference_time': nwbf.timestamps_reference_time,
@@ -73,6 +87,9 @@ class Session(dj.Imported):
 
         print('Skipping Apparatus for now...')
         # Apparatus().insert_from_nwbfile(nwbf)
+
+        # interval lists depend on Session (as a primary key) but users may want to add these manually so this is
+        # a manual table that is also populated from NWB files
 
         print('IntervalList...')
         IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
@@ -121,4 +138,4 @@ class ExperimenterList(dj.Imported):
                 nwb_file_name=nwb_file_name,
                 lab_member_name=e
             )
-            ExperimenterList().Experimenter().insert1(key)
+            self.Experimenter().insert1(key)

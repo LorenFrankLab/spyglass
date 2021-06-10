@@ -12,6 +12,8 @@ class LabMember(dj.Manual):
     first_name: varchar(80)
     last_name: varchar(80)
     """
+    # TODO automatically splitting first and last name using the method below is not always appropriate / correct
+    # consider not splitting full name into first and last name
 
     def insert_from_nwbfile(self, nwbf):
         """Insert lab member information from an NWB file.

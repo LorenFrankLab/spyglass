@@ -41,10 +41,9 @@ class ElectrodeGroup(dj.Imported):
 
         for eg_name in egroups:
             # for each electrode group, we get the group and add an electrode group entry.
-            # as the ElectrodeGroup
             electrode_group = nwbf.get_electrode_group(eg_name)
             key['electrode_group_name'] = eg_name
-            # add elcetrode group location if it does not exist, and fetch the row
+            # add electrode group location if it does not exist, and fetch the row
             key['region_id'] = BrainRegion.fetch_add(region_name=electrode_group.location)
             key['description'] = electrode_group.description
             # the following should probably be a function that returns the probe devices from the file
@@ -54,13 +53,9 @@ class ElectrodeGroup(dj.Imported):
             # else:
             # key['probe_type'] = 'unknown-probe-type'
             probe_re = re.compile('probe')
-            for d in nwbf.devices:
-                if probe_re.search(d):
-                    if nwbf.devices[d] == electrode_group.device:
-                        # this will match the entry in the device schema
-                        key['probe_type'] = electrode_group.device.probe_type
-                        break
-            if 'probe_type' not in key:
+            if probe_re.search(electrode_group.device.name):
+                key['probe_type'] = electrode_group.device.probe_type
+            else:
                 key['probe_type'] = Probe.UNKNOWN
             self.insert1(key, skip_duplicates=True)
 
