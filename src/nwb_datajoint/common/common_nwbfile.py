@@ -150,7 +150,10 @@ class AnalysisNwbfile(dj.Manual):
         # get the list of names of analysis files related to this nwb file
         names = (AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch('analysis_file_name')
         n1 = [str.replace(name, os.path.splitext(nwb_file_name)[0], '') for name in names]
-        max_analysis_file_num = max([int(str.replace(ext, '.nwb', '')) for ext in n1])
+        if len(n1) > 0:
+            max_analysis_file_num = max([int(str.replace(ext, '.nwb', '')) for ext in n1])
+        else:
+            max_analysis_file_num = 0
         # name the file, adding the number of files with preceeding zeros
         analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(max_analysis_file_num+1).zfill(6) + '.nwb'
         print(analysis_file_name)
@@ -242,7 +245,7 @@ class AnalysisNwbfile(dj.Manual):
         # check to make sure the file exists
         assert len((AnalysisNwbfile() & key).fetch()) > 0, \
             f'Error adding {analysis_file_name} to lock file, not in AnalysisNwbfile() schema'
-        lock_file = open(os.getenv('ANALYSIS_LOCK_FILE'), 'a+')
+        lock_file = open(os.getenv('ANALYSIS_LOCK_FILE'), mode='a+')
         lock_file.write(f'{analysis_file_name}\n')
         lock_file.close()
 
@@ -370,10 +373,13 @@ class AnalysisNwbfile(dj.Manual):
     def nightly_cleanup():
         from nwb_datajoint.common import common_nwbfile
         child_tables = get_child_tables(common_nwbfile.AnalysisNwbfile)
+        
         (common_nwbfile.AnalysisNwbfile - child_tables).delete_quick()
 
         # a separate external files clean up required - this is to be done during times when no other transactions are in progress.
         common_nwbfile.schema.external['analysis'].delete(delete_external_files=True)
+
+        # also check to see whether there are directories in the spikesorting folder with this
 
 
 
@@ -410,4 +416,4 @@ class AnalysisNwbfileKachery(dj.Computed):
             key['analysis_file_sha1'] = ka.get_file_hash(kachery_path)
         self.insert1(key)
 
-    # TODO: load from kachery and fetch_nwb
+    # TODO: load from kachery and 

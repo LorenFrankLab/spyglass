@@ -21,6 +21,7 @@ import scipy.stats as stats
 import json
 import pynwb
 import tempfile
+import getpass
 
 import kachery_p2p as kp
 import labbox_ephys as le
@@ -505,8 +506,9 @@ class SpikeSorting(dj.Computed):
 
         # TODO: finish `import_sorted_data` function below
 
-        recording = self.get_filtered_recording_extractor(key)
-        recording_timestamps = recording._timestamps
+        with Timer(label='getting filtered recording extractor', verbose=True):
+            recording = self.get_filtered_recording_extractor(key)
+            recording_timestamps = recording._timestamps
 
         # get the artifact detection parameters and apply artifact detection to zero out artifacts
         artifact_key = (SpikeSortingParameters & key).fetch1('artifact_param_name')
@@ -540,15 +542,22 @@ class SpikeSorting(dj.Computed):
                                                                    '_' + str(key['sort_group_id'])}}
         with Timer(label=f'writing filtered NWB recording extractor to {extractor_nwb_path}', verbose=True):
             # TODO: save timestamps together
+            #Caching the extractor GREATLY speeds up the subsequent processing and NWB writing
+            tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
+            recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000) 
+            #TODO: consider writing NWB or other recording extractor in a separate process
             se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
                                                     buffer_mb=10000, overwrite=True, metadata=metadata,
                                                     es_key='ElectricalSeries')
 
+                
+
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
-        filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
-                                                  'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
-        recording = st.preprocessing.whiten(recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
+        with Timer(label=f'whiteneing', verbose=True):
+            filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+                                                    'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
+            recording = st.preprocessing.whiten(recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
 
         print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
@@ -870,12 +879,44 @@ class SpikeSorting(dj.Computed):
             metrics_processed = json.load(metrics_path)
 
 @schema
+class AutomaticCurationParameters(dj.Manual):
+    definition = """
+    #Table for holding parameters for automatic aspects of curation
+    automatic_curation_param_name: varchar(80)   #name of this parameter set
+    ---
+    automatic_curation_param_dict: BLOB         #dictionary of variables and values for automatic curation
+    """
+
+@schema
+class AutomaticCurationSpikeSortingParameters(dj.Manual):
+    definition = """
+    # Table for holding the output 
+    -> AutomaticCurationParameters
+    -> SpikeSorting
+    """
+
+@schema
+class AutomaticCurationSpikeSorting(dj.Computed):
+    definition = """
+    # Table for holding the output of automated curation applied to each spike sorting
+    -> AutomaticCurationSpikeSortingParameters
+    ---
+    automatic_curation_results_dict=NULL: BLOB       #dictionary of outputs from automatic curation
+    """
+    def make(self, key):
+        print(key)
+        #TODO: add burst parent detection and noise waveform detection
+        key['automatic_curation_results_dict'] = dict()
+        self.insert1(key)
+
+@schema
 class CuratedSpikeSorting(dj.Computed):
     definition = """
-    # Table for holding the output of spike sorting
-    -> SpikeSorting
+    # Table for holding the output of fully curated spike sorting
+    -> AutomaticCurationSpikeSorting
     ---
     -> AnalysisNwbfile    # New analysis NWB file to hold unit info
+    curator:         varchar(80)            # the username of the person who is inserting the curation
     units_object_id: varchar(40)           # Object ID for the units in NWB file
     """
 
@@ -907,20 +948,39 @@ class CuratedSpikeSorting(dj.Computed):
         # We can get the new curated soring from the workspace.
         workspace_uri = (SpikeSorting & key).fetch1('curation_feed_uri')
         workspace = le.load_workspace(workspace_uri=workspace_uri)
+        # check that there is exactly one sorting in this workspace
+        if len(workspace.sorting_ids) == 0:
+            return
+        elif len(workspace.sorting_ids) > 1:
+            Warning(f'More than one sorting associated with {key}; delete extra sorting and try populate again')
+            return
+
+        #sorting = workspace.get_curated_sorting_extractor(workspace.sorting_ids[0])
         sorting = workspace.get_curated_sorting_extractor(workspace.sorting_ids[0])
-       
+
         # Get labels 
         labels = workspace.get_sorting_curation(workspace.sorting_ids[0])
 
         # turn labels to list of str, only including accepted units.
-        labels_concat = []
         accepted_units = []
         unit_labels = labels['labelsByUnit']
         for idx, unitId in enumerate(unit_labels):
             if 'accept' in unit_labels[unitId]:
                 accepted_units.append(unitId)
-                label_concat = ','.join(unit_labels[unitId])
-                labels_concat.append(label_concat)
+            if len(unit_labels[unitId]) == 0:
+                Warning(f'In CuratedSpikeSorting: unit {unitId} has no curation labels. It will not be included in the table')
+
+        #remove non-primary merged units
+        for m in labels['mergeGroups']:
+            for unit_id in m[1:]:
+                accepted_units.remove(unit_id)
+
+        # get the labels for the accepted units
+        labels_concat = []
+        for unitID in accepted_units:
+            label_concat = ','.join(unit_labels[unitId])
+            labels_concat.append(label_concat)
+
         print(f'Found {len(accepted_units)} accepted units')
 
         #exit out if there are no labels or no accepted units
@@ -970,13 +1030,15 @@ class CuratedSpikeSorting(dj.Computed):
         # add the analysis file to the table
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
         key['units_object_id'] = units_object_id
+        key['curator'] = getpass.getuser()
 
         # Insert entry to CuratedSpikeSorting table
         self.insert1(key)
 
-        #Remove the AnalysisNWBFile and the units_object_id entries.
+        #Remove the non primary key entries.
         del key['units_object_id']
         del key['analysis_file_name']
+        del key['curator']
 
         units_table = (CuratedSpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
 
