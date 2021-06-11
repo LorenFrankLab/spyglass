@@ -541,16 +541,11 @@ class SpikeSorting(dj.Computed):
                                                                    '_' + key['sort_interval_name'] + \
                                                                    '_' + str(key['sort_group_id'])}}
         with Timer(label=f'writing filtered NWB recording extractor to {extractor_nwb_path}', verbose=True):
-            # TODO: save timestamps together
-            #Caching the extractor GREATLY speeds up the subsequent processing and NWB writing
+            # cache the recording for maximum efficiency of whitening and sorting
             tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
-            recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000) 
+            recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
             #TODO: consider writing NWB or other recording extractor in a separate process
-            se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
-                                                    buffer_mb=10000, overwrite=True, metadata=metadata,
-                                                    es_key='ElectricalSeries')
-
-                
+            labbox_recording = le.LabboxEphysRecordingExtractor.create_efficient_recording(recording)
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
@@ -571,14 +566,12 @@ class SpikeSorting(dj.Computed):
         
         # TODO: save timestamps
         se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
-
+        
         with Timer(label='computing quality metrics', verbose=True):
-            tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
-            metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
             metrics_key = (SpikeSortingParameters & key).fetch1('cluster_metrics_list_name')    
             metric_info = (SpikeSortingMetrics & {'cluster_metrics_list_name': metrics_key }).fetch1()
             print(metric_info) 
-            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, metrics_recording, sorting)
+            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
 
         print('\nSaving sorting results...')
         units = dict()
@@ -601,8 +594,8 @@ class SpikeSorting(dj.Computed):
         key['units_object_id'] = units_object_id
 
         print('\nGenerating feed for curation...')
-        extractor_nwb_uri = kp.link_file(extractor_nwb_path)
-        print(f'kachery URI for symbolic link to extractor NWB file: {extractor_nwb_uri}')
+        #extractor_nwb_uri = kp.link_file(extractor_nwb_path)
+        #print(f'kachery URI for symbolic link to extractor NWB file: {extractor_nwb_uri}')
         
         # create workspace
         workspace_uri = kp.get(key['analysis_file_name'])
@@ -612,25 +605,16 @@ class SpikeSorting(dj.Computed):
         workspace = le.load_workspace(workspace_uri)
         print(f'Workspace URI: {workspace.uri}')
 
-        
-        
         recording_label = key['nwb_file_name']+'_'+key['sort_interval_name']+'_'+str(key['sort_group_id'])
         sorting_label = key['sorter_name']+'_'+key['parameter_set_name']
 
-        recording_uri = kp.store_json({
-            'recording_format': 'nwb',
-            'data': {
-                'path': extractor_nwb_uri,
-            }
-        })
-        sorting_uri = kp.store_json({
-            'sorting_format': 'nwb',
-            'data': {
-                'path': extractor_nwb_path
-            }
-        })
-        labbox_sorting = le.LabboxEphysSortingExtractor(sorting_uri)
-        labbox_recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
+        # sorting_uri = kp.store_json({
+        #     'sorting_format': 'nwb',
+        #     'data': {
+        #         'path': extractor_nwb_path
+        #     }
+        # })
+        labbox_sorting = le.LabboxEphysSortingExtractor(le.LabboxEphysSortingExtractor.store_sorting(sorting))
 
         R_id = workspace.add_recording(recording=labbox_recording, label=recording_label)
         S_id = workspace.add_sorting(sorting=labbox_sorting, recording_id=R_id, label=sorting_label)               

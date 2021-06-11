@@ -13,6 +13,14 @@ from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sam
 schema = dj.schema('common_behav')
 
 
+#ADD position source table with 
+# Session 
+# interval list
+# ===
+# source
+# external file
+
+
 @schema
 class RawPosition(dj.Imported):
     definition = """
