@@ -13,21 +13,23 @@ from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sam
 schema = dj.schema('common_behav')
 
 
-#ADD position source table with 
-# Session 
-# interval list
-# ===
-# source
-# external file
+@schema
+class PositionSource(dj.Manual):
+    definition = """
+    -> Session
+    -> IntervalList
+    ---
+    source : varchar(40)  # source of data; current options are "trodes" and "dlc" (deep lab cut
+    import_file_name: varchar(200) # path to import file if importing position data
+    """
 
 
 @schema
 class RawPosition(dj.Imported):
     definition = """
-    -> Session
+    -> PositionSource
     ---
     raw_position_object_id: varchar(80)    # the object id of the data in the NWB file
-    -> IntervalList                        # the list of intervals for this object
     """
 
     def make(self, key):
