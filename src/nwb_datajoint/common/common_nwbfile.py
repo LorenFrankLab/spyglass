@@ -4,6 +4,8 @@ import os
 import pandas as pd
 import pathlib
 import pynwb
+import random
+import string
 
 from .nwb_helper_fn import get_electrode_indices, get_nwb_file
 from .dj_helper_fn import get_child_tables
