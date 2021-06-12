@@ -147,16 +147,12 @@ class AnalysisNwbfile(dj.Manual):
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
-        # get the list of names of analysis files related to this nwb file
-        names = (AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch('analysis_file_name')
-        n1 = [str.replace(name, os.path.splitext(nwb_file_name)[0], '') for name in names]
-        if len(n1) > 0:
-            max_analysis_file_num = max([int(str.replace(ext, '.nwb', '')) for ext in n1])
-        else:
-            max_analysis_file_num = 0
-        # name the file, adding the number of files with preceeding zeros
-        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(max_analysis_file_num+1).zfill(6) + '.nwb'
-        print(analysis_file_name)
+        # each file ends with a random string of 10 digits, so we generate that string and redo if by some miracle it's already there
+        file_in_table = True
+        while (file_in_table):
+            analysis_file_name = os.path.splitext(nwb_file_name)[0] + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + '.nwb'
+            file_in_table = len((AnalysisNwbfile & {'analysis_file_name': analysis_file_name}).fetch()) > 0
+  
         return analysis_file_name
 
     @classmethod
