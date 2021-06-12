@@ -22,5 +22,6 @@ dependencies:
     - ghostipy
     - pymysql>=1.0.*
     - h5py==2.10.*
+    - git+git://github.com/SpikeInterface/spikeextractors.git@e6f9255b0ff1a0140b313ae33b62b4676eeabfcd
     - git+git://github.com/LorenFrankLab/ndx-franklab-novela
     - git+git://github.com/magland/sortingview#egg=sortingview&subdirectory=src/python
