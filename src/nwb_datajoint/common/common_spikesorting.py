@@ -924,15 +924,15 @@ class CuratedSpikeSorting(dj.Computed):
         ---
         label='' :              varchar(80)      # optional label for each unit
         noise_overlap=-1 :      float    # noise overlap metric for each unit
-        isolation_score=-1:     float  # isolation score metric for each unit
-        isi_violation_score=-1: float # ISI violation score for each unit
+        nn_hit_rate=-1:         float  # isolation score metric for each unit
+        isi_violation=-1:       float # ISI violation score for each unit
         firing_rate=-1:         float   # firing rate
         num_spikes=-1:          int          # total number of spikes
         """
 
     def make(self, key):
         #define the list of properties. TODO: get this from table definition.
-        unit_properties = ['label', 'isolation_score', 'noise_overlap', 'isi_violation_score', 'firing_rate', 'num_spikes']
+        unit_properties = ['label', 'nn_hit_rate', 'noise_overlap', 'isi_violation', 'firing_rate', 'num_spikes']
 
 
         #Creating the curated units table involves 4 steps:
