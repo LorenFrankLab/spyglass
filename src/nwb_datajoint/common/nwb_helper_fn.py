@@ -201,3 +201,34 @@ def get_electrode_indices(nwb_object, electrode_ids):
         electrode_table_indices = nwb_object.electrodes.id[:]
 
     return [elect_idx for elect_idx, elect_id in enumerate(electrode_table_indices) if elect_id in electrode_ids]
+
+def get_all_spatial_series(nwbf, verbose=False):
+    """Given an nwb file object, gets the spatial series and Interval lists from the file and returns a dictionary by epoch
+    :param nwbf: the nwb file object
+    :type nwbf: file object
+    :param verbose: flag to cause printing of sampling rate
+    :type verbose: bool
+    """
+    position = get_data_interface(nwbf, 'position', pynwb.behavior.Position)
+    if position is None:
+        return None
+
+    pos_data_dict = dict()
+    for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
+        pos_data_dict[pos_epoch] = dict()
+        # get the valid intervals for the position data
+        timestamps = np.asarray(spatial_series.timestamps)
+
+        # estimate the sampling rate
+        sampling_rate = estimate_sampling_rate(timestamps, 1.75)
+        if sampling_rate < 0:
+            raise ValueError(f'Error adding position data for position epoch {pos_epoch}')
+        if verbose:
+            print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
+        # add the valid intervals to the Interval list
+        pos_data_dict[pos_epoch]['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 2.5, 0)
+        pos_data_dict[pos_epoch]['raw_position_object_id'] = spatial_series.object_id
+
+    return pos_data_dict
+    
+            
