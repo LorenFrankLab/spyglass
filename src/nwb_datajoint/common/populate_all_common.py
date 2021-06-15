@@ -3,7 +3,7 @@ from .common_session import Session, ExperimenterList
 from .common_ephys import ElectrodeGroup, Electrode, Raw, SampleCount
 from .common_sensors import SensorData
 from .common_task import TaskEpoch
-from .common_behav import RawPosition, StateScriptFile, VideoFile  # HeadDir, Speed, LinPos,
+from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFile  # HeadDir, Speed, LinPos,
 from .common_dio import DIOEvents
 from .common_nwbfile import Nwbfile
 
@@ -38,6 +38,7 @@ def populate_all_common(nwb_file_name):
     print('Populate VideoFile')
     VideoFile.populate(fp)
     print('RawPosition...')
+    PositionSource().get_nwbf_position_source(nwb_file_name)
     RawPosition.populate(fp)
     # print('HeadDir...')
     # HeadDir().populate()

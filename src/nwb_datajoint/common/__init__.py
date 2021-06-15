@@ -1,6 +1,6 @@
 # Reorganize this into hierarchy
 # Note: users will have their own tables... permission system
-from .common_behav import RawPosition, HeadDir, Speed, LinPos, StateScriptFile, VideoFile
+from .common_behav import PositionSource, RawPosition, HeadDir, Speed, LinPos, StateScriptFile, VideoFile
 from .common_device import DataAcquisitionDevice, CameraDevice, Probe
 from .common_dio import DIOEvents
 from .common_ephys import ElectrodeGroup, Electrode, Raw, SampleCount

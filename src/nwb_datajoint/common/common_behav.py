@@ -24,16 +24,17 @@ class PositionSource(dj.Manual):
     import_file_name: varchar(200) # path to import file if importing position data
     """
 
-    def get_nwbf_position_data(self, nwb_file_name):
+    def get_nwbf_position_source(self, nwb_file_name):
         """Given an nwb file name, gets the spatial series and Interval lists from the file, adds the interval 
         lists to the interval list table, and populates RawPosition if possible
 
         :param nwb_file_name: the name of the nwb_file
         :type nwb_file_name: string
         """
-        nwbf = get_nwb_file(nwb_file_name)
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        nwbf = get_nwb_file(nwb_file_abspath)
 
-        pos_dict = get_all_spatial_series(nwbf)
+        pos_dict = get_all_spatial_series(nwbf, verbose=True)
         key = dict()
         if pos_dict is not None:
             for epoch in pos_dict:
@@ -72,9 +73,11 @@ class RawPosition(dj.Imported):
 
         pos_dict = get_all_spatial_series(nwbf)
         for epoch in pos_dict:
+            if key['interval_list_name'] == PositionSource.get_pos_interval_name(epoch):
                 pdict = pos_dict[epoch]
                 key['raw_position_object_id'] = pdict['raw_position_object_id']
                 self.insert1(key)
+                break
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
