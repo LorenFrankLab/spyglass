@@ -1,3 +1,4 @@
+from operator import pos
 import datajoint as dj
 import numpy as np
 import pynwb
@@ -8,7 +9,7 @@ from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .common_task import TaskEpoch
 from .dj_helper_fn import fetch_nwb
-from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sampling_rate, get_nwb_file
+from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sampling_rate, get_nwb_file, get_all_spatial_series
 
 schema = dj.schema('common_behav')
 
@@ -19,9 +20,41 @@ class PositionSource(dj.Manual):
     -> Session
     -> IntervalList
     ---
-    source : varchar(40)  # source of data; current options are "trodes" and "dlc" (deep lab cut
+    source : varchar(40)  # source of data; current options are "trodes" and "dlc" (deep lab cut)
     import_file_name: varchar(200) # path to import file if importing position data
     """
+
+    def get_nwbf_position_data(self, nwb_file_name):
+        """Given an nwb file name, gets the spatial series and Interval lists from the file, adds the interval 
+        lists to the interval list table, and populates RawPosition if possible
+
+        :param nwb_file_name: the name of the nwb_file
+        :type nwb_file_name: string
+        """
+        nwbf = get_nwb_file(nwb_file_name)
+
+        pos_dict = get_all_spatial_series(nwbf)
+        key = dict()
+        if pos_dict is not None:
+            for epoch in pos_dict:
+                pdict = pos_dict[epoch]
+                # create the interval list and insert it
+                pos_interval_list_name = self.get_pos_interval_name(epoch)
+                interval_dict = dict()
+                interval_dict['nwb_file_name'] = nwb_file_name
+                interval_dict['interval_list_name'] = pos_interval_list_name 
+                interval_dict['valid_times'] = pdict['valid_times']
+                IntervalList().insert1(interval_dict, skip_duplicates=True)
+                # add this interval list to the table
+                key['nwb_file_name'] = nwb_file_name
+                key['interval_list_name'] = pos_interval_list_name
+                key['source'] = 'trodes'
+                key['import_file_name'] = ''
+                self.insert1(key)
+
+    @staticmethod
+    def get_pos_interval_name(pos_epoch_num):
+        return f'pos {pos_epoch_num} valid times'
 
 
 @schema
@@ -29,7 +62,7 @@ class RawPosition(dj.Imported):
     definition = """
     -> PositionSource
     ---
-    raw_position_object_id: varchar(80)    # the object id of the data in the NWB file
+    raw_position_object_id: varchar(80)    # the object id of the spatial series for this epoch in the NWB file
     """
 
     def make(self, key):
@@ -37,37 +70,11 @@ class RawPosition(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        # Get the position data. FIX: change Position to position when name changed or fix helper function to allow
-        # upper or lower case
-        position = get_data_interface(nwbf, 'position', pynwb.behavior.Position)
-        if position is None:
-            print(f'No position data interface found in {nwb_file_name}\n')
-            return
-
-        for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
-            pos_interval_name = f'pos {pos_epoch} valid times'
-            # get the valid intervals for the position data
-            timestamps = np.asarray(spatial_series.timestamps)
-
-            # estimate the sampling rate
-            sampling_rate = estimate_sampling_rate(timestamps, 1.75)
-            if sampling_rate < 0:
-                raise ValueError(f'Error adding position data for position epoch {pos_epoch}')
-            print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
-
-            # add the valid intervals to the Interval list
-            interval_dict = dict()
-            interval_dict['nwb_file_name'] = key['nwb_file_name']
-            interval_dict['interval_list_name'] = pos_interval_name
-            # allow single skipped frames
-            interval_dict['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 2.5, 0)
-            IntervalList().insert1(interval_dict, skip_duplicates=True)
-
-            key['raw_position_object_id'] = position.object_id
-            # TODO why is the SpatialSeries object_id not stored?
-            # this is created when we populate the Task schema
-            key['interval_list_name'] = pos_interval_name
-            self.insert1(key, skip_duplicates=True)
+        pos_dict = get_all_spatial_series(nwbf)
+        for epoch in pos_dict:
+                pdict = pos_dict[epoch]
+                key['raw_position_object_id'] = pdict['raw_position_object_id']
+                self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
