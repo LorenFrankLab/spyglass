@@ -1,11 +1,13 @@
-from .common_session import Session, ExperimenterList
-# from .common_nwbfile import NwbfileKachery
-from .common_ephys import ElectrodeGroup, Electrode, Raw, SampleCount
-from .common_sensors import SensorData
-from .common_task import TaskEpoch
-from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFile  # HeadDir, Speed, LinPos,
+# HeadDir, Speed, LinPos,
+from .common_behav import (PositionSource, RawPosition, StateScriptFile,
+                           VideoFile)
 from .common_dio import DIOEvents
+# from .common_nwbfile import NwbfileKachery
+from .common_ephys import Electrode, ElectrodeGroup, Raw, SampleCount
 from .common_nwbfile import Nwbfile
+from .common_sensors import SensorData
+from .common_session import ExperimenterList, Session
+from .common_task import TaskEpoch
 
 
 def populate_all_common(nwb_file_name):

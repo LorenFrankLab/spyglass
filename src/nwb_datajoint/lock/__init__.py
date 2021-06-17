@@ -1,1 +1,1 @@
-from .file_lock import NwbfileLock, AnalysisNwbfileLock
+from .file_lock import AnalysisNwbfileLock, NwbfileLock

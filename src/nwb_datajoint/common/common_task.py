@@ -1,9 +1,9 @@
 import datajoint as dj
 
-from .common_session import Session  # noqa: F401
-from .common_nwbfile import Nwbfile
-from .common_interval import IntervalList
 from .common_device import CameraDevice
+from .common_interval import IntervalList
+from .common_nwbfile import Nwbfile
+from .common_session import Session  # noqa: F401
 from .nwb_helper_fn import get_data_interface, get_nwb_file
 
 schema = dj.schema("common_task")
@@ -120,7 +120,8 @@ class TaskEpoch(dj.Imported):
                     CameraDevice().insert1({'camera_name': 'none'})
                 # get the interval list for this task, which corresponds to the matching epoch for the raw data.
                 # Users should define more restrictive intervals as required for analyses
-                session_intervals = (IntervalList() & {'nwb_file_name': nwb_file_name}).fetch('interval_list_name')
+                session_intervals = (IntervalList() & {'nwb_file_name': nwb_file_name}).fetch(
+                    'interval_list_name')
                 for epoch in task.task_epochs[0]:
                     key['epoch'] = epoch
                     target_interval = str(epoch).zfill(2)

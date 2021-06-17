@@ -8,6 +8,7 @@
 # Note: This is franklab-specific
 import ndx_franklab_novela
 
-from .data_import.storage_dirs import check_env, kachery_storage_dir, base_dir
 from .data_import.insert_sessions import insert_sessions
+from .data_import.storage_dirs import base_dir, check_env, kachery_storage_dir
+
 # from .lock import file_lock as lock

@@ -1,5 +1,6 @@
-import datajoint as dj
 import re
+
+import datajoint as dj
 
 schema = dj.schema("common_device")
 
@@ -77,7 +78,8 @@ class CameraDevice(dj.Manual):
         for d in nwbf.devices:
             if 'camera_device' in d:  # TODO instead of name check, check type ndx_franklab_novela.CameraDevice
                 c = str.split(d)
-                device_dict['camera_id'] = c[1]  # TODO this is limited to 9 camera IDs. also ideally an attribute
+                # TODO this is limited to 9 camera IDs. also ideally an attribute
+                device_dict['camera_id'] = c[1]
                 device = nwbf.devices[d]
                 # TODO: fix camera name and add fields when new extension is available
                 device_dict['camera_name'] = device.camera_name
@@ -129,7 +131,8 @@ class Probe(dj.Manual):
         probe_dict = dict()
         probe_re = re.compile("probe")
         for d in nwbf.devices:
-            if probe_re.search(d):  # TODO instead of name check, check type ndx_franklab_novela.Probe
+            # TODO instead of name check, check type ndx_franklab_novela.Probe
+            if probe_re.search(d):
                 p = nwbf.devices[d]
                 # add this probe if it's not already here
                 if {'probe_type': p.probe_type} not in Probe():

@@ -42,16 +42,19 @@ class FirFilter(dj.Manual):
         if filter_type == 'lowpass' or filter_type == 'highpass':
             # check that two frequencies were passed in and that they are in the right order
             if len(band_edges) != 2:
-                print('Error in Filter.add_filter: lowpass and highpass filter requires two band_frequencies')
+                print(
+                    'Error in Filter.add_filter: lowpass and highpass filter requires two band_frequencies')
                 return None
             tw = band_edges[1] - band_edges[0]
 
         elif filter_type == 'bandpass':
             if len(band_edges) != 4:
-                print('Error in Filter.add_filter: bandpass filter requires four band_frequencies.')
+                print(
+                    'Error in Filter.add_filter: bandpass filter requires four band_frequencies.')
                 return None
             # the transition width is the mean of the widths of left and right transition regions
-            tw = ((band_edges[1] - band_edges[0]) + (band_edges[3] - band_edges[2])) / 2.0
+            tw = ((band_edges[1] - band_edges[0]) +
+                  (band_edges[3] - band_edges[2])) / 2.0
 
         else:
             raise Exception(f'Unexpected filter type: {filter_type}')
@@ -84,12 +87,14 @@ class FirFilter(dj.Manual):
 
         filterdict['filter_band_edges'] = np.asarray(band_edges)
         # create 1d array for coefficients
-        filterdict['filter_coeff'] = np.array(gsp.firdesign(numtaps, band_edges, desired, fs=fs, p=p), ndmin=1)
+        filterdict['filter_coeff'] = np.array(gsp.firdesign(
+            numtaps, band_edges, desired, fs=fs, p=p), ndmin=1)
         # add this filter to the table
         self.insert1(filterdict, skip_duplicates="True")
 
     def plot_magnitude(self, filter_name, fs):
-        filter = (self & {'filter_name': filter_name} & {'filter_sampling_rate': fs}).fetch(as_dict=True)
+        filter = (self & {'filter_name': filter_name} & {
+                  'filter_sampling_rate': fs}).fetch(as_dict=True)
         f = filter[0]
         plt.figure()
         w, h = signal.freqz(filter[0]['filter_coeff'], worN=65536)
@@ -103,7 +108,8 @@ class FirFilter(dj.Manual):
         plt.grid(True)
 
     def plot_fir_filter(self, filter_name, fs):
-        filter = (self & {'filter_name': filter_name} & {'filter_sampling_rate': fs}).fetch(as_dict=True)
+        filter = (self & {'filter_name': filter_name} & {
+                  'filter_sampling_rate': fs}).fetch(as_dict=True)
         f = filter[0]
         plt.figure()
         plt.clf()
@@ -115,7 +121,8 @@ class FirFilter(dj.Manual):
 
     def filter_delay(self, filter_name, fs):
         # return the filter delay
-        filter = (self & {'filter_name': filter_name} & {'filter_sampling_rate': fs}).fetch(as_dict=True)
+        filter = (self & {'filter_name': filter_name} & {
+                  'filter_sampling_rate': fs}).fetch(as_dict=True)
         return self.calc_filter_delay(filter['filter_coeff'])
 
     def filter_data_nwb(self, analysis_file_abs_path, eseries, filter_coeff, valid_times, electrode_ids,
@@ -145,7 +152,8 @@ class FirFilter(dj.Manual):
 
         # to get the input dimension restrictions we need to look at the electrode table for the eseries and get
         # the indices from that
-        input_dim_restrictions[electrode_axis] = np.s_[get_electrode_indices(eseries, electrode_ids)]
+        input_dim_restrictions[electrode_axis] = np.s_[
+            get_electrode_indices(eseries, electrode_ids)]
 
         indices = []
         output_shape_list = [0] * n_dim
@@ -157,9 +165,11 @@ class FirFilter(dj.Manual):
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
             if a_start < timestamps[0]:
-                raise ValueError('Interval start time %f is smaller than first timestamp %f' % (a_start, timestamps[0]))
+                raise ValueError('Interval start time %f is smaller than first timestamp %f' % (
+                    a_start, timestamps[0]))
             if a_stop > timestamps[-1]:
-                raise ValueError('Interval stop time %f is larger than last timestamp %f' % (a_stop, timestamps[-1]))
+                raise ValueError('Interval stop time %f is larger than last timestamp %f' % (
+                    a_stop, timestamps[-1]))
             frm, to = np.searchsorted(timestamps, (a_start, a_stop))
             if to > n_samples:
                 to = n_samples
@@ -168,7 +178,8 @@ class FirFilter(dj.Manual):
                                                filter_coeff,
                                                axis=time_axis,
                                                input_index_bounds=[frm, to],
-                                               output_index_bounds=[filter_delay, filter_delay + to - frm],
+                                               output_index_bounds=[
+                                                   filter_delay, filter_delay + to - frm],
                                                describe_dims=True,
                                                ds=decimation,
                                                input_dim_restrictions=input_dim_restrictions)
@@ -183,11 +194,13 @@ class FirFilter(dj.Manual):
             # get the indices of the electrodes in the electrode table
             elect_ind = get_electrode_indices(nwbf, electrode_ids)
 
-            electrode_table_region = nwbf.create_electrode_table_region(elect_ind, 'filtered electrode table')
+            electrode_table_region = nwbf.create_electrode_table_region(
+                elect_ind, 'filtered electrode table')
             eseries_name = 'filtered data'
             # TODO: use datatype of data
             es = pynwb.ecephys.ElectricalSeries(name=eseries_name,
-                                                data=np.empty(tuple(output_shape_list), dtype=output_dtype),
+                                                data=np.empty(
+                                                    tuple(output_shape_list), dtype=output_dtype),
                                                 electrodes=electrode_table_region,
                                                 timestamps=np.empty(output_shape_list[time_axis]))
             # Add the electrical series to the scratch area
@@ -207,14 +220,16 @@ class FirFilter(dj.Manual):
 
             for ii, (start, stop) in enumerate(indices):
                 extracted_ts = timestamps[start:stop:decimation]
-                new_timestamps[ts_offset:ts_offset + len(extracted_ts)] = extracted_ts
+                new_timestamps[ts_offset:ts_offset +
+                               len(extracted_ts)] = extracted_ts
                 ts_offset += len(extracted_ts)
                 # filter the data
                 gsp.filter_data_fir(data,
                                     filter_coeff,
                                     axis=time_axis,
                                     input_index_bounds=[start, stop],
-                                    output_index_bounds=[filter_delay, filter_delay + stop - start],
+                                    output_index_bounds=[
+                                        filter_delay, filter_delay + stop - start],
                                     ds=decimation,
                                     input_dim_restrictions=input_dim_restrictions,
                                     outarray=filtered_data,
@@ -259,7 +274,8 @@ class FirFilter(dj.Manual):
                                                filter_coeff,
                                                axis=time_axis,
                                                input_index_bounds=[frm, to],
-                                               output_index_bounds=[filter_delay, filter_delay + to - frm],
+                                               output_index_bounds=[
+                                                   filter_delay, filter_delay + to - frm],
                                                describe_dims=True,
                                                ds=decimation,
                                                input_dim_restrictions=input_dim_restrictions)
@@ -269,7 +285,8 @@ class FirFilter(dj.Manual):
         # create the dataset and the timestamps array
         filtered_data = np.empty(tuple(output_shape_list), dtype=data.dtype)
 
-        new_timestamps = np.empty((output_shape_list[time_axis],), timestamps.dtype)
+        new_timestamps = np.empty(
+            (output_shape_list[time_axis],), timestamps.dtype)
 
         indices = np.array(indices, ndmin=2)
 
@@ -280,7 +297,8 @@ class FirFilter(dj.Manual):
             extracted_ts = timestamps[start:stop:decimation]
 
             print(f"Diffs {np.diff(extracted_ts)}")
-            new_timestamps[ts_offset:ts_offset + len(extracted_ts)] = extracted_ts
+            new_timestamps[ts_offset:ts_offset +
+                           len(extracted_ts)] = extracted_ts
             ts_offset += len(extracted_ts)
 
             # finally ready to filter data!
@@ -288,7 +306,8 @@ class FirFilter(dj.Manual):
                                 filter_coeff,
                                 axis=time_axis,
                                 input_index_bounds=[start, stop],
-                                output_index_bounds=[filter_delay, filter_delay + stop - start],
+                                output_index_bounds=[
+                                    filter_delay, filter_delay + stop - start],
                                 ds=decimation,
                                 input_dim_restrictions=input_dim_restrictions,
                                 outarray=filtered_data,
@@ -307,5 +326,7 @@ class FirFilter(dj.Manual):
         """ Add standard filters to the Filter table including
         0-400 Hz low pass for continuous raw data -> LFP
         """
-        self.add_filter('LFP 0-400 Hz', 20000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
-        self.add_filter('LFP 0-400 Hz', 30000, 'lowpass', [400, 425], 'standard LFP filter for 20 KHz data')
+        self.add_filter('LFP 0-400 Hz', 20000, 'lowpass',
+                        [400, 425], 'standard LFP filter for 20 KHz data')
+        self.add_filter('LFP 0-400 Hz', 30000, 'lowpass',
+                        [400, 425], 'standard LFP filter for 20 KHz data')

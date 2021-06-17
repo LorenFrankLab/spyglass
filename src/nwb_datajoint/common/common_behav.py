@@ -1,4 +1,5 @@
 from operator import pos
+
 import datajoint as dj
 import numpy as np
 import pynwb
@@ -9,7 +10,9 @@ from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .common_task import TaskEpoch
 from .dj_helper_fn import fetch_nwb
-from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sampling_rate, get_nwb_file, get_all_spatial_series
+from .nwb_helper_fn import (estimate_sampling_rate, get_all_spatial_series,
+                            get_data_interface, get_nwb_file,
+                            get_valid_intervals)
 
 schema = dj.schema('common_behav')
 
@@ -25,7 +28,7 @@ class PositionSource(dj.Manual):
     """
 
     def get_nwbf_position_source(self, nwb_file_name):
-        """Given an nwb file name, gets the spatial series and Interval lists from the file, adds the interval 
+        """Given an nwb file name, gets the spatial series and Interval lists from the file, adds the interval
         lists to the interval list table, and populates RawPosition if possible
 
         :param nwb_file_name: the name of the nwb_file
@@ -43,7 +46,7 @@ class PositionSource(dj.Manual):
                 pos_interval_list_name = self.get_pos_interval_name(epoch)
                 interval_dict = dict()
                 interval_dict['nwb_file_name'] = nwb_file_name
-                interval_dict['interval_list_name'] = pos_interval_list_name 
+                interval_dict['interval_list_name'] = pos_interval_list_name
                 interval_dict['valid_times'] = pdict['valid_times']
                 IntervalList().insert1(interval_dict, skip_duplicates=True)
                 # add this interval list to the table
@@ -159,7 +162,8 @@ class HeadDir(dj.Imported):
             behav_mod = nwbf.get_processing_module('Behavior')
             headdir = behav_mod.data_interfaces['Head Direction']  # noqa: F841 TODO: make use of headdir
         except Exception:  # TODO: use more precise error check
-            print(f'Unable to import HeadDir: no Behavior module found in {nwb_file_name}')
+            print(
+                f'Unable to import HeadDir: no Behavior module found in {nwb_file_name}')
             return
         key['nwb_object_id'] = -1
         # this is created when we populate the Task schema
@@ -185,7 +189,8 @@ class Speed(dj.Imported):
             behav_mod = nwbf.get_processing_module('Behavior')
             speed = behav_mod.data_interfaces['Speed']  # noqa: F841 TODO: make use of speed
         except Exception:  # TODO: use more precise error check
-            print(f'Unable to import Speed: no Behavior module found in {nwb_file_name}')
+            print(
+                f'Unable to import Speed: no Behavior module found in {nwb_file_name}')
             return
         key['nwb_object_id'] = -1
         # this is created when we populate the Task schema
@@ -211,7 +216,8 @@ class LinPos(dj.Imported):
             behav_mod = nwbf.get_processing_module("Behavior")
             linpos = behav_mod.data_interfaces['Linearized Position']  # noqa: F841 TODO: make use of speed
         except Exception:  # TODO: use more precise error check
-            print(f'Unable to import LinPos: no Behavior module found in {nwb_file_name}')
+            print(
+                f'Unable to import LinPos: no Behavior module found in {nwb_file_name}')
             return
         key['nwb_object_id'] = -1
         # this is created when we populate the Task schema

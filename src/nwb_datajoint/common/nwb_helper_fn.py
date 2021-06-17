@@ -1,10 +1,12 @@
 """NWB helper functions for finding processing modules and data interfaces."""
 
-import numpy as np
-import pynwb
 import warnings
 
-__open_nwb_files = dict()  # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
+import numpy as np
+import pynwb
+
+# dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
+__open_nwb_files = dict()
 
 
 def get_nwb_file(nwb_file_path):
@@ -22,7 +24,8 @@ def get_nwb_file(nwb_file_path):
     """
     _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
     if nwbfile is None:
-        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r', load_namespaces=True)  # keep file open
+        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r',
+                             load_namespaces=True)  # keep file open
         nwbfile = io.read()
         __open_nwb_files[nwb_file_path] = (io, nwbfile)
     return nwbfile
@@ -118,13 +121,15 @@ def estimate_sampling_rate(timestamps, multiplier):
     # 3. average the time differences between adjacent samples
     sample_diff = np.diff(timestamps[~np.isnan(timestamps)])
     if len(sample_diff) < 10:
-        raise ValueError(f'Only {len(sample_diff)} timestamps are valid. Check the data.')
+        raise ValueError(
+            f'Only {len(sample_diff)} timestamps are valid. Check the data.')
     nsmooth = 10
     smoother = np.ones(nsmooth) / nsmooth
     smooth_diff = np.convolve(sample_diff, smoother, mode='same')
 
     # we histogram with 100 bins out to 3 * mean, which should be fine for any reasonable number of samples
-    hist, bins = np.histogram(smooth_diff, bins=100, range=[0, 3 * np.mean(smooth_diff)])
+    hist, bins = np.histogram(smooth_diff, bins=100, range=[
+                              0, 3 * np.mean(smooth_diff)])
     mode = bins[np.where(hist == np.max(hist))]
 
     adjacent = sample_diff < mode[0] * multiplier
@@ -161,7 +166,7 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
     # all true entries of gap represent gaps. Get the times bounding these intervals.
     gapind = np.asarray(np.where(gap))
     # The end of each valid interval are the indices of the gaps and the final value
-    valid_end = np.append(gapind, np.asarray(len(timestamps)-1))
+    valid_end = np.append(gapind, np.asarray(len(timestamps) - 1))
 
     # the beginning of the gaps are the first element and gapind+1
     valid_start = np.insert(gapind + 1, 0, 0)
@@ -196,11 +201,13 @@ def get_electrode_indices(nwb_object, electrode_ids):
     """
     if isinstance(nwb_object, pynwb.ecephys.ElectricalSeries):
         # electrode_table_region = list(electrical_series.electrodes.to_dataframe().index)  # TODO verify
-        electrode_table_indices = nwb_object.electrodes.data[:]  # dynamictableregion of row indices
+        # dynamictableregion of row indices
+        electrode_table_indices = nwb_object.electrodes.data[:]
     elif isinstance(nwb_object, pynwb.NWBFile):
         electrode_table_indices = nwb_object.electrodes.id[:]
 
     return [elect_idx for elect_idx, elect_id in enumerate(electrode_table_indices) if elect_id in electrode_ids]
+
 
 def get_all_spatial_series(nwbf, verbose=False):
     """Given an nwb file object, gets the spatial series and Interval lists from the file and returns a dictionary by epoch
@@ -222,13 +229,14 @@ def get_all_spatial_series(nwbf, verbose=False):
         # estimate the sampling rate
         sampling_rate = estimate_sampling_rate(timestamps, 1.75)
         if sampling_rate < 0:
-            raise ValueError(f'Error adding position data for position epoch {pos_epoch}')
+            raise ValueError(
+                f'Error adding position data for position epoch {pos_epoch}')
         if verbose:
-            print("Processing raw position data. Estimated sampling rate: {} Hz".format(sampling_rate))
+            print("Processing raw position data. Estimated sampling rate: {} Hz".format(
+                sampling_rate))
         # add the valid intervals to the Interval list
-        pos_data_dict[pos_epoch]['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 2.5, 0)
+        pos_data_dict[pos_epoch]['valid_times'] = get_valid_intervals(
+            timestamps, sampling_rate, 2.5, 0)
         pos_data_dict[pos_epoch]['raw_position_object_id'] = spatial_series.object_id
 
     return pos_data_dict
-    
-            

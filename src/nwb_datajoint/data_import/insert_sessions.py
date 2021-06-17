@@ -1,8 +1,9 @@
 import os
-import pynwb
 import warnings
 
-from ..common import Nwbfile, populate_all_common, get_raw_eseries
+import pynwb
+
+from ..common import Nwbfile, get_raw_eseries, populate_all_common
 from .storage_dirs import check_env
 
 
@@ -22,14 +23,16 @@ def insert_sessions(nwb_file_names):
         nwb_file_names = [nwb_file_names]
 
     for nwb_file_name in nwb_file_names:
-        assert not nwb_file_name.startswith('/'), f'You must use relative paths. nwb_file_name: {nwb_file_name}'
+        assert not nwb_file_name.startswith(
+            '/'), f'You must use relative paths. nwb_file_name: {nwb_file_name}'
 
         # file name for the copied raw data
         out_nwb_file_name = os.path.splitext(nwb_file_name)[0] + '_.nwb'
 
         # Check whether the file already exists in the Nwbfile table
         if len(Nwbfile() & {'nwb_file_name': out_nwb_file_name}):
-            warnings.warn(f'Cannot insert data from {nwb_file_name}: {out_nwb_file_name} is already in Nwbfile table.')
+            warnings.warn(
+                f'Cannot insert data from {nwb_file_name}: {out_nwb_file_name} is already in Nwbfile table.')
             continue
 
         # Make a copy of the NWB file that ends with '_'.
@@ -40,14 +43,17 @@ def insert_sessions(nwb_file_names):
 
 
 def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
-    print(f'Creating a copy of NWB file {nwb_file_name} with link to raw ephys data: {out_nwb_file_name}')
+    print(
+        f'Creating a copy of NWB file {nwb_file_name} with link to raw ephys data: {out_nwb_file_name}')
 
     nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
-    assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
+    assert os.path.exists(
+        nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
 
     out_nwb_file_abs_path = Nwbfile.get_abs_path(out_nwb_file_name)
     if os.path.exists(out_nwb_file_name):
-        warnings.warn(f'Output file {out_nwb_file_abs_path} exists and will be overwritten.')
+        warnings.warn(
+            f'Output file {out_nwb_file_abs_path} exists and will be overwritten.')
 
     with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r', load_namespaces=True) as input_io:
         nwbf = input_io.read()
