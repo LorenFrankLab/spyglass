@@ -3,14 +3,11 @@ import json
 import os
 import tempfile
 import time
-from itertools import compress
 from pathlib import Path
-from typing import Dict
 
 import datajoint as dj
 import kachery_p2p as kp
 import labbox_ephys as le
-import labbox_ephys_widgets_jp as lew
 import numpy as np
 import pynwb
 import scipy.stats as stats
