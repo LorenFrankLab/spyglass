@@ -1,11 +1,14 @@
-name: Black Formatter
+name: Black Code Formatting on PR
+
 on: [push, pull_request]
+
 jobs:
-  black-format:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: Ahuge/black-action@v1.0.3
-      - name: Black Code Formatter
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BLACK_ARGS: "."
+    linting:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v1
+              name: Checkout
+            - uses: Ahuge/black-action@v1.0.3
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                BLACK_ARGS: "."
