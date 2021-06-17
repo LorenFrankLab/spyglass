@@ -28,8 +28,6 @@ class RawPosition(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        # Get the position data. FIX: change Position to position when name changed or fix helper function to allow
-        # upper or lower case
         position = get_data_interface(nwbf, 'position', pynwb.behavior.Position)
         if position is None:
             print(f'No position data interface found in {nwb_file_name}\n')
@@ -77,6 +75,7 @@ class StateScriptFile(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
+
         # TODO change to associated_files when NWB file changed.
         associated_files = nwbf.processing.get('associated files')
         if associated_files is None:

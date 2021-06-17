@@ -18,9 +18,9 @@ class Session(dj.Imported):
     # Table for holding experimental sessions.
     -> Nwbfile
     ---
-    -> Subject
-    -> Institution
-    -> Lab
+    -> [nullable] Subject
+    -> [nullable] Institution
+    -> [nullable] Lab
     session_id: varchar(80)
     session_description: varchar(80)
     session_start_time: datetime
@@ -39,7 +39,7 @@ class Session(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        # certain data should not be associated with a single NWB file / session because they may apply to
+        # certain data are not associated with a single NWB file / session because they may apply to
         # multiple sessions. these data go into dj.Manual tables
         # e.g., a lab member may be associated with multiple experiments, so the lab member table should not
         # be dependent on (contain a primary key for) a session
@@ -71,7 +71,7 @@ class Session(dj.Imported):
         if nwbf.subject is not None and nwbf.subject.subject_id is not None:
             subject_id = nwbf.subject.subject_id
         else:
-            subject_id = 'UNKNOWN'
+            subject_id = Subject.UNKNOWN
 
         Session().insert1({
             'nwb_file_name': nwb_file_name,
@@ -120,19 +120,7 @@ class ExperimenterList(dj.Imported):
             return
 
         for e in nwbf.experimenter:
-            # check to see if the experimenter is in the lab member list, and if not add her / him
-            if {'lab_member_name': e} not in LabMember():
-                names = [x.strip() for x in e.split(' ')]
-                labmember_dict = dict()
-                labmember_dict['lab_member_name'] = e
-                if len(names) == 2:
-                    labmember_dict['first_name'] = names[0]
-                    labmember_dict['last_name'] = names[1]
-                else:
-                    warnings.warn(f'Experimenter {e} does not seem to have a first and last name')
-                    labmember_dict['first_name'] = 'unknown'
-                    labmember_dict['last_name'] = 'unknown'
-                LabMember().insert1(labmember_dict)
+            LabMember().add_from_name(e)
             # now insert the experimenter, which is a combination of the nwbfile and the name
             key = dict(
                 nwb_file_name=nwb_file_name,
