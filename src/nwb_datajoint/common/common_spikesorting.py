@@ -4,6 +4,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
+import shutil
 
 import datajoint as dj
 import kachery_p2p as kp
@@ -951,6 +952,19 @@ class SpikeSorting(dj.Computed):
             ), f'Error: {metrics_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             metrics_processed = json.load(metrics_path)
 
+    def nightly_cleanup(self):
+        """Clean up spike sorting directories that are not in the SpikeSorting table
+
+        :return: None
+        """
+        # get a list of the files in the spike sorting storage directory
+        dir_names = next(os.walk(os.environ['SPIKE_SORTING_STORAGE_DIR']))[1]
+        # now retrieve a list of the currently used analysis nwb files
+        analysis_file_names = self.fetch('analysis_file_name')
+        for dir in dir_names:
+            if not dir in analysis_file_names:
+                print(dir)
+                #shutil.rmtree(dir)
 
 @schema
 class AutomaticCurationParameters(dj.Manual):
@@ -1126,8 +1140,7 @@ class CuratedSpikeSorting(dj.Computed):
         del key['analysis_file_name']
         del key['curator']
 
-        units_table = (CuratedSpikeSorting & key).fetch_nwb()[
-            0]['units'].to_dataframe()
+        units_table = (CuratedSpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
 
         # Add entries to CuratedSpikeSorting.Units table
         print('\nAdding to dj Unit table...')
@@ -1143,3 +1156,25 @@ class CuratedSpikeSorting(dj.Computed):
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+
+    def delete_extractors(self, key):
+        """Delete directories with sorting and recording extractors that are no longer needed
+
+        :param key: key to curated sortings where the extractors can be removed
+        :type key: dict
+        """
+        # get a list of the files in the spike sorting storage directory
+        dir_names = next(os.walk(os.environ['SPIKE_SORTING_STORAGE_DIR']))[1]
+        # now retrieve a list of the currently used analysis nwb files
+        analysis_file_names = (self & key).fetch('analysis_file_name')
+        delete_list = []
+        for dir in dir_names:
+            if not dir in analysis_file_names:
+                delete_list.append(dir)
+                print(f'Adding {dir} to delete list')
+        delete = input('Delete all listed directories (y/n)? ')
+        if delete == 'y' or delete == 'Y':
+            for dir in delete_list:
+                shutil.rmtree(dir)
+            return
+        print('No files deleted')
