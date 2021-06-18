@@ -1,12 +1,12 @@
 import os
 import pathlib
+import random
+import string
 
 import datajoint as dj
 import kachery as ka
 import pandas as pd
 import pynwb
-import random
-import string
 
 from .dj_helper_fn import get_child_tables
 from .nwb_helper_fn import get_electrode_indices, get_nwb_file
@@ -155,9 +155,11 @@ class AnalysisNwbfile(dj.Manual):
         # each file ends with a random string of 10 digits, so we generate that string and redo if by some miracle it's already there
         file_in_table = True
         while (file_in_table):
-            analysis_file_name = os.path.splitext(nwb_file_name)[0] + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + '.nwb'
-            file_in_table = len((AnalysisNwbfile & {'analysis_file_name': analysis_file_name}).fetch()) > 0
-  
+            analysis_file_name = os.path.splitext(nwb_file_name)[
+                0] + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + '.nwb'
+            file_in_table = len(
+                (AnalysisNwbfile & {'analysis_file_name': analysis_file_name}).fetch()) > 0
+
         return analysis_file_name
 
         # # get the list of names of analysis files related to this nwb file
@@ -335,7 +337,8 @@ class AnalysisNwbfile(dj.Manual):
                                              description=f'{metric} sorting metric',
                                              data=metric_data)
                 if labels is not None:
-                    nwbf.add_unit_column(name = 'label', description='label given during curation', data = labels)
+                    nwbf.add_unit_column(
+                        name='label', description='label given during curation', data=labels)
                 # If the waveforms were specified, add them as a dataframe to scratch
                 waveforms_object_id = ''
                 if units_waveforms is not None:
@@ -388,14 +391,14 @@ class AnalysisNwbfile(dj.Manual):
     def nightly_cleanup():
         from nwb_datajoint.common import common_nwbfile
         child_tables = get_child_tables(common_nwbfile.AnalysisNwbfile)
-        
+
         (common_nwbfile.AnalysisNwbfile - child_tables).delete_quick()
 
         # a separate external files clean up required - this is to be done during times when no other transactions are in progress.
-        common_nwbfile.schema.external['analysis'].delete(delete_external_files=True)
+        common_nwbfile.schema.external['analysis'].delete(
+            delete_external_files=True)
 
         # also check to see whether there are directories in the spikesorting folder with this
-
 
 
 @schema
@@ -432,4 +435,4 @@ class AnalysisNwbfileKachery(dj.Computed):
             key['analysis_file_sha1'] = ka.get_file_hash(kachery_path)
         self.insert1(key)
 
-    # TODO: load from kachery and 
+    # TODO: load from kachery and

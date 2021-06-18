@@ -1,8 +1,9 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
-import numpy as np
-import re
 import inspect
+import re
+
 import datajoint as dj
+import numpy as np
 
 from .nwb_helper_fn import get_nwb_file
 
@@ -37,7 +38,8 @@ def dj_replace(original_table, new_values, key_column, replace_column):
         new_values = tmp
 
     new_val_array = np.asarray(new_values)
-    replace_ind = np.where(np.isin(original_table[key_column], new_val_array[:, 0]))
+    replace_ind = np.where(
+        np.isin(original_table[key_column], new_val_array[:, 0]))
     original_table[replace_column][replace_ind] = new_val_array[:, 1]
     return original_table
 
@@ -67,7 +69,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     if not attrs:
         attrs = query_expression.heading.names
 
-    rec_dicts = (query_expression * tbl.proj(nwb2load_filepath=attr_name)).fetch(*attrs, 'nwb2load_filepath', **kwargs)
+    rec_dicts = (query_expression * tbl.proj(nwb2load_filepath=attr_name)
+                 ).fetch(*attrs, 'nwb2load_filepath', **kwargs)
 
     if not rec_dicts or not np.any(['object_id' in key for key in rec_dicts[0]]):
         return rec_dicts
@@ -87,5 +90,3 @@ def get_child_tables(table):
     table = table() if inspect.isclass(table) else table
     return [dj.FreeTable(table.connection, s if not s.isdigit() else next(iter(table.connection.dependencies.children(s))))
             for s in table.children()]
-
-

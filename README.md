@@ -46,7 +46,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
      ```bash
      export NWB_DATAJOINT_BASE_DIR="/stelmo/nwb/"
      export SPIKE_SORTING_STORAGE_DIR="/stelmo/nwb/spikesorting"
-     export ANALYSIS_LOCK_FILE = "/home/lorenlab/nwb_datajoint_lock/.lockfile"
+     export ANALYSIS_LOCK_FILE="/home/lorenlab/nwb_datajoint_lock/.lockfile"
      export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
      export KACHERY_P2P_API_HOST="typhoon"
      export KACHERY_P2P_API_PORT="14747"

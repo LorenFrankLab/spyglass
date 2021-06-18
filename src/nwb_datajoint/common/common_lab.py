@@ -44,7 +44,8 @@ class Institution(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with institution information.
         """
-        self.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
+        self.insert1(dict(institution_name=nwbf.institution),
+                     skip_duplicates=True)
 
 
 @schema

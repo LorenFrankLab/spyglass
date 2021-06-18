@@ -1,5 +1,6 @@
-import datajoint as dj
 import os
+
+import datajoint as dj
 
 schema = dj.schema('file_lock')
 

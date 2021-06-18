@@ -46,4 +46,4 @@ def set_configuration(user_name):
 
 
 if __name__ == "__main__":
-    set_configuration(sys.argv[0])
+    set_configuration(sys.argv[1])
