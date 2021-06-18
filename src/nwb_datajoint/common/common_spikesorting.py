@@ -1178,3 +1178,38 @@ class CuratedSpikeSorting(dj.Computed):
                 shutil.rmtree(dir)
             return
         print('No files deleted')
+
+@schema
+class UnitInclusionParameters(dj.Manual):
+    definition = """
+    unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
+    ---
+    max_noise_overlap=1:        float   # noise overlap threshold (include below) 
+    min_nn_hit_rate=-1:         float   # isolation score threshold (include above)
+    max_isi_violation=1:        float   # ISI violation threshold
+    min_firing_rate=0:          float   # minimum firing rate threshold
+    max_firing_rate=100000      float   # maximum fring rate thershold
+    min_num_spikes=0:           int     # minimum total number of spikes
+    label_list:                 BLOB    # list of acceptable lables
+    """
+    
+    def get_included_units(self, curated_sorting_key, unit_inclusion_key):
+        """given a reference to a set of curated sorting units and a specific unit inclusion parameter list, returns 
+        the units that should be included
+
+        :param curated_sorting_key: key to entries in CuratedSpikeSorting.Unit table
+        :type curated_sorting_key: dict
+        :param unit_inclusion_key: key to a single unit inclusion parameter set
+        :type unit_inclusion_key: dict
+        """
+        units = (CuratedSpikeSorting().Unit() & f'noise_overlap <= {key['max_noise_overlap']}' &
+                                               f'nn_hit_rate >= {key['min_nn_hit_rate']}' &
+                                               f'isi_violation <= {key['max_isi_violation']}' &
+                                               f'firing_rate >= {key['min_firing_rate']}' &
+                                               f'firing_rate <= {key['max_firing_rate']}' &
+                                               f'num_spikes >= {key['min_num_spikes']}').fetch()
+        included_units = []
+        for unit in units:
+            if unit['label'] in key['label_list']
+            included_units.append(unit)
+        return included_units
