@@ -1208,8 +1208,10 @@ class UnitInclusionParameters(dj.Manual):
                                                f'firing_rate >= {key['min_firing_rate']}' &
                                                f'firing_rate <= {key['max_firing_rate']}' &
                                                f'num_spikes >= {key['min_num_spikes']}').fetch()
+        # now filter by labels
         included_units = []
         for unit in units:
-            if unit['label'] in key['label_list']
-            included_units.append(unit)
+            if unit['label'] in key['label_list']:
+                included_units.append(unit)
+
         return included_units

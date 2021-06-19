@@ -127,7 +127,7 @@ class Probe(dj.Manual):
         ----------
         nwbf : pynwb.NWBFile
             The source NWB file object.
-        """
+        """ 
         probe_dict = dict()
         probe_re = re.compile("probe")
         for d in nwbf.devices:
