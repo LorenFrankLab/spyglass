@@ -153,3 +153,4 @@ dmypy.json
 temp_nwb/*
 
 notebooks/mountainsort4_output/
+notebooks/mark_extraction_test.ipynb
