@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 import shutil
 
-
 import datajoint as dj
 import kachery_p2p as kp
 import labbox_ephys as le
@@ -1180,7 +1179,6 @@ class CuratedSpikeSorting(dj.Computed):
             return
         print('No files deleted')
 
-@schema
 class UnitInclusionParameters(dj.Manual):
     definition = """
     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
@@ -1203,20 +1201,6 @@ class UnitInclusionParameters(dj.Manual):
         :param unit_inclusion_key: key to a single unit inclusion parameter set
         :type unit_inclusion_key: dict
         """
-<<<<<<< HEAD
-        units = (CuratedSpikeSorting().Unit() & f'noise_overlap <= {key['max_noise_overlap']}' &
-                                               f'nn_hit_rate >= {key['min_nn_hit_rate']}' &
-                                               f'isi_violation <= {key['max_isi_violation']}' &
-                                               f'firing_rate >= {key['min_firing_rate']}' &
-                                               f'firing_rate <= {key['max_firing_rate']}' &
-                                               f'num_spikes >= {key['min_num_spikes']}').fetch()
-        # now filter by labels
-        included_units = []
-        for unit in units:
-            if unit['label'] in key['label_list']:
-                included_units.append(unit)
-
-=======
 
         curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
         inclusion_key = (UnitInclusionParameters & unit_inclusion_key).fetch1()
@@ -1232,11 +1216,10 @@ class UnitInclusionParameters(dj.Manual):
         for unit in units:
             labels = unit['label'].split(',')
             exclude = False
-                for label in labels:
-                    if label in inclusion_key['exclusion_label_list']:
-                        exclude = True
+            for label in labels:
+                if label in inclusion_key['exclusion_label_list']:
+                    exclude = True
             if not exclude:
                 included_units.append(unit)
                 
->>>>>>> 537080dc22a34cca3e626a4d3b525dc2307ad6a6
         return included_units
