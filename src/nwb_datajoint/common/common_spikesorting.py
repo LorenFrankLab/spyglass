@@ -1,6 +1,7 @@
 import getpass
 import json
 import os
+import pathlib
 import tempfile
 import time
 from pathlib import Path
@@ -953,7 +954,8 @@ class SpikeSorting(dj.Computed):
             metrics_processed = json.load(metrics_path)
 
     def nightly_cleanup(self):
-        """Clean up spike sorting directories that are not in the SpikeSorting table
+        """Clean up spike sorting directories that are not in the SpikeSorting table. 
+        This should be run after AnalysisNwbFile().nightly_cleanup()
 
         :return: None
         """
@@ -963,8 +965,9 @@ class SpikeSorting(dj.Computed):
         analysis_file_names = self.fetch('analysis_file_name')
         for dir in dir_names:
             if not dir in analysis_file_names:
-                print(dir)
-                #shutil.rmtree(dir)
+                full_path = str(pathlib.Path(os.environ['SPIKE_SORTING_STORAGE_DIR']) / dir)
+                print(f'removing {full_path}')
+                shutil.rmtree(str(pathlib.Path(os.environ['SPIKE_SORTING_STORAGE_DIR']) / dir))
 
 @schema
 class AutomaticCurationParameters(dj.Manual):
@@ -1179,15 +1182,16 @@ class CuratedSpikeSorting(dj.Computed):
             return
         print('No files deleted')
 
+@schema
 class UnitInclusionParameters(dj.Manual):
     definition = """
     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
     ---
     max_noise_overlap=1:        float   # noise overlap threshold (include below) 
     min_nn_hit_rate=-1:         float   # isolation score threshold (include above)
-    max_isi_violation=1:        float   # ISI violation threshold
+    max_isi_violation=100:        float   # ISI violation threshold
     min_firing_rate=0:          float   # minimum firing rate threshold
-    max_firing_rate=100000      float   # maximum fring rate thershold
+    max_firing_rate=100000:      float   # maximum fring rate thershold
     min_num_spikes=0:           int     # minimum total number of spikes
     exclude_label_list=NULL:    BLOB    # list of labels to EXCLUDE
     """
@@ -1205,21 +1209,23 @@ class UnitInclusionParameters(dj.Manual):
         curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
         inclusion_key = (UnitInclusionParameters & unit_inclusion_key).fetch1()
         units = (CuratedSpikeSorting().Unit() & curated_sortings &
-                                               f'noise_overlap <= {inclusion_key['max_noise_overlap']}' &
-                                               f'nn_hit_rate >= {inclusion_key['min_nn_hit_rate']}' &
-                                               f'isi_violation <= {inclusion_key['max_isi_violation']}' &
-                                               f'firing_rate >= {inclusion_key['min_firing_rate']}' &
-                                               f'firing_rate <= {inclusion_key['max_firing_rate']}' &
-                                               f'num_spikes >= {inclusion_key['min_num_spikes']}').fetch()
-        #now exclude by label
-        included_units = []
-        for unit in units:
-            labels = unit['label'].split(',')
-            exclude = False
-            for label in labels:
-                if label in inclusion_key['exclusion_label_list']:
-                    exclude = True
-            if not exclude:
-                included_units.append(unit)
-                
-        return included_units
+                                               f'noise_overlap <= {inclusion_key["max_noise_overlap"]}' &
+                                               f'nn_hit_rate >= {inclusion_key["min_nn_hit_rate"]}' &
+                                               f'isi_violation <= {inclusion_key["max_isi_violation"]}' &
+                                               f'firing_rate >= {inclusion_key["min_firing_rate"]}' &
+                                               f'firing_rate <= {inclusion_key["max_firing_rate"]}' &
+                                               f'num_spikes >= {inclusion_key["min_num_spikes"]}').fetch()
+        #now exclude by label if it is specified
+        if inclusion_key['exclude_label_list'] is not None:
+            included_units = []
+            for unit in units:
+                labels = unit['label'].split(',')
+                exclude = False
+                for label in labels:
+                    if label in inclusion_key['exclude_label_list']:
+                        exclude = True
+                if not exclude:
+                    included_units.append(unit)   
+            return included_units
+        else:
+            return units

@@ -26,7 +26,7 @@ from .common_spikesorting import (AutomaticCurationParameters,
                                   SpikeSorterParameters, SpikeSorting,
                                   SpikeSortingArtifactParameters,
                                   SpikeSortingMetrics, SpikeSortingParameters,
-                                  SpikeSortingWaveformParameters)
+                                  SpikeSortingWaveformParameters, UnitInclusionParameters)
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
 from .nwb_helper_fn import (close_nwb_files, estimate_sampling_rate,
