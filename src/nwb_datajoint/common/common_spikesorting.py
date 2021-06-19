@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 import shutil
 
+
 import datajoint as dj
 import kachery_p2p as kp
 import labbox_ephys as le
@@ -1190,7 +1191,7 @@ class UnitInclusionParameters(dj.Manual):
     min_firing_rate=0:          float   # minimum firing rate threshold
     max_firing_rate=100000      float   # maximum fring rate thershold
     min_num_spikes=0:           int     # minimum total number of spikes
-    label_list:                 BLOB    # list of acceptable lables
+    exclude_label_list=NULL:    BLOB    # list of labels to EXCLUDE
     """
     
     def get_included_units(self, curated_sorting_key, unit_inclusion_key):
@@ -1202,6 +1203,7 @@ class UnitInclusionParameters(dj.Manual):
         :param unit_inclusion_key: key to a single unit inclusion parameter set
         :type unit_inclusion_key: dict
         """
+<<<<<<< HEAD
         units = (CuratedSpikeSorting().Unit() & f'noise_overlap <= {key['max_noise_overlap']}' &
                                                f'nn_hit_rate >= {key['min_nn_hit_rate']}' &
                                                f'isi_violation <= {key['max_isi_violation']}' &
@@ -1214,4 +1216,27 @@ class UnitInclusionParameters(dj.Manual):
             if unit['label'] in key['label_list']:
                 included_units.append(unit)
 
+=======
+
+        curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
+        inclusion_key = (UnitInclusionParameters & unit_inclusion_key).fetch1()
+        units = (CuratedSpikeSorting().Unit() & curated_sortings &
+                                               f'noise_overlap <= {inclusion_key['max_noise_overlap']}' &
+                                               f'nn_hit_rate >= {inclusion_key['min_nn_hit_rate']}' &
+                                               f'isi_violation <= {inclusion_key['max_isi_violation']}' &
+                                               f'firing_rate >= {inclusion_key['min_firing_rate']}' &
+                                               f'firing_rate <= {inclusion_key['max_firing_rate']}' &
+                                               f'num_spikes >= {inclusion_key['min_num_spikes']}').fetch()
+        #now exclude by label
+        included_units = []
+        for unit in units:
+            labels = unit['label'].split(',')
+            exclude = False
+                for label in labels:
+                    if label in inclusion_key['exclusion_label_list']:
+                        exclude = True
+            if not exclude:
+                included_units.append(unit)
+                
+>>>>>>> 537080dc22a34cca3e626a4d3b525dc2307ad6a6
         return included_units
