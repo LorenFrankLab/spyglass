@@ -386,7 +386,6 @@ class AnalysisNwbfile(dj.Manual):
         """
         self.external['analysis'].delete(delete_external_files=delete_files)
 
-        # the usage of the above function to clean up AnalysisNwbfile table is as follows:
     @staticmethod
     def nightly_cleanup():
         from nwb_datajoint.common import common_nwbfile

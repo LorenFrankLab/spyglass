@@ -5,6 +5,7 @@ from .common_interval import IntervalList  # noqa: F401
 from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .nwb_helper_fn import get_data_interface, get_nwb_file
+from .dj_helper_fn import fetch_nwb  # dj_replace
 
 schema = dj.schema('common_dio')
 
@@ -15,7 +16,7 @@ class DIOEvents(dj.Imported):
     -> Session
     dio_event_name: varchar(80)  # the name assigned to this DIO event
     ---
-    nwb_object_id: varchar(80)   # the object id of the data in the NWB file
+    dio_object_id: varchar(80)   # the object id of the data in the NWB file
     -> IntervalList              # the list of intervals for this object
     """
 
@@ -38,3 +39,6 @@ class DIOEvents(dj.Imported):
             key['dio_event_name'] = event_series
             key['nwb_object_id'] = behav_events_ts[event_series].object_id
             self.insert1(key, skip_duplicates=True)
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)

@@ -1,9 +1,11 @@
 import getpass
 import json
 import os
+import pathlib
 import tempfile
 import time
 from pathlib import Path
+import shutil
 
 import datajoint as dj
 # import kachery_p2p as kp
@@ -952,6 +954,21 @@ class SpikeSorting(dj.Computed):
             ), f'Error: {metrics_path} does not exist when attempting to import {(SpikeSortingParameters() & key).fetch1()}'
             metrics_processed = json.load(metrics_path)
 
+    def nightly_cleanup(self):
+        """Clean up spike sorting directories that are not in the SpikeSorting table. 
+        This should be run after AnalysisNwbFile().nightly_cleanup()
+
+        :return: None
+        """
+        # get a list of the files in the spike sorting storage directory
+        dir_names = next(os.walk(os.environ['SPIKE_SORTING_STORAGE_DIR']))[1]
+        # now retrieve a list of the currently used analysis nwb files
+        analysis_file_names = self.fetch('analysis_file_name')
+        for dir in dir_names:
+            if not dir in analysis_file_names:
+                full_path = str(pathlib.Path(os.environ['SPIKE_SORTING_STORAGE_DIR']) / dir)
+                print(f'removing {full_path}')
+                shutil.rmtree(str(pathlib.Path(os.environ['SPIKE_SORTING_STORAGE_DIR']) / dir))
 
 @schema
 class AutomaticCurationParameters(dj.Manual):
@@ -1127,8 +1144,7 @@ class CuratedSpikeSorting(dj.Computed):
         del key['analysis_file_name']
         del key['curator']
 
-        units_table = (CuratedSpikeSorting & key).fetch_nwb()[
-            0]['units'].to_dataframe()
+        units_table = (CuratedSpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
 
         # Add entries to CuratedSpikeSorting.Units table
         print('\nAdding to dj Unit table...')
@@ -1144,3 +1160,73 @@ class CuratedSpikeSorting(dj.Computed):
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+
+    def delete_extractors(self, key):
+        """Delete directories with sorting and recording extractors that are no longer needed
+
+        :param key: key to curated sortings where the extractors can be removed
+        :type key: dict
+        """
+        # get a list of the files in the spike sorting storage directory
+        dir_names = next(os.walk(os.environ['SPIKE_SORTING_STORAGE_DIR']))[1]
+        # now retrieve a list of the currently used analysis nwb files
+        analysis_file_names = (self & key).fetch('analysis_file_name')
+        delete_list = []
+        for dir in dir_names:
+            if not dir in analysis_file_names:
+                delete_list.append(dir)
+                print(f'Adding {dir} to delete list')
+        delete = input('Delete all listed directories (y/n)? ')
+        if delete == 'y' or delete == 'Y':
+            for dir in delete_list:
+                shutil.rmtree(dir)
+            return
+        print('No files deleted')
+
+@schema
+class UnitInclusionParameters(dj.Manual):
+    definition = """
+    unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
+    ---
+    max_noise_overlap=1:        float   # noise overlap threshold (include below) 
+    min_nn_hit_rate=-1:         float   # isolation score threshold (include above)
+    max_isi_violation=100:        float   # ISI violation threshold
+    min_firing_rate=0:          float   # minimum firing rate threshold
+    max_firing_rate=100000:      float   # maximum fring rate thershold
+    min_num_spikes=0:           int     # minimum total number of spikes
+    exclude_label_list=NULL:    BLOB    # list of labels to EXCLUDE
+    """
+    
+    def get_included_units(self, curated_sorting_key, unit_inclusion_key):
+        """given a reference to a set of curated sorting units and a specific unit inclusion parameter list, returns 
+        the units that should be included
+
+        :param curated_sorting_key: key to entries in CuratedSpikeSorting.Unit table
+        :type curated_sorting_key: dict
+        :param unit_inclusion_key: key to a single unit inclusion parameter set
+        :type unit_inclusion_key: dict
+        """
+
+        curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
+        inclusion_key = (UnitInclusionParameters & unit_inclusion_key).fetch1()
+        units = (CuratedSpikeSorting().Unit() & curated_sortings &
+                                               f'noise_overlap <= {inclusion_key["max_noise_overlap"]}' &
+                                               f'nn_hit_rate >= {inclusion_key["min_nn_hit_rate"]}' &
+                                               f'isi_violation <= {inclusion_key["max_isi_violation"]}' &
+                                               f'firing_rate >= {inclusion_key["min_firing_rate"]}' &
+                                               f'firing_rate <= {inclusion_key["max_firing_rate"]}' &
+                                               f'num_spikes >= {inclusion_key["min_num_spikes"]}').fetch()
+        #now exclude by label if it is specified
+        if inclusion_key['exclude_label_list'] is not None:
+            included_units = []
+            for unit in units:
+                labels = unit['label'].split(',')
+                exclude = False
+                for label in labels:
+                    if label in inclusion_key['exclude_label_list']:
+                        exclude = True
+                if not exclude:
+                    included_units.append(unit)   
+            return included_units
+        else:
+            return units
