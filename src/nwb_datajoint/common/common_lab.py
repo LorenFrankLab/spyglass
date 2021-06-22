@@ -5,14 +5,28 @@ schema = dj.schema("common_lab")
 
 
 @schema
+class LabTeam(dj.Manual):
+    definition = """
+    team_name: varchar(80)
+    ---
+    team_description='': varchar(200)
+    """
+
+    class LabTeamMember(dj.Manual):
+        definition = """
+        ->Master
+        ->LabMember
+        """
+
 class LabMember(dj.Manual):
     definition = """
     lab_member_name: varchar(80)
     ---
     first_name: varchar(80)
     last_name: varchar(80)
+    user_name='': varchar(80)
+    google_user_name='': varchar(80)
     """
-
     def insert_from_nwbfile(self, nwbf):
         """Insert lab member information from an NWB file.
 
@@ -27,6 +41,12 @@ class LabMember(dj.Manual):
             labmember_dict['first_name'] = str.split(labmember)[0]
             labmember_dict['last_name'] = str.split(labmember)[-1]
             self.insert1(labmember_dict, skip_duplicates=True)
+            # check to see if this person is a member of any lab teams, and if not, add a new team with their name
+            if len((LabTeam.LabTeamMember() & labmember_dict).fetch) == 0:
+                LabTeam.insert1({'team_name' : labmember_dict['lab_member_name']})
+                LabTeam.LabTeamMember.insert1({'team_name' : labmember_dict['lab_member_name'], 
+                                                'lab_member_name' : labmember_dict['lab_member_name']})
+                
 
 
 @schema
