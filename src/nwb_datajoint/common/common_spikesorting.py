@@ -6,7 +6,8 @@ import time
 from pathlib import Path
 
 import datajoint as dj
-import kachery_p2p as kp
+# import kachery_p2p as kp
+import kachery_client as kp
 import labbox_ephys as le
 import numpy as np
 import pynwb
