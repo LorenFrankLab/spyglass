@@ -8,8 +8,7 @@ from pathlib import Path
 import shutil
 
 import datajoint as dj
-# import kachery_p2p as kp
-import kachery_client as kp
+import kachery_client as kc
 import labbox_ephys as le
 import numpy as np
 import pynwb
@@ -654,43 +653,41 @@ class SpikeSorting(dj.Computed):
         key['units_object_id'] = units_object_id
 
         print('\nGenerating feed for curation...')
-        extractor_nwb_uri = kp.link_file(extractor_nwb_path)
+        extractor_nwb_uri = kc.link_file(extractor_nwb_path)
         print(
             f'kachery URI for symbolic link to extractor NWB file: {extractor_nwb_uri}')
 
         # create workspace
-        workspace_uri = kp.get(key['analysis_file_name'])
+        workspace_name = key['analysis_file_name']
+        workspace_uri = kc.get(workspace_name)
         if not workspace_uri:
-            workspace_uri = le.create_workspace(
-                label=key['analysis_file_name']).uri
-            kp.set(key['analysis_file_name'], workspace_uri)
+            workspace_uri = le.create_workspace(label=workspace_name).uri
+            kc.set(workspace_name, workspace_uri)
         workspace = le.load_workspace(workspace_uri)
         print(f'Workspace URI: {workspace.uri}')
-
+        
         recording_label = key['nwb_file_name'] + '_' + \
             key['sort_interval_name'] + '_' + str(key['sort_group_id'])
         sorting_label = key['sorter_name'] + '_' + key['parameter_set_name']
 
-        recording_uri = kp.store_json({
+        recording_uri = kc.store_json({
             'recording_format': 'nwb',
             'data': {
-                'path': extractor_nwb_path,
+                'path': extractor_nwb_path
             }
         })
-        sorting_uri = kp.store_json({
+        sorting_uri = kc.store_json({
             'sorting_format': 'nwb',
             'data': {
                 'path': extractor_nwb_path
             }
         })
-        labbox_sorting = le.LabboxEphysSortingExtractor(sorting_uri)
-        labbox_recording = le.LabboxEphysRecordingExtractor(
-            recording_uri, download=True)
 
-        R_id = workspace.add_recording(
-            recording=labbox_recording, label=recording_label)
-        S_id = workspace.add_sorting(
-            sorting=labbox_sorting, recording_id=R_id, label=sorting_label)
+        sorting = le.LabboxEphysSortingExtractor(sorting_uri)
+        recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
+
+        R_id = workspace.add_recording(recording=recording, label=recording_label)
+        S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
 
         key['curation_feed_uri'] = workspace.uri
 
@@ -704,13 +701,19 @@ class SpikeSorting(dj.Computed):
                     old_unit_id)] = external_metrics[metric_ind]['data'].pop(old_unit_id)
         workspace.set_unit_metrics_for_sorting(
             sorting_id=S_id, metrics=external_metrics)
+        
+        workspace_list = sortingview.WorkspaceList(list_name='default')
+        workspace_list.add_workspace(name=workspace_name, workspace=workspace)
+        print('Workspace added to sortingview')
 
-        # add to the web app as well
-        workspace_list = sortingview.WorkspaceList(
-            backend_uri='gs://labbox-franklab/sortingview-backends/franklab.json')
-        workspace_list.add_workspace(
-            name=key['analysis_file_name'], workspace=workspace)
-
+        print(f'To curate the spike sorting, go to https://sortingview.vercel.app/workspace?workspace={workspace.uri}&channel=franklab')
+        # TODO: give permission to workspace
+        # user_id = # 'user_id@gmail.com'
+        # permissions = {'edit': True}
+        # W = sortingview.load_workspace(workspace_uri)
+        # W.set_user_permissions(user_id, permissions)
+        # print(f'Permissions for {user_id} set to: {W.get_user_permissions(user_id)}')
+        
         # TODO: extract labels
 
         self.insert1(key)
