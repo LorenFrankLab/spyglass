@@ -23,9 +23,6 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 3. Install this repository:
 
    ```bash
-   # to use the package:
-   pip install nwb_datajoint
-   # if you're a developer:
    pip install -e .
    ```
 
