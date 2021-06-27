@@ -20,6 +20,7 @@ import spiketoolkit as st
 from mountainsort4._mdaio_impl import readmda
 
 from .common_device import Probe
+from .common_lab import LabMember, LabTeam
 from .common_ephys import Electrode, ElectrodeGroup, Raw
 from .common_interval import (IntervalList, SortInterval,
                               interval_list_excludes_ind,
@@ -504,6 +505,7 @@ class SpikeSortingParameters(dj.Manual):
     -> SpikeSortingArtifactParameters
     -> SpikeSortingMetrics
     -> IntervalList
+    -> LabTeam
     import_path = '': varchar(200) # optional path to previous curated sorting output
     """
 
@@ -539,7 +541,7 @@ class SpikeSorting(dj.Computed):
             partially filled entity; value of primary keys from key source
             (in this case SpikeSortingParameters)
         """
-
+        team_name = (SpikeSortingParameters & key).fetch1('team_name')
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
 
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
@@ -707,15 +709,21 @@ class SpikeSorting(dj.Computed):
         print('Workspace added to sortingview')
 
         print(f'To curate the spike sorting, go to https://sortingview.vercel.app/workspace?workspace={workspace.uri}&channel=franklab')
-        # TODO: give permission to workspace
-        # user_id = # 'user_id@gmail.com'
-        # permissions = {'edit': True}
-        # W = sortingview.load_workspace(workspace_uri)
-        # W.set_user_permissions(user_id, permissions)
-        # print(f'Permissions for {user_id} set to: {W.get_user_permissions(user_id)}')
         
-        # TODO: extract labels
-
+        # Give permission to workspace based on Google account
+        team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
+        if len(team_members)==0:
+            raise ValueError('The specified team does not exist or there are no members in the team;\
+                             create or change the entry in LabTeam table first')
+        workspace = sortingview.load_workspace(workspace_uri)
+        for team_member in team_members:
+            google_user_id = (LabMember.LabMemberInfo & {'lab_member_name':team_member}).fetch('google_user_name')  
+            if len(google_user_id)!=1:
+                print(f'Google user ID for {team_member} does not exist or more than one ID detected;\
+                        permission to curate not given to {team_member}, skipping...')              
+            workspace.set_user_permissions(google_user_id[0], {'edit': True})
+            print(f'Permissions for {google_user_id[0]} set to: {workspace.get_user_permissions(google_user_id[0])}')
+    
         self.insert1(key)
         print('\nDone - entry inserted to table.')
 
@@ -976,7 +984,7 @@ class SpikeSorting(dj.Computed):
 @schema
 class AutomaticCurationParameters(dj.Manual):
     definition = """
-    #Table for holding parameters for automatic aspects of curation
+    # Table for holding parameters for automatic aspects of curation
     automatic_curation_param_name: varchar(80)   #name of this parameter set
     ---
     automatic_curation_param_dict: BLOB         #dictionary of variables and values for automatic curation

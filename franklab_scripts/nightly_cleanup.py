@@ -28,7 +28,7 @@ from nwb_datajoint.common import (RawPosition, HeadDir, Speed, LinPos, StateScri
                                   AutomaticCurationSpikeSorting, AutomaticCurationSpikeSortingParameters, AutomaticCurationParameters,
                                   FirFilter,
                                   IntervalList, SortInterval,
-                                  Lab, LabMember, Institution,
+                                  Lab, LabMember, LabTeam, Institution,
                                   BrainRegion,
                                   SensorData,
                                   Session, ExperimenterList,
