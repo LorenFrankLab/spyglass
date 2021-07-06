@@ -671,17 +671,18 @@ class SpikeSorting(dj.Computed):
         recording_label = key['nwb_file_name'] + '_' + \
             key['sort_interval_name'] + '_' + str(key['sort_group_id'])
         sorting_label = key['sorter_name'] + '_' + key['parameter_set_name']
-
+        
+        # put kachery sha1 hash instead of path
         recording_uri = kc.store_json({
             'recording_format': 'nwb',
             'data': {
-                'path': extractor_nwb_path
+                'path': extractor_nwb_uri
             }
         })
         sorting_uri = kc.store_json({
             'sorting_format': 'nwb',
             'data': {
-                'path': extractor_nwb_path
+                'path': extractor_nwb_uri
             }
         })
 
