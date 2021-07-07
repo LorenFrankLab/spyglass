@@ -702,6 +702,9 @@ class SpikeSorting(dj.Computed):
             for old_unit_id in metrics.index:
                 external_metrics[metric_ind]['data'][str(
                     old_unit_id)] = external_metrics[metric_ind]['data'].pop(old_unit_id)
+                # change nan to none so that json can handle it
+                if np.isnan(external_metrics[metric_ind]['data'][str(old_unit_id)]):
+                    external_metrics[metric_ind]['data'][str(old_unit_id)] = None
         workspace.set_unit_metrics_for_sorting(
             sorting_id=S_id, metrics=external_metrics)
         
