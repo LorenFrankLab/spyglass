@@ -103,8 +103,8 @@ def interval_list_excludes_ind(valid_times, timestamps):
     """
     # add the first and last times to the list and creat a list of invalid intervals
     valid_times_list = np.ndarray.ravel(valid_times).tolist()
-    valid_times_list.insert(0, timestamps[0]-0.00001)
-    valid_times_list.append(timestamps[-1]+0.001)
+    valid_times_list.insert(0, timestamps[0] - 0.00001)
+    valid_times_list.append(timestamps[-1] + 0.001)
     invalid_times = np.array(valid_times_list).reshape(-1, 2)
     # add the first and last timestamp indices
     ind = []
@@ -125,8 +125,8 @@ def interval_list_excludes(valid_times, timestamps):
     """
     # add the first and last times to the list and creat a list of invalid intervals
     valid_times_list = np.ravel(valid_times).tolist()
-    valid_times_list.insert(0, timestamps[0]-0.00001)
-    valid_times_list.append(timestamps[-1]+0.00001)
+    valid_times_list.insert(0, timestamps[0] - 0.00001)
+    valid_times_list.append(timestamps[-1] + 0.00001)
     invalid_times = np.array(valid_times_list).reshape(-1, 2)
     # add the first and last timestamp indices
     ind = []
@@ -167,7 +167,7 @@ def interval_list_intersect(interval_list1, interval_list2):
 
     interval_list2 = np.ravel(interval_list2)
     # create a parallel list for the second interval where 2 indicates the start and -2 the end of an interval
-    interval_list2_start_end = np.ones(interval_list2.shape)*2
+    interval_list2_start_end = np.ones(interval_list2.shape) * 2
     interval_list2_start_end[1::2] = -2
 
     # concatenate the two lists so we can resort the intervals and apply the same sorting to the start-stop arrays
@@ -176,7 +176,8 @@ def interval_list_intersect(interval_list1, interval_list2):
     sort_ind = np.argsort(combined_intervals)
     combined_intervals = combined_intervals[sort_ind]
     # a cumulative sum of 3 indicates the beginning of a joint interval, and the following element is the end
-    intersection_starts = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 3)))
+    intersection_starts = np.ravel(
+        np.array(np.where(np.cumsum(ss[sort_ind]) == 3)))
     intersection_stops = intersection_starts + 1
     intersect = []
     for start, stop in zip(intersection_starts, intersection_stops):

@@ -1,5 +1,6 @@
 import datajoint as dj
 import ndx_franklab_novela
+import re
 
 schema = dj.schema("common_device")
 
@@ -91,7 +92,8 @@ class CameraDevice(dj.Manual):
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.CameraDevice):
                 device_dict = dict()
-                device_dict['camera_id'] = str.split(device.name)[1]  # TODO ideally this is not encoded in the name
+                # TODO ideally this is not encoded in the name
+                device_dict['camera_id'] = str.split(device.name)[1]
                 # TODO: fix camera name and add fields when new extension is available
                 device_dict['camera_name'] = device.camera_name
                 # device_dict['manufacturer'] = device.manufacturer

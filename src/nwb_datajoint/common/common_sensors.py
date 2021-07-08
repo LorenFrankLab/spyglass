@@ -26,10 +26,12 @@ class SensorData(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        sensor = get_data_interface(nwbf, 'analog', pynwb.behavior.BehavioralEvents)
+        sensor = get_data_interface(
+            nwbf, 'analog', pynwb.behavior.BehavioralEvents)
         if sensor is not None:
             key['sensor_data_object_id'] = sensor.time_series['analog'].object_id
-            key['interval_list_name'] = (Raw & {'nwb_file_name': nwb_file_name}).fetch1('interval_list_name')
+            key['interval_list_name'] = (
+                Raw & {'nwb_file_name': nwb_file_name}).fetch1('interval_list_name')
             self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):

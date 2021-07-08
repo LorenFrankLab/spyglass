@@ -1,26 +1,28 @@
 #!/usr/bin/env python
-
-
+import os
 import sys
 import tempfile
-import os
 
-# get the argument and make sure it's a username
-username = sys.argv[1]
-if os.path.isdir('/home/' + username):
-    print('Creating database user ', username)
-else:
-    errormessage = 'Error: username ' + username + ' does not exist in /home.'
-    exit(errormessage)
 
-# create a tempoary file for the command
-file = tempfile.NamedTemporaryFile(mode='w')
+def add_user(user_name):
+    if os.path.isdir(f'/home/{user_name}'):
+        print('Creating database user ', user_name)
+    else:
+        sys.exit(f'Error: user_name {user_name} does not exist in /home.')
 
-file.write("GRANT ALL PRIVILEGES ON `{}\_%`.* TO `{}`@\'%\' IDENTIFIED BY \'temppass\';\n".format(username, username))
-file.write("GRANT ALL PRIVILEGES ON `common\_%`.* TO `{}`@'%';\n".format(username))
-file.write("GRANT SELECT ON `%`.* TO `{}`@'%';\n".format(username))
-file.flush()
+    # create a tempoary file for the command
+    file = tempfile.NamedTemporaryFile(mode='w')
 
-# run those commands in sql
-os.system('mysql -p -h lmf-db.cin.ucsf.edu < {}'.format(file.name))
-# os.system('cat {}'.format(file.name))
+    file.write(
+        f"GRANT ALL PRIVILEGES ON `{user_name}\_%`.* TO `{user_name}`@\'%\' IDENTIFIED BY \'temppass\';\n")
+    file.write(
+        f"GRANT ALL PRIVILEGES ON `common\_%`.* TO `{user_name}`@'%';\n")
+    file.write(f"GRANT SELECT ON `%`.* TO `{user_name}`@'%';\n")
+    file.flush()
+
+    # run those commands in sql
+    os.system(f'mysql -p -h lmf-db.cin.ucsf.edu < {file.name}')
+
+
+if __name__ == "__main__":
+    add_user(sys.argv[1])

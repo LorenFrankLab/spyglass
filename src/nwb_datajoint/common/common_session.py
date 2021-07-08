@@ -1,8 +1,9 @@
-import datajoint as dj
 import warnings
 
-from .common_device import DataAcquisitionDevice, CameraDevice, Probe
-from .common_lab import Lab, Institution, LabMember
+import datajoint as dj
+
+from .common_device import CameraDevice, DataAcquisitionDevice, Probe
+from .common_lab import Institution, Lab, LabMember
 from .common_nwbfile import Nwbfile
 from .common_subject import Subject
 from .nwb_helper_fn import get_nwb_file

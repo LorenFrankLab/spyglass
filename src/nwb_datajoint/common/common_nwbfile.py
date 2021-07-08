@@ -1,17 +1,20 @@
+import os
+import pathlib
+import random
+import string
+
 import datajoint as dj
 import kachery as ka
-import os
 import pandas as pd
-import pathlib
 import pynwb
 
-from .nwb_helper_fn import get_electrode_indices, get_nwb_file
 from .dj_helper_fn import get_child_tables
+from .nwb_helper_fn import get_electrode_indices, get_nwb_file
 
 schema = dj.schema("common_nwbfile")
 
 # define the fields that should be kept in AnalysisNWBFiles
-nwb_keep_fields = ('devices', 'electrode_groups', 'electrodes', 'experiment_description',
+NWB_KEEP_FIELDS = ('devices', 'electrode_groups', 'electrodes', 'experiment_description',
                    'experimenter', 'file_create_date', 'identifier', 'intervals',
                    'institution', 'lab', 'session_description', 'session_id',
                    'session_start_time', 'subject', 'timestamps_reference_time')
@@ -35,7 +38,8 @@ class Nwbfile(dj.Manual):
             The relative path to the NWB file.
         """
         nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
-        assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
+        assert os.path.exists(
+            nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
 
         self.insert1(dict(
             nwb_file_name=nwb_file_name,
@@ -129,16 +133,17 @@ class AnalysisNwbfile(dj.Manual):
             # pop off the unnecessary elements to save space
             nwb_fields = nwbf.fields
             for field in nwb_fields:
-                if field not in nwb_keep_fields:
+                if field not in NWB_KEEP_FIELDS:
                     nwb_object = getattr(nwbf, field)
-                    if type(nwb_object) is pynwb.core.LabelledDict:
+                    if isinstance(nwb_object, pynwb.core.LabelledDict):
                         for module in list(nwb_object.keys()):
                             nwb_object.pop(module)
 
             analysis_file_name = self.__get_new_file_name(nwb_file_name)
             # write the new file
             print(f'Writing new NWB file {analysis_file_name}')
-            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+                analysis_file_name)
             # export the new NWB file
             with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w', manager=io.manager) as export_io:
                 export_io.export(io, nwbf)
@@ -147,14 +152,24 @@ class AnalysisNwbfile(dj.Manual):
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
-        # get the list of names of analysis files related to this nwb file
-        names = (AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch('analysis_file_name')
-        n1 = [str.replace(name, os.path.splitext(nwb_file_name)[0], '') for name in names]
-        max_analysis_file_num = max([int(str.replace(ext, '.nwb', '')) for ext in n1])
-        # name the file, adding the number of files with preceeding zeros
-        analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(max_analysis_file_num+1).zfill(6) + '.nwb'
-        print(analysis_file_name)
+        # each file ends with a random string of 10 digits, so we generate that string and redo if by some miracle it's already there
+        file_in_table = True
+        while (file_in_table):
+            analysis_file_name = os.path.splitext(nwb_file_name)[
+                0] + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + '.nwb'
+            file_in_table = len(
+                (AnalysisNwbfile & {'analysis_file_name': analysis_file_name}).fetch()) > 0
+
         return analysis_file_name
+
+        # # get the list of names of analysis files related to this nwb file
+        # names = (AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch('analysis_file_name')
+        # n1 = [str.replace(name, os.path.splitext(nwb_file_name)[0], '') for name in names]
+        # max_analysis_file_num = max([int(str.replace(ext, '.nwb', '')) for ext in n1])
+        # # name the file, adding the number of files with preceeding zeros
+        # analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(max_analysis_file_num+1).zfill(6) + '.nwb'
+        # print(analysis_file_name)
+        # return analysis_file_name
 
     @classmethod
     def copy(cls, nwb_file_name):
@@ -178,10 +193,12 @@ class AnalysisNwbfile(dj.Manual):
             # get the current number of analysis files related to this nwb file
             original_nwb_file_name = (AnalysisNwbfile &
                                       {'analysis_file_name': nwb_file_name}).fetch('nwb_file_name')[0]
-            analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
+            analysis_file_name = cls.__get_new_file_name(
+                original_nwb_file_name)
             # write the new file
             print(f'Writing new NWB file {analysis_file_name}...')
-            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+                analysis_file_name)
             # export the new NWB file
             with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w', manager=io.manager) as export_io:
                 export_io.export(io, nwbf)
@@ -202,7 +219,8 @@ class AnalysisNwbfile(dj.Manual):
         key['nwb_file_name'] = nwb_file_name
         key['analysis_file_name'] = analysis_file_name
         key['analysis_file_description'] = ''
-        key['analysis_file_abs_path'] = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        key['analysis_file_abs_path'] = AnalysisNwbfile.get_abs_path(
+            analysis_file_name)
         self.insert1(key)
 
     @staticmethod
@@ -224,7 +242,8 @@ class AnalysisNwbfile(dj.Manual):
         base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
         assert base_dir is not None, 'You must set NWB_DATAJOINT_BASE_DIR environment variable.'
 
-        analysis_nwb_file_abspath = str(base_dir / 'analysis' / analysis_nwb_file_name)
+        analysis_nwb_file_abspath = str(
+            base_dir / 'analysis' / analysis_nwb_file_name)
         return analysis_nwb_file_abspath
 
     @staticmethod
@@ -242,7 +261,7 @@ class AnalysisNwbfile(dj.Manual):
         # check to make sure the file exists
         assert len((AnalysisNwbfile() & key).fetch()) > 0, \
             f'Error adding {analysis_file_name} to lock file, not in AnalysisNwbfile() schema'
-        lock_file = open(os.getenv('ANALYSIS_LOCK_FILE'), 'a+')
+        lock_file = open(os.getenv('ANALYSIS_LOCK_FILE'), mode='a+')
         lock_file.write(f'{analysis_file_name}\n')
         lock_file.close()
 
@@ -270,7 +289,7 @@ class AnalysisNwbfile(dj.Manual):
             return nwb_object.object_id
 
     def add_units(self, analysis_file_name, units, units_valid_times,
-                  units_sort_interval, metrics=None, units_waveforms=None):
+                  units_sort_interval, metrics=None, units_waveforms=None, labels=None):
         """Add units, given a units dictionary where each entry is (unit id, spike times).
 
         Parameters
@@ -287,6 +306,8 @@ class AnalysisNwbfile(dj.Manual):
             Dictionary of unit waveforms with unit ids as keys.
         metrics : dict, optional
             Cluster metrics.
+        labels : dict, optional
+            Curation labels for clusters
 
         Returns
         -------
@@ -315,13 +336,17 @@ class AnalysisNwbfile(dj.Manual):
                         nwbf.add_unit_column(name=metric,
                                              description=f'{metric} sorting metric',
                                              data=metric_data)
+                if labels is not None:
+                    nwbf.add_unit_column(
+                        name='label', description='label given during curation', data=labels)
                 # If the waveforms were specified, add them as a dataframe to scratch
                 waveforms_object_id = ''
                 if units_waveforms is not None:
                     waveforms_df = pd.DataFrame.from_dict(units_waveforms,
                                                           orient='index')
                     waveforms_df.columns = ['waveforms']
-                    nwbf.add_scratch(waveforms_df, name='units_waveforms', notes='spike waveforms for each unit')
+                    nwbf.add_scratch(
+                        waveforms_df, name='units_waveforms', notes='spike waveforms for each unit')
                     waveforms_object_id = nwbf.scratch['units_waveforms'].object_id
 
                 io.write(nwbf)
@@ -361,16 +386,18 @@ class AnalysisNwbfile(dj.Manual):
         """
         self.external['analysis'].delete(delete_external_files=delete_files)
 
-        # the usage of the above function to clean up AnalysisNwbfile table is as follows:  
     @staticmethod
     def nightly_cleanup():
         from nwb_datajoint.common import common_nwbfile
         child_tables = get_child_tables(common_nwbfile.AnalysisNwbfile)
+
         (common_nwbfile.AnalysisNwbfile - child_tables).delete_quick()
 
         # a separate external files clean up required - this is to be done during times when no other transactions are in progress.
-        common_nwbfile.schema.external['analysis'].delete(delete_external_files=True)
+        common_nwbfile.schema.external['analysis'].delete(
+            delete_external_files=True)
 
+        # also check to see whether there are directories in the spikesorting folder with this
 
 
 @schema
@@ -400,10 +427,11 @@ class AnalysisNwbfileKachery(dj.Computed):
 
     def make(self, key):
         print('Computing SHA-1 and storing in kachery...')
-        analysis_file_abs_path = AnalysisNwbfile().get_abs_path(key['analysis_file_name'])
+        analysis_file_abs_path = AnalysisNwbfile(
+        ).get_abs_path(key['analysis_file_name'])
         with ka.config(use_hard_links=True):
             kachery_path = ka.store_file(analysis_file_abs_path)
             key['analysis_file_sha1'] = ka.get_file_hash(kachery_path)
         self.insert1(key)
 
-    # TODO: load from kachery and fetch_nwb
+    # TODO: load from kachery and
