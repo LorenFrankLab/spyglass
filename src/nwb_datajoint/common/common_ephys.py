@@ -264,7 +264,7 @@ class LFPSelection(dj.Manual):
             LFPSelection().insert1({'nwb_file_name': nwb_file_name})
 
             # TO DO: do this in a better way
-            all_electrodes = Electrode.fetch(as_dict=True)
+            all_electrodes = (Electrode() & {'nwb_file_name' : nwb_file_name}).fetch(as_dict=True)
             primary_key = Electrode.primary_key
             for e in all_electrodes:
                 # create a dictionary so we can insert new elects
