@@ -405,7 +405,7 @@ class LFPBandSelection(dj.Manual):
             raise ValueError(
                 f'filter {filter_name}, sampling rate {lfp_sampling_rate}is not in the FirFilter table')
         # interval_list
-        if not len((IntervalList() & {'interval_name': interval_list_name}).fetch()):
+        if not len((IntervalList() & {'nwb_file_name': nwb_file_name, 'interval_name': interval_list_name}).fetch()):
             raise ValueError(f'interval list {interval_list_name} is not in the IntervalList table; the list must be '
                              'added before this function is called')
         # reference_electrode_list
@@ -490,7 +490,7 @@ class LFPBand(dj.Computed):
             'lfp_sampling_rate')
         interval_list_name, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1('interval_list_name',
                                                                                        'lfp_band_sampling_rate')
-        valid_times = (IntervalList() & {
+        valid_times = (IntervalList() & {'nwb_file_name' : key['nwb_file_name'],
                        'interval_list_name': interval_list_name}).fetch1('valid_times')
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1(
             'filter_name', 'filter_sampling_rate', 'lfp_band_sampling_rate')
@@ -517,6 +517,8 @@ class LFPBand(dj.Computed):
         filtered_data_object_id = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_object, filter_coeff,
                                                               valid_times, lfp_band_elect_id, decimation)
 
+        # now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table                                             
+        AnalysisNwbfile().add(key['nwb_file_name'], lfp_band_file_name)        
         key['analysis_file_name'] = lfp_band_file_name
         key['filtered_data_object_id'] = filtered_data_object_id
         self.insert1(key)
