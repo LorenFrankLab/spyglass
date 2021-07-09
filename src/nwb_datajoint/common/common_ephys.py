@@ -327,6 +327,10 @@ class LFP(dj.Imported):
         lfp_object_id = FirFilter().filter_data_nwb(lfp_file_abspath, rawdata,
                                                     filter_coeff, valid_times, electrode_id_list, decimation)
 
+        # now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table                                             
+        AnalysisNwbfile().add(key['nwb_file_name'], lfp_file_name])
+
+
         key['analysis_file_name'] = lfp_file_name
         key['lfp_object_id'] = lfp_object_id
         key['lfp_sampling_rate'] = sampling_rate // decimation
