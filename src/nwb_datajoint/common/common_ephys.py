@@ -328,7 +328,7 @@ class LFP(dj.Imported):
                                                     filter_coeff, valid_times, electrode_id_list, decimation)
 
         # now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table                                             
-        AnalysisNwbfile().add(key['nwb_file_name'], lfp_file_name])
+        AnalysisNwbfile().add(key['nwb_file_name'], lfp_file_name)
 
 
         key['analysis_file_name'] = lfp_file_name
