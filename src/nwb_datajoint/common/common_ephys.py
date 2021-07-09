@@ -447,7 +447,7 @@ class LFPBandSelection(dj.Manual):
         for e, r in zip(electrode_list, ref_list):
             key['electrode_id'] = e
             key['electrode_group_name'] = (
-                Electrode & {'electrode_id': e}).fetch1('electrode_group_name')
+                Electrode & {'nwb_file_name': nwb_file_name, 'electrode_id': e}).fetch1('electrode_group_name')
             key['reference_elect_id'] = r
             self.LFPBandElectrode().insert1(key, skip_duplicates=True)
 
