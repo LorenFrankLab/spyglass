@@ -38,7 +38,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 
    > If you're not affiliated with UCSF or if you are just looking to try out `nwb_datajoint`, then you will need to set up a different MySQL server. For example, you can set up your own local server with a Docker image of a MySQL server configured for Datajoint (see [instructions](https://tutorials.datajoint.io/setting-up/local-database.html))
 
-2. Add the following environment variables (e.g. in `~/.bashrc`). This example assumes that you are interacting with the database on a computer that has mounted `stelmo` at `/stelmo` (if the mount location is different, change accordingly).
+2. Add the following environment variables (e.g. in `~/.bashrc`). This example assumes that you are interacting with the database on a computer that has mounted `stelmo` at `/stelmo` (if the mount location is different, change accordingly). For this to take effect, log out and log back in, or run `source ~/.bashrc` in the terminal.
 
      ```bash
      export NWB_DATAJOINT_BASE_DIR="/stelmo/nwb/"
@@ -61,7 +61,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 
    > Again, if you're using your own MySQL server, then you may need to change the other settings as well.
 
-Finally, open up a python console and import `nwb_datajoint` to check that the installation has worked.
+Finally, open up a python console (e.g. type `ipython` in the terminal) and import `nwb_datajoint` to check that the installation has worked.
 
 ## Tutorials
 
