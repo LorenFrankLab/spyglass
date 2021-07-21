@@ -90,7 +90,7 @@ class FirFilter(dj.Manual):
         filterdict['filter_coeff'] = np.array(gsp.firdesign(
             numtaps, band_edges, desired, fs=fs, p=p), ndmin=1)
         # add this filter to the table
-        self.insert1(filterdict, skip_duplicates="True")
+        self.insert1(filterdict, skip_duplicates=True)
 
     def plot_magnitude(self, filter_name, fs):
         filter = (self & {'filter_name': filter_name} & {

@@ -16,6 +16,13 @@ class Subject(dj.Manual):
     """
     # TODO increase length of description field (and maybe all fields, really)
 
+    UNKNOWN = 'UNKNOWN'
+
+    def initialize(self):
+        # initialize with an unknown subject for use when NWB file does not contain a subject
+        # TODO: move to initialization script so it doesn't get called every time
+        self.insert1(dict(subject_id=self.UNKNOWN), skip_duplicates=True)
+
     def insert_from_nwbfile(self, nwbf):
         """Get the subject information from the NWBFile and insert it into the Subject table."""
         self.initialize()

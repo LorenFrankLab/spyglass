@@ -74,13 +74,24 @@ class LabTeam(dj.Manual):
         """
 
     def create_new_team(self, team_name: str, team_members: list, team_description: str = ''):
-        """
-        Shortcut for adding a new team with a list of team members
+        """Create a new team with a list of team members.
+
+        If the lab member does not exist in the database, they will be added.
+
+        Parameters
+        ----------
+        team_name : str
+            The name of the team.
+        team_members : str
+            The full names of the lab members that are part of the team.
+        team_description: str
+            The description of the team.
         """
         labteam_dict = dict()
         labteam_dict['team_name'] = team_name
         labteam_dict['team_description'] = team_description
         LabTeam.insert1(labteam_dict, skip_duplicates=True)
+
         for team_member in team_members:
             LabMember.add_from_name(team_member)
             if len((LabMember.LabMemberInfo & {'lab_member_name': team_member}).fetch('google_user_name')) == 0:
@@ -98,6 +109,13 @@ class Institution(dj.Manual):
     institution_name: varchar(80)
     ---
     """
+
+    UNKNOWN = 'UNKNOWN'
+
+    def initialize(self):
+        # initialize with an unknown institution for use when NWB file does not contain an institution
+        # TODO: move to initialization script so it doesn't get called every time
+        self.insert1(dict(institution_name=self.UNKNOWN), skip_duplicates=True)
 
     def insert_from_nwbfile(self, nwbf):
         """Insert institution information from an NWB file.
@@ -120,6 +138,13 @@ class Lab(dj.Manual):
     lab_name: varchar(80)
     ---
     """
+
+    UNKNOWN = 'UNKNOWN'
+
+    def initialize(self):
+        # initialize with an unknown lab for use when NWB file does not contain a lab
+        # TODO: move to initialization script so it doesn't get called every time
+        self.insert1(dict(lab_name=self.UNKNOWN), skip_duplicates=True)
 
     def insert_from_nwbfile(self, nwbf):
         """Insert lab name information from an NWB file.

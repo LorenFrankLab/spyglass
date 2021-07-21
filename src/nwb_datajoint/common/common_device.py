@@ -1,6 +1,5 @@
 import datajoint as dj
 import ndx_franklab_novela
-import re
 
 schema = dj.schema("common_device")
 
@@ -20,7 +19,7 @@ class DataAcquisitionDevice(dj.Manual):
     def initialize(self):
         # initialize with an unknown camera for use when NWB file does not contain a compatible camera device
         # TODO: move to initialization script so it doesn't get called every time
-        self.insert1({'device_name': self.UNKNOWN}, skip_duplicates='True')
+        self.insert1({'device_name': self.UNKNOWN}, skip_duplicates=True)
 
     def insert_from_nwbfile(self, nwbf):
         """Insert a data acquisition device from an NWB file.
@@ -38,7 +37,7 @@ class DataAcquisitionDevice(dj.Manual):
         self.initialize()
         device_name_list = list()
         for device in nwbf.devices.values():
-            if isinstance(device, ndx_franklab_novela.DataAcquisitionDevice):
+            if isinstance(device, ndx_franklab_novela.DataAcqDevice):
                 device_dict = dict()
                 device_dict['device_name'] = device.name
                 device_dict['system'] = device.system
@@ -72,7 +71,7 @@ class CameraDevice(dj.Manual):
     def initialize(self):
         # initialize with an unknown camera for use when NWB file does not contain a compatible camera device
         # TODO: move to initialization script so it doesn't get called every time
-        self.insert1({'camera_name': self.UNKNOWN}, skip_duplicates='True')
+        self.insert1({'camera_name': self.UNKNOWN}, skip_duplicates=True)
 
     def insert_from_nwbfile(self, nwbf):
         """Insert camera devices from an NWB file

@@ -246,7 +246,7 @@ class SpikeSorter(dj.Manual):
         '''
         sorters = ss.available_sorters()
         for sorter in sorters:
-            self.insert1({'sorter_name': sorter}, skip_duplicates="True")
+            self.insert1({'sorter_name': sorter}, skip_duplicates=True)
 
 
 @schema
@@ -667,11 +667,11 @@ class SpikeSorting(dj.Computed):
             kc.set(workspace_name, workspace_uri)
         workspace = le.load_workspace(workspace_uri)
         print(f'Workspace URI: {workspace.uri}')
-        
+
         recording_label = key['nwb_file_name'] + '_' + \
             key['sort_interval_name'] + '_' + str(key['sort_group_id'])
         sorting_label = key['sorter_name'] + '_' + key['parameter_set_name']
-        
+
         # put kachery sha1 hash instead of path
         recording_uri = kc.store_json({
             'recording_format': 'nwb',
@@ -707,13 +707,13 @@ class SpikeSorting(dj.Computed):
                     external_metrics[metric_ind]['data'][str(old_unit_id)] = None
         workspace.set_unit_metrics_for_sorting(
             sorting_id=S_id, metrics=external_metrics)
-        
+
         workspace_list = sortingview.WorkspaceList(list_name='default')
         workspace_list.add_workspace(name=workspace_name, workspace=workspace)
         print('Workspace added to sortingview')
 
         print(f'To curate the spike sorting, go to https://sortingview.vercel.app/workspace?workspace={workspace.uri}&channel=franklab')
-        
+
         # Give permission to workspace based on Google account
         team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
         if len(team_members)==0:
@@ -721,13 +721,13 @@ class SpikeSorting(dj.Computed):
                              create or change the entry in LabTeam table first')
         workspace = sortingview.load_workspace(workspace_uri)
         for team_member in team_members:
-            google_user_id = (LabMember.LabMemberInfo & {'lab_member_name':team_member}).fetch('google_user_name')  
+            google_user_id = (LabMember.LabMemberInfo & {'lab_member_name':team_member}).fetch('google_user_name')
             if len(google_user_id)!=1:
                 print(f'Google user ID for {team_member} does not exist or more than one ID detected;\
-                        permission to curate not given to {team_member}, skipping...')              
+                        permission to curate not given to {team_member}, skipping...')
             workspace.set_user_permissions(google_user_id[0], {'edit': True})
             print(f'Permissions for {google_user_id[0]} set to: {workspace.get_user_permissions(google_user_id[0])}')
-    
+
         self.insert1(key)
         print('\nDone - entry inserted to table.')
 
@@ -970,7 +970,7 @@ class SpikeSorting(dj.Computed):
             metrics_processed = json.load(metrics_path)
 
     def nightly_cleanup(self):
-        """Clean up spike sorting directories that are not in the SpikeSorting table. 
+        """Clean up spike sorting directories that are not in the SpikeSorting table.
         This should be run after AnalysisNwbFile().nightly_cleanup()
 
         :return: None
@@ -1203,7 +1203,7 @@ class UnitInclusionParameters(dj.Manual):
     definition = """
     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
     ---
-    max_noise_overlap=1:        float   # noise overlap threshold (include below) 
+    max_noise_overlap=1:        float   # noise overlap threshold (include below)
     min_nn_hit_rate=-1:         float   # isolation score threshold (include above)
     max_isi_violation=100:        float   # ISI violation threshold
     min_firing_rate=0:          float   # minimum firing rate threshold
@@ -1211,9 +1211,9 @@ class UnitInclusionParameters(dj.Manual):
     min_num_spikes=0:           int     # minimum total number of spikes
     exclude_label_list=NULL:    BLOB    # list of labels to EXCLUDE
     """
-    
+
     def get_included_units(self, curated_sorting_key, unit_inclusion_key):
-        """given a reference to a set of curated sorting units and a specific unit inclusion parameter list, returns 
+        """given a reference to a set of curated sorting units and a specific unit inclusion parameter list, returns
         the units that should be included
 
         :param curated_sorting_key: key to entries in CuratedSpikeSorting.Unit table
@@ -1241,7 +1241,7 @@ class UnitInclusionParameters(dj.Manual):
                     if label in inclusion_key['exclude_label_list']:
                         exclude = True
                 if not exclude:
-                    included_units.append(unit)   
+                    included_units.append(unit)
             return included_units
         else:
             return units

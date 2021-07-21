@@ -1,5 +1,3 @@
-import warnings
-
 import datajoint as dj
 
 from .common_device import CameraDevice, DataAcquisitionDevice, Probe

@@ -16,7 +16,8 @@ class BrainRegion(dj.Lookup):
     # TODO consider making (region_name, subregion_name, subsubregion_name) a primary key
     # subregion_name='' and subsubregion_name='' will be necessary but that seems OK
 
-    def fetch_add(self, region_name, subregion_name=None, subsubregion_name=None):
+    @classmethod
+    def fetch_add(cls, region_name, subregion_name=None, subsubregion_name=None):
         """Return the region ID for the given names, and if no match exists, first add it to the BrainRegion table.
 
         The combination of (region_name, subregion_name, subsubregion_name) is effectively unique, then.
@@ -40,7 +41,7 @@ class BrainRegion(dj.Lookup):
         key['subregion_name'] = subregion_name
         key['subsubregion_name'] = subsubregion_name
         query = BrainRegion & key
-        if len(query) == 0:
-            self.insert1(key)
+        if not query:
+            cls.insert1(key)
             query = BrainRegion & key
         return query.fetch1('region_id')
