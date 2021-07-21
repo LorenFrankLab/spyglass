@@ -26,11 +26,11 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
    pip install -e .
    ```
 
-4. Enable `labbox` server extension on `Jupyter Lab`. This is necessary for curation of spike sorted data with `labbox-ephys-widgets-jp`.
+<!-- 4. Enable `labbox` server extension on `Jupyter Lab`. This is necessary for curation of spike sorted data with `labbox-ephys-widgets-jp`.
 
    ```bash
    jupyter serverextension enable labbox --sys-prefix
-   ```
+   ``` -->
 
 ### Setting up database access
 
@@ -38,7 +38,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 
    > If you're not affiliated with UCSF or if you are just looking to try out `nwb_datajoint`, then you will need to set up a different MySQL server. For example, you can set up your own local server with a Docker image of a MySQL server configured for Datajoint (see [instructions](https://tutorials.datajoint.io/setting-up/local-database.html))
 
-2. Add the following environment variables (e.g. in `~/.bashrc`). This example assumes that you are interacting with the database on a computer that has mounted `stelmo` at `/stelmo` (if the mount location is different, change accordingly).
+2. Add the following environment variables (e.g. in `~/.bashrc`). This example assumes that you are interacting with the database on a computer that has mounted `stelmo` at `/stelmo` (if the mount location is different, change accordingly). For this to take effect, log out and log back in, or run `source ~/.bashrc` in the terminal.
 
      ```bash
      export NWB_DATAJOINT_BASE_DIR="/stelmo/nwb/"
@@ -52,7 +52,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 
    > If you're not connected to UCSF network, then you will have to host your own `kachery` node for curating spike sorting. Go to [kacheryhub](https://www.kacheryhub.org), log in with your Google credentials, and then click on 'How to host a kachery node` for more information.
 
-3. Configure DataJoint. To connect to the Datajoint database, we have to specify information about it such as the hostname and the port. You should also change your password from the temporary one you were given. Go to the config directory, and run [`dj_config.py`](https://github.com/LorenFrankLab/nwb_datajoint/blob/master/config/dj_config.py) in the command line with your username:
+3. Configure DataJoint. To connect to the Datajoint database, we have to specify information about it such as the hostname and the port. You should also change your password from the temporary one you were given. Go to the config directory, and run [`dj_config.py`](https://github.com/LorenFrankLab/nwb_datajoint/blob/master/config/dj_config.py) in the terminal with your username:
 
     ```bash
     cd config # change to the config directory
@@ -61,7 +61,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 
    > Again, if you're using your own MySQL server, then you may need to change the other settings as well.
 
-Finally, open up a python console and import `nwb_datajoint` to check that the installation has worked.
+Finally, open up a python console (e.g. run `ipython` from terminal) and import `nwb_datajoint` to check that the installation has worked.
 
 ## Tutorials
 
