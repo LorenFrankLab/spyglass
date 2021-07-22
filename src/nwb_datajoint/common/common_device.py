@@ -1,7 +1,7 @@
 import datajoint as dj
 import ndx_franklab_novela
 
-schema = dj.schema("common_device")
+schema = dj.schema('common_device')
 
 
 @schema
@@ -16,12 +16,14 @@ class DataAcquisitionDevice(dj.Manual):
 
     UNKNOWN = 'UNKNOWN'
 
-    def initialize(self):
+    @classmethod
+    def initialize(cls):
         # initialize with an unknown camera for use when NWB file does not contain a compatible camera device
         # TODO: move to initialization script so it doesn't get called every time
-        self.insert1({'device_name': self.UNKNOWN}, skip_duplicates=True)
+        cls.insert1({'device_name': cls.UNKNOWN}, skip_duplicates=True)
 
-    def insert_from_nwbfile(self, nwbf):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf):
         """Insert a data acquisition device from an NWB file.
 
         Parameters
@@ -34,7 +36,7 @@ class DataAcquisitionDevice(dj.Manual):
         device_name_list : list
             List of data acquisition object names found in the NWB file.
         """
-        self.initialize()
+        cls.initialize()
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.DataAcqDevice):
@@ -43,7 +45,7 @@ class DataAcquisitionDevice(dj.Manual):
                 device_dict['system'] = device.system
                 device_dict['amplifier'] = device.amplifier
                 device_dict['adc_circuit'] = device.adc_circuit
-                self.insert1(device_dict, skip_duplicates=True)
+                cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['device_name'])
         if device_name_list:
             print(f'Inserted data acquisition devices {device_name_list}')
@@ -68,12 +70,14 @@ class CameraDevice(dj.Manual):
     # value for camera_name if ndx_franklab_novela.CameraDevice data type is not present in the NWB file
     UNKNOWN = 'UNKNOWN'
 
-    def initialize(self):
+    @classmethod
+    def initialize(cls):
         # initialize with an unknown camera for use when NWB file does not contain a compatible camera device
         # TODO: move to initialization script so it doesn't get called every time
-        self.insert1({'camera_name': self.UNKNOWN}, skip_duplicates=True)
+        cls.insert1({'camera_name': cls.UNKNOWN}, skip_duplicates=True)
 
-    def insert_from_nwbfile(self, nwbf):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf):
         """Insert camera devices from an NWB file
 
         Parameters
@@ -86,7 +90,7 @@ class CameraDevice(dj.Manual):
         device_name_list : list
             List of camera device object names found in the NWB file.
         """
-        self.initialize()
+        cls.initialize()
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.CameraDevice):
@@ -100,7 +104,7 @@ class CameraDevice(dj.Manual):
                 device_dict['lens'] = device.lens
                 device_dict['meters_per_pixel'] = device.meters_per_pixel
 
-                self.insert1(device_dict, skip_duplicates=True)
+                cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['camera_name'])
         if device_name_list:
             print(f'Inserted camera devices {device_name_list}')
@@ -145,25 +149,27 @@ class Probe(dj.Manual):
     # value for probe_type if ndx_franklab_novela.Probe data type is not present in the NWB file
     UNKNOWN = 'UNKNOWN'
 
-    def initialize(self):
+    @classmethod
+    def initialize(cls):
         # initialize with an unknown probe type for use when NWB file does not contain a compatible probe device
         # TODO: move to initialization script so it doesn't get called every time
         probe_dict = dict()
-        probe_dict['probe_type'] = self.UNKNOWN
-        self.insert1(probe_dict, skip_duplicates=True)
+        probe_dict['probe_type'] = cls.UNKNOWN
+        cls.insert1(probe_dict, skip_duplicates=True)
 
         shank_dict = dict()
         shank_dict['probe_type'] = probe_dict['probe_type']
-        shank_dict['probe_shank'] = self.Shank.UNKNOWN
-        self.Shank().insert1(shank_dict, skip_duplicates=True)
+        shank_dict['probe_shank'] = cls.Shank.UNKNOWN
+        cls.Shank.insert1(shank_dict, skip_duplicates=True)
 
         electrode_dict = dict()
         electrode_dict['probe_type'] = probe_dict['probe_type']
         electrode_dict['probe_shank'] = shank_dict['probe_shank']
-        electrode_dict['probe_electrode'] = self.Electrode.UNKNOWN
-        self.Electrode().insert1(electrode_dict, skip_duplicates=True)
+        electrode_dict['probe_electrode'] = cls.Electrode.UNKNOWN
+        cls.Electrode.insert1(electrode_dict, skip_duplicates=True)
 
-    def insert_from_nwbfile(self, nwbf):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf):
         """Insert probe devices from an NWB file
 
         Parameters
@@ -176,7 +182,7 @@ class Probe(dj.Manual):
         device_name_list : list
             List of probe device types found in the NWB file.
         """
-        self.initialize()
+        cls.initialize()
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.Probe):
@@ -189,7 +195,7 @@ class Probe(dj.Manual):
                     probe_dict['probe_description'] = device.probe_description
                     probe_dict['num_shanks'] = len(device.shanks)
                     probe_dict['contact_side_numbering'] = 'True' if device.contact_side_numbering else 'False'
-                    self.insert1(probe_dict)
+                    cls.insert1(probe_dict)
                     device_name_list.append(probe_dict['probe_type'])
 
                     # go through the shanks and add each one to the Shank table
@@ -197,7 +203,7 @@ class Probe(dj.Manual):
                         shank_dict = dict()
                         shank_dict['probe_type'] = probe_dict['probe_type']
                         shank_dict['probe_shank'] = int(shank.name)
-                        self.Shank().insert1(shank_dict)
+                        cls.Shank.insert1(shank_dict)
 
                         # go through the electrodes and add each one to the Electrode table
                         for electrode in shank.shanks_electrodes.values():
@@ -210,7 +216,7 @@ class Probe(dj.Manual):
                             elect_dict['rel_x'] = electrode.rel_x
                             elect_dict['rel_y'] = electrode.rel_y
                             elect_dict['rel_z'] = electrode.rel_z
-                            self.Electrode().insert1(elect_dict)
+                            cls.Electrode.insert1(elect_dict)
 
         if device_name_list:
             print(f'Inserted probe devices {device_name_list}')

@@ -212,33 +212,40 @@ def get_electrode_indices(nwb_object, electrode_ids):
 
 
 def get_all_spatial_series(nwbf, verbose=False):
-    """Given an nwb file object, gets the spatial series and Interval lists from the file and returns a dictionary by epoch
-    :param nwbf: the nwb file object
-    :type nwbf: file object
-    :param verbose: flag to cause printing of sampling rate
-    :type verbose: bool
+    """Given an NWBFile, get the spatial series and interval lists from the file and return a dictionary by epoch.
+
+    Parameters
+    ----------
+    nwbf : pynwb.NWBFile
+        The source NWB file object.
+    verbose : bool
+        Flag representing whether to print the sampling rate.
+
+    Returns
+    -------
+    pos_data_dict : dict
+        Dict mapping indices to a dict with keys 'valid_times' and 'raw_position_object_id'. Returns None if there
+        is no position data in the file. The 'raw_position_object_id' is the object ID of the SpatialSeries object.
     """
     position = get_data_interface(nwbf, 'position', pynwb.behavior.Position)
     if position is None:
+        print('No conforming position data found.')
         return None
 
     pos_data_dict = dict()
     for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
         pos_data_dict[pos_epoch] = dict()
-        # get the valid intervals for the position data
-        timestamps = np.asarray(spatial_series.timestamps)
 
         # estimate the sampling rate
+        timestamps = np.asarray(spatial_series.timestamps)
         sampling_rate = estimate_sampling_rate(timestamps, 1.75)
         if sampling_rate < 0:
-            raise ValueError(
-                f'Error adding position data for position epoch {pos_epoch}')
+            raise ValueError(f'Error adding position data for position epoch {pos_epoch}')
         if verbose:
-            print("Processing raw position data. Estimated sampling rate: {} Hz".format(
-                sampling_rate))
-        # add the valid intervals to the Interval list
-        pos_data_dict[pos_epoch]['valid_times'] = get_valid_intervals(
-            timestamps, sampling_rate, 2.5, 0)
+            print(f'Processing raw position data. Estimated sampling rate: {sampling_rate} Hz')
+
+        # get the valid intervals for the position data
+        pos_data_dict[pos_epoch]['valid_times'] = get_valid_intervals(timestamps, sampling_rate, 2.5, 0)
         pos_data_dict[pos_epoch]['raw_position_object_id'] = spatial_series.object_id
 
     return pos_data_dict

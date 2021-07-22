@@ -1,6 +1,6 @@
 import datajoint as dj
 
-schema = dj.schema("common_subject")
+schema = dj.schema('common_subject')
 
 
 @schema
@@ -18,14 +18,16 @@ class Subject(dj.Manual):
 
     UNKNOWN = 'UNKNOWN'
 
-    def initialize(self):
+    @classmethod
+    def initialize(cls):
         # initialize with an unknown subject for use when NWB file does not contain a subject
         # TODO: move to initialization script so it doesn't get called every time
-        self.insert1(dict(subject_id=self.UNKNOWN), skip_duplicates=True)
+        cls.insert1(dict(subject_id=cls.UNKNOWN), skip_duplicates=True)
 
-    def insert_from_nwbfile(self, nwbf):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf):
         """Get the subject information from the NWBFile and insert it into the Subject table."""
-        self.initialize()
+        cls.initialize()
         sub = nwbf.subject
         if sub is None:
             print('No subject metadata found.\n')
@@ -43,4 +45,4 @@ class Subject(dj.Manual):
             sex = 'U'
         subject_dict['sex'] = sex
         subject_dict['species'] = sub.species
-        self.insert1(subject_dict, skip_duplicates=True)
+        cls.insert1(subject_dict, skip_duplicates=True)

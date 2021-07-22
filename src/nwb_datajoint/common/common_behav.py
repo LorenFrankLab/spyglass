@@ -19,38 +19,43 @@ class PositionSource(dj.Manual):
     -> Session
     -> IntervalList
     ---
-    source : varchar(40)  # source of data; current options are "trodes" and "dlc" (deep lab cut)
-    import_file_name: varchar(200) # path to import file if importing position data
+    source: varchar(40)             # source of data; current options are "trodes" and "dlc" (deep lab cut)
+    import_file_name: varchar(200)  # path to import file if importing position data
     """
 
-    def get_nwbf_position_source(self, nwb_file_name):
-        """Given an nwb file name, gets the spatial series and Interval lists from the file, adds the interval
-        lists to the interval list table, and populates RawPosition if possible
+    @classmethod
+    def insert_from_nwbfile(cls, nwb_file_name):
+        """Given an NWB file name, get the spatial series and interval lists from the file, add the interval
+        lists to the IntervalList table, and populate the RawPosition table if possible.
 
-        :param nwb_file_name: the name of the nwb_file
-        :type nwb_file_name: string
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file.
         """
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
         pos_dict = get_all_spatial_series(nwbf, verbose=True)
-        key = dict()
         if pos_dict is not None:
             for epoch in pos_dict:
                 pdict = pos_dict[epoch]
+                pos_interval_list_name = cls.get_pos_interval_name(epoch)
+
                 # create the interval list and insert it
-                pos_interval_list_name = self.get_pos_interval_name(epoch)
                 interval_dict = dict()
                 interval_dict['nwb_file_name'] = nwb_file_name
                 interval_dict['interval_list_name'] = pos_interval_list_name
                 interval_dict['valid_times'] = pdict['valid_times']
                 IntervalList().insert1(interval_dict, skip_duplicates=True)
+
                 # add this interval list to the table
+                key = dict()
                 key['nwb_file_name'] = nwb_file_name
                 key['interval_list_name'] = pos_interval_list_name
                 key['source'] = 'trodes'
                 key['import_file_name'] = ''
-                self.insert1(key)
+                cls.insert1(key)
 
     @staticmethod
     def get_pos_interval_name(pos_epoch_num):
@@ -70,6 +75,7 @@ class RawPosition(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
+        # TODO refactor this. this calculates sampling rate (unused here) and is expensive to do twice
         pos_dict = get_all_spatial_series(nwbf)
         for epoch in pos_dict:
             if key['interval_list_name'] == PositionSource.get_pos_interval_name(epoch):
@@ -99,19 +105,23 @@ class StateScriptFile(dj.Imported):
         # TODO change to associated_files when NWB file changed.
         associated_files = nwbf.processing.get('associated files')
         if associated_files is None:
-            print(f'No associated_files processing module found in {nwb_file_name}\n')
+            print(f'Unable to import StateScriptFile: no processing module named "associated files" '
+                  f'found in {nwb_file_name}.')
             return
         for associated_file_obj in associated_files.data_interfaces.values():
             if not isinstance(associated_file_obj, ndx_franklab_novela.AssociatedFiles):
-                print(f'Data interface {associated_file_obj} within "associated files" processing module is not of '
-                      f'type ndx_franklab_novela.AssociatedFiles\n')
+                print(f'Data interface {associated_file_obj.name} within "associated files" processing module is not '
+                      f'of expected type ndx_franklab_novela.AssociatedFiles\n')
                 return
             # parse the task_epochs string
+            # TODO update associated_file_obj.task_epochs to be an array of 1-based ints,
+            # not a comma-separated string of ints
             epoch_list = associated_file_obj.task_epochs.split(',')
             # find the file associated with this epoch
             if str(key['epoch']) in epoch_list:
                 key['file_object_id'] = associated_file_obj.object_id
                 self.insert1(key)
+                break
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
@@ -164,16 +174,21 @@ class HeadDir(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        # position data is stored in the Behavior module
-        try:
-            behav_mod = nwbf.get_processing_module('Behavior')
-            headdir = behav_mod.data_interfaces['Head Direction']  # noqa: F841 TODO: make use of headdir
-        except Exception:  # TODO: use more precise error check
-            print(f'Unable to import HeadDir: no Behavior module found in {nwb_file_name}')
+
+        # position data is stored in the Behavior processing module
+        behav_mod = nwbf.processing.get('behavior')
+        if behav_mod is None:
+            print(f'Unable to import HeadDir: no processing module named "behavior" in {nwb_file_name}.')
             return
+
+        headdir_obj = behav_mod.get('Head Direction')
+        if headdir_obj is None:
+            print('No conforming head direction data found.')
+            return
+
+        # TODO do something with headdir_obj
         key['nwb_object_id'] = -1
-        # this is created when we populate the Task schema
-        key['interval_list_name'] = 'task epochs'
+        key['interval_list_name'] = 'task epochs'  # this is created when we populate the Task schema
         self.insert1(key)
 
 
@@ -190,16 +205,21 @@ class Speed(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        # position data is stored in the Behavior module
-        try:
-            behav_mod = nwbf.get_processing_module('Behavior')
-            speed = behav_mod.data_interfaces['Speed']  # noqa: F841 TODO: make use of speed
-        except Exception:  # TODO: use more precise error check
-            print(f'Unable to import Speed: no Behavior module found in {nwb_file_name}')
+
+        # position data is stored in the Behavior processing module
+        behav_mod = nwbf.processing.get('behavior')
+        if behav_mod is None:
+            print(f'Unable to import Speed: no processing module named "behavior" in {nwb_file_name}.')
             return
+
+        speed_obj = behav_mod.get('Speed')
+        if speed_obj is None:
+            print('No conforming speed data found.')
+            return
+
+        # TODO do something with speed_obj
         key['nwb_object_id'] = -1
-        # this is created when we populate the Task schema
-        key['interval_list_name'] = 'task epochs'
+        key['interval_list_name'] = 'task epochs'  # this is created when we populate the Task schema
         self.insert1(key)
 
 
@@ -216,14 +236,19 @@ class LinPos(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        # position data is stored in the Behavior module
-        try:
-            behav_mod = nwbf.get_processing_module("Behavior")
-            linpos = behav_mod.data_interfaces['Linearized Position']  # noqa: F841 TODO: make use of speed
-        except Exception:  # TODO: use more precise error check
-            print(f'Unable to import LinPos: no Behavior module found in {nwb_file_name}')
+
+        # position data is stored in the Behavior processing module
+        behav_mod = nwbf.processing.get('behavior')
+        if behav_mod is None:
+            print(f'Unable to import LinPos: no processing module named "behavior" in {nwb_file_name}.')
             return
+
+        linpos_obj = behav_mod.get('Linearized Position')
+        if linpos_obj is None:
+            print('No conforming linearized position data found.')
+            return
+
+        # TODO do something with linpos_obj
         key['nwb_object_id'] = -1
-        # this is created when we populate the Task schema
-        key['interval_list_name'] = 'task epochs'
+        key['interval_list_name'] = 'task epochs'  # this is created when we populate the Task schema
         self.insert1(key)

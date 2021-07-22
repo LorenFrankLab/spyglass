@@ -1,7 +1,7 @@
 """Schema for institution name, lab name, and lab members (experimenters)."""
 import datajoint as dj
 
-schema = dj.schema("common_lab")
+schema = dj.schema('common_lab')
 
 
 @schema
@@ -25,7 +25,8 @@ class LabMember(dj.Manual):
         google_user_name: varchar(80)
         """
 
-    def insert_from_nwbfile(self, nwbf):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf):
         """Insert lab member information from an NWB file.
 
         Parameters
@@ -37,11 +38,12 @@ class LabMember(dj.Manual):
             print('No experimenter metadata found.\n')
             return
         for experimenter in nwbf.experimenter:
-            self.add_from_name(experimenter)
+            cls.insert_from_name(experimenter)
             # each person is by default the member of their own LabTeam (same as their name)
             LabTeam.create_new_team(team_name=experimenter, team_members=[experimenter])
 
-    def add_from_name(self, full_name):
+    @classmethod
+    def insert_from_name(cls, full_name):
         """Insert a lab member by name.
 
         The first name is the part of the name that precedes a space, and the last name is the part of the name that
@@ -56,7 +58,7 @@ class LabMember(dj.Manual):
         labmember_dict['lab_member_name'] = full_name
         labmember_dict['first_name'] = str.split(full_name)[0]
         labmember_dict['last_name'] = str.split(full_name)[-1]
-        self.insert1(labmember_dict, skip_duplicates=True)
+        cls.insert1(labmember_dict, skip_duplicates=True)
 
 
 @schema
@@ -73,7 +75,8 @@ class LabTeam(dj.Manual):
         -> LabMember
         """
 
-    def create_new_team(self, team_name: str, team_members: list, team_description: str = ''):
+    @classmethod
+    def create_new_team(cls, team_name: str, team_members: list, team_description: str = ''):
         """Create a new team with a list of team members.
 
         If the lab member does not exist in the database, they will be added.
@@ -90,17 +93,18 @@ class LabTeam(dj.Manual):
         labteam_dict = dict()
         labteam_dict['team_name'] = team_name
         labteam_dict['team_description'] = team_description
-        LabTeam.insert1(labteam_dict, skip_duplicates=True)
+        cls.insert1(labteam_dict, skip_duplicates=True)
 
         for team_member in team_members:
-            LabMember.add_from_name(team_member)
-            if len((LabMember.LabMemberInfo & {'lab_member_name': team_member}).fetch('google_user_name')) == 0:
-                print(f'Please add the Google user ID for {team_member} in LabMember.LabMemberInfo table '
+            LabMember.insert_from_name(team_member)
+            query = (LabMember.LabMemberInfo & {'lab_member_name': team_member}).fetch('google_user_name')
+            if not query:
+                print(f'Please add the Google user ID for {team_member} in the LabMember.LabMemberInfo table '
                       'if you want to give them permission to manually curate sortings by this team.')
             labteammember_dict = dict()
             labteammember_dict['team_name'] = team_name
             labteammember_dict['lab_member_name'] = team_member
-            LabTeam.LabTeamMember.insert1(labteammember_dict, skip_duplicates=True)
+            cls.LabTeamMember.insert1(labteammember_dict, skip_duplicates=True)
 
 
 @schema
@@ -112,12 +116,14 @@ class Institution(dj.Manual):
 
     UNKNOWN = 'UNKNOWN'
 
-    def initialize(self):
+    @classmethod
+    def initialize(cls):
         # initialize with an unknown institution for use when NWB file does not contain an institution
         # TODO: move to initialization script so it doesn't get called every time
-        self.insert1(dict(institution_name=self.UNKNOWN), skip_duplicates=True)
+        cls.insert1(dict(institution_name=cls.UNKNOWN), skip_duplicates=True)
 
-    def insert_from_nwbfile(self, nwbf):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf):
         """Insert institution information from an NWB file.
 
         Parameters
@@ -125,11 +131,11 @@ class Institution(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with institution information.
         """
-        self.initialize()
+        cls.initialize()
         if nwbf.institution is None:
             print('No institution metadata found.\n')
             return
-        self.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
+        cls.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
 
 
 @schema
@@ -141,12 +147,13 @@ class Lab(dj.Manual):
 
     UNKNOWN = 'UNKNOWN'
 
-    def initialize(self):
+    @classmethod
+    def initialize(cls):
         # initialize with an unknown lab for use when NWB file does not contain a lab
         # TODO: move to initialization script so it doesn't get called every time
-        self.insert1(dict(lab_name=self.UNKNOWN), skip_duplicates=True)
+        cls.insert1(dict(lab_name=cls.UNKNOWN), skip_duplicates=True)
 
-    def insert_from_nwbfile(self, nwbf):
+    def insert_from_nwbfile(cls, nwbf):
         """Insert lab name information from an NWB file.
 
         Parameters
@@ -154,8 +161,8 @@ class Lab(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with lab name information.
         """
-        self.initialize()
+        cls.initialize()
         if nwbf.lab is None:
             print('No lab metadata found.\n')
             return
-        self.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)
+        cls.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)

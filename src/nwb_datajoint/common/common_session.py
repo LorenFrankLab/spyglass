@@ -6,7 +6,7 @@ from .common_nwbfile import Nwbfile
 from .common_subject import Subject
 from .nwb_helper_fn import get_nwb_file
 
-schema = dj.schema("common_session")
+schema = dj.schema('common_session')
 
 # TODO: figure out what to do about ExperimenterList
 
@@ -112,17 +112,15 @@ class ExperimenterList(dj.Imported):
     def make(self, key):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        self.insert1({'nwb_file_name': nwb_file_name}, skip_duplicates=True)
+        self.insert1({'nwb_file_name': nwb_file_name}, skip_duplicates=True)  # TODO is this necessary??
         nwbf = get_nwb_file(nwb_file_abspath)
 
         if nwbf.experimenter is None:
             return
 
-        for e in nwbf.experimenter:
-            LabMember().add_from_name(e)
-            # now insert the experimenter, which is a combination of the nwbfile and the name
-            key = dict(
-                nwb_file_name=nwb_file_name,
-                lab_member_name=e
-            )
+        for name in nwbf.experimenter:
+            LabMember().insert_from_name(name)
+            key = dict()
+            key['nwb_file_name'] = nwb_file_name
+            key['lab_member_name'] = name
             self.Experimenter().insert1(key)

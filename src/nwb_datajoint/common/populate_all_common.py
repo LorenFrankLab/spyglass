@@ -40,7 +40,7 @@ def populate_all_common(nwb_file_name):
     print('Populate VideoFile')
     VideoFile.populate(fp)
     print('RawPosition...')
-    PositionSource().get_nwbf_position_source(nwb_file_name)
+    PositionSource.insert_from_nwbfile(nwb_file_name)
     RawPosition.populate(fp)
     # print('HeadDir...')
     # HeadDir().populate()

@@ -13,19 +13,21 @@ class IntervalList(dj.Manual):
     definition = """
     # Time intervals with data
     -> Session
-    interval_list_name: varchar(200) # descriptive name of this interval list
+    interval_list_name: varchar(200)  # descriptive name of this interval list
     ---
-    valid_times: longblob # numpy array with start and end times for each interval
+    valid_times: longblob  # numpy array with start and end times for each interval
     """
 
-    def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf, *, nwb_file_name):
         """Add each entry in the NWB file epochs table to the IntervalList table.
 
-        The first tag for each epoch is used as the interval list name. If there are no tags, then 'interval_x'
-        will be used as the interval list name, where x is the index of the epoch in the epochs table.
+        The interval list name for each epoch is set to the first tag for the epoch.
+        If the epoch has no tags, then 'interval_x' will be used as the interval list name, where x is the index
+        (0-indexed) of the epoch in the epochs table.
 
-        Start time and stop time are stored in the valid_times field as a numpy array of [start time, stop time]
-        for each epoch.
+        The start time and stop time of the epoch are stored in the valid_times field as a numpy array of
+        [start time, stop time] for each epoch.
 
         Parameters
         ----------
@@ -38,15 +40,15 @@ class IntervalList(dj.Manual):
             print('No epochs found in NWB file.')
             return
         epochs = nwbf.epochs.to_dataframe()
-        for e in epochs.iterrows():
+        for epoch_index, epoch_data in epochs.iterrows():
             epoch_dict = dict()
             epoch_dict['nwb_file_name'] = nwb_file_name
-            if e[1].tags[0]:
-                epoch_dict['interval_list_name'] = e[1].tags[0]
+            if epoch_data.tags[0]:
+                epoch_dict['interval_list_name'] = epoch_data.tags[0]
             else:
-                epoch_dict['interval_list_name'] = 'interval_' + str(e[0])
-            epoch_dict['valid_times'] = np.asarray([[e[1].start_time, e[1].stop_time]])
-            self.insert1(epoch_dict, skip_duplicates=True)
+                epoch_dict['interval_list_name'] = 'interval_' + str(epoch_index)
+            epoch_dict['valid_times'] = np.asarray([[epoch_data.start_time, epoch_data.stop_time]])
+            cls.insert1(epoch_dict, skip_duplicates=True)
 
 
 @schema

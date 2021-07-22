@@ -11,7 +11,7 @@ import pynwb
 from .dj_helper_fn import get_child_tables
 from .nwb_helper_fn import get_electrode_indices, get_nwb_file
 
-schema = dj.schema("common_nwbfile")
+schema = dj.schema('common_nwbfile')
 
 # define the fields that should be kept in AnalysisNWBFiles
 NWB_KEEP_FIELDS = ('devices', 'electrode_groups', 'electrodes', 'experiment_description',
@@ -29,7 +29,8 @@ class Nwbfile(dj.Manual):
     nwb_file_abs_path: filepath@raw
     """
 
-    def insert_from_relative_file_name(self, nwb_file_name):
+    @classmethod
+    def insert_from_relative_file_name(cls, nwb_file_name):
         """Insert a new session from an existing NWB file.
 
         Parameters
@@ -38,13 +39,12 @@ class Nwbfile(dj.Manual):
             The relative path to the NWB file.
         """
         nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
-        assert os.path.exists(
-            nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
+        assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
 
-        self.insert1(dict(
-            nwb_file_name=nwb_file_name,
-            nwb_file_abs_path=nwb_file_abs_path,
-        ), skip_duplicates=True)
+        key = dict()
+        key['nwb_file_name'] = nwb_file_name
+        key['nwb_file_abs_path'] = nwb_file_abs_path
+        cls.insert1(key, skip_duplicates=True)
 
     @staticmethod
     def get_abs_path(nwb_file_name):
@@ -152,13 +152,13 @@ class AnalysisNwbfile(dj.Manual):
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
-        # each file ends with a random string of 10 digits, so we generate that string and redo if by some miracle it's already there
+        # each file ends with a random string of 10 digits, so we generate that string and redo if by some miracle
+        # it's already there
         file_in_table = True
-        while (file_in_table):
+        while file_in_table:
             analysis_file_name = os.path.splitext(nwb_file_name)[
                 0] + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + '.nwb'
-            file_in_table = len(
-                (AnalysisNwbfile & {'analysis_file_name': analysis_file_name}).fetch()) > 0
+            file_in_table = (AnalysisNwbfile & {'analysis_file_name': analysis_file_name})
 
         return analysis_file_name
 
@@ -191,14 +191,12 @@ class AnalysisNwbfile(dj.Manual):
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r', load_namespaces=True) as io:
             nwbf = io.read()
             # get the current number of analysis files related to this nwb file
-            original_nwb_file_name = (AnalysisNwbfile &
-                                      {'analysis_file_name': nwb_file_name}).fetch('nwb_file_name')[0]
-            analysis_file_name = cls.__get_new_file_name(
-                original_nwb_file_name)
+            query = (AnalysisNwbfile & {'analysis_file_name': nwb_file_name})
+            original_nwb_file_name = query.fetch('nwb_file_name')[0]
+            analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
             # write the new file
             print(f'Writing new NWB file {analysis_file_name}...')
-            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-                analysis_file_name)
+            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
             # export the new NWB file
             with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w', manager=io.manager) as export_io:
                 export_io.export(io, nwbf)
@@ -219,8 +217,7 @@ class AnalysisNwbfile(dj.Manual):
         key['nwb_file_name'] = nwb_file_name
         key['analysis_file_name'] = analysis_file_name
         key['analysis_file_description'] = ''
-        key['analysis_file_abs_path'] = AnalysisNwbfile.get_abs_path(
-            analysis_file_name)
+        key['analysis_file_abs_path'] = AnalysisNwbfile.get_abs_path(analysis_file_name)
         self.insert1(key)
 
     @staticmethod
@@ -393,7 +390,8 @@ class AnalysisNwbfile(dj.Manual):
 
         (common_nwbfile.AnalysisNwbfile - child_tables).delete_quick()
 
-        # a separate external files clean up required - this is to be done during times when no other transactions are in progress.
+        # a separate external files clean up required - this is to be done during times when no other transactions are
+        # in progress.
         common_nwbfile.schema.external['analysis'].delete(
             delete_external_files=True)
 

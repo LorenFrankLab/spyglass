@@ -7,7 +7,7 @@ from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .nwb_helper_fn import get_data_interface, get_nwb_file
 
-schema = dj.schema("common_task")
+schema = dj.schema('common_task')
 
 
 @schema
@@ -51,7 +51,8 @@ class Task(dj.Manual):
      task_subtype = NULL: varchar(80)       # subtype of task
      """
 
-    def insert_from_nwbfile(self, nwbf):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf):
         """Insert tasks from an NWB file.
 
         Parameters
@@ -65,9 +66,10 @@ class Task(dj.Manual):
             return
         for task in tasks_mod.data_interfaces.values():
             if isinstance(task, pynwb.core.DynamicTable):
-                self.insert_from_task_table(task)
+                cls.insert_from_task_table(task)
 
-    def insert_from_task_table(self, task_table):
+    @classmethod
+    def insert_from_task_table(cls, task_table):
         """Insert tasks from a pynwb DynamicTable containing task metadata.
 
         Duplicate tasks will not be added.
@@ -82,7 +84,7 @@ class Task(dj.Manual):
             task_dict = dict()
             task_dict['task_name'] = task_entry[1].task_name
             task_dict['task_description'] = task_entry[1].task_description
-            self.insert1(task_dict, skip_duplicates=True)
+            cls.insert1(task_dict, skip_duplicates=True)
 
     @classmethod
     def check_task_table(cls, task_table):
