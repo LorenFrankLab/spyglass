@@ -95,8 +95,7 @@ class StateScriptFile(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        # TODO change to associated_files when NWB file changed.
-        associated_files = nwbf.processing.get('associated files')
+        associated_files = nwbf.processing.get('associated_files')
         if associated_files is not None:
             # TODO type checking that associated_file_obj is of type ndx_franklab_novela.AssociatedFiles
             for associated_file_obj in associated_files.data_interfaces.values():
