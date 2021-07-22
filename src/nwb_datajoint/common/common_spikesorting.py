@@ -1058,7 +1058,7 @@ class CuratedSpikeSorting(dj.Computed):
         # 1. Merge
         # We can get the new curated soring from the workspace.
         workspace_uri = (SpikeSorting & key).fetch1('curation_feed_uri')
-        workspace = le.load_workspace(workspace_uri=workspace_uri)
+        workspace = sortingview.load_workspace(workspace_uri=workspace_uri)
         # check that there is exactly one sorting in this workspace
         if len(workspace.sorting_ids) == 0:
             return
@@ -1149,7 +1149,7 @@ class CuratedSpikeSorting(dj.Computed):
         # add the analysis file to the table
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
         key['units_object_id'] = units_object_id
-        key['curator'] = getpass.getuser()
+        # key['curator'] = (SpikeSortingParameters & key).fetch1('team_name')
 
         # Insert entry to CuratedSpikeSorting table
         self.insert1(key)
