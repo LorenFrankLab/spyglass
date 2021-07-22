@@ -208,7 +208,7 @@ class SampleCount(dj.Imported):
         # TODO: change name when nwb file is changed
         sample_count = get_data_interface(nwbf, 'sample_count')
         if sample_count is None:
-            warnings.warn(f'Unable to get sample count object in: {nwb_file_abspath}')
+            print(f'Unable to import SampleCount: no data interface named "sample_count" found in {nwb_file_name}.')
             return
         key['sample_count_object_id'] = sample_count.object_id
 
