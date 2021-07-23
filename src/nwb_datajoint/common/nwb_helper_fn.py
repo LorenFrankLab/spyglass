@@ -202,13 +202,13 @@ def get_electrode_indices(nwb_object, electrode_ids):
         Array of indices of the specified electrode IDs.
     """
     if isinstance(nwb_object, pynwb.ecephys.ElectricalSeries):
-        # electrode_table_region = list(electrical_series.electrodes.to_dataframe().index)  # TODO verify
-        # dynamictableregion of row indices
-        electrode_table_indices = nwb_object.electrodes.data[:]
+        electrodes_table = nwb_object.electrodes.table
     elif isinstance(nwb_object, pynwb.NWBFile):
-        electrode_table_indices = nwb_object.electrodes.id[:]
+        electrodes_table = nwb_object.electrodes
+    else:
+        raise ValueError('nwb_object must be of type ElectricalSeries or NWBFile')
 
-    return [elect_idx for elect_idx, elect_id in enumerate(electrode_table_indices) if elect_id in electrode_ids]
+    return [elect_idx for elect_idx, elect_id in enumerate(electrodes_table.ids[:]) if elect_id in electrode_ids]
 
 
 def get_all_spatial_series(nwbf, verbose=False):
