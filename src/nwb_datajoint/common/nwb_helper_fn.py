@@ -186,8 +186,14 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
 
 
 def get_electrode_indices(nwb_object, electrode_ids):
-    """Given an NWB file or electrical series object, return the indices of the specified electrode_ids from the
-    NWB file electrodes table.
+    """Given an NWB file or electrical series object, return the indices of the specified electrode_ids.
+
+    If an ElectricalSeries is given, then the indices returned are relative to the selected rows in
+    ElectricalSeries.electrodes. For example, if electricalseries.electrodes = [5], and row index 5 of
+    nwbfile.electrodes has ID 10, then calling get_electrode_indices(electricalseries, 10) will return 0, the
+    index of the matching electrode in electricalseries.electrodes.
+
+    If an NWBFile is given, then the row indices with the matching IDs in the file's electrodes table are returned.
 
     Parameters
     ----------
@@ -202,13 +208,17 @@ def get_electrode_indices(nwb_object, electrode_ids):
         Array of indices of the specified electrode IDs.
     """
     if isinstance(nwb_object, pynwb.ecephys.ElectricalSeries):
-        electrodes_table = nwb_object.electrodes.table
+        # electrodes is a DynamicTableRegion which may contain a subset of the rows in NWBFile.electrodes
+        # match against only the subset of electrodes referenced by this ElectricalSeries
+        electrode_table_indices = nwb_object.electrodes.data[:]
+        selected_elect_ids = nwb_object.electrodes.table.id[electrode_table_indices]
     elif isinstance(nwb_object, pynwb.NWBFile):
-        electrodes_table = nwb_object.electrodes
+        # electrodes is a DynamicTable that contains all electrodes
+        selected_elect_ids = nwb_object.electrodes.id[:]
     else:
         raise ValueError('nwb_object must be of type ElectricalSeries or NWBFile')
 
-    return [elect_idx for elect_idx, elect_id in enumerate(electrodes_table.ids[:]) if elect_id in electrode_ids]
+    return [elect_idx for elect_idx, elect_id in enumerate(selected_elect_ids) if elect_id in electrode_ids]
 
 
 def get_all_spatial_series(nwbf, verbose=False):
