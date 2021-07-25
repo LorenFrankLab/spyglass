@@ -137,7 +137,7 @@ class FirFilter(dj.Manual):
         :param valid_times: 2D numpy array with start and stop times of intervals to be filtered
         :param electrode_ids: list of electrode_ids to filter
         :param decimation: int decimation factor
-        :return: The NWB object id of the filtered data
+        :return: The NWB object id of the filtered data (str), list containing first and last timestamp
 
         This function takes data and timestamps from an NWB electrical series and filters them using the ghostipy
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
@@ -195,6 +195,7 @@ class FirFilter(dj.Manual):
             output_shape_list[time_axis] += shape[time_axis]
 
         # open the nwb file to create the dynamic table region and electrode series, then write and close the file
+        print(f'Creating and writing electrical series to analysis file')
         with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             # get the indices of the electrodes in the electrode table
@@ -219,7 +220,6 @@ class FirFilter(dj.Manual):
             es = nwbf.objects[es.object_id]
             filtered_data = es.data
             new_timestamps = es.timestamps
-
             indices = np.array(indices, ndmin=2)
             # Filter and write the output dataset
             ts_offset = 0
@@ -239,7 +239,7 @@ class FirFilter(dj.Manual):
                         data = np.empty((n_electrodes, n_samples), dtype=dtype)
                         data[:, start:stop] = data_on_disk[:,start:stop] 
                 else:
-                    printf('Interval {ii}: leaving data on disk')
+                    print(f'Interval {ii}: leaving data on disk')
                     data = data_on_disk
                     timestamps = timestamps_on_disk
 
@@ -258,11 +258,13 @@ class FirFilter(dj.Manual):
                                     input_dim_restrictions=input_dim_restrictions,
                                     outarray=filtered_data,
                                     output_offset=output_offsets[ii])
+            start_end = [new_timestamps[0], new_timestamps[-1]]
+
             io.write(nwbf)
         # TODO: add the Analysis file to kachery
         # AnalysisNwbfile().add_to_kachery(analysis_file_abs_path)
-        # return the object ID for the filtered data
-        return es.object_id
+        # return the object ID for the filtered data and the start and end timestamps
+        return es.object_id, start_end
 
     def filter_data(self, timestamps, data, filter_coeff, valid_times, electrodes, decimation):
         """
