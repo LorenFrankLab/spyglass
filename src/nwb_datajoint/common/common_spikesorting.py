@@ -1027,7 +1027,6 @@ class CuratedSpikeSorting(dj.Computed):
     -> AutomaticCurationSpikeSorting
     ---
     -> AnalysisNwbfile    # New analysis NWB file to hold unit info
-    curator:         varchar(80)            # the username of the person who is inserting the curation
     units_object_id: varchar(40)           # Object ID for the units in NWB file
     """
 
@@ -1079,15 +1078,14 @@ class CuratedSpikeSorting(dj.Computed):
         unit_labels = labels['labelsByUnit']
         for idx, unitId in enumerate(unit_labels):
             if 'accept' in unit_labels[unitId]:
-                accepted_units.append(unitId)
-            if len(unit_labels[unitId]) == 0:
-                Warning(
-                    f'In CuratedSpikeSorting: unit {unitId} has no curation labels. It will not be included in the table')
+                accepted_units.append(unitId)            
 
         # remove non-primary merged units
-        for m in labels['mergeGroups']:
-            for unit_id in m[1:]:
-                accepted_units.remove(unit_id)
+        if labels['mergeGroups']:
+            for m in labels['mergeGroups']:
+                if set(m[1:]).issubset(accepted_units):
+                    for cell in m[1:]:
+                        accepted_units.remove(cell)
 
         # get the labels for the accepted units
         labels_concat = []
@@ -1149,7 +1147,6 @@ class CuratedSpikeSorting(dj.Computed):
         # add the analysis file to the table
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
         key['units_object_id'] = units_object_id
-        # key['curator'] = (SpikeSortingParameters & key).fetch1('team_name')
 
         # Insert entry to CuratedSpikeSorting table
         self.insert1(key)
@@ -1157,7 +1154,6 @@ class CuratedSpikeSorting(dj.Computed):
         # Remove the non primary key entries.
         del key['units_object_id']
         del key['analysis_file_name']
-        del key['curator']
 
         units_table = (CuratedSpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
 
