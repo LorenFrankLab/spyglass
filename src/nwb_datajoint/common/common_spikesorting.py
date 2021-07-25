@@ -1089,7 +1089,7 @@ class CuratedSpikeSorting(dj.Computed):
 
         # get the labels for the accepted units
         labels_concat = []
-        for unitID in accepted_units:
+        for unitId in accepted_units:
             label_concat = ','.join(unit_labels[unitId])
             labels_concat.append(label_concat)
 
@@ -1201,9 +1201,9 @@ class UnitInclusionParameters(dj.Manual):
     ---
     max_noise_overlap=1:        float   # noise overlap threshold (include below) 
     min_nn_hit_rate=-1:         float   # isolation score threshold (include above)
-    max_isi_violation=100:        float   # ISI violation threshold
+    max_isi_violation=100:      float   # ISI violation threshold
     min_firing_rate=0:          float   # minimum firing rate threshold
-    max_firing_rate=100000:      float   # maximum fring rate thershold
+    max_firing_rate=100000:     float   # maximum fring rate thershold
     min_num_spikes=0:           int     # minimum total number of spikes
     exclude_label_list=NULL:    BLOB    # list of labels to EXCLUDE
     """
