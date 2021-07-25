@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pynwb
 import scipy.signal as signal
+import psutil
+import sys
 
 from .nwb_helper_fn import get_electrode_indices
 
@@ -141,13 +143,15 @@ class FirFilter(dj.Manual):
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
         created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
         """
-        data = eseries.data
-        timestamps = eseries.timestamps
-        n_dim = len(data.shape)
-        n_samples = len(timestamps)
+
+        data_on_disk = eseries.data
+        timestamps_on_disk = eseries.timestamps
+        n_dim = len(data_on_disk.shape)
+        n_samples = len(timestamps_on_disk)
         # find the
-        time_axis = 0 if data.shape[0] == n_samples else 1
+        time_axis = 0 if data_on_disk.shape[0] == n_samples else 1
         electrode_axis = 1 - time_axis
+        n_electrodes = data_on_disk.shape[electrode_axis]
         input_dim_restrictions = [None] * n_dim
 
         # to get the input dimension restrictions we need to look at the electrode table for the eseries and get
@@ -160,21 +164,23 @@ class FirFilter(dj.Manual):
         output_shape_list[electrode_axis] = len(electrode_ids)
         output_offsets = [0]
 
-        output_dtype = type(data[0][0])
+        timestamp_size = sys.getsizeof(timestamps_on_disk[0])
+        data_size = sys.getsizeof(data_on_disk[0][0])
+        output_dtype = type(data_on_disk[0][0])
 
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
-            if a_start < timestamps[0]:
+            if a_start < timestamps_on_disk[0]:
                 raise ValueError('Interval start time %f is smaller than first timestamp %f' % (
-                    a_start, timestamps[0]))
-            if a_stop > timestamps[-1]:
+                    a_start, timestamps_on_disk[0]))
+            if a_stop > timestamps_on_disk[-1]:
                 raise ValueError('Interval stop time %f is larger than last timestamp %f' % (
-                    a_stop, timestamps[-1]))
-            frm, to = np.searchsorted(timestamps, (a_start, a_stop))
+                    a_stop, timestamps_on_disk[-1]))
+            frm, to = np.searchsorted(timestamps_on_disk, (a_start, a_stop))
             if to > n_samples:
                 to = n_samples
             indices.append((frm, to))
-            shape, dtype = gsp.filter_data_fir(data,
+            shape, dtype = gsp.filter_data_fir(data_on_disk,
                                                filter_coeff,
                                                axis=time_axis,
                                                input_index_bounds=[frm, to],
@@ -218,7 +224,25 @@ class FirFilter(dj.Manual):
             # Filter and write the output dataset
             ts_offset = 0
 
+            print('Filtering data')
             for ii, (start, stop) in enumerate(indices):
+                 # calculate the size of the timestamps and the data and determine whether they can be loaded into < 90% of RAM
+                mem = psutil.virtual_memory()
+                if (stop-start) * (timestamp_size + data_size * n_electrodes) < 0.9 * mem.available:
+                    print(f'Interval {ii}: loading data into memory')
+                    timestamps = np.empty((n_samples,), dtype='uint64')
+                    timestamps[start:stop] = timestamps_on_disk[start:stop]
+                    if time_axis == 0:
+                        data = np.empty((n_samples, n_electrodes), dtype=dtype)
+                        data[start:stop,:] = data_on_disk[start:stop, :]
+                    else:
+                        data = np.empty((n_electrodes, n_samples), dtype=dtype)
+                        data[:, start:stop] = data_on_disk[:,start:stop] 
+                else:
+                    printf('Interval {ii}: leaving data on disk')
+                    data = data_on_disk
+                    timestamps = timestamps_on_disk
+
                 extracted_ts = timestamps[start:stop:decimation]
                 new_timestamps[ts_offset:ts_offset +
                                len(extracted_ts)] = extracted_ts
@@ -296,7 +320,7 @@ class FirFilter(dj.Manual):
         for ii, (start, stop) in enumerate(indices):
             extracted_ts = timestamps[start:stop:decimation]
 
-            print(f"Diffs {np.diff(extracted_ts)}")
+            #print(f"Diffs {np.diff(extracted_ts)}")
             new_timestamps[ts_offset:ts_offset +
                            len(extracted_ts)] = extracted_ts
             ts_offset += len(extracted_ts)
