@@ -12,7 +12,9 @@ from .common_interval import (IntervalList, SortInterval,
                               interval_list_contains_ind,
                               interval_list_excludes,
                               interval_list_excludes_ind,
-                              interval_list_intersect)
+                              interval_list_intersect,
+                              interval_list_censor, 
+                              interval_list_union)
 from .common_lab import Institution, Lab, LabMember, LabTeam
 from .common_nwbfile import (AnalysisNwbfile, AnalysisNwbfileKachery, Nwbfile,
                              NwbfileKachery)
