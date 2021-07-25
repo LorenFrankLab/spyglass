@@ -295,7 +295,7 @@ class LFP(dj.Imported):
 
         valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'],
                                          'interval_list_name': interval_list_name}).fetch1('valid_times')
-                                         
+
         # target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
@@ -319,7 +319,6 @@ class LFP(dj.Imported):
         lfp_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
 
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
-        # test:
         lfp_object_id, timestamp_interval = FirFilter().filter_data_nwb(lfp_file_abspath, rawdata,
                                                     filter_coeff, valid_times, electrode_id_list, decimation)
 
@@ -539,7 +538,7 @@ class LFPBand(dj.Computed):
                                 'valid_times': lfp_band_valid_times})
         else:
             # check that the valid times are the same
-            assert np.all(np.equal(tmp_valid_times, lfp_band_valid_times)), 'previously saved lfp band times do not match current times'
+            assert np.isclose(tmp_valid_times[0], lfp_band_valid_times).all(), 'previously saved lfp band times do not match current times'
 
         self.insert1(key)
 

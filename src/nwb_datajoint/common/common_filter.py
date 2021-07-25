@@ -141,8 +141,13 @@ class FirFilter(dj.Manual):
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
         created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
         """
+        
+
+        #TODO: test of load data into RAM if there is space
         data = eseries.data
+        #data = np.asarray(eseries.data)
         timestamps = eseries.timestamps
+        #timestamps = np.asarray(eseries.timestamps)
         n_dim = len(data.shape)
         n_samples = len(timestamps)
         # find the
@@ -164,6 +169,7 @@ class FirFilter(dj.Manual):
 
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
+            #print(f'Calculating size of chunk from {a_start} to {a_stop}')
             if a_start < timestamps[0]:
                 raise ValueError('Interval start time %f is smaller than first timestamp %f' % (
                     a_start, timestamps[0]))
@@ -189,6 +195,7 @@ class FirFilter(dj.Manual):
             output_shape_list[time_axis] += shape[time_axis]
 
         # open the nwb file to create the dynamic table region and electrode series, then write and close the file
+        print(f'Creating and writing electrical series to analysis file')
         with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             # get the indices of the electrodes in the electrode table
@@ -218,6 +225,7 @@ class FirFilter(dj.Manual):
             ts_offset = 0
 
             for ii, (start, stop) in enumerate(indices):
+                print(f'filtering chunk {ii} of {len(indices)}')
                 extracted_ts = timestamps[start:stop:decimation]
                 new_timestamps[ts_offset:ts_offset +
                                len(extracted_ts)] = extracted_ts
@@ -297,7 +305,8 @@ class FirFilter(dj.Manual):
         for ii, (start, stop) in enumerate(indices):
             extracted_ts = timestamps[start:stop:decimation]
 
-            print(f"Diffs {np.diff(extracted_ts)}")
+            #print(f"Diffs {np.diff(extracted_ts)}")
+            print(f'Filtering interval {ii} of {len(indices)}')
             new_timestamps[ts_offset:ts_offset +
                            len(extracted_ts)] = extracted_ts
             ts_offset += len(extracted_ts)
