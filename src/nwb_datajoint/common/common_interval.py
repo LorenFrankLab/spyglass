@@ -1,5 +1,6 @@
 import datajoint as dj
 import numpy as np
+from numpy.lib import emath
 
 from .common_session import Session  # noqa: F401
 
@@ -206,3 +207,20 @@ def interval_list_union(interval_list1, interval_list2):
     for start, stop in zip(union_starts, union_stops):
         union.append([combined_intervals[start], combined_intervals[stop]])
     return np.asarray(union)
+
+def interval_list_censor(interval_list, timestamps):
+    """returns a new interval list that starts and ends at the first and last timestamp
+
+    Args:
+        interval_list (numpy array of intervals [start, stop]): interval list from IntervalList valid times
+        timestamps (numpy array or list): timestamp list
+    
+    Returns: 
+        interval_list (numpy array of intervals [start, stop])
+    """
+    # check that all timestamps are in the interval list
+    assert len(interval_list_contains_ind(interval_list, timestamps)) == len(timestamps), 'interval_list must contain all timestamps' 
+    
+    timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
+    return interval_list_intersect(interval_list, timestamps_interval)    
+
