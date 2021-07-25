@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pynwb
 import scipy.signal as signal
+import psutil
+import sys
 
 from .nwb_helper_fn import get_electrode_indices
 
@@ -141,18 +143,15 @@ class FirFilter(dj.Manual):
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
         created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
         """
-        
 
-        #TODO: test of load data into RAM if there is space
-        data = eseries.data
-        #data = np.asarray(eseries.data)
-        timestamps = eseries.timestamps
-        #timestamps = np.asarray(eseries.timestamps)
-        n_dim = len(data.shape)
-        n_samples = len(timestamps)
+        data_on_disk = eseries.data
+        timestamps_on_disk = eseries.timestamps
+        n_dim = len(data_on_disk.shape)
+        n_samples = len(timestamps_on_disk)
         # find the
-        time_axis = 0 if data.shape[0] == n_samples else 1
+        time_axis = 0 if data_on_disk.shape[0] == n_samples else 1
         electrode_axis = 1 - time_axis
+        n_electrodes = data_on_disk.shape[electrode_axis]
         input_dim_restrictions = [None] * n_dim
 
         # to get the input dimension restrictions we need to look at the electrode table for the eseries and get
@@ -165,22 +164,24 @@ class FirFilter(dj.Manual):
         output_shape_list[electrode_axis] = len(electrode_ids)
         output_offsets = [0]
 
-        output_dtype = type(data[0][0])
+        timestamp_size = sys.getsizeof(timestamps_on_disk[0])
+        timestamp_dtype = type(timestamps_on_disk[0])
+        data_size = sys.getsizeof(data_on_disk[0][0])
+        output_dtype = type(data_on_disk[0][0])
 
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
-            #print(f'Calculating size of chunk from {a_start} to {a_stop}')
-            if a_start < timestamps[0]:
+            if a_start < timestamps_on_disk[0]:
                 raise ValueError('Interval start time %f is smaller than first timestamp %f' % (
-                    a_start, timestamps[0]))
-            if a_stop > timestamps[-1]:
+                    a_start, timestamps_on_disk[0]))
+            if a_stop > timestamps_on_disk[-1]:
                 raise ValueError('Interval stop time %f is larger than last timestamp %f' % (
-                    a_stop, timestamps[-1]))
-            frm, to = np.searchsorted(timestamps, (a_start, a_stop))
+                    a_stop, timestamps_on_disk[-1]))
+            frm, to = np.searchsorted(timestamps_on_disk, (a_start, a_stop))
             if to > n_samples:
                 to = n_samples
             indices.append((frm, to))
-            shape, dtype = gsp.filter_data_fir(data,
+            shape, dtype = gsp.filter_data_fir(data_on_disk,
                                                filter_coeff,
                                                axis=time_axis,
                                                input_index_bounds=[frm, to],
@@ -195,7 +196,7 @@ class FirFilter(dj.Manual):
             output_shape_list[time_axis] += shape[time_axis]
 
         # open the nwb file to create the dynamic table region and electrode series, then write and close the file
-        print(f'Creating and writing electrical series to analysis file')
+        #print(f'Creating and writing electrical series to analysis file')
         with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             # get the indices of the electrodes in the electrode table
@@ -224,23 +225,56 @@ class FirFilter(dj.Manual):
             # Filter and write the output dataset
             ts_offset = 0
 
+            print('Filtering data')
             for ii, (start, stop) in enumerate(indices):
-                print(f'filtering chunk {ii} of {len(indices)}')
-                extracted_ts = timestamps[start:stop:decimation]
-                new_timestamps[ts_offset:ts_offset +
+                 # calculate the size of the timestamps and the data and determine whether they 
+                 # can be loaded into < 90% of available RAM
+                mem = psutil.virtual_memory()
+                interval_samples = stop-start
+                if interval_samples * (timestamp_size +  n_electrodes) < 0.9 * mem.available:
+                    print(f'Interval {ii}: loading data into memory')
+                    timestamps = np.asarray(timestamps_on_disk[start:stop], dtype=timestamp_dtype)
+                    if time_axis == 0:
+                        data = np.asarray(data_on_disk[start:stop, :], dtype=dtype)
+                    else:
+                        data = np.asarray(data_on_disk[:, start:stop], dtype=dtype)
+                    
+                    extracted_ts = timestamps[0:-1:decimation]
+                    new_timestamps[ts_offset:ts_offset +
                                len(extracted_ts)] = extracted_ts
-                ts_offset += len(extracted_ts)
-                # filter the data
-                gsp.filter_data_fir(data,
-                                    filter_coeff,
-                                    axis=time_axis,
-                                    input_index_bounds=[start, stop],
-                                    output_index_bounds=[
-                                        filter_delay, filter_delay + stop - start],
-                                    ds=decimation,
-                                    input_dim_restrictions=input_dim_restrictions,
-                                    outarray=filtered_data,
-                                    output_offset=output_offsets[ii])
+                    ts_offset += len(extracted_ts)
+                     # filter the data
+                    gsp.filter_data_fir(data,
+                                        filter_coeff,
+                                        axis=time_axis,
+                                        input_index_bounds=[0, interval_samples-1],
+                                        output_index_bounds=[
+                                            filter_delay, filter_delay + stop - start],
+                                        ds=decimation,
+                                        input_dim_restrictions=input_dim_restrictions,
+                                        outarray=filtered_data,
+                                        output_offset=output_offsets[ii])
+                else:
+                    print(f'Interval {ii}: leaving data on disk')
+                    data = data_on_disk
+                    timestamps = timestamps_on_disk
+
+                    extracted_ts = timestamps[start:stop:decimation]
+                    new_timestamps[ts_offset:ts_offset +
+                                len(extracted_ts)] = extracted_ts
+                    ts_offset += len(extracted_ts)
+                    # filter the data
+                    gsp.filter_data_fir(data,
+                                        filter_coeff,
+                                        axis=time_axis,
+                                        input_index_bounds=[start, stop],
+                                        output_index_bounds=[
+                                            filter_delay, filter_delay + stop - start],
+                                        ds=decimation,
+                                        input_dim_restrictions=input_dim_restrictions,
+                                        outarray=filtered_data,
+                                        output_offset=output_offsets[ii])
+
             start_end = [new_timestamps[0], new_timestamps[-1]]
 
             io.write(nwbf)
@@ -306,7 +340,6 @@ class FirFilter(dj.Manual):
             extracted_ts = timestamps[start:stop:decimation]
 
             #print(f"Diffs {np.diff(extracted_ts)}")
-            print(f'Filtering interval {ii} of {len(indices)}')
             new_timestamps[ts_offset:ts_offset +
                            len(extracted_ts)] = extracted_ts
             ts_offset += len(extracted_ts)
