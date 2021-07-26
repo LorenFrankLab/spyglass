@@ -103,7 +103,7 @@ class StateScriptFile(dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
 
         # TODO change to associated_files when NWB file changed.
-        associated_files = nwbf.processing.get('associated files')
+        associated_files = nwbf.processing.get('associated_files') or nwbf.processing.get('associated files')
         if associated_files is None:
             print(f'Unable to import StateScriptFile: no processing module named "associated files" '
                   f'found in {nwb_file_name}.')

@@ -1027,7 +1027,6 @@ class CuratedSpikeSorting(dj.Computed):
     -> AutomaticCurationSpikeSorting
     ---
     -> AnalysisNwbfile    # New analysis NWB file to hold unit info
-    curator:         varchar(80)            # the username of the person who is inserting the curation
     units_object_id: varchar(40)           # Object ID for the units in NWB file
     """
 
@@ -1058,7 +1057,7 @@ class CuratedSpikeSorting(dj.Computed):
         # 1. Merge
         # We can get the new curated soring from the workspace.
         workspace_uri = (SpikeSorting & key).fetch1('curation_feed_uri')
-        workspace = le.load_workspace(workspace_uri=workspace_uri)
+        workspace = sortingview.load_workspace(workspace_uri=workspace_uri)
         # check that there is exactly one sorting in this workspace
         if len(workspace.sorting_ids) == 0:
             return
@@ -1079,19 +1078,18 @@ class CuratedSpikeSorting(dj.Computed):
         unit_labels = labels['labelsByUnit']
         for idx, unitId in enumerate(unit_labels):
             if 'accept' in unit_labels[unitId]:
-                accepted_units.append(unitId)
-            if len(unit_labels[unitId]) == 0:
-                Warning(
-                    f'In CuratedSpikeSorting: unit {unitId} has no curation labels. It will not be included in the table')
+                accepted_units.append(unitId)            
 
         # remove non-primary merged units
-        for m in labels['mergeGroups']:
-            for unit_id in m[1:]:
-                accepted_units.remove(unit_id)
+        if labels['mergeGroups']:
+            for m in labels['mergeGroups']:
+                if set(m[1:]).issubset(accepted_units):
+                    for cell in m[1:]:
+                        accepted_units.remove(cell)
 
         # get the labels for the accepted units
         labels_concat = []
-        for unitID in accepted_units:
+        for unitId in accepted_units:
             label_concat = ','.join(unit_labels[unitId])
             labels_concat.append(label_concat)
 
@@ -1149,7 +1147,6 @@ class CuratedSpikeSorting(dj.Computed):
         # add the analysis file to the table
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
         key['units_object_id'] = units_object_id
-        key['curator'] = getpass.getuser()
 
         # Insert entry to CuratedSpikeSorting table
         self.insert1(key)
@@ -1157,7 +1154,6 @@ class CuratedSpikeSorting(dj.Computed):
         # Remove the non primary key entries.
         del key['units_object_id']
         del key['analysis_file_name']
-        del key['curator']
 
         units_table = (CuratedSpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
 
@@ -1205,9 +1201,9 @@ class UnitInclusionParameters(dj.Manual):
     ---
     max_noise_overlap=1:        float   # noise overlap threshold (include below)
     min_nn_hit_rate=-1:         float   # isolation score threshold (include above)
-    max_isi_violation=100:        float   # ISI violation threshold
+    max_isi_violation=100:      float   # ISI violation threshold
     min_firing_rate=0:          float   # minimum firing rate threshold
-    max_firing_rate=100000:      float   # maximum fring rate thershold
+    max_firing_rate=100000:     float   # maximum fring rate thershold
     min_num_spikes=0:           int     # minimum total number of spikes
     exclude_label_list=NULL:    BLOB    # list of labels to EXCLUDE
     """

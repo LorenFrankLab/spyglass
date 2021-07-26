@@ -7,7 +7,7 @@ import pynwb
 
 from .common_device import Probe
 from .common_filter import FirFilter
-from .common_interval import IntervalList  # noqa: F401
+from .common_interval import IntervalList, interval_list_censor, interval_list_intersect  # noqa: F401
 # SortInterval, interval_list_intersect, interval_list_excludes_ind
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_region import BrainRegion  # noqa: F401
@@ -270,10 +270,6 @@ class LFP(dj.Imported):
         sampling_rate, interval_list_name = (Raw() & key).fetch1('sampling_rate', 'interval_list_name')
         sampling_rate = int(np.round(sampling_rate))
 
-        # TEST
-        # interval_list_name = '01_s1'
-        key['interval_list_name'] = interval_list_name
-
         valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'],
                                          'interval_list_name': interval_list_name}).fetch1('valid_times')
 
@@ -299,8 +295,7 @@ class LFP(dj.Imported):
         lfp_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
 
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
-        # test:
-        lfp_object_id = FirFilter().filter_data_nwb(lfp_file_abspath, rawdata,
+        lfp_object_id, timestamp_interval = FirFilter().filter_data_nwb(lfp_file_abspath, rawdata,
                                                     filter_coeff, valid_times, electrode_id_list, decimation)
 
         # now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table
@@ -309,6 +304,14 @@ class LFP(dj.Imported):
         key['analysis_file_name'] = lfp_file_name
         key['lfp_object_id'] = lfp_object_id
         key['lfp_sampling_rate'] = sampling_rate // decimation
+
+        # finally, we need to censor the valid times to account for the downsampling
+        lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
+        # add an interval list for the LFP valid times, skipping duplicates
+        key['interval_list_name'] = 'lfp valid times'
+        IntervalList.insert1({'nwb_file_name': key['nwb_file_name'],
+                               'interval_list_name': key['interval_list_name'],
+                               'valid_times': lfp_valid_times}, replace=True)
         self.insert1(key)
 
     def nwb_object(self, key):
@@ -330,8 +333,7 @@ class LFPBandSelection(dj.Manual):
     definition = """
     -> LFP
     -> FirFilter                 # the filter to use for the data
-    ---
-    -> IntervalList # the set of times to be filtered
+    -> IntervalList.proj(target_interval_list_name='interval_list_name') # the original set of times to be filtered
     lfp_band_sampling_rate: int # the sampling rate for this band
     """
 
@@ -397,14 +399,11 @@ class LFPBandSelection(dj.Manual):
         key['nwb_file_name'] = nwb_file_name
         key['filter_name'] = filter_name
         key['filter_sampling_rate'] = lfp_sampling_rate
-        key['interval_list_name'] = interval_list_name
+        key['target_interval_list_name'] = interval_list_name
         key['lfp_band_sampling_rate'] = lfp_sampling_rate // decimation
         # insert an entry into the main LFPBandSelectionTable
         self.insert1(key, skip_duplicates=True)
 
-        # remove the keys that are not used for the LFPBandElectrode table
-        key.pop('interval_list_name')
-        key.pop('lfp_band_sampling_rate')
         # get all of the current entries and delete any that are not in the list
         elect_id, ref_id = (self.LFPBandElectrode() & key).fetch('electrode_id', 'reference_elect_id')
         for e, r in zip(elect_id, ref_id):
@@ -428,6 +427,7 @@ class LFPBand(dj.Computed):
     -> LFPBandSelection
     ---
     -> AnalysisNwbfile
+    -> IntervalList
     filtered_data_object_id: varchar(80)  # the NWB object ID for loading this object from the file
     """
 
@@ -454,10 +454,16 @@ class LFPBand(dj.Computed):
                     lfp_data[:, lfp_band_ref_index]
 
         lfp_sampling_rate = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1('lfp_sampling_rate')
-        interval_list_name, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1('interval_list_name',
+        interval_list_name, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1('target_interval_list_name',
                                                                                        'lfp_band_sampling_rate')
         valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'],
                        'interval_list_name': interval_list_name}).fetch1('valid_times')
+        # the valid_times for this interval may be slightly beyond the valid times for the lfp itself,
+        # so we have to intersect the two
+        lfp_interval_list = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1('interval_list_name')
+        lfp_valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'],
+                                             'interval_list_name': lfp_interval_list}).fetch1('valid_times')
+        lfp_band_valid_times = interval_list_intersect(valid_times, lfp_valid_times)
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1(
             'filter_name', 'filter_sampling_rate', 'lfp_band_sampling_rate')
 
@@ -479,13 +485,31 @@ class LFPBand(dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
         # filter the data and write to an the nwb file
-        filtered_data_object_id = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_object, filter_coeff,
-                                                              valid_times, lfp_band_elect_id, decimation)
+        filtered_data_object_id, timestamp_interval = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_object,
+                                                                                  filter_coeff, lfp_band_valid_times,
+                                                                                  lfp_band_elect_id, decimation)
 
         # now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table
         AnalysisNwbfile().add(key['nwb_file_name'], lfp_band_file_name)
         key['analysis_file_name'] = lfp_band_file_name
         key['filtered_data_object_id'] = filtered_data_object_id
+
+        # finally, we need to censor the valid times to account for the downsampling if this is the first time we've
+        # downsampled these data
+        key['interval_list_name'] = interval_list_name + ' lfp band ' + str(lfp_band_sampling_rate) + 'Hz'
+        tmp_valid_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
+                                                 'interval_list_name': key['interval_list_name']}).fetch('valid_times')
+        if len(tmp_valid_times) == 0:
+            lfp_band_valid_times = interval_list_censor(lfp_band_valid_times, timestamp_interval)
+            # add an interval list for the LFP valid times
+            IntervalList.insert1({'nwb_file_name': key['nwb_file_name'],
+                                'interval_list_name': key['interval_list_name'],
+                                'valid_times': lfp_band_valid_times})
+        else:
+            # check that the valid times are the same
+            assert np.isclose(tmp_valid_times[0], lfp_band_valid_times).all(), \
+                'previously saved lfp band times do not match current times'
+
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
