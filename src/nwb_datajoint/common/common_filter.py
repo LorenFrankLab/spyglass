@@ -231,7 +231,7 @@ class FirFilter(dj.Manual):
                  # can be loaded into < 90% of available RAM
                 mem = psutil.virtual_memory()
                 interval_samples = stop-start
-                if interval_samples * (timestamp_size +  n_electrodes) < 0.9 * mem.available:
+                if interval_samples * (timestamp_size +  n_electrodes*data_size) < 0.9 * mem.available:
                     print(f'Interval {ii}: loading data into memory')
                     timestamps = np.asarray(timestamps_on_disk[start:stop], dtype=timestamp_dtype)
                     if time_axis == 0:
