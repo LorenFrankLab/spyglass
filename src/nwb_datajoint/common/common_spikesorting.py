@@ -1,4 +1,3 @@
-import getpass
 import json
 import os
 import pathlib
@@ -9,7 +8,6 @@ import shutil
 
 import datajoint as dj
 import kachery_client as kc
-import labbox_ephys as le
 import numpy as np
 import pynwb
 import scipy.stats as stats
@@ -663,9 +661,9 @@ class SpikeSorting(dj.Computed):
         workspace_name = key['analysis_file_name']
         workspace_uri = kc.get(workspace_name)
         if not workspace_uri:
-            workspace_uri = le.create_workspace(label=workspace_name).uri
+            workspace_uri = sortingview.create_workspace(label=workspace_name).uri
             kc.set(workspace_name, workspace_uri)
-        workspace = le.load_workspace(workspace_uri)
+        workspace = sortingview.load_workspace(workspace_uri)
         print(f'Workspace URI: {workspace.uri}')
         
         recording_label = key['nwb_file_name'] + '_' + \
@@ -686,8 +684,8 @@ class SpikeSorting(dj.Computed):
             }
         })
 
-        sorting = le.LabboxEphysSortingExtractor(sorting_uri)
-        recording = le.LabboxEphysRecordingExtractor(recording_uri, download=True)
+        sorting = sortingview.LabboxEphysSortingExtractor(sorting_uri)
+        recording = sortingview.LabboxEphysRecordingExtractor(recording_uri, download=True)
 
         R_id = workspace.add_recording(recording=recording, label=recording_label)
         S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
@@ -1193,7 +1191,7 @@ class CuratedSpikeSorting(dj.Computed):
                 shutil.rmtree(dir)
             return
         print('No files deleted')
-
+    # def delete(self, key)
 @schema
 class UnitInclusionParameters(dj.Manual):
     definition = """
