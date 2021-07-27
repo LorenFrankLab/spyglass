@@ -190,7 +190,7 @@ class FirFilter(dj.Manual):
                                                describe_dims=True,
                                                ds=decimation,
                                                input_dim_restrictions=input_dim_restrictions)
-            print(f'dtype = {dtype}, {data}')
+            #print(f'dtype = {dtype}')
             output_offsets.append(output_offsets[-1] + shape[time_axis])
             # TODO: remove int() when fixed:
             output_shape_list[time_axis] += shape[time_axis]
