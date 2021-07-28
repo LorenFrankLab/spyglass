@@ -282,9 +282,7 @@ class AnalysisNwbfile(dj.Manual):
         -------
         nwb_object_id : str
             The NWB object ID of the added object.
-        """
-        # convert to NWB object
- 
+        """ 
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             if isinstance(nwb_object, pd.DataFrame):
