@@ -7,6 +7,7 @@ import datajoint as dj
 import kachery as ka
 import pandas as pd
 import pynwb
+from hdmf.common import DynamicTable
 
 from .dj_helper_fn import get_child_tables
 from .nwb_helper_fn import get_electrode_indices, get_nwb_file
@@ -274,19 +275,27 @@ class AnalysisNwbfile(dj.Manual):
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        nwb_object : pynwb.core.NWBDataInterface
-            The NWB object created by PyNWB.
+        nwb_object : pynwb.core.NWBDataInterface or DataFrame
+            The NWB object created by PyNWB or a Panda DataFrame.
 
         Returns
         -------
         nwb_object_id : str
             The NWB object ID of the added object.
         """
+        # convert to NWB object
+ 
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
             nwbf = io.read()
-            nwbf.add_scratch(nwb_object)
-            io.write(nwbf)
-            return nwb_object.object_id
+            if isinstance(nwb_object, pd.DataFrame):
+                dt_object = DynamicTable.from_dataframe(name='pandas_table', df = nwb_object)
+                nwbf.add_scratch(dt_object)
+                io.write(nwbf)
+                return dt_object.object_id
+            else:
+                nwbf.add_scratch(nwb_object)
+                io.write(nwbf)
+                return nwb_object.object_id
 
     def add_units(self, analysis_file_name, units, units_valid_times,
                   units_sort_interval, metrics=None, units_waveforms=None, labels=None):
