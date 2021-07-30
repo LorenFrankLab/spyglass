@@ -739,9 +739,13 @@ class SpikeSorting(dj.Computed):
         print(f'Attempting to delete {len(entries)} entries, checking permission...')
     
         for entry_idx in range(len(entries)):
+            # check the team name for the entry, then look up the members in that team, then get their datajoint user names
             team_name = (SpikeSortingParameters & (SpikeSortingParameters & entries[entry_idx]).proj()).fetch1()['team_name']
-            lab_member_name_list = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch1('lab_member_name')
-            permission_bool[entry_idx] = current_user_name in lab_member_name_list
+            lab_member_name_list = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
+            datajoint_user_names = []
+            for lab_member_name in lab_member_name_list:
+                datajoint_user_names.append((LabMember.LabMemberInfo & {'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
+            permission_bool[entry_idx] = current_user_name in datajoint_user_names
         if np.sum(permission_bool)==len(entries):
             print('Permission to delete all specified entries granted.')
             super(SpikeSorting, self).delete()
@@ -1186,22 +1190,28 @@ class CuratedSpikeSorting(dj.Computed):
 
         print('Done with dj Unit table.')
 
-    # def delete(self):        
+    # def delete(self):
+    #     """
+    #     Extends the delete method of base class to implement permission checking
+    #     """
+    #     current_user_name = dj.config['database.user']
     #     entries = self.fetch()
-    #     print(f'Attempting to delete {len(entries)} entries')
-    #     for entry in entries:
-    #         nwb_file_name = entry
-    #     # nwbf = self.fetch()[0][1]
-    #     print(f'nwb file: {nwbf}')
-    #     team_name = (SpikeSortingParameters & {'nwb_file_name': nwbf}).fetch('team_name')[0]
-    #     print(f'team_name: {team_name}')
-    #     lab_member_name = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
-    #     print(f'team members: {lab_member_name}')
-    #     if lab_member_name is 'kyu hyun lee':
-    #         print('overriding method')
+    #     permission_bool = np.zeros((len(entries),))
+    #     print(f'Attempting to delete {len(entries)} entries, checking permission...')
+    
+    #     for entry_idx in range(len(entries)):
+    #         # check the team name for the entry, then look up the members in that team, then get their datajoint user names
+    #         team_name = (SpikeSortingParameters & (SpikeSortingParameters & entries[entry_idx]).proj()).fetch1()['team_name']
+    #         lab_member_name_list = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
+    #         datajoint_user_names = []
+    #         for lab_member_name in lab_member_name_list:
+    #             datajoint_user_names.append((LabMember.LabMemberInfo & {'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
+    #         permission_bool[entry_idx] = current_user_name in datajoint_user_names
+    #     if np.sum(permission_bool)==len(entries):
+    #         print('Permission to delete all specified entries granted.')
     #         super(CuratedSpikeSorting, self).delete()
     #     else:
-    #         print('you are not a member of the team; not deleting anything...')
+    #         print('You do not have permission to delete all specified entries. Not deleting anything.')
         
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)

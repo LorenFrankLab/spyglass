@@ -16,7 +16,8 @@ class LabMember(dj.Manual):
         # Information about lab member in the context of Frank lab network
         -> master
         ---
-        google_user_name: varchar(80)
+        google_user_name: varchar(80)              # used for permission to curate
+        datajoint_user_name = '': varchar(80)      # used for permission to delete entries
         """
     def insert_from_nwbfile(self, nwbf):
         """Insert lab member information from an NWB file.
@@ -29,7 +30,7 @@ class LabMember(dj.Manual):
         for labmember in nwbf.experimenter:
             labmember_dict = dict()
             labmember_dict['lab_member_name'] = str(labmember)
-            labmember_dict['first_name'] = str.split(labmember)[0]
+            labmember_dict['first_name'] = str.split(labmember)[:-1]
             labmember_dict['last_name'] = str.split(labmember)[-1]
             self.insert1(labmember_dict, skip_duplicates=True)
             # each person is by default the member of their own LabTeam (same as their name)
