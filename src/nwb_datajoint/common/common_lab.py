@@ -22,7 +22,8 @@ class LabMember(dj.Manual):
         # Information about lab member in the context of Frank lab network
         -> master
         ---
-        google_user_name: varchar(80)
+        google_user_name: varchar(80)              # used for permission to curate
+        datajoint_user_name = '': varchar(80)      # used for permission to delete entries
         """
 
     @classmethod
@@ -46,8 +47,8 @@ class LabMember(dj.Manual):
     def insert_from_name(cls, full_name):
         """Insert a lab member by name.
 
-        The first name is the part of the name that precedes a space, and the last name is the part of the name that
-        follows the last space.
+        The first name is the part of the name that precedes the last space, and the last name is the part of the
+        name that follows the last space.
 
         Parameters
         ----------
@@ -56,7 +57,7 @@ class LabMember(dj.Manual):
         """
         labmember_dict = dict()
         labmember_dict['lab_member_name'] = full_name
-        labmember_dict['first_name'] = str.split(full_name)[0]
+        labmember_dict['first_name'] = str.split(full_name)[:-1]
         labmember_dict['last_name'] = str.split(full_name)[-1]
         cls.insert1(labmember_dict, skip_duplicates=True)
 

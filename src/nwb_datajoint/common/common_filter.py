@@ -167,7 +167,7 @@ class FirFilter(dj.Manual):
         timestamp_size = sys.getsizeof(timestamps_on_disk[0])
         timestamp_dtype = type(timestamps_on_disk[0])
         data_size = sys.getsizeof(data_on_disk[0][0])
-        output_dtype = type(data_on_disk[0][0])
+        data_dtype = type(data_on_disk[0][0])
 
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
@@ -190,7 +190,7 @@ class FirFilter(dj.Manual):
                                                describe_dims=True,
                                                ds=decimation,
                                                input_dim_restrictions=input_dim_restrictions)
-            # print(f'dtype = {dtype}, {data}')
+            #print(f'dtype = {dtype}')
             output_offsets.append(output_offsets[-1] + shape[time_axis])
             # TODO: remove int() when fixed:
             output_shape_list[time_axis] += shape[time_axis]
@@ -208,7 +208,7 @@ class FirFilter(dj.Manual):
             # TODO: use datatype of data
             es = pynwb.ecephys.ElectricalSeries(name=eseries_name,
                                                 data=np.empty(
-                                                    tuple(output_shape_list), dtype=output_dtype),
+                                                    tuple(output_shape_list), dtype=data_dtype),
                                                 electrodes=electrode_table_region,
                                                 timestamps=np.empty(output_shape_list[time_axis]))
             # Add the electrical series to the scratch area
@@ -231,13 +231,13 @@ class FirFilter(dj.Manual):
                  # can be loaded into < 90% of available RAM
                 mem = psutil.virtual_memory()
                 interval_samples = stop-start
-                if interval_samples * (timestamp_size +  n_electrodes) < 0.9 * mem.available:
+                if interval_samples * (timestamp_size +  n_electrodes*data_size) < 0.9 * mem.available:
                     print(f'Interval {ii}: loading data into memory')
                     timestamps = np.asarray(timestamps_on_disk[start:stop], dtype=timestamp_dtype)
                     if time_axis == 0:
-                        data = np.asarray(data_on_disk[start:stop, :], dtype=dtype)
+                        data = np.asarray(data_on_disk[start:stop, :], dtype=data_dtype)
                     else:
-                        data = np.asarray(data_on_disk[:, start:stop], dtype=dtype)
+                        data = np.asarray(data_on_disk[:, start:stop], dtype=data_dtype)
                     
                     extracted_ts = timestamps[0:-1:decimation]
                     new_timestamps[ts_offset:ts_offset +
