@@ -12,8 +12,7 @@ class LabMember(dj.Manual):
     first_name: varchar(80)
     last_name: varchar(80)
     """
-    # TODO automatically splitting first and last name using the method below is not always appropriate / correct
-    # consider not splitting full name into first and last name
+
     # NOTE that names must be unique here. If there are two neuroscientists named Jack Black that have data in this
     # database, this will create an incorrect linkage. NWB does not yet provide unique IDs for names.
 

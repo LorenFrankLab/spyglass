@@ -5,7 +5,6 @@ import ndx_franklab_novela
 import numpy as np
 import pynwb
 
-from .common_device import Probe
 from .common_filter import FirFilter
 from .common_interval import IntervalList, interval_list_censor, interval_list_intersect  # noqa: F401
 # SortInterval, interval_list_intersect, interval_list_excludes_ind
@@ -291,7 +290,8 @@ class LFP(dj.Imported):
 
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         lfp_object_id, timestamp_interval = FirFilter().filter_data_nwb(lfp_file_abspath, rawdata,
-                                                    filter_coeff, valid_times, electrode_id_list, decimation)
+                                                                        filter_coeff, valid_times,
+                                                                        electrode_id_list, decimation)
 
         # now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table
         AnalysisNwbfile().add(key['nwb_file_name'], lfp_file_name)
