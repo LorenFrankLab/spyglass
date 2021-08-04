@@ -20,7 +20,7 @@ class Session(dj.Imported):
     -> [nullable] Subject
     -> [nullable] Institution
     -> [nullable] Lab
-    session_id: varchar(80)
+    session_id = NULL: varchar(80)
     session_description: varchar(80)
     session_start_time: datetime
     timestamps_reference_time: datetime
@@ -67,17 +67,17 @@ class Session(dj.Imported):
         print('Task...')
         Task().insert_from_nwbfile(nwbf)
 
-        if nwbf.subject is not None and nwbf.subject.subject_id is not None:
+        if nwbf.subject is not None:
             subject_id = nwbf.subject.subject_id
         else:
-            subject_id = Subject.UNKNOWN
+            subject_id = None
 
         Session().insert1({
             'nwb_file_name': nwb_file_name,
             'subject_id': subject_id,
             'institution_name': nwbf.institution,
             'lab_name': nwbf.lab,
-            'session_id': nwbf.session_id if nwbf.session_id is not None else 'UNKNOWN',
+            'session_id': nwbf.session_id,
             'session_description': nwbf.session_description,
             'session_start_time': nwbf.session_start_time,
             'timestamps_reference_time': nwbf.timestamps_reference_time,
