@@ -27,7 +27,7 @@ class Subject(dj.Manual):
     @classmethod
     def insert_from_nwbfile(cls, nwbf):
         """Get the subject information from the NWBFile and insert it into the Subject table."""
-        cls.initialize()
+        # cls.initialize()
         sub = nwbf.subject
         if sub is None:
             print('No subject metadata found.\n')

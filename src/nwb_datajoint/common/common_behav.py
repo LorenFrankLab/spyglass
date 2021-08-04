@@ -102,15 +102,15 @@ class StateScriptFile(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        # TODO change to associated_files when NWB file changed.
         associated_files = nwbf.processing.get('associated_files') or nwbf.processing.get('associated files')
         if associated_files is None:
-            print(f'Unable to import StateScriptFile: no processing module named "associated files" '
+            print(f'Unable to import StateScriptFile: no processing module named "associated_files" '
                   f'found in {nwb_file_name}.')
             return
+
         for associated_file_obj in associated_files.data_interfaces.values():
             if not isinstance(associated_file_obj, ndx_franklab_novela.AssociatedFiles):
-                print(f'Data interface {associated_file_obj.name} within "associated files" processing module is not '
+                print(f'Data interface {associated_file_obj.name} within "associated_files" processing module is not '
                       f'of expected type ndx_franklab_novela.AssociatedFiles\n')
                 return
             # parse the task_epochs string

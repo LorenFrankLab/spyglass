@@ -132,7 +132,7 @@ class Institution(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with institution information.
         """
-        cls.initialize()
+        # cls.initialize()
         if nwbf.institution is None:
             print('No institution metadata found.\n')
             return
@@ -162,7 +162,7 @@ class Lab(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with lab name information.
         """
-        cls.initialize()
+        # cls.initialize()
         if nwbf.lab is None:
             print('No lab metadata found.\n')
             return

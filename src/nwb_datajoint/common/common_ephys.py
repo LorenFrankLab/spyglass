@@ -28,7 +28,7 @@ class ElectrodeGroup(dj.Imported):
     electrode_group_name: varchar(80)  # electrode group name from NWBFile
     ---
     -> BrainRegion
-    -> Probe
+    -> [nullable] Probe
     description: varchar(80)  # description of electrode group
     target_hemisphere: enum('Right','Left')
     """
@@ -50,8 +50,6 @@ class ElectrodeGroup(dj.Imported):
             # the following should probably be a function that returns the probe devices from the file
             if isinstance(electrode_group.device.probe_type, ndx_franklab_novela.Probe):
                 key['probe_type'] = electrode_group.device.probe_type
-            else:
-                key['probe_type'] = Probe.UNKNOWN
             self.insert1(key, skip_duplicates=True)
 
 
@@ -61,7 +59,7 @@ class Electrode(dj.Imported):
     -> ElectrodeGroup
     electrode_id: int                      # the unique number for this electrode
     ---
-    -> Probe.Electrode
+    -> [nullable] Probe.Electrode
     -> BrainRegion
     name='': varchar(80)                   # unique label for each contact
     original_reference_electrode=-1: int   # the configured reference electrode for this electrode
@@ -101,9 +99,6 @@ class Electrode(dj.Imported):
                 key['probe_electrode'] = elect_data.probe_electrode
                 key['bad_channel'] = 'True' if elect_data.bad_channel else 'False'
             else:
-                key['probe_type'] = Probe.UNKNOWN
-                key['probe_shank'] = Probe.Shank.UNKNOWN
-                key['probe_electrode'] = Probe.Electrode.UNKNOWN
                 key['bad_channel'] = 'False'
             key['region_id'] = BrainRegion.fetch_add(region_name=elect_data.group.location)
             key['x'] = elect_data.x

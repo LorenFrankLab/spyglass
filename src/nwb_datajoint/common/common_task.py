@@ -115,7 +115,7 @@ class TaskEpoch(dj.Imported):
      epoch: int  # the session epoch for this task and apparatus (1-based)
      ---
      -> Task
-     -> CameraDevice
+     -> [nullable] CameraDevice
      -> IntervalList
      """
 

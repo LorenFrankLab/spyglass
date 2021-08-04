@@ -14,14 +14,6 @@ class DataAcquisitionDevice(dj.Manual):
     adc_circuit = NULL: varchar(80)
     """
 
-    UNKNOWN = 'UNKNOWN'
-
-    @classmethod
-    def initialize(cls):
-        # initialize with an unknown camera for use when NWB file does not contain a compatible camera device
-        # TODO: move to initialization script so it doesn't get called every time
-        cls.insert1({'device_name': cls.UNKNOWN}, skip_duplicates=True)
-
     @classmethod
     def insert_from_nwbfile(cls, nwbf):
         """Insert a data acquisition device from an NWB file.
@@ -36,7 +28,6 @@ class DataAcquisitionDevice(dj.Manual):
         device_name_list : list
             List of data acquisition object names found in the NWB file.
         """
-        cls.initialize()
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.DataAcqDevice):
@@ -67,15 +58,6 @@ class CameraDevice(dj.Manual):
     camera_id = -1: int
     """
 
-    # value for camera_name if ndx_franklab_novela.CameraDevice data type is not present in the NWB file
-    UNKNOWN = 'UNKNOWN'
-
-    @classmethod
-    def initialize(cls):
-        # initialize with an unknown camera for use when NWB file does not contain a compatible camera device
-        # TODO: move to initialization script so it doesn't get called every time
-        cls.insert1({'camera_name': cls.UNKNOWN}, skip_duplicates=True)
-
     @classmethod
     def insert_from_nwbfile(cls, nwbf):
         """Insert camera devices from an NWB file
@@ -90,7 +72,6 @@ class CameraDevice(dj.Manual):
         device_name_list : list
             List of camera device object names found in the NWB file.
         """
-        cls.initialize()
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.CameraDevice):
@@ -182,7 +163,7 @@ class Probe(dj.Manual):
         device_name_list : list
             List of probe device types found in the NWB file.
         """
-        cls.initialize()
+        # cls.initialize()
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.Probe):
