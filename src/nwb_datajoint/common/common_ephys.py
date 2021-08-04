@@ -305,8 +305,8 @@ class LFP(dj.Imported):
         # add an interval list for the LFP valid times, skipping duplicates
         key['interval_list_name'] = 'lfp valid times'
         IntervalList.insert1({'nwb_file_name': key['nwb_file_name'],
-                               'interval_list_name': key['interval_list_name'],
-                               'valid_times': lfp_valid_times}, replace=True)
+                              'interval_list_name': key['interval_list_name'],
+                              'valid_times': lfp_valid_times}, replace=True)
         self.insert1(key)
 
     def nwb_object(self, key):
@@ -315,7 +315,6 @@ class LFP(dj.Imported):
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         lfp_nwbf = get_nwb_file(lfp_file_abspath)
         # get the object id
-        # TODO should the self below be LFPBand()? This table does not have 'filtered_data_object_id'
         nwb_object_id = (self & {'analysis_file_name': lfp_file_name}).fetch1('filtered_data_object_id')
         return lfp_nwbf.objects[nwb_object_id]
 

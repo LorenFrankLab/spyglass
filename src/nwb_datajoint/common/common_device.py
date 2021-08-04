@@ -99,9 +99,9 @@ class Probe(dj.Manual):
     definition = """
     probe_type: varchar(80)
     ---
-    probe_description=NULL: varchar(80)  # description of this probe
-    num_shanks=NULL: int                 # number of shanks on this device
-    contact_side_numbering=NULL: enum('True', 'False')  # electrode numbers from contact side of the device
+    probe_description: varchar(80)                 # description of this probe
+    num_shanks: int                                # number of shanks on this device
+    contact_side_numbering: enum('True', 'False')  # electrode numbers from contact side of the device
     """
 
     class Shank(dj.Part):
