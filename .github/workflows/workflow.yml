@@ -22,19 +22,21 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: 3.8
-    - name: Install dependencies
-      run: |
-        conda update conda
-        python -m pip install --upgrade pip
-        conda env create -f environment.yml
-        conda activate nwb_datajoint
-        pip install -e .
     - name: Start tutorial docker container
       run: |
         docker run -d --rm --name datajoint-test-server -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql
+    - name: Install dependencies
+      run: |
+        $CONDA/bin/conda update conda
+        python -m pip install --upgrade pip
+        $CONDA/bin/conda env create -f environment.yml
+        $CONDA/bin/conda activate nwb_datajoint
+        pip install -e .
     - name: Configure datajoint
       run: |
+        $CONDA/bin/conda activate nwb_datajoint
         python tests/ci_config.py
     - name: Test import
       run: |
+        $CONDA/bin/conda activate nwb_datajoint
         python -c "import nwb_datajoint; import nwb_datajoint.common"
