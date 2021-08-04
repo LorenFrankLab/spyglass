@@ -11,6 +11,13 @@ jobs:
     env:
       OS: ${{ matrix.os }}
       PYTHON: '3.8'
+    services:
+      datajoint-test-server:
+        image: datajoint:datajoint/mysql
+        ports:
+        - 3306
+        options: >-
+          MYSQL_ROOT_PASSWORD=tutorial
     steps:
     - name: Cancel Workflow Action
       uses: styfle/cancel-workflow-action@0.6.0
@@ -22,9 +29,9 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: 3.8
-    - name: Start tutorial docker container
-      run: |
-        docker run -d --rm --name datajoint-test-server -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql
+    # - name: Start tutorial docker container
+    #   run: |
+    #     docker run -d --rm --name datajoint-test-server -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql
     - name: Install dependencies
       run: |
         $CONDA/bin/conda update conda
