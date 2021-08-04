@@ -5,6 +5,7 @@ import ndx_franklab_novela
 import numpy as np
 import pynwb
 
+from .common_device import Probe  # noqa: F401
 from .common_filter import FirFilter
 from .common_interval import IntervalList, interval_list_censor, interval_list_intersect  # noqa: F401
 # SortInterval, interval_list_intersect, interval_list_excludes_ind
@@ -28,7 +29,7 @@ class ElectrodeGroup(dj.Imported):
     ---
     -> BrainRegion
     -> [nullable] Probe
-    description: varchar(80)  # description of electrode group
+    description = '10': varchar(80)  # description of electrode group
     target_hemisphere: enum('Right','Left')
     """
 
@@ -47,7 +48,7 @@ class ElectrodeGroup(dj.Imported):
             key['region_id'] = BrainRegion.fetch_add(region_name=electrode_group.location)
             key['description'] = electrode_group.description
             # the following should probably be a function that returns the probe devices from the file
-            if isinstance(electrode_group.device.probe_type, ndx_franklab_novela.Probe):
+            if isinstance(electrode_group.device, ndx_franklab_novela.Probe):
                 key['probe_type'] = electrode_group.device.probe_type
             self.insert1(key, skip_duplicates=True)
 
