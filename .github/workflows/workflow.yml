@@ -1,4 +1,6 @@
-name: Run coverage
+name: Import test
+
+on: [push, pull_request]
 
 jobs:
   run:
