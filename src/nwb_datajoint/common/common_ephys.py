@@ -370,10 +370,12 @@ class LFPBandSelection(dj.Manual):
                              f'samping rate {lfp_sampling_rate}')
         # filter
         # TODO replace "if not len(x.fetch())" with "if not x"
-        if not len((FirFilter() & {'filter_name': filter_name, 'filter_sampling_rate': lfp_sampling_rate}).fetch()):
+        query = (FirFilter() & {'filter_name': filter_name, 'filter_sampling_rate': lfp_sampling_rate})
+        if not query:
             raise ValueError(f'filter {filter_name}, sampling rate {lfp_sampling_rate} is not in the FirFilter table')
         # interval_list
-        if not len((IntervalList() & {'nwb_file_name': nwb_file_name, 'interval_name': interval_list_name}).fetch()):
+        query = (IntervalList() & {'nwb_file_name': nwb_file_name, 'interval_name': interval_list_name})
+        if not query:
             raise ValueError(f'interval list {interval_list_name} is not in the IntervalList table; the list must be '
                              'added before this function is called')
         # reference_electrode_list
@@ -492,13 +494,13 @@ class LFPBand(dj.Computed):
         # downsampled these data
         key['interval_list_name'] = interval_list_name + ' lfp band ' + str(lfp_band_sampling_rate) + 'Hz'
         tmp_valid_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
-                                                 'interval_list_name': key['interval_list_name']}).fetch('valid_times')
+                                           'interval_list_name': key['interval_list_name']}).fetch('valid_times')
         if len(tmp_valid_times) == 0:
             lfp_band_valid_times = interval_list_censor(lfp_band_valid_times, timestamp_interval)
             # add an interval list for the LFP valid times
             IntervalList.insert1({'nwb_file_name': key['nwb_file_name'],
-                                'interval_list_name': key['interval_list_name'],
-                                'valid_times': lfp_band_valid_times})
+                                  'interval_list_name': key['interval_list_name'],
+                                  'valid_times': lfp_band_valid_times})
         else:
             # check that the valid times are the same
             assert np.isclose(tmp_valid_times[0], lfp_band_valid_times).all(), \
