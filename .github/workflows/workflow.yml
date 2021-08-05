@@ -34,6 +34,10 @@ jobs:
       with:
         activate-environment: nwb_datajoint
         environment-file: environment.yml
+    - name: Install test requirements
+      shell: bash -l {0}
+      run: |
+        pip install -r requirements-dev.txt
     - name: Install nwb_datajoint
       shell: bash -l {0}
       run: |
@@ -55,3 +59,7 @@ jobs:
         NWB_DATAJOINT_BASE_DIR: ./data
         KACHERY_STORAGE_DIR: ./data/kachery-storage
         DJ_SUPPORT_FILEPATH_MANAGEMENT: True
+    - name: Run tests
+      shell: bash -l {0}
+      run: |
+        pytest  # env vars are set within certain test

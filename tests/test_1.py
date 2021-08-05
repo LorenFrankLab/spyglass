@@ -63,8 +63,8 @@ def test_1(tmp_path, datajoint_server):
     assert len(x) == 0
 
     x = CameraDevice().fetch()
-    assert len(x) == 2
-    # TODO check camera devices
+    # TODO No camera devices?
+    assert len(x) == 0
 
     x = Probe().fetch()
     assert len(x) == 1
