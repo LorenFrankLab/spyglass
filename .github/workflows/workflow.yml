@@ -45,3 +45,7 @@ jobs:
         conda activate nwb_datajoint
         python tests/ci_config.py  # configure datajoint and environment vars
         python -c "import nwb_datajoint; import nwb_datajoint.common"  # test import
+      env:
+        NWB_DATAJOINT_BASE_DIR: .
+        KACHERY_STORAGE_DIR: ./kachery-storage
+        DJ_SUPPORT_FILEPATH_MANAGEMENT: True
