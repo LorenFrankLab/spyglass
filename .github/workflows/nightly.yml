@@ -31,7 +31,7 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: 3.8
-    - name: Set up conda
+    - name: Set up conda environment
       uses: conda-incubator/setup-miniconda@v2
       with:
         activate-environment: nwb_datajoint
@@ -41,9 +41,19 @@ jobs:
       run: |
         conda activate nwb_datajoint
         pip install -e .
-    - name: Test configuring datajoint and import
+    - name: Set up data directories
+      run: |
+        mkdir ./data
+        mkdir ./data/kachery-storage
+        mkdir ./data/raw
+        mkdir ./data/analysis
+    - name: Configure datajoint and test importing nwb_datajoint
       shell: bash -l {0}
       run: |
         conda activate nwb_datajoint
-        python tests/ci_config.py  # configure datajoint and environment vars
+        python tests/ci_config.py  # configure datajoint
         python -c "import nwb_datajoint; import nwb_datajoint.common"  # test import
+      env:
+        NWB_DATAJOINT_BASE_DIR: ./data
+        KACHERY_STORAGE_DIR: ./data/kachery-storage
+        DJ_SUPPORT_FILEPATH_MANAGEMENT: True
