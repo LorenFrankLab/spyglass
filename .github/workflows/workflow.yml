@@ -39,13 +39,9 @@ jobs:
       run: |
         conda activate nwb_datajoint
         pip install -e .
-    - name: Configure datajoint
+    - name: Test configuring datajoint and import
       shell: bash -l {0}
       run: |
         conda activate nwb_datajoint
-        python tests/ci_config.py
-    - name: Test import
-      shell: bash -l {0}
-      run: |
-        conda activate nwb_datajoint
-        python -c "import nwb_datajoint; import nwb_datajoint.common"
+        python tests/ci_config.py  # configure datajoint and environment vars
+        python -c "import nwb_datajoint; import nwb_datajoint.common"  # test import
