@@ -29,7 +29,7 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: 3.8
-    - name: Set up conda
+    - name: Set up conda environment
       uses: conda-incubator/setup-miniconda@v2
       with:
         activate-environment: nwb_datajoint
@@ -39,7 +39,7 @@ jobs:
       run: |
         conda activate nwb_datajoint
         pip install -e .
-    - name: Test configuring datajoint and import
+    - name: Configure datajoint and test importing nwb_datajoint
       shell: bash -l {0}
       run: |
         conda activate nwb_datajoint
