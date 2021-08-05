@@ -37,6 +37,7 @@ jobs:
         $CONDA/bin/conda update conda
         python -m pip install --upgrade pip
         $CONDA/bin/conda env create -f environment.yml
+        $CONDA/bin/conda init
         $CONDA/bin/conda activate nwb_datajoint
         pip install -e .
     - name: Configure datajoint
