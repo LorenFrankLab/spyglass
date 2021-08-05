@@ -15,7 +15,7 @@ jobs:
       datajoint_test_server:
         image: datajoint/mysql
         ports:
-        - 3306
+        - 3306:3306
         options: >-
           -e MYSQL_ROOT_PASSWORD=tutorial
     steps:
