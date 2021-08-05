@@ -316,8 +316,8 @@ class LFP(dj.Imported):
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         lfp_nwbf = get_nwb_file(lfp_file_abspath)
         # get the object id
-        nwb_object_id = (self & {'analysis_file_name': lfp_file_name}).fetch1('filtered_data_object_id')
-        return lfp_nwbf.objects[nwb_object_id]
+        nwb_object_id = (self & {'analysis_file_name': lfp_file_name}).fetch1('lfp_object_id')
+        return nwbf.objects[nwb_object_id]
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
