@@ -39,17 +39,15 @@ jobs:
       run: |
         conda activate nwb_datajoint
         pip install -e .
-    - name: Set up data directories
-      run: |
-        mkdir ./data
-        mkdir ./data/kachery-storage
-        mkdir ./data/raw
-        mkdir ./data/analysis
     - name: Test configuring datajoint and import
       shell: bash -l {0}
       run: |
         conda activate nwb_datajoint
-        python tests/ci_config.py  # configure datajoint and environment vars
+        mkdir ./data  # set up data directories
+        mkdir ./data/kachery-storage
+        mkdir ./data/raw
+        mkdir ./data/analysis
+        python tests/ci_config.py  # configure datajoint
         python -c "import nwb_datajoint; import nwb_datajoint.common"  # test import
       env:
         NWB_DATAJOINT_BASE_DIR: ./data
