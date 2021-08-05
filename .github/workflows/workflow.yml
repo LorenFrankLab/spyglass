@@ -13,7 +13,7 @@ jobs:
       PYTHON: '3.8'
     services:
       datajoint-test-server:
-        image: datajoint:datajoint/mysql
+        image: datajoint/mysql
         ports:
         - 3306
         options: >-
