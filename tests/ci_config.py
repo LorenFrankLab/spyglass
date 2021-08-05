@@ -26,3 +26,4 @@ dj.config['stores'] = {
     'stage': str(analysis_dir)
   }
 }
+dj.config.save_global()
