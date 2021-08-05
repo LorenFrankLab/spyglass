@@ -17,7 +17,7 @@ jobs:
         ports:
         - 3306
         options: >-
-          MYSQL_ROOT_PASSWORD=tutorial
+          -e MYSQL_ROOT_PASSWORD=tutorial
     steps:
     - name: Cancel Workflow Action
       uses: styfle/cancel-workflow-action@0.6.0
