@@ -12,7 +12,7 @@ jobs:
       OS: ${{ matrix.os }}
       PYTHON: '3.8'
     services:
-      datajoint-test-server:
+      datajoint_test_server:
         image: datajoint/mysql
         ports:
         - 3306
