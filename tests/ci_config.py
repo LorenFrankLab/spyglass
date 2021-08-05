@@ -1,12 +1,12 @@
 import datajoint as dj
-import os
 from pathlib import Path
 
 data_dir = Path('.')
 
-os.environ['NWB_DATAJOINT_BASE_DIR'] = str(data_dir)
-os.environ['KACHERY_STORAGE_DIR'] = str(data_dir / 'kachery-storage')
-os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
+# NOTE these env vars are set in the GitHub Action directly
+# os.environ['NWB_DATAJOINT_BASE_DIR'] = str(data_dir)
+# os.environ['KACHERY_STORAGE_DIR'] = str(data_dir / 'kachery-storage')
+# os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
 
 raw_dir = data_dir / 'raw'
 analysis_dir = data_dir / 'analysis'
