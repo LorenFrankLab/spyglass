@@ -18,8 +18,8 @@ class SensorData(dj.Imported):
     definition = """
     -> Session
     ---
-    sensor_data_object_id : varchar(40)  # object id of the data in the NWB file
-    -> IntervalList       # the list of intervals for this object
+    sensor_data_object_id: varchar(40)  # object id of the data in the NWB file
+    -> IntervalList                     # the list of intervals for this object
     """
 
     def make(self, key):

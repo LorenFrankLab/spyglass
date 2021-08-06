@@ -13,10 +13,10 @@ schema = dj.schema('common_task')
 @schema
 class Apparatus(dj.Manual):
     definition = """
-     apparatus_name: varchar(80)
+     apparatus_name: varchar(200)
      ---
      #-> AnalysisNWBFile
-     nwb_object_id='': varchar(255)  # the NWB object identifier for a class that describes this apparatus
+     nwb_object_id='': varchar(40)  # the NWB object identifier for a class that describes this apparatus
      """
 
     # def insert_from_nwbfile(self, nwbf):
@@ -44,11 +44,11 @@ class Apparatus(dj.Manual):
 @schema
 class Task(dj.Manual):
     definition = """
-     task_name: varchar(80)
+     task_name: varchar(200)
      ---
-     task_description = NULL: varchar(255)  # description of this task
-     task_type = NULL: varchar(80)          # type of task
-     task_subtype = NULL: varchar(80)       # subtype of task
+     task_description = NULL: varchar(2000)    # description of this task
+     task_type = NULL: varchar(2000)           # type of task
+     task_subtype = NULL: varchar(2000)        # subtype of task
      """
 
     @classmethod

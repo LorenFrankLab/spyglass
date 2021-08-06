@@ -230,13 +230,12 @@ def interval_list_censor(interval_list, timestamps):
     Args:
         interval_list (numpy array of intervals [start, stop]): interval list from IntervalList valid times
         timestamps (numpy array or list): timestamp list
-    
-    Returns: 
+
+    Returns:
         interval_list (numpy array of intervals [start, stop])
     """
     # check that all timestamps are in the interval list
-    assert len(interval_list_contains_ind(interval_list, timestamps)) == len(timestamps), 'interval_list must contain all timestamps' 
-    
-    timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
-    return interval_list_intersect(interval_list, timestamps_interval)    
+    assert len(interval_list_contains_ind(interval_list, timestamps)) == len(timestamps), 'interval_list must contain all timestamps'
 
+    timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
+    return interval_list_intersect(interval_list, timestamps_interval)

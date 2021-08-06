@@ -25,11 +25,11 @@ class ElectrodeGroup(dj.Imported):
     definition = """
     # Grouping of electrodes corresponding to a physical probe.
     -> Session
-    electrode_group_name: varchar(80)  # electrode group name from NWBFile
+    electrode_group_name: varchar(200)  # electrode group name from NWBFile
     ---
     -> BrainRegion
     -> [nullable] Probe
-    description = '10': varchar(80)  # description of electrode group
+    description: varchar(2000)  # description of electrode group
     target_hemisphere: enum('Right','Left')
     """
 
@@ -61,18 +61,18 @@ class Electrode(dj.Imported):
     ---
     -> [nullable] Probe.Electrode
     -> BrainRegion
-    name='': varchar(80)                   # unique label for each contact
+    name='': varchar(200)                  # unique label for each contact
     original_reference_electrode=-1: int   # the configured reference electrode for this electrode
     x=NULL: float                          # the x coordinate of the electrode position in the brain
     y=NULL: float                          # the y coordinate of the electrode position in the brain
     z=NULL: float                          # the z coordinate of the electrode position in the brain
-    filtering: varchar(200)                # description of the signal filtering
+    filtering: varchar(2000)               # description of the signal filtering
     impedance=null: float                  # electrode impedance
     bad_channel: enum("True","False")      # if electrode is 'good' or 'bad' as observed during recording
     x_warped=NULL: float                   # x coordinate of electrode position warped to common template brain
     y_warped=NULL: float                   # y coordinate of electrode position warped to common template brain
     z_warped=NULL: float                   # z coordinate of electrode position warped to common template brain
-    contacts: varchar(80)                  # label of electrode contacts used for a bipolar signal -- current workaround
+    contacts: varchar(200)                 # label of electrode contacts used for a bipolar signal -- current workaround
     """
 
     def make(self, key):
@@ -124,10 +124,10 @@ class Raw(dj.Imported):
     -> Session
     ---
     -> IntervalList
-    raw_object_id: varchar(80)      # the NWB object ID for loading this object from the file
+    raw_object_id: varchar(40)      # the NWB object ID for loading this object from the file
     sampling_rate: float            # Sampling rate calculated from data, in Hz
-    comments: varchar(80)
-    description: varchar(80)
+    comments: varchar(2000)
+    description: varchar(2000)
     """
 
     def make(self, key):
@@ -255,7 +255,7 @@ class LFP(dj.Imported):
     -> IntervalList         # the valid intervals for the data
     -> FirFilter                 # the filter used for the data
     -> AnalysisNwbfile      # the name of the nwb file with the lfp data
-    lfp_object_id: varchar(80)  # the NWB object ID for loading this object from the file
+    lfp_object_id: varchar(40)  # the NWB object ID for loading this object from the file
     lfp_sampling_rate: float # the sampling rate, in HZ
     """
 
@@ -425,7 +425,7 @@ class LFPBand(dj.Computed):
     ---
     -> AnalysisNwbfile
     -> IntervalList
-    filtered_data_object_id: varchar(80)  # the NWB object ID for loading this object from the file
+    filtered_data_object_id: varchar(40)  # the NWB object ID for loading this object from the file
     """
 
     def make(self, key):

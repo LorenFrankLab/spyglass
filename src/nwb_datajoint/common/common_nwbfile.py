@@ -25,7 +25,7 @@ NWB_KEEP_FIELDS = ('devices', 'electrode_groups', 'electrodes', 'experiment_desc
 class Nwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files.
-    nwb_file_name: varchar(255) # name of the NWB file
+    nwb_file_name: varchar(2000)   # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
     """
@@ -104,13 +104,13 @@ class Nwbfile(dj.Manual):
 class AnalysisNwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting.
-    analysis_file_name : varchar(255)             # name of the file
+    analysis_file_name: varchar(2000)              # name of the file
     ---
-    -> Nwbfile                                    # name of the parent NWB file. Used for naming and metadata copy
-    analysis_file_abs_path: filepath@analysis     # the full path to the file
-    analysis_file_description = '': varchar(255)  # an optional description of this analysis
-    analysis_parameters = NULL: blob              # additional relevant parmeters. Currently used only for analyses
-                                                  # that span multiple NWB files
+    -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
+    analysis_file_abs_path: filepath@analysis      # the full path to the file
+    analysis_file_description = '': varchar(2000)  # an optional description of this analysis
+    analysis_parameters = NULL: blob               # additional relevant parmeters. Currently used only for analyses
+                                                   # that span multiple NWB files
     """
 
     def create(self, nwb_file_name):
@@ -279,7 +279,7 @@ class AnalysisNwbfile(dj.Manual):
         -------
         nwb_object_id : str
             The NWB object ID of the added object.
-        """ 
+        """
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             if isinstance(nwb_object, pd.DataFrame):

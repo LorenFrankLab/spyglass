@@ -7,11 +7,11 @@ schema = dj.schema('common_device')
 @schema
 class DataAcquisitionDevice(dj.Manual):
     definition = """
-    device_name: varchar(80)
+    device_name: varchar(200)
     ---
     system = 'Other': enum('SpikeGadgets','TDT_Rig1','TDT_Rig2','PCS','RCS','RNS','NeuroOmega','Other')
     amplifier = 'Other': enum('Intan','PZ5_Amp1','PZ5_Amp2','Other')
-    adc_circuit = NULL: varchar(80)
+    adc_circuit = NULL: varchar(2000)
     """
 
     @classmethod
@@ -49,12 +49,12 @@ class DataAcquisitionDevice(dj.Manual):
 @schema
 class CameraDevice(dj.Manual):
     definition = """
-    camera_name: varchar(80)
+    camera_name: varchar(200)
     ---
     meters_per_pixel = 0: float  # height / width of pixel in meters
-    manufacturer = '': varchar(80)
-    model = '': varchar(80)
-    lens = '': varchar(80)
+    manufacturer = '': varchar(2000)
+    model = '': varchar(2000)
+    lens = '': varchar(2000)
     camera_id = -1: int
     """
 
@@ -97,9 +97,9 @@ class CameraDevice(dj.Manual):
 @schema
 class Probe(dj.Manual):
     definition = """
-    probe_type: varchar(80)
+    probe_type: varchar(200)
     ---
-    probe_description: varchar(80)                 # description of this probe
+    probe_description: varchar(2000)               # description of this probe
     num_shanks: int                                # number of shanks on this device
     contact_side_numbering: enum('True', 'False')  # electrode numbers from contact side of the device
     """

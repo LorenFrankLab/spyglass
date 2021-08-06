@@ -234,7 +234,7 @@ class SortGroup(dj.Manual):
 class SpikeSorter(dj.Manual):
     definition = """
     # Table that holds the list of spike sorters avaialbe through spikeinterface
-    sorter_name: varchar(80) # the name of the spike sorting algorithm
+    sorter_name: varchar(200) # the name of the spike sorting algorithm
     """
 
     def insert_from_spikeinterface(self):
@@ -251,7 +251,7 @@ class SpikeSorter(dj.Manual):
 class SpikeSorterParameters(dj.Manual):
     definition = """
     -> SpikeSorter
-    parameter_set_name: varchar(80) # label for this set of parameters
+    parameter_set_name: varchar(200) # label for this set of parameters
     ---
     parameter_dict: blob # dictionary of parameter names and values
     filter_parameter_dict: blob # dictionary of filter parameter names and
@@ -290,7 +290,7 @@ class SpikeSorterParameters(dj.Manual):
 @schema
 class SpikeSortingWaveformParameters(dj.Manual):
     definition = """
-    waveform_parameters_name: varchar(80) # the name for this set of waveform extraction parameters
+    waveform_parameters_name: varchar(200) # the name for this set of waveform extraction parameters
     ---
     waveform_parameter_dict: blob # a dictionary containing the SpikeInterface waveform parameters
     """
@@ -300,7 +300,7 @@ class SpikeSortingWaveformParameters(dj.Manual):
 class SpikeSortingMetrics(dj.Manual):
     definition = """
     # Table for holding the parameters for computing quality metrics
-    cluster_metrics_list_name: varchar(80) # the name for this list of cluster metrics
+    cluster_metrics_list_name: varchar(200) # the name for this list of cluster metrics
     ---
     metric_dict: blob            # dict of SpikeInterface metrics with True / False elements to indicate whether a given metric should be computed.
     metric_parameter_dict: blob  # dict of parameters for the metrics
@@ -504,7 +504,7 @@ class SpikeSortingParameters(dj.Manual):
     -> SpikeSortingMetrics
     -> IntervalList
     -> LabTeam
-    import_path = '': varchar(200) # optional path to previous curated sorting output
+    import_path = '': varchar(2000) # optional path to previous curated sorting output
     """
 
 
@@ -517,7 +517,7 @@ class SpikeSorting(dj.Computed):
     -> AnalysisNwbfile
     units_object_id: varchar(40)           # Object ID for the units in NWB file
     time_of_sort=0: int                    # This is when the sort was done
-    curation_feed_uri='': varchar(1000)    # Labbox-ephys feed for curation
+    curation_feed_uri='': varchar(2000)    # Labbox-ephys feed for curation
     """
 
     def make(self, key):
@@ -737,7 +737,7 @@ class SpikeSorting(dj.Computed):
         entries = self.fetch()
         permission_bool = np.zeros((len(entries),))
         print(f'Attempting to delete {len(entries)} entries, checking permission...')
-    
+
         for entry_idx in range(len(entries)):
             # check the team name for the entry, then look up the members in that team, then get their datajoint user names
             team_name = (SpikeSortingParameters & (SpikeSortingParameters & entries[entry_idx]).proj()).fetch1()['team_name']
@@ -751,7 +751,7 @@ class SpikeSorting(dj.Computed):
             super(SpikeSorting, self).delete()
         else:
             print('You do not have permission to delete all specified entries. Not deleting anything.')
-    
+
     def get_stored_recording_sorting(self, key):
         """Retrieves the stored recording and sorting extractors given the key to a SpikeSorting
 
@@ -1010,7 +1010,7 @@ class SpikeSorting(dj.Computed):
 class AutomaticCurationParameters(dj.Manual):
     definition = """
     # Table for holding parameters for automatic aspects of curation
-    automatic_curation_param_name: varchar(80)   #name of this parameter set
+    automatic_curation_param_name: varchar(200)   #name of this parameter set
     ---
     automatic_curation_param_dict: BLOB         #dictionary of variables and values for automatic curation
     """
@@ -1055,14 +1055,14 @@ class CuratedSpikeSorting(dj.Computed):
         definition = """
         # Table for holding sorted units
         -> master
-        unit_id: int            # ID for each unit
+        unit_id: int                    # ID for each unit
         ---
-        label='' :              varchar(80)      # optional label for each unit
-        noise_overlap=-1 :      float    # noise overlap metric for each unit
-        nn_hit_rate=-1:         float  # isolation score metric for each unit
-        isi_violation=-1:       float # ISI violation score for each unit
-        firing_rate=-1:         float   # firing rate
-        num_spikes=-1:          int          # total number of spikes
+        label='': varchar(2000)         # optional label for each unit
+        noise_overlap=-1: float         # noise overlap metric for each unit
+        nn_hit_rate=-1: float           # isolation score metric for each unit
+        isi_violation=-1: float         # ISI violation score for each unit
+        firing_rate=-1: float           # firing rate
+        num_spikes=-1: int              # total number of spikes
         """
 
     def make(self, key):
@@ -1099,7 +1099,7 @@ class CuratedSpikeSorting(dj.Computed):
         unit_labels = labels['labelsByUnit']
         for idx, unitId in enumerate(unit_labels):
             if 'accept' in unit_labels[unitId]:
-                accepted_units.append(unitId)            
+                accepted_units.append(unitId)
 
         # remove non-primary merged units
         if labels['mergeGroups']:
@@ -1198,7 +1198,7 @@ class CuratedSpikeSorting(dj.Computed):
     #     entries = self.fetch()
     #     permission_bool = np.zeros((len(entries),))
     #     print(f'Attempting to delete {len(entries)} entries, checking permission...')
-    
+
     #     for entry_idx in range(len(entries)):
     #         # check the team name for the entry, then look up the members in that team, then get their datajoint user names
     #         team_name = (SpikeSortingParameters & (SpikeSortingParameters & entries[entry_idx]).proj()).fetch1()['team_name']
@@ -1212,7 +1212,7 @@ class CuratedSpikeSorting(dj.Computed):
     #         super(CuratedSpikeSorting, self).delete()
     #     else:
     #         print('You do not have permission to delete all specified entries. Not deleting anything.')
-        
+
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
@@ -1241,7 +1241,7 @@ class CuratedSpikeSorting(dj.Computed):
 @schema
 class UnitInclusionParameters(dj.Manual):
     definition = """
-    unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
+    unit_inclusion_param_name: varchar(200) # the name of the list of thresholds for unit inclusion
     ---
     max_noise_overlap=1:        float   # noise overlap threshold (include below)
     min_nn_hit_rate=-1:         float   # isolation score threshold (include above)

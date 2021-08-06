@@ -20,11 +20,11 @@ class Session(dj.Imported):
     -> [nullable] Subject
     -> [nullable] Institution
     -> [nullable] Lab
-    session_id = NULL: varchar(80)
-    session_description: varchar(80)
+    session_id = NULL: varchar(200)
+    session_description: varchar(2000)
     session_start_time: datetime
     timestamps_reference_time: datetime
-    experiment_description = NULL: varchar(80)
+    experiment_description = NULL: varchar(2000)
     """
 
     def make(self, key):

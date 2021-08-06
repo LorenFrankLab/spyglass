@@ -16,16 +16,16 @@ schema = dj.schema('common_filter')
 @schema
 class FirFilter(dj.Manual):
     definition = """
-    filter_name: varchar(80)    # descriptive name of this filter
-    filter_sampling_rate: int       # sampling rate for this filter
+    filter_name: varchar(200)        # descriptive name of this filter
+    filter_sampling_rate: int        # sampling rate for this filter
     ---
     filter_type: enum('lowpass', 'highpass', 'bandpass')
     filter_low_stop=0: float         # lowest frequency for stop band for low frequency side of filter
     filter_low_pass=0: float         # lowest frequency for pass band of low frequency side of filter
-    filter_high_pass=0: float         # highest frequency for pass band for high frequency side of filter
-    filter_high_stop=0: float         # highest frequency for stop band of high frequency side of filter
-    filter_comments: varchar(255)   # comments about the filter
-    filter_band_edges: blob         # numpy array containing the filter bands (redundant with individual parameters)
+    filter_high_pass=0: float        # highest frequency for pass band for high frequency side of filter
+    filter_high_stop=0: float        # highest frequency for stop band of high frequency side of filter
+    filter_comments: varchar(2000)   # comments about the filter
+    filter_band_edges: blob          # numpy array containing the filter bands (redundant with individual parameters)
     filter_coeff: blob               # numpy array containing the filter coefficients
     """
 
@@ -227,7 +227,7 @@ class FirFilter(dj.Manual):
 
             print('Filtering data')
             for ii, (start, stop) in enumerate(indices):
-                 # calculate the size of the timestamps and the data and determine whether they 
+                 # calculate the size of the timestamps and the data and determine whether they
                  # can be loaded into < 90% of available RAM
                 mem = psutil.virtual_memory()
                 interval_samples = stop-start
@@ -238,7 +238,7 @@ class FirFilter(dj.Manual):
                         data = np.asarray(data_on_disk[start:stop, :], dtype=data_dtype)
                     else:
                         data = np.asarray(data_on_disk[:, start:stop], dtype=data_dtype)
-                    
+
                     extracted_ts = timestamps[0:-1:decimation]
                     new_timestamps[ts_offset:ts_offset +
                                len(extracted_ts)] = extracted_ts

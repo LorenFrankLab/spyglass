@@ -15,9 +15,9 @@ schema = dj.schema('common_dio')
 class DIOEvents(dj.Imported):
     definition = """
     -> Session
-    dio_event_name: varchar(80)  # the name assigned to this DIO event
+    dio_event_name: varchar(200)  # the name assigned to this DIO event
     ---
-    dio_object_id: varchar(80)   # the object id of the data in the NWB file
+    dio_object_id: varchar(40)   # the object id of the data in the NWB file
     -> IntervalList              # the list of intervals for this object
     """
 

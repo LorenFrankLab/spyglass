@@ -6,13 +6,13 @@ schema = dj.schema('common_subject')
 @schema
 class Subject(dj.Manual):
     definition = """
-    subject_id: varchar(80)
+    subject_id: varchar(200)
     ---
-    age = NULL: varchar(80)
-    description = NULL: varchar(80)
-    genotype = NULL: varchar(80)
+    age = NULL: varchar(200)
+    description = NULL: varchar(2000)
+    genotype = NULL: varchar(2000)
     sex = 'U': enum('M', 'F', 'U')
-    species = NULL: varchar(80)
+    species = NULL: varchar(200)
     """
     # TODO increase length of description field (and maybe all fields, really)
 

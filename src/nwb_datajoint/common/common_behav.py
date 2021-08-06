@@ -19,8 +19,8 @@ class PositionSource(dj.Manual):
     -> Session
     -> IntervalList
     ---
-    source: varchar(40)             # source of data; current options are "trodes" and "dlc" (deep lab cut)
-    import_file_name: varchar(200)  # path to import file if importing position data
+    source: varchar(200)            # source of data; current options are "trodes" and "dlc" (deep lab cut)
+    import_file_name: varchar(2000)  # path to import file if importing position data
     """
 
     @classmethod
@@ -67,7 +67,7 @@ class RawPosition(dj.Imported):
     definition = """
     -> PositionSource
     ---
-    raw_position_object_id: varchar(80)    # the object id of the spatial series for this epoch in the NWB file
+    raw_position_object_id: varchar(40)    # the object id of the spatial series for this epoch in the NWB file
     """
 
     def make(self, key):

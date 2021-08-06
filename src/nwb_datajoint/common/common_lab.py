@@ -7,10 +7,10 @@ schema = dj.schema('common_lab')
 @schema
 class LabMember(dj.Manual):
     definition = """
-    lab_member_name: varchar(80)
+    lab_member_name: varchar(200)
     ---
-    first_name: varchar(80)
-    last_name: varchar(80)
+    first_name: varchar(200)
+    last_name: varchar(200)
     """
 
     # NOTE that names must be unique here. If there are two neuroscientists named Jack Black that have data in this
@@ -21,8 +21,8 @@ class LabMember(dj.Manual):
         # Information about lab member in the context of Frank lab network
         -> master
         ---
-        google_user_name: varchar(80)              # used for permission to curate
-        datajoint_user_name = '': varchar(80)      # used for permission to delete entries
+        google_user_name: varchar(200)              # used for permission to curate
+        datajoint_user_name = '': varchar(200)      # used for permission to delete entries
         """
 
     @classmethod
@@ -64,9 +64,9 @@ class LabMember(dj.Manual):
 @schema
 class LabTeam(dj.Manual):
     definition = """
-    team_name: varchar(80)
+    team_name: varchar(200)
     ---
-    team_description='': varchar(200)
+    team_description='': varchar(2000)
     """
 
     class LabTeamMember(dj.Part):
@@ -110,7 +110,7 @@ class LabTeam(dj.Manual):
 @schema
 class Institution(dj.Manual):
     definition = """
-    institution_name: varchar(80)
+    institution_name: varchar(200)
     ---
     """
 
@@ -141,7 +141,7 @@ class Institution(dj.Manual):
 @schema
 class Lab(dj.Manual):
     definition = """
-    lab_name: varchar(80)
+    lab_name: varchar(200)
     ---
     """
 
