@@ -2,6 +2,7 @@ import datajoint as dj
 from datetime import datetime
 import kachery as ka
 import os
+from pathlib import Path
 import pynwb
 import pytz
 import uuid
@@ -10,32 +11,33 @@ import uuid
 def test_1(tmp_path, datajoint_server):
     from nwb_datajoint.common import Session, DataAcquisitionDevice, CameraDevice, Probe
     from nwb_datajoint.data_import import insert_sessions
-    nwb_datajoint_base_dir = tmp_path / 'nwb-data'
-    os.environ['NWB_DATAJOINT_BASE_DIR'] = str(nwb_datajoint_base_dir)
-    os.environ['KACHERY_STORAGE_DIR'] = str(nwb_datajoint_base_dir / 'kachery-storage')
-    os.environ['KACHERY_STORAGE_DIR'] = str(nwb_datajoint_base_dir / 'kachery-storage')
-    os.mkdir(os.environ['NWB_DATAJOINT_BASE_DIR'])
-    os.mkdir(os.environ['KACHERY_STORAGE_DIR'])
-    os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
-
+    print(os.environ)
+    nwb_datajoint_base_dir = Path(os.environ['NWB_DATAJOINT_BASE_DIR'])
     raw_dir = nwb_datajoint_base_dir / 'raw'
-    analysis_dir = nwb_datajoint_base_dir / 'analysis'
-    os.mkdir(raw_dir)
-    os.mkdir(analysis_dir)
-
-    dj.config['stores'] = {
-        'raw': {
-            'protocol': 'file',
-            'location': str(raw_dir),
-            'stage': str(raw_dir)
-        },
-        'analysis': {
-            'protocol': 'file',
-            'location': str(analysis_dir),
-            'stage': str(analysis_dir)
-        }
-    }
-
+    # os.environ['NWB_DATAJOINT_BASE_DIR'] = str(nwb_datajoint_base_dir)
+    # os.environ['KACHERY_STORAGE_DIR'] = str(nwb_datajoint_base_dir / 'kachery-storage')
+    # os.mkdir(os.environ['NWB_DATAJOINT_BASE_DIR'])
+    # os.mkdir(os.environ['KACHERY_STORAGE_DIR'])
+    # os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
+    #
+    # raw_dir = nwb_datajoint_base_dir / 'raw'
+    # analysis_dir = nwb_datajoint_base_dir / 'analysis'
+    # os.mkdir(raw_dir)
+    # os.mkdir(analysis_dir)
+    #
+    # dj.config['stores'] = {
+    #     'raw': {
+    #         'protocol': 'file',
+    #         'location': str(raw_dir),
+    #         'stage': str(raw_dir)
+    #     },
+    #     'analysis': {
+    #         'protocol': 'file',
+    #         'location': str(analysis_dir),
+    #         'stage': str(analysis_dir)
+    #     }
+    # }
+    #
     nwb_fname = str(raw_dir / 'test.nwb')
 
     with ka.config(fr='default_readonly'):
