@@ -13,8 +13,10 @@ def test_1(tmp_path, datajoint_server):
     nwb_datajoint_base_dir = tmp_path / 'nwb-data'
     os.environ['NWB_DATAJOINT_BASE_DIR'] = str(nwb_datajoint_base_dir)
     os.environ['KACHERY_STORAGE_DIR'] = str(nwb_datajoint_base_dir / 'kachery-storage')
+    os.environ['KACHERY_STORAGE_DIR'] = str(nwb_datajoint_base_dir / 'kachery-storage')
     os.mkdir(os.environ['NWB_DATAJOINT_BASE_DIR'])
     os.mkdir(os.environ['KACHERY_STORAGE_DIR'])
+    os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
 
     raw_dir = nwb_datajoint_base_dir / 'raw'
     analysis_dir = nwb_datajoint_base_dir / 'analysis'
