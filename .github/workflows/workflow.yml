@@ -3,7 +3,7 @@ name: Import test
 on: push
 
 jobs:
-  run:
+  run-tests:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -11,6 +11,9 @@ jobs:
     env:
       OS: ${{ matrix.os }}
       PYTHON: '3.8'
+      NWB_DATAJOINT_BASE_DIR: ./data
+      KACHERY_STORAGE_DIR: ./data/kachery-storage
+      DJ_SUPPORT_FILEPATH_MANAGEMENT: True
     services:
       datajoint_test_server:
         image: datajoint/mysql
@@ -45,20 +48,16 @@ jobs:
         pip install -e .
     - name: Set up data directories
       run: |
-        mkdir ./data
-        mkdir ./data/kachery-storage
-        mkdir ./data/raw
-        mkdir ./data/analysis
+        mkdir ${NWB_DATAJOINT_BASE_DIR}
+        mkdir ${KACHERY_STORAGE_DIR}
+        mkdir "${NWB_DATAJOINT_BASE_DIR}/raw"
+        mkdir "${NWB_DATAJOINT_BASE_DIR}/analysis"
     - name: Configure datajoint and test importing nwb_datajoint
       shell: bash -l {0}
       run: |
         conda activate nwb_datajoint
         python tests/ci_config.py  # configure datajoint
         python -c "import nwb_datajoint; import nwb_datajoint.common"  # test import
-      env:
-        NWB_DATAJOINT_BASE_DIR: ./data
-        KACHERY_STORAGE_DIR: ./data/kachery-storage
-        DJ_SUPPORT_FILEPATH_MANAGEMENT: True
     - name: Run tests
       shell: bash -l {0}
       run: |
