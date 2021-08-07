@@ -45,18 +45,18 @@ def test_1(tmp_path, datajoint_server):
     from nwb_datajoint.data_import import insert_sessions
 
     raw_dir = _set_up_env(tmp_path)
-    nwb_fname = raw_dir / 'test.nwb'
+    nwbfile_path = raw_dir / 'test.nwb'
 
     with ka.config(fr='default_readonly'):
         ka.load_file('sha1://8ed68285c327b3766402ee75730d87994ac87e87/beans20190718_no_eseries_no_behavior.nwb',
-                     dest=str(nwb_fname))
+                     dest=str(nwbfile_path))
 
     # test that the file can be read. this is not used otherwise
-    with pynwb.NWBHDF5IO(path=nwb_fname, mode='r', load_namespaces=True) as io:
+    with pynwb.NWBHDF5IO(path=str(nwbfile_path), mode='r', load_namespaces=True) as io:
         nwbfile = io.read()
         assert nwbfile is not None
 
-    insert_sessions(nwb_fname.name)
+    insert_sessions(nwbfile_path.name)
 
     x = (Session() & {'nwb_file_name': 'test_.nwb'}).fetch1()
     assert x['nwb_file_name'] == 'test_.nwb'
