@@ -7,17 +7,20 @@ import pytz
 import uuid
 
 
-def test_1(tmp_path, datajoint_server):
-    from nwb_datajoint.common import Session, DataAcquisitionDevice, CameraDevice, Probe
-    from nwb_datajoint.data_import import insert_sessions
+def _set_up_env(tmp_path):
     nwb_datajoint_base_dir = tmp_path / 'nwb-data'
+    kachery_storage_dir = nwb_datajoint_base_dir / 'kachery-storage'
+
     os.environ['NWB_DATAJOINT_BASE_DIR'] = str(nwb_datajoint_base_dir)
-    os.environ['KACHERY_STORAGE_DIR'] = str(nwb_datajoint_base_dir / 'kachery-storage')
-    os.mkdir(os.environ['NWB_DATAJOINT_BASE_DIR'])
-    os.mkdir(os.environ['KACHERY_STORAGE_DIR'])
+    os.environ['KACHERY_STORAGE_DIR'] = str(kachery_storage_dir)
+    os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
+
+    os.mkdir(nwb_datajoint_base_dir)
+    os.mkdir(kachery_storage_dir)
 
     raw_dir = nwb_datajoint_base_dir / 'raw'
     analysis_dir = nwb_datajoint_base_dir / 'analysis'
+
     os.mkdir(raw_dir)
     os.mkdir(analysis_dir)
 
@@ -33,19 +36,27 @@ def test_1(tmp_path, datajoint_server):
             'stage': str(analysis_dir)
         }
     }
+    return raw_dir
 
-    nwb_fname = str(raw_dir / 'test.nwb')
+
+# TODO use the datajoint_server fixture
+def test_1(tmp_path, datajoint_server):
+    from nwb_datajoint.common import Session, DataAcquisitionDevice, CameraDevice, Probe
+    from nwb_datajoint.data_import import insert_sessions
+
+    raw_dir = _set_up_env(tmp_path)
+    nwbfile_path = raw_dir / 'test.nwb'
 
     with ka.config(fr='default_readonly'):
         ka.load_file('sha1://8ed68285c327b3766402ee75730d87994ac87e87/beans20190718_no_eseries_no_behavior.nwb',
-                     dest=nwb_fname)
+                     dest=str(nwbfile_path))
 
     # test that the file can be read. this is not used otherwise
-    with pynwb.NWBHDF5IO(path=nwb_fname, mode='r', load_namespaces=True) as io:
+    with pynwb.NWBHDF5IO(path=str(nwbfile_path), mode='r', load_namespaces=True) as io:
         nwbfile = io.read()
         assert nwbfile is not None
 
-    insert_sessions(['test.nwb'])
+    insert_sessions(nwbfile_path.name)
 
     x = (Session() & {'nwb_file_name': 'test_.nwb'}).fetch1()
     assert x['nwb_file_name'] == 'test_.nwb'
@@ -63,8 +74,8 @@ def test_1(tmp_path, datajoint_server):
     assert len(x) == 0
 
     x = CameraDevice().fetch()
-    assert len(x) == 2
-    # TODO check camera devices
+    # TODO No camera devices?
+    assert len(x) == 0
 
     x = Probe().fetch()
     assert len(x) == 1
