@@ -22,7 +22,7 @@ class LabMember(dj.Manual):
         -> master
         ---
         google_user_name: varchar(200)              # used for permission to curate
-        datajoint_user_name = '': varchar(200)      # used for permission to delete entries
+        datajoint_user_name = "": varchar(200)      # used for permission to delete entries
         """
 
     @classmethod
@@ -66,7 +66,7 @@ class LabTeam(dj.Manual):
     definition = """
     team_name: varchar(200)
     ---
-    team_description='': varchar(2000)
+    team_description = "": varchar(2000)
     """
 
     class LabTeamMember(dj.Part):

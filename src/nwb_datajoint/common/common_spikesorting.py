@@ -434,7 +434,7 @@ class SpikeSortingArtifactParameters(dj.Manual):
     # Table for holding parameters related to artifact detection
     artifact_param_name: varchar(200) #name for this set of parameters
     ---
-    parameter_dict: BLOB    # dictionary of parameters for get_no_artifact_times() function
+    parameter_dict: blob    # dictionary of parameters for get_no_artifact_times() function
     """
 
     def get_no_artifact_times(self, recording, zscore_thresh=-1.0, amplitude_thresh=-1.0,
@@ -504,7 +504,7 @@ class SpikeSortingParameters(dj.Manual):
     -> SpikeSortingMetrics
     -> IntervalList
     -> LabTeam
-    import_path = '': varchar(2000) # optional path to previous curated sorting output
+    import_path = "": varchar(2000) # optional path to previous curated sorting output
     """
 
 
@@ -517,7 +517,7 @@ class SpikeSorting(dj.Computed):
     -> AnalysisNwbfile
     units_object_id: varchar(40)           # Object ID for the units in NWB file
     time_of_sort=0: int                    # This is when the sort was done
-    curation_feed_uri='': varchar(2000)    # Labbox-ephys feed for curation
+    curation_feed_uri="": varchar(2000)    # Labbox-ephys feed for curation
     """
 
     def make(self, key):
@@ -1012,7 +1012,7 @@ class AutomaticCurationParameters(dj.Manual):
     # Table for holding parameters for automatic aspects of curation
     automatic_curation_param_name: varchar(200)   #name of this parameter set
     ---
-    automatic_curation_param_dict: BLOB         #dictionary of variables and values for automatic curation
+    automatic_curation_param_dict: blob         #dictionary of variables and values for automatic curation
     """
 
 
@@ -1031,7 +1031,7 @@ class AutomaticCurationSpikeSorting(dj.Computed):
     # Table for holding the output of automated curation applied to each spike sorting
     -> AutomaticCurationSpikeSortingParameters
     ---
-    automatic_curation_results_dict=NULL: BLOB       #dictionary of outputs from automatic curation
+    automatic_curation_results_dict=NULL: blob       #dictionary of outputs from automatic curation
     """
 
     def make(self, key):
@@ -1249,7 +1249,7 @@ class UnitInclusionParameters(dj.Manual):
     min_firing_rate=0:          float   # minimum firing rate threshold
     max_firing_rate=100000:     float   # maximum fring rate thershold
     min_num_spikes=0:           int     # minimum total number of spikes
-    exclude_label_list=NULL:    BLOB    # list of labels to EXCLUDE
+    exclude_label_list=NULL:    blob    # list of labels to EXCLUDE
     """
 
     def get_included_units(self, curated_sorting_key, unit_inclusion_key):

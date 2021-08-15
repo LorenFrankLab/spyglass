@@ -19,7 +19,7 @@ class FirFilter(dj.Manual):
     filter_name: varchar(200)        # descriptive name of this filter
     filter_sampling_rate: int        # sampling rate for this filter
     ---
-    filter_type: enum('lowpass', 'highpass', 'bandpass')
+    filter_type: enum('lowpass", "highpass", "bandpass")
     filter_low_stop=0: float         # lowest frequency for stop band for low frequency side of filter
     filter_low_pass=0: float         # lowest frequency for pass band of low frequency side of filter
     filter_high_pass=0: float        # highest frequency for pass band for high frequency side of filter

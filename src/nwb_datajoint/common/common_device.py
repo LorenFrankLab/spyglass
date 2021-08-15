@@ -9,8 +9,8 @@ class DataAcquisitionDevice(dj.Manual):
     definition = """
     device_name: varchar(200)
     ---
-    system = 'Other': enum('SpikeGadgets','TDT_Rig1','TDT_Rig2','PCS','RCS','RNS','NeuroOmega','Other')
-    amplifier = 'Other': enum('Intan','PZ5_Amp1','PZ5_Amp2','Other')
+    system = "Other": enum("SpikeGadgets","TDT_Rig1","TDT_Rig2","PCS","RCS","RNS","NeuroOmega","Other")
+    amplifier = "Other": enum("Intan","PZ5_Amp1","PZ5_Amp2","Other")
     adc_circuit = NULL: varchar(2000)
     """
 
@@ -52,9 +52,9 @@ class CameraDevice(dj.Manual):
     camera_name: varchar(200)
     ---
     meters_per_pixel = 0: float  # height / width of pixel in meters
-    manufacturer = '': varchar(2000)
-    model = '': varchar(2000)
-    lens = '': varchar(2000)
+    manufacturer = "": varchar(2000)
+    model = "": varchar(2000)
+    lens = "": varchar(2000)
     camera_id = -1: int
     """
 
@@ -101,7 +101,7 @@ class Probe(dj.Manual):
     ---
     probe_description: varchar(2000)               # description of this probe
     num_shanks: int                                # number of shanks on this device
-    contact_side_numbering: enum('True', 'False')  # electrode numbers from contact side of the device
+    contact_side_numbering: enum("True", "False")  # electrode numbers from contact side of the device
     """
 
     class Shank(dj.Part):
@@ -116,12 +116,12 @@ class Probe(dj.Manual):
     class Electrode(dj.Part):
         definition = """
         -> master.Shank
-        probe_electrode: int        # electrode
+        probe_electrode: int          # electrode
         ---
-        contact_size=NULL: float    # (um) contact size
-        rel_x=NULL: float           # (um) x coordinate of the electrode within the probe
-        rel_y=NULL: float           # (um) y coordinate of the electrode within the probe
-        rel_z=NULL: float           # (um) z coordinate of the electrode within the probe
+        contact_size = NULL: float    # (um) contact size
+        rel_x = NULL: float           # (um) x coordinate of the electrode within the probe
+        rel_y = NULL: float           # (um) y coordinate of the electrode within the probe
+        rel_z = NULL: float           # (um) z coordinate of the electrode within the probe
         """
 
         # value for probe_type if ndx_franklab_novela.Probe data type is not present in the NWB file

@@ -30,7 +30,7 @@ class ElectrodeGroup(dj.Imported):
     -> BrainRegion
     -> [nullable] Probe
     description: varchar(2000)  # description of electrode group
-    target_hemisphere: enum('Right','Left')
+    target_hemisphere: enum("Right","Left")
     """
 
     def make(self, key):
@@ -61,18 +61,18 @@ class Electrode(dj.Imported):
     ---
     -> [nullable] Probe.Electrode
     -> BrainRegion
-    name='': varchar(200)                  # unique label for each contact
-    original_reference_electrode=-1: int   # the configured reference electrode for this electrode
-    x=NULL: float                          # the x coordinate of the electrode position in the brain
-    y=NULL: float                          # the y coordinate of the electrode position in the brain
-    z=NULL: float                          # the z coordinate of the electrode position in the brain
-    filtering: varchar(2000)               # description of the signal filtering
-    impedance=null: float                  # electrode impedance
-    bad_channel: enum("True","False")      # if electrode is 'good' or 'bad' as observed during recording
-    x_warped=NULL: float                   # x coordinate of electrode position warped to common template brain
-    y_warped=NULL: float                   # y coordinate of electrode position warped to common template brain
-    z_warped=NULL: float                   # z coordinate of electrode position warped to common template brain
-    contacts: varchar(200)                 # label of electrode contacts used for a bipolar signal -- current workaround
+    name = "": varchar(200)                 # unique label for each contact
+    original_reference_electrode = -1: int  # the configured reference electrode for this electrode
+    x = NULL: float                         # the x coordinate of the electrode position in the brain
+    y = NULL: float                         # the y coordinate of the electrode position in the brain
+    z = NULL: float                         # the z coordinate of the electrode position in the brain
+    filtering: varchar(2000)                # description of the signal filtering
+    impedance = null: float                 # electrode impedance
+    bad_channel: enum("True","False")       # if electrode is "good" or "bad" as observed during recording
+    x_warped = NULL: float                  # x coordinate of electrode position warped to common template brain
+    y_warped = NULL: float                  # y coordinate of electrode position warped to common template brain
+    z_warped = NULL: float                  # z coordinate of electrode position warped to common template brain
+    contacts: varchar(200)                  # label of electrode contacts used for a bipolar signal - current workaround
     """
 
     def make(self, key):

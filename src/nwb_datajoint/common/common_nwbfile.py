@@ -108,7 +108,7 @@ class AnalysisNwbfile(dj.Manual):
     ---
     -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
     analysis_file_abs_path: filepath@analysis      # the full path to the file
-    analysis_file_description = '': varchar(2000)  # an optional description of this analysis
+    analysis_file_description = "": varchar(2000)  # an optional description of this analysis
     analysis_parameters = NULL: blob               # additional relevant parmeters. Currently used only for analyses
                                                    # that span multiple NWB files
     """

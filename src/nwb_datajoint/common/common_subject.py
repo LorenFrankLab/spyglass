@@ -11,7 +11,7 @@ class Subject(dj.Manual):
     age = NULL: varchar(200)
     description = NULL: varchar(2000)
     genotype = NULL: varchar(2000)
-    sex = 'U': enum('M', 'F', 'U')
+    sex = "U": enum("M", "F", "U")
     species = NULL: varchar(200)
     """
     # TODO increase length of description field (and maybe all fields, really)
