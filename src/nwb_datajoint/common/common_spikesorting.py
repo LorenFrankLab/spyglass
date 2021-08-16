@@ -1057,7 +1057,7 @@ class CuratedSpikeSorting(dj.Computed):
         -> master
         unit_id: int                    # ID for each unit
         ---
-        label='': varchar(2000)         # optional label for each unit
+        label="": varchar(200)          # optional label for each unit
         noise_overlap=-1: float         # noise overlap metric for each unit
         nn_hit_rate=-1: float           # isolation score metric for each unit
         isi_violation=-1: float         # ISI violation score for each unit
