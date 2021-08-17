@@ -37,22 +37,23 @@ def close_nwb_files():
     __open_nwb_files.clear()
 
 
-def get_data_interface(nwbfile, data_interface_name, data_interface_class=pynwb.core.NWBDataInterface):
-    """Search for a specified data interface in the processing modules of an NWB file.
+def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
+    """Search for a specified NWBDataInterface or DynamicTable in the processing modules of an NWB file.
 
     Parameters
     ----------
     nwbfile : pynwb.NWBFile
         The NWB file object to search in.
     data_interface_name : str
-        The name of the NWBDataInterface to search for.
+        The name of the NWBDataInterface or DynamicTable to search for.
     data_interface_class : type, optional
-        The class (or superclass) of the NWBDataInterface to search for (default: pynwb.core.NWBDataInterface).
+        The class (or superclass) to search for. This argument helps to prevent accessing an object with the same
+        name but the incorrect type. Default: no restriction.
 
     Warns
     -----
     UserWarning
-        If multiple data interfaces with the matching name are found.
+        If multiple NWBDataInterface and DynamicTable objects with the matching name are found.
 
     Returns
     -------
@@ -62,11 +63,14 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=pynwb.
     ret = []
     for module in nwbfile.processing.values():
         match = module.data_interfaces.get(data_interface_name, None)
-        if match is not None and isinstance(match, data_interface_class):
+        if match is not None:
+            if data_interface_class is not None and not isinstance(match, data_interface_class):
+                continue
             ret.append(match)
     if len(ret) > 1:
-        warnings.warn(f"Multiple data interfaces with name '{data_interface_name}' and class {data_interface_class} "
-                      f"found in NWBFile with identifier {nwbfile.identifier}. Using the first one found.")
+        warnings.warn(f"Multiple data interfaces with name '{data_interface_name}' "
+                      f"found in NWBFile with identifier {nwbfile.identifier}. Using the first one found. "
+                      "Use the data_interface_class argument to restrict the search.")
     if len(ret) >= 1:
         return ret[0]
     else:
