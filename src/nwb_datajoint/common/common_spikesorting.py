@@ -1022,6 +1022,7 @@ class AutomaticCurationSpikeSortingParameters(dj.Manual):
     # Table for holding the output
     -> AutomaticCurationParameters
     -> SpikeSorting
+    -> SpikeSortingMetrics(cluster_metrics_list_name='auto_curate_cluster_metrics_list_name')
     """
 
 
@@ -1047,6 +1048,8 @@ class CuratedSpikeSorting(dj.Computed):
     # Table for holding the output of fully curated spike sorting
     -> AutomaticCurationSpikeSorting
     ---
+    -> SpikeSortingMetrics(cluster_metrics_list_name='final_cluster_metrics_list_name')
+
     -> AnalysisNwbfile    # New analysis NWB file to hold unit info
     units_object_id: varchar(40)           # Object ID for the units in NWB file
     """
