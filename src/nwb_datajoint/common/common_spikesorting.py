@@ -27,7 +27,7 @@ from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
-
+from .utils import add_to_sortingview_workspace, set_workspace_permission
 
 class Timer:
     """
@@ -653,82 +653,21 @@ class SpikeSorting(dj.Computed):
         key['units_object_id'] = units_object_id
 
         print('\nGenerating feed for curation...')
-        extractor_nwb_uri = kc.link_file(extractor_nwb_path)
-        print(
-            f'kachery URI for symbolic link to extractor NWB file: {extractor_nwb_uri}')
-
-        # create workspace
         workspace_name = key['analysis_file_name']
-        workspace_uri = kc.get(workspace_name)
-        if not workspace_uri:
-            workspace_uri = sortingview.create_workspace(label=workspace_name).uri
-            kc.set(workspace_name, workspace_uri)
-        workspace = sortingview.load_workspace(workspace_uri)
-        print(f'Workspace URI: {workspace.uri}')
-        
         recording_label = key['nwb_file_name'] + '_' + \
             key['sort_interval_name'] + '_' + str(key['sort_group_id'])
         sorting_label = key['sorter_name'] + '_' + key['parameter_set_name']
-        
-        # put kachery sha1 hash instead of path
-        recording_uri = kc.store_json({
-            'recording_format': 'nwb',
-            'data': {
-                'path': extractor_nwb_uri
-            }
-        })
-        sorting_uri = kc.store_json({
-            'sorting_format': 'nwb',
-            'data': {
-                'path': extractor_nwb_uri
-            }
-        })
-
-        sorting = sortingview.LabboxEphysSortingExtractor(sorting_uri)
-        recording = sortingview.LabboxEphysRecordingExtractor(recording_uri, download=True)
-
-        R_id = workspace.add_recording(recording=recording, label=recording_label)
-        S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
-
-        key['curation_feed_uri'] = workspace.uri
-
-        # Set external metrics that will appear in the units table
-        external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
-                             'data': metrics[metric].to_dict()} for metric in metrics.columns]
-        # change unit id to string
-        for metric_ind in range(len(external_metrics)):
-            for old_unit_id in metrics.index:
-                external_metrics[metric_ind]['data'][str(
-                    old_unit_id)] = external_metrics[metric_ind]['data'].pop(old_unit_id)
-                # change nan to none so that json can handle it
-                if np.isnan(external_metrics[metric_ind]['data'][str(old_unit_id)]):
-                    external_metrics[metric_ind]['data'][str(old_unit_id)] = None
-        workspace.set_unit_metrics_for_sorting(
-            sorting_id=S_id, metrics=external_metrics)
-        
-        workspace_list = sortingview.WorkspaceList(list_name='default')
-        workspace_list.add_workspace(name=workspace_name, workspace=workspace)
-        print('Workspace added to sortingview')
-
-        print(f'To curate the spike sorting, go to https://sortingview.vercel.app/workspace?workspace={workspace.uri}&channel=franklab')
+        workspace_uri = add_to_sortingview_workspace(workspace_name, recording_label, sorting_label, extractor_nwb_path, metrics=metrics)
+                
+        key['curation_feed_uri'] = workspace_uri
         
         # Give permission to workspace based on Google account
         team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
-        if len(team_members)==0:
-            raise ValueError('The specified team does not exist or there are no members in the team;\
-                             create or change the entry in LabTeam table first')
-        workspace = sortingview.load_workspace(workspace_uri)
-        for team_member in team_members:
-            google_user_id = (LabMember.LabMemberInfo & {'lab_member_name':team_member}).fetch('google_user_name')  
-            if len(google_user_id)!=1:
-                print(f'Google user ID for {team_member} does not exist or more than one ID detected;\
-                        permission to curate not given to {team_member}, skipping...')              
-            workspace.set_user_permissions(google_user_id[0], {'edit': True})
-            print(f'Permissions for {google_user_id[0]} set to: {workspace.get_user_permissions(google_user_id[0])}')
-    
+        set_workspace_permission(workspace_name, team_members)
+        
         self.insert1(key)
         print('\nDone - entry inserted to table.')
-
+      
     def delete(self):
         """
         Extends the delete method of base class to implement permission checking
