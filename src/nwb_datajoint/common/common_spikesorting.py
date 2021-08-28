@@ -735,7 +735,7 @@ class SpikeSorting(dj.Computed):
         entries = self.fetch()
         permission_bool = np.zeros((len(entries),))
         print(f'Attempting to delete {len(entries)} entries, checking permission...')
-    
+
         for entry_idx in range(len(entries)):
             # check the team name for the entry, then look up the members in that team, then get their datajoint user names
             team_name = (SpikeSortingParameters & (SpikeSortingParameters & entries[entry_idx]).proj()).fetch1()['team_name']
@@ -744,6 +744,7 @@ class SpikeSorting(dj.Computed):
             for lab_member_name in lab_member_name_list:
                 datajoint_user_names.append((LabMember.LabMemberInfo & {'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
             permission_bool[entry_idx] = current_user_name in datajoint_user_names
+            print(current_user_name, datajoint_user_names)
         if np.sum(permission_bool)==len(entries):
             print('Permission to delete all specified entries granted.')
             super().delete()
@@ -816,9 +817,7 @@ class SpikeSorting(dj.Computed):
                                              'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
 
             sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
-            assert sort_indices[1] - \
-                sort_indices[
-                    0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
+            assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
 
             electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
                                                              'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
@@ -1077,10 +1076,30 @@ class AutomaticCurationSpikeSorting(dj.Computed):
                 cluster_metrics_list_name = (AutomaticCurationSpikeSortingParameters & key).fetch1('automatic_curation_cluster_metrics_list_name')
                 metrics = SpikeSortingMetrics().compute_metrics(cluster_metrics_list_name, metrics_recording, sorting)  
             
+        
             # add a duplicate sorting with the new metrics
-            sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' + cluster_metrics_list_name
-            S_id = workspace.add_sorting(sorting=sorting, recording_id=workspace.recording_ids[0], 
-                                         label=sorting_label)
+            #sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' + cluster_metrics_list_name
+            #S_id = workspace.add_sorting(sorting=sorting, recording_id=workspace.recording_ids[0], 
+            #                             label=sorting_label)
+            #TEST
+            S_id = sorting_id
+
+             # Set external metrics that will appear in the units table
+            external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
+                                'data': metrics[metric].to_dict()} for metric in metrics.columns]
+            # change unit id to string
+            for metric_ind in range(len(external_metrics)):
+                for old_unit_id in metrics.index:
+                    external_metrics[metric_ind]['data'][str(
+                        old_unit_id)] = external_metrics[metric_ind]['data'].pop(old_unit_id)
+                    # change nan to none so that json can handle it
+                    if np.isnan(external_metrics[metric_ind]['data'][str(old_unit_id)]):
+                        external_metrics[metric_ind]['data'][str(old_unit_id)] = None
+            workspace.set_unit_metrics_for_sorting(
+                        sorting_id=S_id, metrics=external_metrics)    
+
+            print(f'To curate the spike sorting, go to https://sortingview.vercel.app/workspace?workspace={workspace.uri}&channel=franklab')
+
             # 3. Save the units and their updated metrics
             # load the AnalysisNWBFile from the original sort to get the sort_interval_valid times and the sort_interval
             orig_units = (SpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
