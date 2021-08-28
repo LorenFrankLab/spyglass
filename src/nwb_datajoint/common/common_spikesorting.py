@@ -735,7 +735,7 @@ class SpikeSorting(dj.Computed):
         entries = self.fetch()
         permission_bool = np.zeros((len(entries),))
         print(f'Attempting to delete {len(entries)} entries, checking permission...')
-
+    
         for entry_idx in range(len(entries)):
             # check the team name for the entry, then look up the members in that team, then get their datajoint user names
             team_name = (SpikeSortingParameters & (SpikeSortingParameters & entries[entry_idx]).proj()).fetch1()['team_name']
@@ -744,7 +744,6 @@ class SpikeSorting(dj.Computed):
             for lab_member_name in lab_member_name_list:
                 datajoint_user_names.append((LabMember.LabMemberInfo & {'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
             permission_bool[entry_idx] = current_user_name in datajoint_user_names
-            print(current_user_name, datajoint_user_names)
         if np.sum(permission_bool)==len(entries):
             print('Permission to delete all specified entries granted.')
             super().delete()
@@ -1038,7 +1037,6 @@ class AutomaticCurationSpikeSorting(dj.Computed):
     """
 
     def make(self, key):
-        print(key)
         auto_curate_param_dict = (AutomaticCurationParameters & key).fetch1('automatic_curation_param_dict')
         # TODO: add burst parent detection and noise waveform detection
 
@@ -1078,11 +1076,11 @@ class AutomaticCurationSpikeSorting(dj.Computed):
             
         
             # add a duplicate sorting with the new metrics
-            #sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' + cluster_metrics_list_name
-            #S_id = workspace.add_sorting(sorting=sorting, recording_id=workspace.recording_ids[0], 
-            #                             label=sorting_label)
+            sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' + cluster_metrics_list_name
+            S_id = workspace.add_sorting(sorting=sorting, recording_id=workspace.recording_ids[0], 
+                                         label=sorting_label)
             #TEST
-            S_id = sorting_id
+            #S_id = sorting_id
 
              # Set external metrics that will appear in the units table
             external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
@@ -1238,8 +1236,7 @@ class CuratedSpikeSorting(dj.Computed):
                                                     'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
             recording = st.preprocessing.whiten(
                 recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
-            cluster_metrics_list_name = (SpikeSortingParameters & tmp_key).fetch1(
-                'cluster_metrics_list_name')
+            cluster_metrics_list_name = (CuratedSpikeSortingParameters & key).fetch1('final_cluster_metrics_list_name')
             metrics = SpikeSortingMetrics().compute_metrics(cluster_metrics_list_name, recording, sorting)
 
         # Limit the metrics to accepted units
