@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -167,7 +168,7 @@ class SortGroup(dj.Manual):
         '''
         key = dict()
         key['nwb_file_name'] = nwb_file_name
-        sort_group_list = (SortGroup() & key).fetch('sort_group_id')
+        sort_group_list = (SortGroup() & key).fetch1()
         for sort_group in sort_group_list:
             key['sort_group_id'] = sort_group
             self.SortGroupElectrode().insert(dj_replace(sort_group_list, sort_group_ref_list,
@@ -403,14 +404,13 @@ class SpikeSortingMetrics(dj.Manual):
                 valid = False
         return valid
 
-    def compute_metrics(self, key, recording, sorting):
+    def compute_metrics(self, cluster_metrics_list_name, recording, sorting):
         """
         Use spikeinterface to compute the list of selected metrics for a sorting
 
         Parameters
         ----------
-        key: str
-            cluster_metrics_list_name from SpikeSortingParameters
+        cluster_metrics_list_name: str
         recording: spikeinterface RecordingExtractor
         sorting: spikeinterface SortingExtractor
 
@@ -418,7 +418,7 @@ class SpikeSortingMetrics(dj.Manual):
         -------
         metrics: pandas.dataframe
         """
-        m = (self & {'cluster_metrics_list_name': key}).fetch1()
+        m = (self & {'cluster_metrics_list_name': cluster_metrics_list_name}).fetch1()
 
         return st.validation.compute_quality_metrics(sorting=sorting,
                                                      recording=recording,
@@ -518,6 +518,7 @@ class SpikeSorting(dj.Computed):
     units_object_id: varchar(40)           # Object ID for the units in NWB file
     time_of_sort=0: int                    # This is when the sort was done
     curation_feed_uri='': varchar(1000)    # Labbox-ephys feed for curation
+    sorting_id='none': varchar(20)         # the sorting id of the  sorting that was added
     """
 
     def make(self, key):
@@ -600,7 +601,7 @@ class SpikeSorting(dj.Computed):
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
-        with Timer(label=f'whiteneing', verbose=True):
+        with Timer(label=f'whitening', verbose=True):
             filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                       'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
             recording = st.preprocessing.whiten(
@@ -624,12 +625,9 @@ class SpikeSorting(dj.Computed):
         with Timer(label='computing quality metrics', verbose=True):
             # tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
             # metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
-            metrics_key = (SpikeSortingParameters & key).fetch1(
+            cluster_metrics_list_name = (SpikeSortingParameters & key).fetch1(
                 'cluster_metrics_list_name')
-            metric_info = (SpikeSortingMetrics & {
-                           'cluster_metrics_list_name': metrics_key}).fetch1()
-            print(metric_info)
-            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+            metrics = SpikeSortingMetrics().compute_metrics(cluster_metrics_list_name, recording, sorting)
 
         print('\nSaving sorting results...')
         units = dict()
@@ -643,7 +641,6 @@ class SpikeSorting(dj.Computed):
             units_valid_times[unit_id] = sort_interval_valid_times
             units_sort_interval[unit_id] = [sort_interval]
 
-        # TODO: consider replacing with spikeinterface call if possible
         units_object_id, _ = AnalysisNwbfile().add_units(key['analysis_file_name'],
                                                          units, units_valid_times,
                                                          units_sort_interval,
@@ -757,9 +754,7 @@ class SpikeSorting(dj.Computed):
                                              'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
 
             sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
-            assert sort_indices[1] - \
-                sort_indices[
-                    0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
+            assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
 
             electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
                                                              'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
@@ -961,6 +956,8 @@ class AutomaticCurationSpikeSortingParameters(dj.Manual):
     # Table for holding the output
     -> AutomaticCurationParameters
     -> SpikeSorting
+    ---
+    -> SpikeSortingMetrics.proj(automatic_curation_cluster_metrics_list_name='cluster_metrics_list_name')
     """
 
 
@@ -970,21 +967,128 @@ class AutomaticCurationSpikeSorting(dj.Computed):
     # Table for holding the output of automated curation applied to each spike sorting
     -> AutomaticCurationSpikeSortingParameters
     ---
+    -> AnalysisNwbfile
+    units_object_id: varchar(40)           # Object ID for the units in NWB file
+    curation_feed_uri='': varchar(1000)    # sortingview / figurl feed for curation; duplicated from SpikeSorting
+    sorting_id: varchar(20)                # the sorting id of the new sorting that was added
     automatic_curation_results_dict=NULL: BLOB       #dictionary of outputs from automatic curation
     """
 
     def make(self, key):
-        print(key)
+        auto_curate_param_dict = (AutomaticCurationParameters & key).fetch1('automatic_curation_param_dict')
         # TODO: add burst parent detection and noise waveform detection
+
         key['automatic_curation_results_dict'] = dict()
+        ss_key = (SpikeSorting & key).fetch1()
+        key['curation_feed_uri'] = ss_key['curation_feed_uri']
+
+        # check to see if there are updated metrics
+        auto_curate_metrics_list = (AutomaticCurationSpikeSortingParameters() & key).fetch1('automatic_curation_cluster_metrics_list_name')
+        orig_metrics_list = (SpikeSortingParameters() & key).fetch1('cluster_metrics_list_name')
+        
+        if auto_curate_metrics_list != orig_metrics_list:
+            #TODO: replace code below and in CuratedSpikeSorting with function calls to avoid duplication
+            # get the recording and the sorting from the workspace
+            workspace = sortingview.load_workspace(ss_key['curation_feed_uri'])
+            sorting_id = ss_key['sorting_id']
+            # check to see if there are multiple sortings, and if so, get just the first one
+            if sorting_id == 'none':
+                print(f'AutomaticCurationSpikeSorting: no sorting_id in SpikeSorting, using the first sorting.')
+                sorting = workspace.get_sorting_extractor(workspace.sorting_ids[0])
+            else:
+                sorting = workspace.get_sorting_extractor(sorting_id)
+
+            recording = workspace.get_recording_extractor(workspace.recording_ids[0]) 
+
+            #whiten the recording     
+            with Timer(label=f'whitening and computing new quality metrics', verbose=True):
+                filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+                                                        'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
+                recording = st.preprocessing.whiten(
+                    recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
+
+                tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
+                metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
+                cluster_metrics_list_name = (AutomaticCurationSpikeSortingParameters & key).fetch1('automatic_curation_cluster_metrics_list_name')
+                metrics = SpikeSortingMetrics().compute_metrics(cluster_metrics_list_name, metrics_recording, sorting)  
+            
+        
+            # add a duplicate sorting with the new metrics
+            sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' + cluster_metrics_list_name
+            S_id = workspace.add_sorting(sorting=sorting, recording_id=workspace.recording_ids[0], 
+                                         label=sorting_label)
+            #TEST
+            #S_id = sorting_id
+
+             # Set external metrics that will appear in the units table
+            external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
+                                'data': metrics[metric].to_dict()} for metric in metrics.columns]
+            # change unit id to string
+            for metric_ind in range(len(external_metrics)):
+                for old_unit_id in metrics.index:
+                    external_metrics[metric_ind]['data'][str(
+                        old_unit_id)] = external_metrics[metric_ind]['data'].pop(old_unit_id)
+                    # change nan to none so that json can handle it
+                    if np.isnan(external_metrics[metric_ind]['data'][str(old_unit_id)]):
+                        external_metrics[metric_ind]['data'][str(old_unit_id)] = None
+            workspace.set_unit_metrics_for_sorting(
+                        sorting_id=S_id, metrics=external_metrics)    
+
+            print(f'To curate the spike sorting, go to https://sortingview.vercel.app/workspace?workspace={workspace.uri}&channel=franklab')
+
+            # 3. Save the units and their updated metrics
+            # load the AnalysisNWBFile from the original sort to get the sort_interval_valid times and the sort_interval
+            orig_units = (SpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
+            sort_interval = orig_units.iloc[1]['sort_interval']
+            sort_interval_valid_times = orig_units.iloc[1]['obs_intervals']
+
+            # add the units with the metrics and labels to the file.
+            print('\nSaving curated sorting results...')
+            timestamps = SpikeSorting.get_recording_timestamps(key)
+            units = dict()
+            units_valid_times = dict()
+            units_sort_interval = dict()
+            unit_ids = sorting.get_unit_ids()
+            for unit_id in unit_ids:
+                #TODO: take units from existing units table rather than from the sorting?
+                spike_times_in_samples = sorting.get_unit_spike_train(
+                    unit_id=unit_id)
+                units[unit_id] = timestamps[spike_times_in_samples]
+                units_valid_times[unit_id] = sort_interval_valid_times
+                units_sort_interval[unit_id] = [sort_interval]
+
+            # Create a new analysis NWB file
+            key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
+
+            units_object_id, _ = AnalysisNwbfile().add_units(key['analysis_file_name'],
+                                                            units, units_valid_times,
+                                                            units_sort_interval,
+                                                            metrics=metrics)
+            # add the analysis file to the table
+            AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
+            key['units_object_id'] = units_object_id
+            key['sorting_id'] = S_id
+        else:
+            # note that the code below will need to change if the sorting is modified (e.g. duplicate spikes delete)
+            key['analysis_file_name'] = ss_key['analysis_file_name']
+            key['units_object_id'] = ss_key['units_object_id']
+            key['sorting_id'] = ss_key['sorting_id']
+
+
         self.insert1(key)
 
+@schema 
+class CuratedSpikeSortingParameters(dj.Manual):
+    definition = """
+    -> AutomaticCurationSpikeSorting
+    -> SpikeSortingMetrics.proj(final_cluster_metrics_list_name='cluster_metrics_list_name')
+    """
 
 @schema
 class CuratedSpikeSorting(dj.Computed):
     definition = """
     # Table for holding the output of fully curated spike sorting
-    -> AutomaticCurationSpikeSorting
+    -> CuratedSpikeSortingParameters
     ---
     -> AnalysisNwbfile    # New analysis NWB file to hold unit info
     units_object_id: varchar(40)           # Object ID for the units in NWB file
@@ -1018,20 +1122,17 @@ class CuratedSpikeSorting(dj.Computed):
         # We can get the new curated soring from the workspace.
         workspace_uri = (SpikeSorting & key).fetch1('curation_feed_uri')
         workspace = sortingview.load_workspace(workspace_uri=workspace_uri)
-        # check that there is exactly one sorting in this workspace
-        if len(workspace.sorting_ids) == 0:
-            return
-        elif len(workspace.sorting_ids) > 1:
-            Warning(
-                f'More than one sorting associated with {key}; delete extra sorting and try populate again')
+        target_sorting_id = (AutomaticCurationSpikeSorting & key).fetch1('sorting_id')
+        if not target_sorting_id in workspace.sorting_ids:
+            Warning(f'AutomaticCurationSpikeSorting sorting_id {target_sorting_id} not found in workspace; skipping')
             return
 
         #sorting = workspace.get_curated_sorting_extractor(workspace.sorting_ids[0])
-        sorting = workspace.get_curated_sorting_extractor(
-            workspace.sorting_ids[0])
+        # There should be two sortings, corresponding to the 
+        sorting = workspace.get_curated_sorting_extractor(target_sorting_id)
 
         # Get labels
-        labels = workspace.get_sorting_curation(workspace.sorting_ids[0])
+        labels = workspace.get_sorting_curation(target_sorting_id)
 
         # turn labels to list of str, only including accepted units.
         accepted_units = []
@@ -1062,15 +1163,19 @@ class CuratedSpikeSorting(dj.Computed):
 
         # 2. Recalucate metrics for curated units to account for merges
         # get the recording extractor
-        with Timer(label=f'Recomputing metrics', verbose=True):
+        with Timer(label=f'Whitening and recomputing metrics', verbose=True):
             recording = workspace.get_recording_extractor(
                 workspace.recording_ids[0])
             tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
             recording = se.CacheRecordingExtractor(
-                recording, save_path=tmpfile.name, chunk_mb=10000)
-            metrics_key = (SpikeSortingParameters & key).fetch1(
-                'cluster_metrics_list_name')
-            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+                                recording, save_path=tmpfile.name, chunk_mb=10000)
+            # whiten the recording
+            filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+                                                    'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
+            recording = st.preprocessing.whiten(
+                recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
+            cluster_metrics_list_name = (CuratedSpikeSortingParameters & key).fetch1('final_cluster_metrics_list_name')
+            metrics = SpikeSortingMetrics().compute_metrics(cluster_metrics_list_name, recording, sorting)
 
         # Limit the metrics to accepted units
         metrics = metrics.loc[accepted_units]
