@@ -98,7 +98,8 @@ class SortGroup(dj.Manual):
         # get the electrodes from this NWB file
         electrodes = (Electrode() & {'nwb_file_name': nwb_file_name} & {
                       'bad_channel': 'False'}).fetch()
-        e_groups = np.unique(electrodes['electrode_group_name'])
+        e_groups = list(np.unique(electrodes['electrode_group_name']))
+        e_groups.sort(key=int)  # sort electrode groups numerically
         sort_group = 0
         sg_key = dict()
         sge_key = dict()
