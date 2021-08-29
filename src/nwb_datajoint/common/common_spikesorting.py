@@ -654,8 +654,9 @@ class SpikeSorting(dj.Computed):
         recording_label = key['nwb_file_name'] + '_' + \
             key['sort_interval_name'] + '_' + str(key['sort_group_id'])
         sorting_label = key['sorter_name'] + '_' + key['parameter_set_name']
-        workspace_uri = add_to_sortingview_workspace(workspace_name, recording_label, sorting_label, extractor_nwb_path, metrics=metrics)
-                
+        workspace_uri, sorting_id = add_to_sortingview_workspace(workspace_name, recording_label, sorting_label, extractor_nwb_path, metrics=metrics)
+
+        key['sorting_id'] = sorting_id      
         key['curation_feed_uri'] = workspace_uri
         
         # Give permission to workspace based on Google account
