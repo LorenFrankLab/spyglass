@@ -574,8 +574,9 @@ class SpikeSorting(dj.Computed):
             recording = st.preprocessing.mask(recording, mask)
 
         # Path to files that will hold recording and sorting extractors
+        # TODO: remove nwb
         extractor_nwb_path, _ = self.get_extractor_save_path(key, type='nwb')
-        #sorting_h5_path, recording_h5_path = self.get_extractor_save_path(key, type='h5v1')
+        sorting_h5_path, recording_h5_path = self.get_extractor_save_path(key, type='h5v1')
 
         metadata = {}
         metadata['Ecephys'] = {'ElectricalSeries': {'name': 'ElectricalSeries',
@@ -653,7 +654,8 @@ class SpikeSorting(dj.Computed):
                         + cluster_metrics_list_name
 
         workspace_uri, sorting_id = add_to_sortingview_workspace(workspace_name, recording_label, 
-                                                        sorting_label, h5_recording, h5_sorting, 
+                                                        sorting_label, None, h5_sorting, 
+                                                        analysis_nwb_path=extractor_nwb_path,
                                                         metrics=metrics)
 
         key['sorting_id'] = sorting_id      
