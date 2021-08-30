@@ -574,33 +574,21 @@ class SpikeSorting(dj.Computed):
             recording = st.preprocessing.mask(recording, mask)
 
         # Path to files that will hold recording and sorting extractors
-        extractor_file_name = key['nwb_file_name'] \
-            + '_' + key['sort_interval_name'] \
-            + '_' + str(key['sort_group_id']) \
-            + '_' + key['sorter_name'] \
-            + '_' + key['parameter_set_name'] + '.nwb'
-        analysis_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
-                            / key['analysis_file_name'])
-
-        if not os.path.isdir(analysis_path):
-            os.mkdir(analysis_path)
-        extractor_nwb_path = str(Path(analysis_path) / extractor_file_name)
+        #extractor_nwb_path, _ = self.get_extractor_save_path(key, type='nwb')
+        sorting_h5_path, recording_h5_path = self.get_extractor_save_path(key, type='h5v1')
 
         metadata = {}
         metadata['Ecephys'] = {'ElectricalSeries': {'name': 'ElectricalSeries',
                                                     'description': key['nwb_file_name'] +
-                                                    '_' + key['sort_interval_name'] +
+                                                    '_' + key['sort_interval_name'] + 
                                                     '_' + str(key['sort_group_id'])}}
-        with Timer(label=f'writing filtered NWB recording extractor to {extractor_nwb_path}', verbose=True):
-            # TODO: save timestamps together
-            # Caching the extractor GREATLY speeds up the subsequent processing and NWB writing
+        
+        with Timer(label=f'writing filtered h5 recording extractor to {recording_h5_path}', verbose=True):
+            #Caching the extractor GREATLY speeds up the subsequent processing 
             tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
             recording = se.CacheRecordingExtractor(
-                recording, save_path=tmpfile.name, chunk_mb=1000, n_jobs=4)
-            # TODO: consider writing NWB or other recording extractor in a separate process
-            se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
-                                                     buffer_mb=10000, overwrite=True, metadata=metadata,
-                                                     es_key='ElectricalSeries')
+                        recording, save_path=tmpfile.name, chunk_mb=1000, n_jobs=4)
+            h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording, recording_h5_path)
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
@@ -621,9 +609,9 @@ class SpikeSorting(dj.Computed):
 
         key['time_of_sort'] = int(time.time())
 
-        # TODO: save timestamps
-        se.NwbSortingExtractor.write_sorting(
-            sorting, save_path=extractor_nwb_path)
+        #store the sorting for later visualization
+        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
+     
         cluster_metrics_list_name = (SpikeSortingParameters & key).fetch1(
                 'cluster_metrics_list_name')
         with Timer(label='computing quality metrics', verbose=True):
@@ -659,7 +647,7 @@ class SpikeSorting(dj.Computed):
                         + cluster_metrics_list_name
 
         workspace_uri, sorting_id = add_to_sortingview_workspace(workspace_name, recording_label, 
-                                                        sorting_label, extractor_nwb_path, 
+                                                        sorting_label, h5_recording, h5_sorting, 
                                                         metrics=metrics)
 
         key['sorting_id'] = sorting_id      
@@ -697,7 +685,10 @@ class SpikeSorting(dj.Computed):
         if not os.path.isdir(analysis_path):
             os.mkdir(analysis_path)
         full_path = str(Path(analysis_path) / extractor_base_name)
-        return full_path+'_recording.'+type, full_path+'_sorting.'+type
+        if type == 'h5v1':  
+            return full_path + '_recording.' + type, full_path + '_sorting.' + type
+        elif type == 'nwb':
+            return full_path + '.' + type, full_path + '.' + type
 
     def delete(self):
         """
@@ -802,6 +793,7 @@ class SpikeSorting(dj.Computed):
         with Timer(label='NWB recording extractor create from file', verbose=True):
             R = se.NwbRecordingExtractor(Nwbfile.get_abs_path(key['nwb_file_name']),
                                          electrical_series_name='e-series')
+        
 
         sub_R = se.SubRecordingExtractor(
             R, start_frame=sort_indices[0], end_frame=sort_indices[1])
@@ -1107,10 +1099,9 @@ class AutomaticCurationSpikeSorting(dj.Computed):
                 sorting_id = workspace.add_sorting(sorting=sorting, recording_id=recording_id, 
                                             label=sorting_label)
             else:     
-                # TEST: store new sorting extractor. 
+                #  store new sorting extractor. 
                 r_path, s_path = SpikeSorting.get_extractor_save_path(key, type='h5v1') 
-                sorting_uri = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(new_sorting, s_path)
-                sorting_tmp = sv.LabboxEphysSortingExtractor(sorting_uri)
+                sorting_tmp = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(new_sorting, s_path)
                 # add to workspace
                 sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' + cluster_metrics_list_name
                 sorting_id = workspace.add_sorting(sorting=sorting_tmp, recording_id=recording_id, label=sorting_label)
@@ -1144,7 +1135,7 @@ class AutomaticCurationSpikeSorting(dj.Computed):
             unit_ids = sorting.get_unit_ids()
             unit_times_list = []
             for unit_id in unit_ids:
-                #TODO: take units from existing units table rather than from the sorting?
+                # Note that we take the units from the sorting because it may have been changed above.
                 spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
                 units[unit_id] = timestamps[spike_times_in_samples]
                 unit_times_list.append(units[unit_id])
@@ -1177,6 +1168,8 @@ class AutomaticCurationSpikeSorting(dj.Computed):
         labels['labelsByUnit'] = dict()
         # format: labels['labelsByUnit'] = {1:'accept', 2:'noise,reject'}] would label unit 1 as 'accept' and unit 2 as 'noise' and 'reject'
         
+        # List of available functions for spike waveform extraction: 
+        # https://spikeinterface.readthedocs.io/en/0.13.0/api.html#module-spiketoolkit.postprocessing
         if 'burst_merge' in acpd:
             if acpd['burst_merge']:
                 # get the burst_merge parameters
@@ -1195,6 +1188,40 @@ class AutomaticCurationSpikeSorting(dj.Computed):
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
+    def delete(self):
+        """
+        Extends the delete method of base class to implement permission checking
+        """
+        current_user_name = dj.config['database.user']
+        entries = self.fetch()
+        permission_bool = np.zeros((len(entries),))
+        print(f'Attempting to delete {len(entries)} entries, checking permission...')
+    
+        for entry_idx in range(len(entries)):
+            # check the team name for the entry, then look up the members in that team, then get their datajoint user names
+            team_name = (SpikeSortingParameters & (SpikeSortingParameters & entries[entry_idx]).proj()).fetch1()['team_name']
+            lab_member_name_list = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
+            datajoint_user_names = []
+            for lab_member_name in lab_member_name_list:
+                datajoint_user_names.append((LabMember.LabMemberInfo & {'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
+            permission_bool[entry_idx] = current_user_name in datajoint_user_names
+
+        if np.sum(permission_bool)==len(entries):
+            print('Permission to delete all specified entries granted.')
+            # delete the sortings from the workspaces
+            for entry_idx in range(len(entries)):
+                #print(entries[entry_idx])
+                #TODO FIX:
+                #key = (AutomaticCurationSpikeSorting & (AutomaticCurationSpikeSorting & entries[entry_idx]).proj())
+                # workspace_uri = key['curation_feed_uri'] 
+                #print(key)
+                # # load the workspace and the sorting
+                # workspace = sv.load_workspace(workspace_uri)
+                # sorting_id = key['sorting_id']
+                # workspace.delete_sorting(sorting_id)
+            super().delete()
+        else:
+            raise Exception('You do not have permission to delete all specified entries. Not deleting anything.')
 @schema 
 class CuratedSpikeSortingParameters(dj.Manual):
     definition = """

@@ -6,7 +6,9 @@ import kachery_client as kc
 import sortingview
 from .common_lab import LabMember
 
-def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sorting_label: str, analysis_nwb_path: str, metrics=None):
+def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sorting_label: str, 
+                                recording : sortingview.LabboxEphysRecordingExtractor, 
+                                sorting: sortingview.LabboxEphysRecordingExtractor, metrics=None):
     """
     Adds recording and sorting to a sortingview workspace
     
@@ -18,8 +20,10 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
         label of recording to appear in sortingview
     sorting_label: str
         label of sorting to appear in sortingview
-    analysis_nwb_path: str
-        path to NWB file in which recording and sorting are stored
+    recording: LabBoxEphysRecordingExtractor
+         recording extractor
+    sorting: LabBoxEphysSortingExtractor
+         sorting extractor
     metrics: pandas.Dataframe 
         external metrics to add to sortingview workspace
     
@@ -31,8 +35,6 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
             sorting_id of sorting that was added
     """               
     workspace_uri: str
-    # convert path to uri
-    extractor_nwb_uri = kc.link_file(analysis_nwb_path)
     # get uri for workspace; if does not exist, create new one
     workspace_uri = kc.get(workspace_name)
     if not workspace_uri:
@@ -41,21 +43,11 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
     workspace = sortingview.load_workspace(workspace_uri)
     print(f'Workspace URI: {workspace.uri}')
     # add the recording and sorting info to kachery
-    recording_uri = kc.store_json({
-        'recording_format': 'nwb',
-        'data': {
-            'path': extractor_nwb_uri
-        }
-    })
-    sorting_uri = kc.store_json({
-        'sorting_format': 'nwb',
-        'data': {
-            'path': extractor_nwb_uri
-        }
-    })
+    # recording_uri = kc.store_json(recording_dict)
+    # sorting_uri = kc.store_json(sorting_dict)
     # load sorting and recording
-    sorting = sortingview.LabboxEphysSortingExtractor(sorting_uri)
-    recording = sortingview.LabboxEphysRecordingExtractor(recording_uri, download=True)
+    # sorting = sortingview.LabboxEphysSortingExtractor(sorting_uri)
+    # recording = sortingview.LabboxEphysRecordingExtractor(recording_uri, download=True)
     # add to workspace
     R_id = workspace.add_recording(recording=recording, label=recording_label)
     S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
