@@ -588,7 +588,11 @@ class SpikeSorting(dj.Computed):
             tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
             recording = se.CacheRecordingExtractor(
                         recording, save_path=tmpfile.name, chunk_mb=1000, n_jobs=4)
-            se.NwbRecordingExtractor.write_recording(recording, extractor_nwb_path, buffer_mb=10000)
+ 
+            # TODO: consider writing NWB or other recording extractor in a separate process
+            se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
+                                                     buffer_mb=10000, overwrite=True, metadata=metadata,
+                                                     es_key='ElectricalSeries')
             # temporary code: save a link, etc. 
             #h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording, recording_h5_path)
 
