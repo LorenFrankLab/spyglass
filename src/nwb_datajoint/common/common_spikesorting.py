@@ -1209,7 +1209,7 @@ class AutomaticCurationSpikeSorting(dj.Computed):
         if np.sum(permission_bool)==len(entries):
             print('Permission to delete all specified entries granted.')
             # delete the sortings from the workspaces
-            for entry_idx in range(len(entries)):
+            #for entry_idx in range(len(entries)):
                 #print(entries[entry_idx])
                 #TODO FIX:
                 #key = (AutomaticCurationSpikeSorting & (AutomaticCurationSpikeSorting & entries[entry_idx]).proj())
