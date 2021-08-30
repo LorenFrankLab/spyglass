@@ -574,8 +574,8 @@ class SpikeSorting(dj.Computed):
             recording = st.preprocessing.mask(recording, mask)
 
         # Path to files that will hold recording and sorting extractors
-        #extractor_nwb_path, _ = self.get_extractor_save_path(key, type='nwb')
-        sorting_h5_path, recording_h5_path = self.get_extractor_save_path(key, type='h5v1')
+        extractor_nwb_path, _ = self.get_extractor_save_path(key, type='nwb')
+        #sorting_h5_path, recording_h5_path = self.get_extractor_save_path(key, type='h5v1')
 
         metadata = {}
         metadata['Ecephys'] = {'ElectricalSeries': {'name': 'ElectricalSeries',
@@ -588,7 +588,9 @@ class SpikeSorting(dj.Computed):
             tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
             recording = se.CacheRecordingExtractor(
                         recording, save_path=tmpfile.name, chunk_mb=1000, n_jobs=4)
-            h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording, recording_h5_path)
+            se.NwbRecordingExtractor.write_recording(recording, extractor_nwb_path, buffer_mb=10000)
+            # temporary code: save a link, etc. 
+            #h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording, recording_h5_path)
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
@@ -1212,7 +1214,7 @@ class AutomaticCurationSpikeSorting(dj.Computed):
             #for entry_idx in range(len(entries)):
                 #print(entries[entry_idx])
                 #TODO FIX:
-                #key = (AutomaticCurationSpikeSorting & (AutomaticCurationSpikeSorting & entries[entry_idx]).proj())
+                #key = (self & (self & entries[entry_idx]).proj())
                 # workspace_uri = key['curation_feed_uri'] 
                 #print(key)
                 # # load the workspace and the sorting
