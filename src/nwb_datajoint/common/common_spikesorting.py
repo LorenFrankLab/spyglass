@@ -1137,7 +1137,7 @@ class AutomaticCurationSpikeSorting(dj.Computed):
             sort_interval_valid_times = orig_units.iloc[1]['obs_intervals']
 
             # add the units with the metrics and labels to the file.
-            print('\nSaving curated sorting results...')
+            print('\nSaving new metrics...')
             timestamps = SpikeSorting.get_recording_timestamps(ss_key)
             units = dict()
             units_valid_times = dict()
