@@ -1,11 +1,15 @@
 "Functions that are commonly used"
 
 from typing import List
+import numpy as np
 import kachery_client as kc
 import sortingview
 from .common_lab import LabMember
 
-def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sorting_label: str, analysis_nwb_path: str, metrics=None):
+def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sorting_label: str, 
+                                recording : sortingview.LabboxEphysRecordingExtractor, 
+                                sorting: sortingview.LabboxEphysRecordingExtractor, analysis_nwb_path=None, 
+                                metrics=None):
     """
     Adds recording and sorting to a sortingview workspace
     
@@ -17,17 +21,25 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
         label of recording to appear in sortingview
     sorting_label: str
         label of sorting to appear in sortingview
+    recording: LabBoxEphysRecordingExtractor
+         recording extractor
+    sorting: LabBoxEphysSortingExtractor
+         sorting extractor
     analysis_nwb_path: str
-        path to NWB file in which recording and sorting are stored
+        TEMPORARY fix to allow use of NWB recording extractors
     metrics: pandas.Dataframe 
         external metrics to add to sortingview workspace
     
-    Output
+    Outputs
     ------
-        uri of sortingview workspace containing recording and sorting
+        workspace_uri: str
+            sortingview workspace uri containing recording and sorting
+        sorting_id: str
+            sorting_id of sorting that was added
     """               
     workspace_uri: str
-    # convert path to uri
+    # get uri for workspace; if does not exist, create new one
+
     extractor_nwb_uri = kc.link_file(analysis_nwb_path)
     # get uri for workspace; if does not exist, create new one
     workspace_uri = kc.get(workspace_name)
@@ -37,26 +49,29 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
     workspace = sortingview.load_workspace(workspace_uri)
     print(f'Workspace URI: {workspace.uri}')
     # add the recording and sorting info to kachery
-    recording_uri = kc.store_json({
-        'recording_format': 'nwb',
-        'data': {
-            'path': extractor_nwb_uri
-        }
-    })
-    sorting_uri = kc.store_json({
-        'sorting_format': 'nwb',
-        'data': {
-            'path': extractor_nwb_uri
-        }
-    })
-    # load sorting and recording
-    sorting = sortingview.LabboxEphysSortingExtractor(sorting_uri)
-    recording = sortingview.LabboxEphysRecordingExtractor(recording_uri, download=True)
+    if analysis_nwb_path is not None:
+        recording_uri = kc.store_json({
+            'recording_format': 'nwb',
+            'data': {
+                'path': extractor_nwb_uri
+            }
+        })   
+        sorting_uri = kc.store_json({
+            'sorting_format': 'nwb',
+            'data': {
+                'path': extractor_nwb_uri
+                }
+            })
+        # load sorting and recording
+        sorting = sortingview.LabboxEphysSortingExtractor(sorting_uri)
+        # load sorting and recording
+        recording = sortingview.LabboxEphysRecordingExtractor(recording_uri, download=True)
+  
     # add to workspace
     R_id = workspace.add_recording(recording=recording, label=recording_label)
     S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
     # Set external metrics that will appear in the units table
-    if metrics:
+    if metrics is not None:
         external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
                                 'data': metrics[metric].to_dict()} for metric in metrics.columns]
         # change unit id to string
@@ -74,7 +89,7 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
     print('Workspace added to sortingview')
     print(f'To curate the spike sorting, go to https://sortingview.vercel.app/workspace?workspace={workspace.uri}&channel=franklab')
     
-    return workspace.uri
+    return workspace.uri, S_id
 
 def set_workspace_permission(workspace_name: str, team_members: List[str]):
     """
