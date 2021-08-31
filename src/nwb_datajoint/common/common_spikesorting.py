@@ -1046,7 +1046,8 @@ class AutomaticCurationSpikeSorting(dj.Computed):
         recording_id = workspace.recording_ids[0]
         recording = workspace.get_recording_extractor(recording_id)
 
-        acpd = (AutomaticCurationParameters & key).fetch1('automatic_curation_param_dict')
+        auto_curate_param_name = (AutomaticCurationSpikeSortingParameters & key).fetch1('automatic_curation_param_name')
+        acpd = (AutomaticCurationParameters & {'automatic_curation_param_name': auto_curate_param_name}).fetch1('automatic_curation_param_dict')
         # check for defined automatic curation keys / parameters
         
         #1. Create and save new sorting if requested
