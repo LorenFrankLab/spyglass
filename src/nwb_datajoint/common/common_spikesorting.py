@@ -1004,9 +1004,10 @@ class AutomaticCurationParameters(dj.Manual):
 class AutomaticCurationSpikeSortingParameters(dj.Manual):
     definition = """
     # Table for holding the output
-    -> AutomaticCurationParameters
+
     -> SpikeSorting
     ---
+    -> AutomaticCurationParameters
     -> SpikeSortingMetrics.proj(automatic_curation_cluster_metrics_list_name='cluster_metrics_list_name')
     """
 
@@ -1236,6 +1237,7 @@ class AutomaticCurationSpikeSorting(dj.Computed):
 class CuratedSpikeSortingParameters(dj.Manual):
     definition = """
     -> AutomaticCurationSpikeSorting
+    ---
     -> SpikeSortingMetrics.proj(final_cluster_metrics_list_name='cluster_metrics_list_name')
     """
 
