@@ -17,6 +17,7 @@ import scipy.stats as stats
 import sortingview as sv
 import spikeextractors as se
 from spikeextractors.extractors.numpyextractors.numpyextractors import NumpySortingExtractor
+from spikeextractors.extractors.nwbextractors.nwbextractors import NwbSortingExtractor
 import spikesorters as ss
 import spiketoolkit as st
 from mountainsort4._mdaio_impl import readmda
@@ -617,8 +618,9 @@ class SpikeSorting(dj.Computed):
         key['time_of_sort'] = int(time.time())
 
         #store the sorting for later visualization
-        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
-     
+        #h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
+        se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
+
         cluster_metrics_list_name = (SpikeSortingParameters & key).fetch1(
                 'cluster_metrics_list_name')
         with Timer(label='computing quality metrics', verbose=True):
@@ -654,7 +656,7 @@ class SpikeSorting(dj.Computed):
                         + cluster_metrics_list_name
 
         workspace_uri, sorting_id = add_to_sortingview_workspace(workspace_name, recording_label, 
-                                                        sorting_label, None, h5_sorting, 
+                                                        sorting_label, None, None, 
                                                         analysis_nwb_path=extractor_nwb_path,
                                                         metrics=metrics)
 

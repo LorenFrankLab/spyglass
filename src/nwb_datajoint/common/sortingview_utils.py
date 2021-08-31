@@ -55,7 +55,15 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
             'data': {
                 'path': extractor_nwb_uri
             }
-        })
+        })   
+        sorting_uri = kc.store_json({
+            'sorting_format': 'nwb',
+            'data': {
+                'path': extractor_nwb_uri
+                }
+            })
+        # load sorting and recording
+        sorting = sortingview.LabboxEphysSortingExtractor(sorting_uri)
         # load sorting and recording
         recording = sortingview.LabboxEphysRecordingExtractor(recording_uri, download=True)
   
