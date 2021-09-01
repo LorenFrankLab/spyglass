@@ -1051,9 +1051,8 @@ class AutomaticCurationSpikeSorting(dj.Computed):
         # check to see if there are multiple sortings, and if so, get just the first one
         if sorting_id == 'none':
             print(f'AutomaticCurationSpikeSorting: no sorting_id in SpikeSorting, using the first sorting.')
-            sorting = workspace.get_sorting_extractor(workspace.sorting_ids[0])
-        else:
-            sorting = workspace.get_sorting_extractor(sorting_id)
+            sorting_id = workspace.sorting_ids[0]
+        sorting = workspace.get_sorting_extractor(sorting_id)
         recording_id = workspace.recording_ids[0]
         recording = workspace.get_recording_extractor(recording_id)
 
