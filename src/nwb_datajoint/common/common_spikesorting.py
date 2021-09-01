@@ -1050,7 +1050,7 @@ class AutomaticCurationSpikeSorting(dj.Computed):
         sorting_id = ss_key['sorting_id']
         # check to see if there are multiple sortings, and if so, get just the first one
         if sorting_id == 'none':
-            print(f'AutomaticCurationSpikeSorting: no sorting_id in SpikeSorting, using the first sorting.')
+            print(f'AutomaticCurationSpikeSorting: no sorting_id in SpikeSorting, using the first sorting.')            
             sorting_id = workspace.sorting_ids[0]
         sorting = workspace.get_sorting_extractor(sorting_id)
         recording_id = workspace.recording_ids[0]
@@ -1171,16 +1171,15 @@ class AutomaticCurationSpikeSorting(dj.Computed):
             # add the analysis file to the table
             AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
             key['units_object_id'] = units_object_id
-            key['sorting_id'] = sorting_id
-            
             # add the spike_times to the metrics for subsequent labeling  
             metrics['spike_times'] = unit_times_list
 
         else:
             key['analysis_file_name'] = ss_key['analysis_file_name']
             key['units_object_id'] = ss_key['units_object_id']
-            key['sorting_id'] = ss_key['sorting_id']
             metrics = orig_units
+        
+        key['sorting_id'] = sorting_id
 
         #3. add labels as requested for burst merges, noise, etc.
         # initialize the labels dictionary
