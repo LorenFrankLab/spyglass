@@ -80,7 +80,7 @@ class SortGroup(dj.Manual):
         -> Electrode
         """
 
-    def set_group_by_shank(self, nwb_file_name):
+    def set_group_by_shank(self, nwb_file_name, references=None):
         """
         Adds sort group entries in SortGroup table based on shank
         Assigns groups to all non-bad channel electrodes based on their shank:
@@ -93,13 +93,17 @@ class SortGroup(dj.Manual):
         ----------
         nwb_file_name : str
             the name of the NWB file whose electrodes should be put into sorting groups
+        references : dict
+            Optional. If passed, used to set references. Otherwise, references set using
+            original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
         """
         # delete any current groups
         (SortGroup & {'nwb_file_name': nwb_file_name}).delete()
         # get the electrodes from this NWB file
         electrodes = (Electrode() & {'nwb_file_name': nwb_file_name} & {
                       'bad_channel': 'False'}).fetch()
-        e_groups = np.unique(electrodes['electrode_group_name'])
+        e_groups = list(np.unique(electrodes['electrode_group_name']))
+        e_groups.sort(key=int)  # sort electrode groups numerically
         sort_group = 0
         sg_key = dict()
         sge_key = dict()
@@ -109,16 +113,23 @@ class SortGroup(dj.Manual):
             shank_list = np.unique(
                 electrodes['probe_shank'][electrodes['electrode_group_name'] == e_group])
             sge_key['electrode_group_name'] = e_group
-            # get the indices of all electrodes in for this group / shank and set their sorting group
+            # get the indices of all electrodes in this group / shank and set their sorting group
             for shank in shank_list:
                 sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
-                shank_elect_ref = electrodes['original_reference_electrode'][np.logical_and(electrodes['electrode_group_name'] == e_group,
+                # specify reference electrode. Use 'references' if passed, otherwise use reference from config
+                if not references:
+                    shank_elect_ref = electrodes['original_reference_electrode'][np.logical_and(electrodes['electrode_group_name'] == e_group,
                                                                                             electrodes['probe_shank'] == shank)]
-                if np.max(shank_elect_ref) == np.min(shank_elect_ref):
-                    sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
+                    if np.max(shank_elect_ref) == np.min(shank_elect_ref):
+                        sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
+                    else:
+                        ValueError(
+                            f'Error in electrode group {e_group}: reference electrodes are not all the same')
                 else:
-                    ValueError(
-                        f'Error in electrode group {e_group}: reference electrodes are not all the same')
+                    if e_group not in references.keys():
+                        raise Exception(f"electrode group {e_group} not a key in references, so cannot set reference")
+                    else:
+                        sg_key['sort_reference_electrode_id'] = references[e_group]
                 self.insert1(sg_key)
 
                 shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
@@ -175,8 +186,8 @@ class SortGroup(dj.Manual):
         sort_group_list = (SortGroup() & key).fetch1()
         for sort_group in sort_group_list:
             key['sort_group_id'] = sort_group
-            self.SortGroupElectrode().insert(dj_replace(sort_group_list, sort_group_ref_list,
-                                                        'sort_group_id', 'sort_reference_electrode_id'),
+            self.insert(dj_replace(sort_group_list, sort_group_ref_list,
+                                    'sort_group_id', 'sort_reference_electrode_id'),
                                              replace="True")
 
     def get_geometry(self, sort_group_id, nwb_file_name):
@@ -1039,10 +1050,9 @@ class AutomaticCurationSpikeSorting(dj.Computed):
         sorting_id = ss_key['sorting_id']
         # check to see if there are multiple sortings, and if so, get just the first one
         if sorting_id == 'none':
-            print(f'AutomaticCurationSpikeSorting: no sorting_id in SpikeSorting, using the first sorting.')
-            sorting = workspace.get_sorting_extractor(workspace.sorting_ids[0])
-        else:
-            sorting = workspace.get_sorting_extractor(sorting_id)
+            print(f'AutomaticCurationSpikeSorting: no sorting_id in SpikeSorting, using the first sorting.')            
+            sorting_id = workspace.sorting_ids[0]
+        sorting = workspace.get_sorting_extractor(sorting_id)
         recording_id = workspace.recording_ids[0]
         recording = workspace.get_recording_extractor(recording_id)
 
@@ -1161,16 +1171,15 @@ class AutomaticCurationSpikeSorting(dj.Computed):
             # add the analysis file to the table
             AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
             key['units_object_id'] = units_object_id
-            key['sorting_id'] = sorting_id
-            
             # add the spike_times to the metrics for subsequent labeling  
             metrics['spike_times'] = unit_times_list
 
         else:
             key['analysis_file_name'] = ss_key['analysis_file_name']
             key['units_object_id'] = ss_key['units_object_id']
-            key['sorting_id'] = ss_key['sorting_id']
             metrics = orig_units
+        
+        key['sorting_id'] = sorting_id
 
         #3. add labels as requested for burst merges, noise, etc.
         # initialize the labels dictionary
