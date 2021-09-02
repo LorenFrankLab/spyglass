@@ -576,7 +576,7 @@ class SpikeSorting(dj.Computed):
 
         # Path to files that will hold recording and sorting extractors
         # TODO: remove nwb
-        extractor_nwb_path, _ = self.get_extractor_save_path(key, type='nwb')
+        #extractor_nwb_path, _ = self.get_extractor_save_path(key, type='nwb')
         sorting_h5_path, recording_h5_path = self.get_extractor_save_path(key, type='h5v1')
 
         metadata = {}
@@ -592,11 +592,11 @@ class SpikeSorting(dj.Computed):
                         recording, save_path=tmpfile.name, chunk_mb=1000, n_jobs=4)
  
             # TODO: consider writing NWB or other recording extractor in a separate process
-            se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
-                                                     buffer_mb=10000, overwrite=True, metadata=metadata,
-                                                     es_key='ElectricalSeries')
+            # se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
+            #                                          buffer_mb=10000, overwrite=True, metadata=metadata,
+            #                                          es_key='ElectricalSeries')
             # temporary code: save a link, etc. 
-            #h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording, recording_h5_path)
+            h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording, recording_h5_path)
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
@@ -618,8 +618,8 @@ class SpikeSorting(dj.Computed):
         key['time_of_sort'] = int(time.time())
 
         #store the sorting for later visualization
-        #h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
-        se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
+        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
+        #se.NwbSortingExtractor.write_sorting(sorting, save_path=extractor_nwb_path)
 
         cluster_metrics_list_name = (SpikeSortingParameters & key).fetch1(
                 'cluster_metrics_list_name')
@@ -656,8 +656,8 @@ class SpikeSorting(dj.Computed):
                         + cluster_metrics_list_name
 
         workspace_uri, sorting_id = add_to_sortingview_workspace(workspace_name, recording_label, 
-                                                        sorting_label, None, None, 
-                                                        analysis_nwb_path=extractor_nwb_path,
+                                                        sorting_label, h5_recording, h5_sorting, 
+                                                        analysis_nwb_path=None,
                                                         metrics=metrics)
 
         key['sorting_id'] = sorting_id      

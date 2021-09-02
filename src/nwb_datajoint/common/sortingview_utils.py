@@ -8,7 +8,7 @@ from .common_lab import LabMember
 
 def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sorting_label: str, 
                                 recording : sortingview.LabboxEphysRecordingExtractor, 
-                                sorting: sortingview.LabboxEphysRecordingExtractor, analysis_nwb_path=None, 
+                                sorting: sortingview.LabboxEphysSortingExtractor, analysis_nwb_path=None, 
                                 metrics=None):
     """
     Adds recording and sorting to a sortingview workspace
@@ -40,7 +40,6 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
     workspace_uri: str
     # get uri for workspace; if does not exist, create new one
 
-    extractor_nwb_uri = kc.link_file(analysis_nwb_path)
     # get uri for workspace; if does not exist, create new one
     workspace_uri = kc.get(workspace_name)
     if not workspace_uri:
@@ -50,6 +49,7 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
     print(f'Workspace URI: {workspace.uri}')
     # add the recording and sorting info to kachery
     if analysis_nwb_path is not None:
+        extractor_nwb_uri = kc.link_file(analysis_nwb_path)
         recording_uri = kc.store_json({
             'recording_format': 'nwb',
             'data': {
