@@ -1,4 +1,5 @@
 import datajoint as dj
+import hdmf
 
 from .common_device import CameraDevice
 from .common_interval import IntervalList
@@ -55,7 +56,7 @@ class Task(dj.Manual):
     #     task_dict = dict()
     #     #search through he processing modules to see if we can find a behavior module. This should probably be a
     #     # general function
-    #     task_interface = get_data_interface(nwbf, 'task')
+    #     task_interface = get_data_interface(nwbf, 'task', hdmf.common.DynamicTable)
     #     if task_interface is not None:
     #         # check the datatype
     #         if task_interface.data_type == 'DynamicTable':
@@ -102,7 +103,7 @@ class TaskEpoch(dj.Imported):
         # TODO: change to new task structure
         for task_num in range(0, 10):
             task_str = 'task_' + str(task_num)
-            task = get_data_interface(nwbf, task_str)
+            task = get_data_interface(nwbf, task_str, hdmf.common.DynamicTable)
             if task is not None:
                 # check if the task is in the Task table and if not, add it
                 if len(((Task() & {'task_name': task.task_name[0]}).fetch())) == 0:

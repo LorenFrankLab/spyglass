@@ -1,6 +1,8 @@
+from copy import Error
 import json
 import os
 import pathlib
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -9,14 +11,15 @@ import shutil
 import datajoint as dj
 import kachery_client as kc
 import numpy as np
+import pandas as pd
 import pynwb
 import scipy.stats as stats
-import sortingview
+import sortingview as sv
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
-from mountainsort4._mdaio_impl import readmda
+from mountainsort4.mdaio_impl import readmda
 
 from .common_device import Probe
 from .common_lab import LabMember, LabTeam
@@ -28,6 +31,8 @@ from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
+
+from .sortingview_utils import add_to_sortingview_workspace, set_workspace_permission
 
 si.set_global_tmp_folder('/stelmo/nwb/tmp')
 
@@ -77,7 +82,7 @@ class SortGroup(dj.Manual):
         -> Electrode
         """
 
-    def set_group_by_shank(self, nwb_file_name):
+    def set_group_by_shank(self, nwb_file_name, references=None):
         """
         Adds sort group entries in SortGroup table based on shank
         Assigns groups to all non-bad channel electrodes based on their shank:
@@ -90,13 +95,17 @@ class SortGroup(dj.Manual):
         ----------
         nwb_file_name : str
             the name of the NWB file whose electrodes should be put into sorting groups
+        references : dict
+            Optional. If passed, used to set references. Otherwise, references set using
+            original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
         """
         # delete any current groups
         (SortGroup & {'nwb_file_name': nwb_file_name}).delete()
         # get the electrodes from this NWB file
         electrodes = (Electrode() & {'nwb_file_name': nwb_file_name} & {
                       'bad_channel': 'False'}).fetch()
-        e_groups = np.unique(electrodes['electrode_group_name'])
+        e_groups = list(np.unique(electrodes['electrode_group_name']))
+        e_groups.sort(key=int)  # sort electrode groups numerically
         sort_group = 0
         sg_key = dict()
         sge_key = dict()
@@ -106,16 +115,23 @@ class SortGroup(dj.Manual):
             shank_list = np.unique(
                 electrodes['probe_shank'][electrodes['electrode_group_name'] == e_group])
             sge_key['electrode_group_name'] = e_group
-            # get the indices of all electrodes in for this group / shank and set their sorting group
+            # get the indices of all electrodes in this group / shank and set their sorting group
             for shank in shank_list:
                 sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
-                shank_elect_ref = electrodes['original_reference_electrode'][np.logical_and(electrodes['electrode_group_name'] == e_group,
+                # specify reference electrode. Use 'references' if passed, otherwise use reference from config
+                if not references:
+                    shank_elect_ref = electrodes['original_reference_electrode'][np.logical_and(electrodes['electrode_group_name'] == e_group,
                                                                                             electrodes['probe_shank'] == shank)]
-                if np.max(shank_elect_ref) == np.min(shank_elect_ref):
-                    sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
+                    if np.max(shank_elect_ref) == np.min(shank_elect_ref):
+                        sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
+                    else:
+                        ValueError(
+                            f'Error in electrode group {e_group}: reference electrodes are not all the same')
                 else:
-                    ValueError(
-                        f'Error in electrode group {e_group}: reference electrodes are not all the same')
+                    if e_group not in references.keys():
+                        raise Exception(f"electrode group {e_group} not a key in references, so cannot set reference")
+                    else:
+                        sg_key['sort_reference_electrode_id'] = references[e_group]
                 self.insert1(sg_key)
 
                 shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
@@ -169,11 +185,11 @@ class SortGroup(dj.Manual):
         '''
         key = dict()
         key['nwb_file_name'] = nwb_file_name
-        sort_group_list = (SortGroup() & key).fetch('sort_group_id')
+        sort_group_list = (SortGroup() & key).fetch1()
         for sort_group in sort_group_list:
             key['sort_group_id'] = sort_group
-            self.SortGroupElectrode().insert(dj_replace(sort_group_list, sort_group_ref_list,
-                                                        'sort_group_id', 'sort_reference_electrode_id'),
+            self.insert(dj_replace(sort_group_list, sort_group_ref_list,
+                                    'sort_group_id', 'sort_reference_electrode_id'),
                                              replace="True")
 
     def get_geometry(self, sort_group_id, nwb_file_name):
@@ -405,14 +421,13 @@ class SpikeSortingMetrics(dj.Manual):
                 valid = False
         return valid
 
-    def compute_metrics(self, key, recording, sorting):
+    def compute_metrics(self, cluster_metrics_list_name, recording, sorting):
         """
         Use spikeinterface to compute the list of selected metrics for a sorting
 
         Parameters
         ----------
-        key: str
-            cluster_metrics_list_name from SpikeSortingParameters
+        cluster_metrics_list_name: str
         recording: spikeinterface RecordingExtractor
         sorting: spikeinterface SortingExtractor
 
@@ -420,7 +435,7 @@ class SpikeSortingMetrics(dj.Manual):
         -------
         metrics: pandas.dataframe
         """
-        m = (self & {'cluster_metrics_list_name': key}).fetch1()
+        m = (self & {'cluster_metrics_list_name': cluster_metrics_list_name}).fetch1()
 
         return st.validation.compute_quality_metrics(sorting=sorting,
                                                      recording=recording,
@@ -520,6 +535,7 @@ class SpikeSorting(dj.Computed):
     units_object_id: varchar(40)           # Object ID for the units in NWB file
     time_of_sort=0: int                    # This is when the sort was done
     curation_feed_uri='': varchar(1000)    # Labbox-ephys feed for curation
+    sorting_id='none': varchar(20)         # the id of the sorting that was added
     """
 
     def make(self, key):
@@ -546,83 +562,58 @@ class SpikeSorting(dj.Computed):
             recording_timestamps = recording._timestamps
 
         # get the artifact detection parameters and apply artifact detection to zero out artifacts
-        artifact_key = (SpikeSortingParameters & key).fetch1(
-            'artifact_param_name')
-        artifact_param_dict = (SpikeSortingArtifactParameters & {
-                               'artifact_param_name': artifact_key}).fetch1('parameter_dict')
+        artifact_key = (SpikeSortingParameters & key).fetch1('artifact_param_name')
+        artifact_param_dict = (SpikeSortingArtifactParameters & {'artifact_param_name': artifact_key}).fetch1('parameter_dict')
         if not artifact_param_dict['skip']:
-            no_artifact_valid_times = SpikeSortingArtifactParameters.get_no_artifact_times(
-                recording, **artifact_param_dict)
+            no_artifact_valid_times = SpikeSortingArtifactParameters.get_no_artifact_times(recording, **artifact_param_dict)
             # update the sort interval valid times to exclude the artifacts
             sort_interval_valid_times = interval_list_intersect(
                 sort_interval_valid_times, no_artifact_valid_times)
             # exclude the invalid times
-            mask = np.full(recording.get_num_frames(), True, dtype='bool')
-            mask[interval_list_excludes_ind(
-                sort_interval_valid_times, recording_timestamps)] = False
-            # TODO: st.preprocessing.mask no longer exists; replace with remove_artifacts
-            # recording = st.preprocessing.mask(recording, mask)
+            artifact_frames = interval_list_excludes_ind(sort_interval_valid_times, recording_timestamps)
+            recording = st.remove_artifacts(recording, artifact_frames,
+                                            ms_before=0, ms_after=0)
 
-        # Path to files that will hold recording and sorting extractors
-        extractor_file_name = key['nwb_file_name'] \
-            + '_' + key['sort_interval_name'] \
-            + '_' + str(key['sort_group_id']) \
-            + '_' + key['sorter_name'] \
-            + '_' + key['parameter_set_name'] + '.nwb'
-        analysis_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
-                            / key['analysis_file_name'])
+        recording_h5_path, sorting_h5_path = self.get_extractor_save_path(key, type='h5v1')
 
-        # if not os.path.isdir(analysis_path):
-        #     os.mkdir(analysis_path)
-        # extractor_nwb_path = str(Path(analysis_path) / extractor_file_name)
-
-        metadata = {}
-        metadata['Ecephys'] = {'ElectricalSeries': {'name': 'ElectricalSeries',
-                                                    'description': key['nwb_file_name'] +
-                                                    '_' + key['sort_interval_name'] +
-                                                    '_' + str(key['sort_group_id'])}}
-            # TODO: save timestamps together
-            # Caching the extractor GREATLY speeds up the subsequent processing and NWB writing
-        recording = recording.save(folder=analysis_path+'_recording')
-            # TODO: consider writing NWB or other recording extractor in a separate process
-            # se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
-            #                                          buffer_mb=10000, overwrite=True, metadata=metadata,
-            #                                          es_key='ElectricalSeries')
+        # Save filtered recording to binary or NWB
+        # recording = recording.save(folder=analysis_path+'_recording')
+        # se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
+        #                                          buffer_mb=10000, overwrite=True, metadata=metadata,
+        #                                          es_key='ElectricalSeries')
+        
+        # Save filtered recording to h5 recording
+        recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording, recording_h5_path)
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
-        with Timer(label=f'whiteneing', verbose=True):
+        with Timer(label=f'whitening', verbose=True):
             filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                       'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
-            recording = st.preprocessing.whiten(
-                recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
+            recording = st.preprocessing.whiten(recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
 
         print(f'\nRunning spike sorting on {key}...')
-        sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+        sorter_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'parameter_set_name': key['parameter_set_name']}).fetch1()
 
         sorting = ss.run_sorter(key['sorter_name'], recording,
-                                output_folder=os.getenv(
-                                    'SORTING_TEMP_DIR', None),
-                                **sort_parameters['parameter_dict'])
+                                output_folder=os.getenv('SORTING_TEMP_DIR', None),
+                                **sorter_parameters['parameter_dict'])
 
         key['time_of_sort'] = int(time.time())
 
-        # TODO: replace with NWB file
+        # Save sorting as NWB or binary
         # se.NwbSortingExtractor.write_sorting(
         #     sorting, save_path=extractor_nwb_path)
-        sorting = sorting.save(folder=analysis_path+'_sorting')
+        # sorting = sorting.save(folder=analysis_path+'_sorting')
 
+        # Save sorting as H5
+        sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
 
-        with Timer(label='computing quality metrics', verbose=True):
-            # tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
-            # metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
-            metrics_key = (SpikeSortingParameters & key).fetch1(
+        cluster_metrics_list_name = (SpikeSortingParameters & key).fetch1(
                 'cluster_metrics_list_name')
-            metric_info = (SpikeSortingMetrics & {
-                           'cluster_metrics_list_name': metrics_key}).fetch1()
-            print(metric_info)
-            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+        with Timer(label='computing quality metrics', verbose=True):
+            metrics = SpikeSortingMetrics().compute_metrics(cluster_metrics_list_name, recording, sorting)
 
         print('\nSaving sorting results...')
         units = dict()
@@ -636,7 +627,6 @@ class SpikeSorting(dj.Computed):
             units_valid_times[unit_id] = sort_interval_valid_times
             units_sort_interval[unit_id] = [sort_interval]
 
-        # TODO: consider replacing with spikeinterface call if possible
         units_object_id, _ = AnalysisNwbfile().add_units(key['analysis_file_name'],
                                                          units, units_valid_times,
                                                          units_sort_interval,
@@ -646,81 +636,64 @@ class SpikeSorting(dj.Computed):
         key['units_object_id'] = units_object_id
 
         print('\nGenerating feed for curation...')
-        extractor_nwb_uri = kc.link_file(extractor_nwb_path)
-        print(
-            f'kachery URI for symbolic link to extractor NWB file: {extractor_nwb_uri}')
-
-        # create workspace
         workspace_name = key['analysis_file_name']
-        workspace_uri = kc.get(workspace_name)
-        if not workspace_uri:
-            workspace_uri = sortingview.create_workspace(label=workspace_name).uri
-            kc.set(workspace_name, workspace_uri)
-        workspace = sortingview.load_workspace(workspace_uri)
-        print(f'Workspace URI: {workspace.uri}')
-        
         recording_label = key['nwb_file_name'] + '_' + \
             key['sort_interval_name'] + '_' + str(key['sort_group_id'])
-        sorting_label = key['sorter_name'] + '_' + key['parameter_set_name']
-        
-        # put kachery sha1 hash instead of path
-        recording_uri = kc.store_json({
-            'recording_format': 'nwb',
-            'data': {
-                'path': extractor_nwb_uri
-            }
-        })
-        sorting_uri = kc.store_json({
-            'sorting_format': 'nwb',
-            'data': {
-                'path': extractor_nwb_uri
-            }
-        })
+        sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' \
+                        + cluster_metrics_list_name
 
-        sorting = sortingview.LabboxEphysSortingExtractor(sorting_uri)
-        recording = sortingview.LabboxEphysRecordingExtractor(recording_uri, download=True)
+        workspace_uri, sorting_id = add_to_sortingview_workspace(workspace_name, recording_label, 
+                                                                 sorting_label, recording, sorting, 
+                                                                 analysis_nwb_path=None,
+                                                                 metrics=metrics)
 
-        R_id = workspace.add_recording(recording=recording, label=recording_label)
-        S_id = workspace.add_sorting(sorting=sorting, recording_id=R_id, label=sorting_label)
-
-        key['curation_feed_uri'] = workspace.uri
-
-        # Set external metrics that will appear in the units table
-        external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
-                             'data': metrics[metric].to_dict()} for metric in metrics.columns]
-        # change unit id to string
-        for metric_ind in range(len(external_metrics)):
-            for old_unit_id in metrics.index:
-                external_metrics[metric_ind]['data'][str(
-                    old_unit_id)] = external_metrics[metric_ind]['data'].pop(old_unit_id)
-                # change nan to none so that json can handle it
-                if np.isnan(external_metrics[metric_ind]['data'][str(old_unit_id)]):
-                    external_metrics[metric_ind]['data'][str(old_unit_id)] = None
-        workspace.set_unit_metrics_for_sorting(
-            sorting_id=S_id, metrics=external_metrics)
-        
-        workspace_list = sortingview.WorkspaceList(list_name='default')
-        workspace_list.add_workspace(name=workspace_name, workspace=workspace)
-        print('Workspace added to sortingview')
-
-        print(f'To curate the spike sorting, go to https://sortingview.vercel.app/workspace?workspace={workspace.uri}&channel=franklab')
+        key['sorting_id'] = sorting_id      
+        key['curation_feed_uri'] = workspace_uri
         
         # Give permission to workspace based on Google account
         team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
-        if len(team_members)==0:
-            raise ValueError('The specified team does not exist or there are no members in the team;\
-                             create or change the entry in LabTeam table first')
-        workspace = sortingview.load_workspace(workspace_uri)
-        for team_member in team_members:
-            google_user_id = (LabMember.LabMemberInfo & {'lab_member_name':team_member}).fetch('google_user_name')  
-            if len(google_user_id)!=1:
-                print(f'Google user ID for {team_member} does not exist or more than one ID detected;\
-                        permission to curate not given to {team_member}, skipping...')              
-            workspace.set_user_permissions(google_user_id[0], {'edit': True})
-            print(f'Permissions for {google_user_id[0]} set to: {workspace.get_user_permissions(google_user_id[0])}')
-    
+        set_workspace_permission(workspace_name, team_members)
+        
         self.insert1(key)
         print('\nDone - entry inserted to table.')
+
+    @staticmethod
+    def get_extractor_save_path(key: dict, type: str='h5v1'):
+        """
+        Returns the paths for recording and sorting extractors to be saved
+
+        Parameters
+        ----------
+        key: dict
+            Key from SpikeSorting table
+        type: str, optional
+            Type of extractor. Currently 'h5v1' or 'nwb" are supported. Defaults to 'h5v1'.
+        """
+        supported_types = ['h5v1', 'nwb']
+        if type not in supported_types:
+            raise Error(f'extractor type {type} not in supported types {supported_types}')
+        
+        # Path to files that will hold recording and sorting extractors
+        extractor_base_name = key['nwb_file_name'] \
+            + '_' + key['sort_interval_name'] \
+            + '_' + str(key['sort_group_id']) \
+            + '_' + key['sorter_name'] \
+            + '_' + key['parameter_set_name']
+        analysis_path = str(Path(os.environ['SPIKE_SORTING_STORAGE_DIR'])
+                            / key['analysis_file_name'])
+
+        if not os.path.isdir(analysis_path):
+            os.mkdir(analysis_path)
+        full_path = str(Path(analysis_path) / extractor_base_name)
+        
+        if type == 'h5v1': 
+            recording_path = full_path + '_recording.' + type
+            sorting_path = full_path + '_sorting.' + type
+        elif type == 'nwb':
+            recording_path = full_path + '.' + type
+            sorting_path = recording_path
+            
+        return recording_path, sorting_path
 
     def delete(self):
         """
@@ -781,13 +754,11 @@ class SpikeSorting(dj.Computed):
             sort_interval, valid_times)
         return sort_interval_valid_times
 
-    def get_filtered_recording_extractor(self, key):
+    def get_filtered_recording_extractor(self, key: dict):
         """
         Generates a RecordingExtractor object based on parameters in key.
-        (1) Loads the NWB file created during insertion as a NwbRecordingExtractor
-        (2) Slices the NwbRecordingExtractor in time (interval) and space (channels) to
-            get a SubRecordingExtractor
-        (3) Applies referencing, and bandpass filtering
+        (1) Loads the inserted NWB file as a NwbRecordingExtractor
+        (2) Applies referencing and bandpass filtering
 
         Parameters
         ----------
@@ -795,9 +766,9 @@ class SpikeSorting(dj.Computed):
 
         Returns
         -------
-        sub_R: se.RecordingExtractor
+        recording: spikeinterface.extractors.RecordingExtractor
         """
-        #print('In get_filtered_recording_extractor')
+        
         with Timer(label='filtered recording extractor setup', verbose=True):
             nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
             with pynwb.NWBHDF5IO(nwb_file_abs_path, 'r', load_namespaces=True) as io:
@@ -808,9 +779,7 @@ class SpikeSorting(dj.Computed):
                                              'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
 
             sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
-            assert sort_indices[1] - \
-                sort_indices[
-                    0] > 1000, f'Sort indices {sort_indices} are not valid'
+            assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
 
             electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
                                                              'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
@@ -822,16 +791,16 @@ class SpikeSorting(dj.Computed):
             recording = se.read_nwb_recording(Nwbfile.get_abs_path(key['nwb_file_name']),
                                               electrical_series_name='e-series')
 
-        sort_reference_electrode_id = int((SortGroup & {'nwb_file_name': key['nwb_file_name'],
-                                                        'sort_group_id': key['sort_group_id']}).fetch('sort_reference_electrode_id'))
-
+        sort_reference_electrode_id = (SortGroup & {'nwb_file_name': key['nwb_file_name'],
+                                                    'sort_group_id': key['sort_group_id']}).fetch('sort_reference_electrode_id')
+        sort_reference_electrode_id = np.int(sort_reference_electrode_id)
+        
         # make a list of the channels in the sort group and the reference channel if it exists
         channel_ids = electrode_ids.tolist()
-
-        if sort_reference_electrode_id >= 0:
-            # make a list of the channels in the sort group and the reference channel if it exists
+        if sort_reference_electrode_id >= 0:            
             channel_ids.append(sort_reference_electrode_id)
 
+        # slice recording in frames and channels
         recording = recording.frame_slice(start_frame=sort_indices[0], end_frame=sort_indices[1])
         recording = recording.channel_slice(channel_ids=channel_ids)
 
@@ -843,7 +812,6 @@ class SpikeSorting(dj.Computed):
                                                           ref_channels=sort_reference_electrode_id)
             # now restrict it to just the electrode IDs in the sort group
             recording = recording.channel_slice(channel_ids=electrode_ids.tolist())
-
         elif sort_reference_electrode_id == -2:
             recording = st.preprocessing.common_reference(recording, reference='median')
 
@@ -855,7 +823,7 @@ class SpikeSorting(dj.Computed):
         # TODO: change this with spikeinterface.probe
         recording.set_channel_locations(SortGroup().get_geometry(key['sort_group_id'], key['nwb_file_name']))
 
-        # give timestamps for the SubRecordingExtractor
+        # set timestamps
         # TODO: change this once spikeextractors is updated
         recording._timestamps = timestamps[sort_indices[0]:sort_indices[1]]
 
@@ -989,14 +957,31 @@ class AutomaticCurationParameters(dj.Manual):
     ---
     automatic_curation_param_dict: BLOB         #dictionary of variables and values for automatic curation
     """
+    @staticmethod
+    def get_default_parameters(): 
+        """returns a dictionary with the parameters that can be defined 
+
+        Returns:
+            [dict]: dictionary of parameters
+        """
+        param_dict = dict()
+        param_dict['delete_duplicate_spikes'] = False
+        param_dict['burst_merge'] = False
+        param_dict['burst_merge_param'] = dict()
+        param_dict['noise_reject'] = False
+        param_dict['noise_reject_param'] = dict()
+        return param_dict
 
 
 @schema
 class AutomaticCurationSpikeSortingParameters(dj.Manual):
     definition = """
     # Table for holding the output
-    -> AutomaticCurationParameters
+
     -> SpikeSorting
+    ---
+    -> AutomaticCurationParameters
+    -> SpikeSortingMetrics.proj(automatic_curation_cluster_metrics_list_name='cluster_metrics_list_name')
     """
 
 
@@ -1006,21 +991,233 @@ class AutomaticCurationSpikeSorting(dj.Computed):
     # Table for holding the output of automated curation applied to each spike sorting
     -> AutomaticCurationSpikeSortingParameters
     ---
+    -> AnalysisNwbfile
+    units_object_id: varchar(40)           # Object ID for the units in NWB file
+    curation_feed_uri='': varchar(1000)    # sv / figurl feed for curation; duplicated from SpikeSorting
+    sorting_id: varchar(20)                # the sorting id of the new sorting that was added
     automatic_curation_results_dict=NULL: BLOB       #dictionary of outputs from automatic curation
     """
 
     def make(self, key):
-        print(key)
-        # TODO: add burst parent detection and noise waveform detection
+        # LOGIC:
+        #1. If requested, create and save new sorting with spikes removed (e.g. 'delete_duplicate_spikes' == True)
+        #2. If new metrics specified, compute new metrics
+        #3. Using metrics, add labels for burst merge, noise clusters, etc. 
+
         key['automatic_curation_results_dict'] = dict()
+        ss_key = (SpikeSorting & key).fetch1()
+        workspace_uri = key['curation_feed_uri'] = ss_key['curation_feed_uri']
+        # load the workspace and the sorting
+        workspace = sv.load_workspace(ss_key['curation_feed_uri'])
+        sorting_id = ss_key['sorting_id']
+        # check to see if there are multiple sortings, and if so, get just the first one
+        if sorting_id == 'none':
+            print(f'AutomaticCurationSpikeSorting: no sorting_id in SpikeSorting, using the first sorting.')            
+            sorting_id = workspace.sorting_ids[0]
+        sorting = workspace.get_sorting_extractor(sorting_id)
+        recording_id = workspace.recording_ids[0]
+        recording = workspace.get_recording_extractor(recording_id)
+
+        auto_curate_param_name = (AutomaticCurationSpikeSortingParameters & key).fetch1('automatic_curation_param_name')
+        acpd = (AutomaticCurationParameters & {'automatic_curation_param_name': auto_curate_param_name}).fetch1('automatic_curation_param_dict')
+        # check for defined automatic curation keys / parameters
+        
+        #1. Create and save new sorting if requested
+        sorting_modified = False
+        metrics_modified = False
+        analysis_file_created = False
+        if 'delete_duplicate_spikes' in acpd:
+            if acpd['delete_duplicate_spikes']:
+                print('deleting duplicate spikes')
+                # look up the detection interval 
+                param_dict = (SpikeSorterParameters & key).fetch1('parameter_dict')
+                if 'detect_interval' not in param_dict:
+                    Warning(f'delete_duplicate_spikes enabled, but detect_interval is not specified in the spike sorter parameters {key["parameter_set_name"]}; skipping')
+                else:
+                    unit_samples = np.empty((0,),dtype='int64')
+                    unit_labels = np.empty((0,),dtype='int64')
+                    for unit in sorting.get_unit_ids():
+                        tmp_samples = sorting.get_unit_spike_train(unit)
+                        invalid = np.where(np.diff(tmp_samples) < param_dict['detect_interval'])[0]
+                        tmp_samples = np.delete(tmp_samples, invalid)    
+                        print(f'Unit {unit}: {len(invalid)} spikes deleted')
+                        tmp_labels = np.asarray([unit]*len(tmp_samples))
+                        unit_samples = np.hstack((unit_samples, tmp_samples))
+                        unit_labels = np.hstack((unit_labels, tmp_labels))
+                    # sort the times and labels
+                    sort_ind = np.argsort(unit_samples)
+                    unit_samples = unit_samples[sort_ind]
+                    unit_labels = unit_labels[sort_ind]
+                    # create a numpy sorting extractor
+                    new_sorting = se.NumpySortingExtractor()
+                    new_sorting.set_times_labels(times=unit_samples, labels=unit_labels.tolist())
+                    new_sorting.set_sampling_frequency((Raw & key).fetch1('sampling_rate'))
+                    sorting_modified = True
+
+        # 2. check to see if there are updated metrics
+        auto_curate_metrics_list = (AutomaticCurationSpikeSortingParameters() & key).fetch1('automatic_curation_cluster_metrics_list_name')
+        orig_metrics_list = (SpikeSortingParameters() & key).fetch1('cluster_metrics_list_name')
+        orig_units = (SpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
+
+        if sorting_modified or auto_curate_metrics_list != orig_metrics_list:
+            #We need to recalculate the metrics.
+            #First, whiten the recording     
+            with Timer(label=f'whitening and computing new quality metrics', verbose=True):
+                filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+                                                        'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
+                recording = st.preprocessing.whiten(
+                    recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
+
+                tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
+                metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
+                cluster_metrics_list_name = (AutomaticCurationSpikeSortingParameters & key).fetch1('automatic_curation_cluster_metrics_list_name')
+                metrics = SpikeSortingMetrics().compute_metrics(cluster_metrics_list_name, metrics_recording, sorting)  
+                
+            sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' + cluster_metrics_list_name
+            
+            # create the new AnalysisNwbfile for the new sorting / metrics
+            key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
+
+            if not sorting_modified:
+                # add a duplicate sorting with the new metrics
+                sorting_id = workspace.add_sorting(sorting=sorting, recording_id=recording_id, 
+                                            label=sorting_label)
+            else:     
+                #  store new sorting extractor. 
+                r_path, s_path = SpikeSorting.get_extractor_save_path(key, type='h5v1') 
+                sorting_tmp = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(new_sorting, s_path)
+                # add to workspace
+                sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' + cluster_metrics_list_name
+                sorting_id = workspace.add_sorting(sorting=sorting_tmp, recording_id=recording_id, label=sorting_label)
+
+             # Set external metrics that will appear in the units table
+            external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
+                                'data': metrics[metric].to_dict()} for metric in metrics.columns]
+            # change unit id to string
+            for metric_ind in range(len(external_metrics)):
+                for old_unit_id in metrics.index:
+                    external_metrics[metric_ind]['data'][str(
+                        old_unit_id)] = external_metrics[metric_ind]['data'].pop(old_unit_id)
+                    # change nan to none so that json can handle it
+                    if np.isnan(external_metrics[metric_ind]['data'][str(old_unit_id)]):
+                        external_metrics[metric_ind]['data'][str(old_unit_id)] = None
+            
+            workspace.set_unit_metrics_for_sorting(
+                        sorting_id=sorting_id, metrics=external_metrics)    
+
+             # Save the units and their updated metrics
+            # load the AnalysisNWBFile from the original sort to get the sort_interval_valid times and the sort_interval
+            sort_interval = orig_units.iloc[1]['sort_interval']
+            sort_interval_valid_times = orig_units.iloc[1]['obs_intervals']
+
+            # add the units with the metrics and labels to the file.
+            print('\nSaving new metrics...')
+            timestamps = SpikeSorting.get_recording_timestamps(ss_key)
+            units = dict()
+            units_valid_times = dict()
+            units_sort_interval = dict()
+            unit_ids = sorting.get_unit_ids()
+            unit_times_list = []
+            for unit_id in unit_ids:
+                # Note that we take the units from the sorting because it may have been changed above.
+                spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
+                units[unit_id] = timestamps[spike_times_in_samples]
+                unit_times_list.append(units[unit_id])
+                units_valid_times[unit_id] = sort_interval_valid_times
+                units_sort_interval[unit_id] = [sort_interval]
+
+            units_object_id, _ = AnalysisNwbfile().add_units(key['analysis_file_name'],
+                                                            units, units_valid_times,
+                                                            units_sort_interval,
+                                                            metrics=metrics)
+            # add the analysis file to the table
+            AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
+            key['units_object_id'] = units_object_id
+            # add the spike_times to the metrics for subsequent labeling  
+            metrics['spike_times'] = unit_times_list
+
+        else:
+            key['analysis_file_name'] = ss_key['analysis_file_name']
+            key['units_object_id'] = ss_key['units_object_id']
+            metrics = orig_units
+        
+        key['sorting_id'] = sorting_id
+
+        #3. add labels as requested for burst merges, noise, etc.
+        # initialize the labels dictionary
+        labels = dict()
+        labels['mergeGroups'] = []
+        # format: labels['mergeGroups'] = [[1, 2, 5], [3, 4]] would merge units 1,2,and 5 and, separately, 3 and4
+        labels['labelsByUnit'] = dict()
+        # format: labels['labelsByUnit'] = {1:'accept', 2:'noise,reject'}] would label unit 1 as 'accept' and unit 2 as 'noise' and 'reject'
+        
+        # List of available functions for spike waveform extraction: 
+        # https://spikeinterface.readthedocs.io/en/0.13.0/api.html#module-spiketoolkit.postprocessing
+        if 'burst_merge' in acpd:
+            if acpd['burst_merge']:
+                # get the burst_merge parameters
+                burst_merge_param = acpd['burst_merge_param']
+                #TODO: add burst merge code
+        if 'noise_reject' in acpd:
+            if acpd['noise_reject']:
+                # get the noise rejection parameters
+                noise_reject_param = acpd['noise_reject_param']
+                #TODO write noise/ rejection code
+
+        print(f'To curate the modified spike sorting, go to https://sortingview.vercel.app/workspace?workspace={key["curation_feed_uri"]}&channel=franklab')
+                
         self.insert1(key)
 
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+
+    def delete(self):
+        """
+        Extends the delete method of base class to implement permission checking
+        """
+        current_user_name = dj.config['database.user']
+        entries = self.fetch()
+        permission_bool = np.zeros((len(entries),))
+        print(f'Attempting to delete {len(entries)} entries, checking permission...')
+    
+        for entry_idx in range(len(entries)):
+            # check the team name for the entry, then look up the members in that team, then get their datajoint user names
+            team_name = (SpikeSortingParameters & (SpikeSortingParameters & entries[entry_idx]).proj()).fetch1()['team_name']
+            lab_member_name_list = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
+            datajoint_user_names = []
+            for lab_member_name in lab_member_name_list:
+                datajoint_user_names.append((LabMember.LabMemberInfo & {'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
+            permission_bool[entry_idx] = current_user_name in datajoint_user_names
+
+        if np.sum(permission_bool)==len(entries):
+            print('Permission to delete all specified entries granted.')
+            # delete the sortings from the workspaces
+            #for entry_idx in range(len(entries)):
+                #print(entries[entry_idx])
+                #TODO FIX:
+                #key = (self & (self & entries[entry_idx]).proj())
+                # workspace_uri = key['curation_feed_uri'] 
+                #print(key)
+                # # load the workspace and the sorting
+                # workspace = sv.load_workspace(workspace_uri)
+                # sorting_id = key['sorting_id']
+                # workspace.delete_sorting(sorting_id)
+            super().delete()
+        else:
+            raise Exception('You do not have permission to delete all specified entries. Not deleting anything.')
+@schema 
+class CuratedSpikeSortingParameters(dj.Manual):
+    definition = """
+    -> AutomaticCurationSpikeSorting
+    ---
+    -> SpikeSortingMetrics.proj(final_cluster_metrics_list_name='cluster_metrics_list_name')
+    """
 
 @schema
 class CuratedSpikeSorting(dj.Computed):
     definition = """
     # Table for holding the output of fully curated spike sorting
-    -> AutomaticCurationSpikeSorting
+    -> CuratedSpikeSortingParameters
     ---
     -> AnalysisNwbfile    # New analysis NWB file to hold unit info
     units_object_id: varchar(40)           # Object ID for the units in NWB file
@@ -1053,21 +1250,18 @@ class CuratedSpikeSorting(dj.Computed):
         # 1. Merge
         # We can get the new curated soring from the workspace.
         workspace_uri = (SpikeSorting & key).fetch1('curation_feed_uri')
-        workspace = sortingview.load_workspace(workspace_uri=workspace_uri)
-        # check that there is exactly one sorting in this workspace
-        if len(workspace.sorting_ids) == 0:
-            return
-        elif len(workspace.sorting_ids) > 1:
-            Warning(
-                f'More than one sorting associated with {key}; delete extra sorting and try populate again')
+        workspace = sv.load_workspace(workspace_uri=workspace_uri)
+        target_sorting_id = (AutomaticCurationSpikeSorting & key).fetch1('sorting_id')
+        if not target_sorting_id in workspace.sorting_ids:
+            Warning(f'AutomaticCurationSpikeSorting sorting_id {target_sorting_id} not found in workspace; skipping')
             return
 
         #sorting = workspace.get_curated_sorting_extractor(workspace.sorting_ids[0])
-        sorting = workspace.get_curated_sorting_extractor(
-            workspace.sorting_ids[0])
+        # There should be two sortings, corresponding to the 
+        sorting = workspace.get_curated_sorting_extractor(target_sorting_id)
 
         # Get labels
-        labels = workspace.get_sorting_curation(workspace.sorting_ids[0])
+        labels = workspace.get_sorting_curation(target_sorting_id)
 
         # turn labels to list of str, only including accepted units.
         accepted_units = []
@@ -1098,15 +1292,19 @@ class CuratedSpikeSorting(dj.Computed):
 
         # 2. Recalucate metrics for curated units to account for merges
         # get the recording extractor
-        with Timer(label=f'Recomputing metrics', verbose=True):
+        with Timer(label=f'Whitening and recomputing metrics', verbose=True):
             recording = workspace.get_recording_extractor(
                 workspace.recording_ids[0])
             tmpfile = tempfile.NamedTemporaryFile(dir='/stelmo/nwb/tmp')
             recording = se.CacheRecordingExtractor(
-                recording, save_path=tmpfile.name, chunk_mb=10000)
-            metrics_key = (SpikeSortingParameters & key).fetch1(
-                'cluster_metrics_list_name')
-            metrics = SpikeSortingMetrics().compute_metrics(metrics_key, recording, sorting)
+                                recording, save_path=tmpfile.name, chunk_mb=10000)
+            # whiten the recording
+            filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+                                                    'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
+            recording = st.preprocessing.whiten(
+                recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
+            cluster_metrics_list_name = (CuratedSpikeSortingParameters & key).fetch1('final_cluster_metrics_list_name')
+            metrics = SpikeSortingMetrics().compute_metrics(cluster_metrics_list_name, recording, sorting)
 
         # Limit the metrics to accepted units
         metrics = metrics.loc[accepted_units]

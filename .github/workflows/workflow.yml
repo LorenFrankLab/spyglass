@@ -1,0 +1,64 @@
+name: Import test
+
+on: push
+
+jobs:
+  run-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]  #, macos-latest, windows-latest]
+    env:
+      OS: ${{ matrix.os }}
+      PYTHON: '3.8'
+      NWB_DATAJOINT_BASE_DIR: ./data
+      KACHERY_STORAGE_DIR: ./data/kachery-storage
+      DJ_SUPPORT_FILEPATH_MANAGEMENT: True
+    services:
+      datajoint_test_server:
+        image: datajoint/mysql
+        ports:
+        - 3306:3306
+        options: >-
+          -e MYSQL_ROOT_PASSWORD=tutorial
+    steps:
+    - name: Cancel Workflow Action
+      uses: styfle/cancel-workflow-action@0.6.0
+      with:
+        access_token: ${{ github.token }}
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+    - name: Set up conda environment
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        activate-environment: nwb_datajoint
+        environment-file: environment.yml
+    - name: Install test requirements
+      shell: bash -l {0}
+      run: |
+        pip install -r requirements-dev.txt
+    - name: Install nwb_datajoint
+      shell: bash -l {0}
+      run: |
+        conda activate nwb_datajoint
+        pip install -e .
+    - name: Set up data directories
+      run: |
+        mkdir ${NWB_DATAJOINT_BASE_DIR}
+        mkdir ${KACHERY_STORAGE_DIR}
+        mkdir "${NWB_DATAJOINT_BASE_DIR}/raw"
+        mkdir "${NWB_DATAJOINT_BASE_DIR}/analysis"
+    - name: Configure datajoint and test importing nwb_datajoint
+      shell: bash -l {0}
+      run: |
+        conda activate nwb_datajoint
+        python tests/ci_config.py  # configure datajoint
+        python -c "import nwb_datajoint; import nwb_datajoint.common"  # test import
+    - name: Run tests
+      shell: bash -l {0}
+      run: |
+        pytest -rP  # env vars are set within certain tests
