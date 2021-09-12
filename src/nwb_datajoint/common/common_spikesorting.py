@@ -31,7 +31,6 @@ from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
-
 from .sortingview_utils import add_to_sortingview_workspace, set_workspace_permission
 
 si.set_global_tmp_folder('/stelmo/nwb/tmp')
@@ -62,9 +61,7 @@ class Timer:
         if self._verbose:
             print(f"Elapsed time for {self._label}: {self.elapsed()} sec")
 
-
 schema = dj.schema('common_spikesorting')
-
 
 @schema
 class SortGroup(dj.Manual):
@@ -762,11 +759,11 @@ class SpikeSorting(dj.Computed):
 
         Parameters
         ----------
-        key: dict
+            key: dict
 
         Returns
         -------
-        recording: spikeinterface.extractors.RecordingExtractor
+            recording: spikeinterface.extractors.RecordingExtractor
         """
         
         with Timer(label='filtered recording extractor setup', verbose=True):
