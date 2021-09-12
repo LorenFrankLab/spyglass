@@ -1,4 +1,4 @@
-"Functions that are commonly used"
+"Functions for working with sortingview"
 
 from typing import List
 import numpy as np
@@ -7,9 +7,9 @@ import sortingview
 from .common_lab import LabMember
 
 def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sorting_label: str, 
-                                recording : sortingview.LabboxEphysRecordingExtractor, 
-                                sorting: sortingview.LabboxEphysSortingExtractor, analysis_nwb_path=None, 
-                                metrics=None):
+                                 recording : sortingview.LabboxEphysRecordingExtractor, 
+                                 sorting: sortingview.LabboxEphysSortingExtractor, analysis_nwb_path=None, 
+                                 metrics=None):
     """
     Adds recording and sorting to a sortingview workspace
     
@@ -32,13 +32,11 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
     
     Outputs
     ------
-        workspace_uri: str
-            sortingview workspace uri containing recording and sorting
-        sorting_id: str
-            sorting_id of sorting that was added
-    """               
     workspace_uri: str
-    # get uri for workspace; if does not exist, create new one
+        sortingview workspace uri containing recording and sorting
+    sorting_id: str
+        sorting_id of sorting that was added
+    """               
 
     # get uri for workspace; if does not exist, create new one
     workspace_uri = kc.get(workspace_name)
