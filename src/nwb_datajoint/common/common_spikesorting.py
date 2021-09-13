@@ -19,7 +19,7 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
-from mountainsort4.mdaio_impl import readmda
+# from mountainsort4.mdaio_impl import readmda
 
 from .common_device import Probe
 from .common_lab import LabMember, LabTeam
@@ -434,12 +434,12 @@ class SpikeSortingMetrics(dj.Manual):
         """
         m = (self & {'cluster_metrics_list_name': cluster_metrics_list_name}).fetch1()
 
-        return st.validation.compute_quality_metrics(sorting=sorting,
-                                                     recording=recording,
-                                                     metric_names=self.selected_metrics_list(
+        return st.qualitymetrics.compute_quality_metrics(sorting=sorting,
+                                                         recording=recording,
+                                                         metric_names=self.selected_metrics_list(
                                                          m['metric_dict']),
-                                                     as_dataframe=True,
-                                                     **m['metric_parameter_dict'])
+                                                         as_dataframe=True,
+                                                         **m['metric_parameter_dict'])
 
 
 @schema
@@ -570,14 +570,21 @@ class SpikeSorting(dj.Computed):
             artifact_frames = interval_list_excludes_ind(sort_interval_valid_times, recording_timestamps)
             recording = st.remove_artifacts(recording, artifact_frames,
                                             ms_before=0, ms_after=0)
-
-        recording_h5_path, sorting_h5_path = self.get_extractor_save_path(key, type='h5v1')
-
-        # Save filtered recording to binary or NWB
-        # recording = recording.save(folder=analysis_path+'_recording')
-        # se.NwbRecordingExtractor.write_recording(recording, save_path=extractor_nwb_path,
+        
+        # Save filtered recording to binary
+        recording = recording.save()
+        
+        # Save filtered recording to NWB
+        # metadata = {}
+        # metadata['Ecephys'] = {'ElectricalSeries': {'name': 'ElectricalSeries',
+        #                                             'description': key['nwb_file_name'] +
+        #                                             '_' + key['sort_interval_name'] + 
+        #                                             '_' + str(key['sort_group_id'])}}
+        # se.NwbRecordingExtractor.write_recording(recording, save_path=recording_h5_path,
         #                                          buffer_mb=10000, overwrite=True, metadata=metadata,
         #                                          es_key='ElectricalSeries')
+        
+        recording_h5_path, sorting_h5_path = self.get_extractor_save_path(key, type='h5v1')
         
         # Save filtered recording to h5 recording
         recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording, recording_h5_path)
@@ -609,6 +616,7 @@ class SpikeSorting(dj.Computed):
 
         cluster_metrics_list_name = (SpikeSortingParameters & key).fetch1(
                 'cluster_metrics_list_name')
+        # TODO: change using new spikeinterface
         with Timer(label='computing quality metrics', verbose=True):
             metrics = SpikeSortingMetrics().compute_metrics(cluster_metrics_list_name, recording, sorting)
 
@@ -666,7 +674,7 @@ class SpikeSorting(dj.Computed):
         type: str, optional
             Type of extractor. Currently 'h5v1' or 'nwb" are supported. Defaults to 'h5v1'.
         """
-        supported_types = ['h5v1', 'nwb']
+        supported_types = ['h5v1', 'nwb', 'folder']
         if type not in supported_types:
             raise Error(f'extractor type {type} not in supported types {supported_types}')
         
@@ -689,6 +697,9 @@ class SpikeSorting(dj.Computed):
         elif type == 'nwb':
             recording_path = full_path + '.' + type
             sorting_path = recording_path
+        elif type == 'folder':
+            recording_path = full_path + '_recording'
+            sorting_path = full_path + '_sorting'
             
         return recording_path, sorting_path
 
@@ -759,11 +770,11 @@ class SpikeSorting(dj.Computed):
 
         Parameters
         ----------
-            key: dict
+        key: dict
 
         Returns
         -------
-            recording: spikeinterface.extractors.RecordingExtractor
+        recording: spikeinterface.extractors.RecordingExtractor
         """
         
         with Timer(label='filtered recording extractor setup', verbose=True):
@@ -802,7 +813,8 @@ class SpikeSorting(dj.Computed):
         recording = recording.channel_slice(channel_ids=channel_ids)
 
         # Save as binary and reload (for speed)
-        recording = recording.save()
+        # NOTE: omitted as this does not speed things up anymore in si v0.90
+        # recording = recording.save()
         
         if sort_reference_electrode_id >= 0:
             recording = st.preprocessing.common_reference(recording, reference='single',
@@ -818,7 +830,7 @@ class SpikeSorting(dj.Computed):
                                                      freq_max=filter_params['frequency_max'])
 
         # TODO: change this with spikeinterface.probe
-        recording.set_channel_locations(SortGroup().get_geometry(key['sort_group_id'], key['nwb_file_name']))
+        # recording.set_channel_locations(SortGroup().get_geometry(key['sort_group_id'], key['nwb_file_name']))
 
         # set timestamps
         # TODO: change this once spikeextractors is updated
