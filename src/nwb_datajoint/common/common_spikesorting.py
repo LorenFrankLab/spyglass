@@ -33,7 +33,7 @@ from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
 from .sortingview_utils import add_to_sortingview_workspace, set_workspace_permission
 
-si.set_global_tmp_folder('/stelmo/nwb/tmp')
+si.set_global_tmp_folder(os.environ['KACHERY_TEMP_DIR'])
 
 class Timer:
     """
@@ -531,8 +531,6 @@ class SpikeSorting(dj.Computed):
     -> AnalysisNwbfile
     units_object_id: varchar(40)           # Object ID for the units in NWB file
     time_of_sort=0: int                    # This is when the sort was done
-    curation_feed_uri='': varchar(1000)    # Labbox-ephys feed for curation
-    sorting_id='none': varchar(20)         # the id of the sorting that was added
     """
 
     def make(self, key):
@@ -552,8 +550,6 @@ class SpikeSorting(dj.Computed):
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
         sort_interval_valid_times = self.get_sort_interval_valid_times(key)
 
-        # TODO: finish `import_sorted_data` function below
-
         with Timer(label='getting filtered recording extractor', verbose=True):
             recording = self.get_filtered_recording_extractor(key)
             recording_timestamps = recording._timestamps
@@ -571,24 +567,11 @@ class SpikeSorting(dj.Computed):
             recording = st.remove_artifacts(recording, artifact_frames,
                                             ms_before=0, ms_after=0)
         
+        recording_path, sorting_path = self.get_extractor_save_path(key, type='folder')
+        
         # Save filtered recording to binary
-        recording = recording.save()
+        recording = recording.save(folder=recording_path)
         
-        # Save filtered recording to NWB
-        # metadata = {}
-        # metadata['Ecephys'] = {'ElectricalSeries': {'name': 'ElectricalSeries',
-        #                                             'description': key['nwb_file_name'] +
-        #                                             '_' + key['sort_interval_name'] + 
-        #                                             '_' + str(key['sort_group_id'])}}
-        # se.NwbRecordingExtractor.write_recording(recording, save_path=recording_h5_path,
-        #                                          buffer_mb=10000, overwrite=True, metadata=metadata,
-        #                                          es_key='ElectricalSeries')
-        
-        recording_h5_path, sorting_h5_path = self.get_extractor_save_path(key, type='h5v1')
-        
-        # Save filtered recording to h5 recording
-        recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording, recording_h5_path)
-
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
         with Timer(label=f'whitening', verbose=True):
@@ -606,19 +589,8 @@ class SpikeSorting(dj.Computed):
 
         key['time_of_sort'] = int(time.time())
 
-        # Save sorting as NWB or binary
-        # se.NwbSortingExtractor.write_sorting(
-        #     sorting, save_path=extractor_nwb_path)
-        # sorting = sorting.save(folder=analysis_path+'_sorting')
-
-        # Save sorting as H5
-        sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
-
-        cluster_metrics_list_name = (SpikeSortingParameters & key).fetch1(
-                'cluster_metrics_list_name')
-        # TODO: change using new spikeinterface
-        with Timer(label='computing quality metrics', verbose=True):
-            metrics = SpikeSortingMetrics().compute_metrics(cluster_metrics_list_name, recording, sorting)
+        # Save sorting as binary
+        sorting = sorting.save(folder=sorting_path)
 
         print('\nSaving sorting results...')
         units = dict()
@@ -640,24 +612,24 @@ class SpikeSorting(dj.Computed):
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
         key['units_object_id'] = units_object_id
 
-        print('\nGenerating feed for curation...')
-        workspace_name = key['analysis_file_name']
-        recording_label = key['nwb_file_name'] + '_' + \
-            key['sort_interval_name'] + '_' + str(key['sort_group_id'])
-        sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' \
-                        + cluster_metrics_list_name
+        # print('\nGenerating feed for curation...')
+        # workspace_name = key['analysis_file_name']
+        # recording_label = key['nwb_file_name'] + '_' + \
+        #     key['sort_interval_name'] + '_' + str(key['sort_group_id'])
+        # sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' \
+        #                 + cluster_metrics_list_name
 
-        workspace_uri, sorting_id = add_to_sortingview_workspace(workspace_name, recording_label, 
-                                                                 sorting_label, recording, sorting, 
-                                                                 analysis_nwb_path=None,
-                                                                 metrics=metrics)
+        # workspace_uri, sorting_id = add_to_sortingview_workspace(workspace_name, recording_label, 
+        #                                                          sorting_label, recording, sorting, 
+        #                                                          analysis_nwb_path=None,
+        #                                                          metrics=metrics)
 
-        key['sorting_id'] = sorting_id      
-        key['curation_feed_uri'] = workspace_uri
+        # key['sorting_id'] = sorting_id      
+        # key['curation_feed_uri'] = workspace_uri
         
-        # Give permission to workspace based on Google account
-        team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
-        set_workspace_permission(workspace_name, team_members)
+        # # Give permission to workspace based on Google account
+        # team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
+        # set_workspace_permission(workspace_name, team_members)
         
         self.insert1(key)
         print('\nDone - entry inserted to table.')
