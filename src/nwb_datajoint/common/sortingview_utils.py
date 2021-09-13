@@ -81,11 +81,15 @@ def add_to_sortingview_workspace(workspace_name: str, recording_label: str, sort
                 if np.isnan(external_metrics[metric_ind]['data'][str(old_unit_id)]):
                     external_metrics[metric_ind]['data'][str(old_unit_id)] = None
         workspace.set_unit_metrics_for_sorting(sorting_id=S_id, metrics=external_metrics)
-    # add workspace to sortingview
-    workspace_list = sortingview.WorkspaceList(list_name='default')
-    workspace_list.add_workspace(name=workspace_name, workspace=workspace)
-    print('Workspace added to sortingview')
-    print(f'To curate the spike sorting, go to https://sortingview.vercel.app/workspace?workspace={workspace.uri}&channel=franklab')
+    # add workspace to sortingview workspace list
+    # NOTE: deprecated; workspace list no longer needed, switching to figurl
+    # workspace_list = sortingview.WorkspaceList(list_name='default')
+    # workspace_list.add_workspace(name=workspace_name, workspace=workspace)
+    # print('Workspace added to sortingview')
+    F = workspace.figurl()
+    url = F.url(label=workspace_name) 
+    print(f'To curate the spike sorting, go to {url}')
+    # print(f'To curate the spike sorting, go to https://figurl.vercel.app/workspace?workspace={workspace.uri}&channel=franklab')
     
     return workspace.uri, S_id
 
