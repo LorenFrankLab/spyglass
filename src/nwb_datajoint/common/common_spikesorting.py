@@ -302,13 +302,6 @@ class SpikeSorterParameters(dj.Manual):
                 continue
 
 
-@schema
-class SpikeSortingWaveformParameters(dj.Manual):
-    definition = """
-    waveform_parameters_name: varchar(80) # the name for this set of waveform extraction parameters
-    ---
-    waveform_parameter_dict: blob # a dictionary containing the SpikeInterface waveform parameters
-    """
 
 
 @schema
@@ -611,25 +604,6 @@ class SpikeSorting(dj.Computed):
 
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
         key['units_object_id'] = units_object_id
-
-        # print('\nGenerating feed for curation...')
-        # workspace_name = key['analysis_file_name']
-        # recording_label = key['nwb_file_name'] + '_' + \
-        #     key['sort_interval_name'] + '_' + str(key['sort_group_id'])
-        # sorting_label = key['sorter_name'] + '_' + key['parameter_set_name'] + '_' \
-        #                 + cluster_metrics_list_name
-
-        # workspace_uri, sorting_id = add_to_sortingview_workspace(workspace_name, recording_label, 
-        #                                                          sorting_label, recording, sorting, 
-        #                                                          analysis_nwb_path=None,
-        #                                                          metrics=metrics)
-
-        # key['sorting_id'] = sorting_id      
-        # key['curation_feed_uri'] = workspace_uri
-        
-        # # Give permission to workspace based on Google account
-        # team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
-        # set_workspace_permission(workspace_name, team_members)
         
         self.insert1(key)
         print('\nDone - entry inserted to table.')
@@ -958,7 +932,6 @@ class AutomaticCurationParameters(dj.Manual):
 class AutomaticCurationSpikeSortingParameters(dj.Manual):
     definition = """
     # Table for holding the output
-
     -> SpikeSorting
     ---
     -> AutomaticCurationParameters
