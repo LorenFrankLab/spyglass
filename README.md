@@ -41,6 +41,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
      export KACHERY_DAEMON_HOST="typhoon"
      export KACHERY_DAEMON_PORT="14747"
      export KACHERY_TEMP_DIR="/stelmo/nwb/tmp"
+     export FIGURL_CHANNEL="franklab"
      ```
 
     > If you're not connected to UCSF network, then you will have to host your own `kachery` node for curating spike sorting. Go to [kacheryhub](https://www.kacheryhub.org), log in with your Google credentials, and then click on 'How to host a kachery node` for more information.

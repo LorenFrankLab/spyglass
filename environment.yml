@@ -14,6 +14,7 @@ dependencies:
     - labbox-ephys-widgets-jp>=0.1
     - kachery
     - kachery-client
+    - kachery-daemon
     - mountainsort4
     - spikeinterface>=0.90
     - pynwb>=1.4,<2
