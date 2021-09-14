@@ -26,12 +26,6 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
    pip install -e .
    ```
 
-<!-- 4. Enable `labbox` server extension on `Jupyter Lab`. This is necessary for curation of spike sorted data with `labbox-ephys-widgets-jp`.
-
-   ```bash
-   jupyter serverextension enable labbox --sys-prefix
-   ``` -->
-
 ### Setting up database access
 
 1. Ask Loren or Eric to set up an account for you on the Frank lab database. Note that you have to be connected to UCSF LAN to access this server.
@@ -43,16 +37,23 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
      ```bash
      export NWB_DATAJOINT_BASE_DIR="/stelmo/nwb/"
      export SPIKE_SORTING_STORAGE_DIR="/stelmo/nwb/spikesorting"
-     export ANALYSIS_LOCK_FILE="/home/lorenlab/nwb_datajoint_lock/.lockfile"
      export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
      export KACHERY_DAEMON_HOST="typhoon"
      export KACHERY_DAEMON_PORT="14747"
      export KACHERY_TEMP_DIR="/stelmo/nwb/tmp"
+     export FIGURL_CHANNEL="franklab"
      ```
 
-   > If you're not connected to UCSF network, then you will have to host your own `kachery` node for curating spike sorting. Go to [kacheryhub](https://www.kacheryhub.org), log in with your Google credentials, and then click on 'How to host a kachery node` for more information.
+3. Check if you have access to the `kachery` daemon. Open up a terminal, activate the conda environment, and type
 
-3. Configure DataJoint. To connect to the Datajoint database, we have to specify information about it such as the hostname and the port. You should also change your password from the temporary one you were given. Go to the config directory, and run [`dj_config.py`](https://github.com/LorenFrankLab/nwb_datajoint/blob/master/config/dj_config.py) in the terminal with your username:
+   ```bash
+   kachery-client info
+   ```
+
+   If it says you do not have access to the daemon, ask Kyu to add your username to the `kachery-users` group.
+   > If you're running your own `kachery` daemon, then this doesn't apply.
+  
+4. Configure DataJoint. To connect to the Datajoint database, we have to specify information about it such as the hostname and the port. You should also change your password from the temporary one you were given. Go to the config directory, and run [`dj_config.py`](https://github.com/LorenFrankLab/nwb_datajoint/blob/master/config/dj_config.py) in the terminal with your username:
 
     ```bash
     cd config # change to the config directory
