@@ -1,54 +1,19 @@
-import datajoint as dj
 from datetime import datetime
 import kachery as ka
 import os
+import pathlib
 import pynwb
 import pytz
 import uuid
 
 
-def _set_up_env(tmp_path):
-    nwb_datajoint_base_dir = tmp_path / 'nwb-data'
-    kachery_storage_dir = nwb_datajoint_base_dir / 'kachery-storage'
-    tmp_dir = nwb_datajoint_base_dir / 'tmp'
+def test_1():
+    print("In test_1, os.environ['NWB_DATAJOINT_BASE_DIR'] is", os.environ['NWB_DATAJOINT_BASE_DIR'])
+    raw_dir = pathlib.Path(os.environ['NWB_DATAJOINT_BASE_DIR']) / 'raw'
+    nwbfile_path = raw_dir / 'test.nwb'
 
-    os.environ['NWB_DATAJOINT_BASE_DIR'] = str(nwb_datajoint_base_dir)
-    os.environ['KACHERY_STORAGE_DIR'] = str(kachery_storage_dir)
-    os.environ['KACHERY_TEMP_DIR'] = str(tmp_dir)
-    os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
-
-    os.mkdir(nwb_datajoint_base_dir)
-    os.mkdir(kachery_storage_dir)
-    os.mkdir(tmp_dir)
-
-    raw_dir = nwb_datajoint_base_dir / 'raw'
-    analysis_dir = nwb_datajoint_base_dir / 'analysis'
-
-    os.mkdir(raw_dir)
-    os.mkdir(analysis_dir)
-
-    dj.config['stores'] = {
-        'raw': {
-            'protocol': 'file',
-            'location': str(raw_dir),
-            'stage': str(raw_dir)
-        },
-        'analysis': {
-            'protocol': 'file',
-            'location': str(analysis_dir),
-            'stage': str(analysis_dir)
-        }
-    }
-    return raw_dir
-
-
-# TODO use the datajoint_server fixture
-def test_1(tmp_path, datajoint_server):
     from nwb_datajoint.common import Session, DataAcquisitionDevice, CameraDevice, Probe
     from nwb_datajoint.data_import import insert_sessions
-
-    raw_dir = _set_up_env(tmp_path)
-    nwbfile_path = raw_dir / 'test.nwb'
 
     with ka.config(fr='default_readonly'):
         ka.load_file('sha1://8ed68285c327b3766402ee75730d87994ac87e87/beans20190718_no_eseries_no_behavior.nwb',
