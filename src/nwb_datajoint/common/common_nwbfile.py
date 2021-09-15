@@ -7,6 +7,7 @@ import datajoint as dj
 import kachery as ka
 import pandas as pd
 import pynwb
+
 from hdmf.common import DynamicTable
 
 from .dj_helper_fn import get_child_tables
@@ -272,8 +273,8 @@ class AnalysisNwbfile(dj.Manual):
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        nwb_object : pynwb.core.NWBDataInterface or DataFrame
-            The NWB object created by PyNWB or a Panda DataFrame.
+        nwb_object : pynwb.core.NWBDataInterface
+            The NWB object created by PyNWB.
 
         Returns
         -------
@@ -283,7 +284,7 @@ class AnalysisNwbfile(dj.Manual):
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             if isinstance(nwb_object, pd.DataFrame):
-                dt_object = DynamicTable.from_dataframe(name='pandas_table', df = nwb_object)
+                dt_object = DynamicTable.from_dataframe(name='pandas_table', df=nwb_object)
                 nwbf.add_scratch(dt_object)
                 io.write(nwbf)
                 return dt_object.object_id

@@ -10,13 +10,16 @@ import uuid
 def _set_up_env(tmp_path):
     nwb_datajoint_base_dir = tmp_path / 'nwb-data'
     kachery_storage_dir = nwb_datajoint_base_dir / 'kachery-storage'
+    tmp_dir = nwb_datajoint_base_dir / 'tmp'
 
     os.environ['NWB_DATAJOINT_BASE_DIR'] = str(nwb_datajoint_base_dir)
     os.environ['KACHERY_STORAGE_DIR'] = str(kachery_storage_dir)
+    os.environ['KACHERY_TEMP_DIR'] = str(tmp_dir)
     os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
 
     os.mkdir(nwb_datajoint_base_dir)
     os.mkdir(kachery_storage_dir)
+    os.mkdir(tmp_dir)
 
     raw_dir = nwb_datajoint_base_dir / 'raw'
     analysis_dir = nwb_datajoint_base_dir / 'analysis'
