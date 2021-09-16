@@ -21,15 +21,16 @@ from .common_nwbfile import (AnalysisNwbfile, AnalysisNwbfileKachery, Nwbfile,
 from .common_region import BrainRegion
 from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session
-from .common_spikesorting import (AutomaticCurationParameters,
+from .common_spikesorting import (SortGroup, SpikeSortingFilterParameters, SpikeSortingArtifactParameters,
+                                  SpikeSortingRecordingParameters, SpikeSortingRecording, 
+                                  SpikeSortingWorkspace, 
+                                  SpikeSorter, SpikeSorterParameters, 
+                                  SpikeSortingParameters, SpikeSorting, 
+                                  SpikeSortingMetrics, 
+                                  AutomaticCurationParameters, AutomaticCurationSpikeSortingParameters,
                                   AutomaticCurationSpikeSorting,
-                                  AutomaticCurationSpikeSortingParameters,
-                                  CuratedSpikeSorting, CuratedSpikeSortingParameters,
-                                  SortGroup, SpikeSorter,
-                                  SpikeSorterParameters, SpikeSorting,
-                                  SpikeSortingArtifactParameters,
-                                  SpikeSortingMetrics, SpikeSortingParameters,
-                                  SpikeSortingWaveformParameters, UnitInclusionParameters)
+                                  CuratedSpikeSortingParameters, CuratedSpikeSorting,
+                                  UnitInclusionParameters)
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
 from .nwb_helper_fn import (close_nwb_files, estimate_sampling_rate,
