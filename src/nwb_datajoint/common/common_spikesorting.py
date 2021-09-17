@@ -677,7 +677,8 @@ class SpikeSortingWorkspace(dj.Computed):
         sorting = sv.LabboxEphysSortingExtractor(sorting_object)
         # note that we only ever have one recording per workspace
         print(f'workspace.recording_ids[0]: {workspace.recording_ids[0]}')
-        return workspace.add_sorting(workspace.recording_ids[0], sorting=sorting, label=sorting_label)
+        return workspace.add_sorting(recording_id=workspace.recording_ids[0], 
+                                    sorting=sorting, label=sorting_label)
 
     def url(self, key):
         """generate a single url or a list of urls for curation from the key
@@ -688,15 +689,19 @@ class SpikeSortingWorkspace(dj.Computed):
         :rtype: string or a list of strings
         """
         # generate a single website or a list of websites for the selected key
-        uri_list = (self & key).fetch('workspace_uri')
-        channel_list = (self & key).fetch('channel_uri')
-        website_list = list()
-        for index, uri in uri_list:
-            website_list.append(f'https://figurl.vercel.app/workspace?workspace={uri}&channel={channel_list[index]}')
-        if len(website_list) == 1:
-            return website_list[0]
+        workspace_uri_list = (self & key).fetch('workspace_uri')
+        if len(workspace_uri_list) == 0:
+            return None
+        url_list = []
+        for workspace_uri in workspace_uri_list:
+            # load the workspace
+            workspace = sv.load_workspace(workspace_uri)
+            F = workspace.figurl()
+            url_list.append(F.url(label=""))
+        if len(url_list) == 1:
+            return url_list[0]
         else:
-            return website_list
+            return url_list
 
 
 @schema
