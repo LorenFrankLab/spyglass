@@ -11,6 +11,7 @@ import shutil
 import datajoint as dj
 import kachery_client as kc
 import numpy as np
+from numpy.core.records import record
 import pandas as pd
 import pynwb
 import scipy.stats as stats
@@ -395,8 +396,17 @@ class SpikeSortingRecording(dj.Computed):
                 sort_interval_valid_times, recording_timestamps)] = False
             recording = st.preprocessing.mask(recording, mask)
 
+        #add the sort_interval_valid_times as an interval list
+        tmp_key = {}
+        tmp_key['nwb_file_name'] = key['nwb_file_name']
+        tmp_key['interval_list_name'] = key['nwb_file_name'] + '_' + \
+            key['sort_interval_name'] + '_' + str(key['sort_group_id'])+ \
+            key['filter_parameter_set_name'] + '_recording'
+        tmp_key['valid_times'] = sort_interval_valid_times;
+        IntervalList.insert1(tmp_key)
+
         # store the list of valid times for the sort
-        key['sort_interval_valid_times'] = sort_interval_valid_times
+        key['sort_interval_list_name'] = tmp_key['interval_list_name']
 
         # Path to files that will hold the recording extractors
         key['recording_extractor_path'] = self.get_recording_extractor_save_path(key, type='h5v1')
@@ -626,7 +636,7 @@ class SpikeSortingWorkspace(dj.Computed):
         # get the dictionary that defines the recording extractor object
         recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
         # get the uri for that file, assuming h5_v1 format for the moment.
-        recording = sv.LabboxEphysSpikeSortingRecording(recording_object)
+        recording = sv.LabboxEphysRecordingExtractor(recording_object)
         # create the workspace
         workspace_name = key['nwb_file_name'] + '_' + \
             key['sort_interval_name'] + '_' + str(key['sort_group_id'])
@@ -665,13 +675,14 @@ class SpikeSortingWorkspace(dj.Computed):
         workspace_uri = (self & key).fetch1('workspace_uri')
         workspace = sv.load_workspace(workspace_uri)
         sorting = sv.LabboxEphysSortingExtractor(sorting_object)
-        sorting_id = workspace.add_sorting(sorting=sorting, label=sorting_label)
-        return sorting_id
+        # note that we only ever have one recording per workspace
+        print(f'workspace.recording_ids[0]: {workspace.recording_ids[0]}')
+        return workspace.add_sorting(workspace.recording_ids[0], sorting=sorting, label=sorting_label)
 
-    def website(self, key):
-        """generate a single website or a list of websites for the selected key
+    def url(self, key):
+        """generate a single url or a list of urls for curation from the key
 
-        :param key: key to select a set of workspaces
+        :param key: key to select one or a set of workspaces
         :type key: dict
         :return: url or a list of urls
         :rtype: string or a list of strings
@@ -720,10 +731,8 @@ class SpikeSorterParameters(dj.Manual):
         :return: None
         '''
         # set up the default filter parameters
- 
         sort_param_dict = dict()
         sort_param_dict['spikesorter_parameter_set_name'] = 'default'
-
         sorters = ss.available_sorters()
         for sorter in sorters:
             if len((SpikeSorter() & {'sorter_name': sorter}).fetch()):
@@ -783,14 +792,15 @@ class SpikeSorting(dj.Computed):
         # GET the recording extractor from the workspace
         recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
         # get the uri for that file, assuming h5_v1 format for the moment.
-        recording = sv.LabboxEphysSpikeSortingRecording(recording_object)
+        recording = sv.LabboxEphysRecordingExtractor(recording_object)
         recording_timestamps = SpikeSortingRecording.get_recording_timestamps(key)
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
         with Timer(label=f'whitening', verbose=True):
-            filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
-                                                      'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
+            #filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
+            #                                          'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
+            filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
             recording = st.preprocessing.whiten(
                 recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
 
@@ -811,7 +821,9 @@ class SpikeSorting(dj.Computed):
         h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
         key['sorting_extractor_object'] = h5_sorting.object()
         # get the sort interval valid times and the original sort interval
-        sort_interval_valid_times = (SpikeSortingRecording & key).fetch1('sort_interval_valid_times')
+        sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
+        sort_interval_valid_times = (IntervalList & \
+                    {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
         
@@ -835,9 +847,9 @@ class SpikeSorting(dj.Computed):
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
         key['units_object_id'] = units_object_id
 
-        sorting_label = key['spikesorter'] + '_' + key['spikesorting_parameter_set_name']
+        sorting_label = key['sorter_name'] + '_' + key['spikesorter_parameter_set_name']
         # add the sorting to the workspace
-        key['sorting_id'] = SpikeSortingWorkspace.add_sorting(key, sorting_label, key['sorting_extractor_object'])
+        key['sorting_id'] = SpikeSortingWorkspace().add_sorting(key, sorting_label, key['sorting_extractor_object'])
 
         self.insert1(key)
         print('\nDone - entry inserted to table.')
@@ -1249,7 +1261,7 @@ class AutomaticCurationSpikeSorting(dj.Computed):
         # 2. Calculate the metrics
         #First, whiten the recording     
         with Timer(label=f'whitening and computing new quality metrics', verbose=True):
-            filter_params = (SpikeSortingFilterParameters & {'filter_parameter_set_name': key['filter_parameter_set_name']}).fetch1('filter_parameter_dict')
+            filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
             recording = st.preprocessing.whiten(
                 recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
             tmpfile = tempfile.NamedTemporaryFile(dir=os.environ['NWB_DATAJOINT_TEMP_DIR'])
@@ -1448,8 +1460,10 @@ class CuratedSpikeSorting(dj.Computed):
             recording = se.CacheRecordingExtractor(
                                 recording, save_path=tmpfile.name, chunk_mb=10000)
             # whiten the recording
-            filter_params = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
-                                                    'parameter_set_name': key['parameter_set_name']}).fetch1('filter_parameter_dict')
+            #filter_params = (SpikeSortingFilterParameters & 
+            #   {'filter_parameter_set_name': key['filter_parameter_set_name']}).fetch1('filter_parameter_dict')
+            filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
+
             recording = st.preprocessing.whiten(
                 recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
             cluster_metrics_list_name = (CuratedSpikeSortingParameters & key).fetch1('final_cluster_metrics_list_name')
