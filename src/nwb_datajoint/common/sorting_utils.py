@@ -2,6 +2,7 @@
 
 from typing import List
 import numpy as np
+import os
 import kachery_client as kc
 import sortingview as sv
 from .common_lab import LabMember
@@ -10,22 +11,22 @@ from .common_nwbfile import AnalysisNwbfile
 from .common_spikesorting import SpikeSortingRecording, SpikeSortingWorkspace, SortingID
 #TODO: move to separate file
 
-def store_sort(key, *, sorting, sorting_label, sort_interval_list_name, sort_interval, metrics=None):
-    """store a sorting in the Workspace given by the key and in a new AnalysisNwbfile
-
+def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, metrics=None):
+    """store a sorting in a new AnalysisNwbfile
     :param key: key to SpikeSortingRecoring
     :type key: dict
     :param sorting: sorting extractor
     :type sorting: BaseSortingExtractor
-    :param sorting_label: label for sort
-    :type sorting_label: str
-    :param sort_interval_list_name: interval list for sort
+    :param sort_interval_list_name: name of interval list for sort
     :type sort_interval_list_name: str
     :param sort_interval: interval for start and end of sort
     :type sort_interval: list
+    :param path_suffix: string to append to end of sorting extractor file name
+    :type path_suffix: str
     :param metrics: spikesorting metrics, defaults to None
     :type metrics: dict
-    :returns: dictionary with analysis_file_name, units_object_id, and sorting_id keys
+    :returns: analysis_file_name, units_object_id
+    :rtype (str, str)
     """
 
     sort_interval_valid_times = (IntervalList & \
@@ -50,19 +51,7 @@ def store_sort(key, *, sorting, sorting_label, sort_interval_list_name, sort_int
                                                     metrics=metrics)
 
     AnalysisNwbfile().add(key['nwb_file_name'], analysis_file_name)
-    units_object_id = units_object_id
-
-    # add the sorting to the workspace and the SortingID table
-    # get the path from the Recording
-    sorting_h5_path  = SpikeSortingRecording.get_sorting_extractor_save_path(key)
-    h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
-
-    s_key = (SpikeSortingRecording & key).fetch1("KEY")
-    s_key['sorting_extractor_object'] = h5_sorting.object()
-    s_key['sorting_id'] = SpikeSortingWorkspace().add_sorting(key, sorting_label, s_key['sorting_extractor_object'])
-    SortingID.insert1(s_key)
-
-    return {'analysis_file_name': analysis_file_name, 'units_object_id': units_object_id, 'sorting_id' : s_key['sorting_id']}
+    return analysis_file_name,  units_object_id
 
 
 def set_workspace_permission(workspace_name: str, team_members: List[str]):

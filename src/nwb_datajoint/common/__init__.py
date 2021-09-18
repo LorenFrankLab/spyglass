@@ -29,7 +29,7 @@ from .common_spikesorting import (SortGroup, SpikeSortingFilterParameters, Spike
                                   SpikeSortingMetricParameters,
                                   ModifySortingParameters, ModifySortingSelection, ModifySorting, 
                                   AutomaticCurationParameters, AutomaticCurationSelection,
-                                  AutomaticCurationSpikeSorting,
+                                  AutomaticCuration,
                                   CuratedSpikeSortingSelection, CuratedSpikeSorting,
                                   UnitInclusionParameters)
 from .common_subject import Subject
