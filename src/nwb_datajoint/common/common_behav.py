@@ -1,6 +1,7 @@
 from operator import pos
+
 import datajoint as dj
-import numpy as np
+import pandas as pd
 import pynwb
 
 from .common_ephys import Raw  # noqa: F401
@@ -9,7 +10,9 @@ from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .common_task import TaskEpoch
 from .dj_helper_fn import fetch_nwb
-from .nwb_helper_fn import get_data_interface, get_valid_intervals, estimate_sampling_rate, get_nwb_file, get_all_spatial_series
+from .nwb_helper_fn import (estimate_sampling_rate, get_all_spatial_series,
+                            get_data_interface, get_nwb_file,
+                            get_valid_intervals)
 
 schema = dj.schema('common_behav')
 
@@ -25,7 +28,7 @@ class PositionSource(dj.Manual):
     """
 
     def get_nwbf_position_source(self, nwb_file_name):
-        """Given an nwb file name, gets the spatial series and Interval lists from the file, adds the interval 
+        """Given an nwb file name, gets the spatial series and Interval lists from the file, adds the interval
         lists to the interval list table, and populates RawPosition if possible
 
         :param nwb_file_name: the name of the nwb_file
@@ -43,7 +46,7 @@ class PositionSource(dj.Manual):
                 pos_interval_list_name = self.get_pos_interval_name(epoch)
                 interval_dict = dict()
                 interval_dict['nwb_file_name'] = nwb_file_name
-                interval_dict['interval_list_name'] = pos_interval_list_name 
+                interval_dict['interval_list_name'] = pos_interval_list_name
                 interval_dict['valid_times'] = pdict['valid_times']
                 IntervalList().insert1(interval_dict, skip_duplicates=True)
                 # add this interval list to the table
@@ -82,6 +85,13 @@ class RawPosition(dj.Imported):
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
 
+    def fetch1_dataframe(self):
+        raw_position_nwb = self.fetch_nwb()[0]['raw_position']
+        return pd.DataFrame(
+            data=raw_position_nwb.data,
+            index=pd.Index(raw_position_nwb.timestamps, name='time'),
+            columns=raw_position_nwb.description.split(', '))
+
 
 @schema
 class StateScriptFile(dj.Imported):
@@ -95,7 +105,8 @@ class StateScriptFile(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        associated_files = nwbf.processing.get('associated_files') or nwbf.processing.get('associated files')
+        associated_files = nwbf.processing.get(
+            'associated_files') or nwbf.processing.get('associated files')
         if associated_files is not None:
             # TODO type checking that associated_file_obj is of type ndx_franklab_novela.AssociatedFiles
             for associated_file_obj in associated_files.data_interfaces.values():

@@ -2,6 +2,7 @@ name: nwb_datajoint
 channels:
   - conda-forge
   - defaults
+  - franklab
 dependencies:
   - python=3.8
   - jupyterlab>=3.*
@@ -9,6 +10,13 @@ dependencies:
   - pydotplus>=2.0.*
   - dask>=2.30
   - pip>=20.2.*
+  - position_tools
+  - track_linearization
+  - skan
+  - bottleneck
+  - ipympl
+  - tqdm
+  - nb_conda
   - pip:
     - labbox-ephys>=0.7
     - labbox-ephys-widgets-jp>=0.1
