@@ -692,7 +692,6 @@ class SpikeSortingWorkspace(dj.Computed):
         if os.path.exists(sorting_h5_path):
             Warning(f'{sorting_h5_path} exists; overwriting')
         h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
-
         s_key = (SpikeSortingRecording & key).fetch1("KEY")
         sorting_object = s_key['sorting_extractor_object'] = h5_sorting.object()
         
