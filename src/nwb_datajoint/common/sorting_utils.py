@@ -9,9 +9,8 @@ from .common_lab import LabMember
 from .common_interval import IntervalList
 from .common_nwbfile import AnalysisNwbfile
 from .common_spikesorting import SpikeSortingRecording, SpikeSortingWorkspace, SortingID
-#TODO: move to separate file
 
-def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, metrics=None):
+def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, metrics=None, unit_ids=None):
     """store a sorting in a new AnalysisNwbfile
     :param key: key to SpikeSortingRecoring
     :type key: dict
@@ -23,8 +22,10 @@ def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, m
     :type sort_interval: list
     :param path_suffix: string to append to end of sorting extractor file name
     :type path_suffix: str
-    :param metrics: spikesorting metrics, defaults to None
+    :param metrics: spikesorting metrics, optional, defaults to None
     :type metrics: dict
+    :param unit_ids: the ids of the units to save, optional, defaults to None
+    :type list
     :returns: analysis_file_name, units_object_id
     :rtype (str, str)
     """
@@ -36,13 +37,16 @@ def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, m
     units = dict()
     units_valid_times = dict()
     units_sort_interval = dict()
-    unit_ids = sorting.get_unit_ids()
-    for unit_id in unit_ids:
-        spike_times_in_samples = sorting.get_unit_spike_train(
-            unit_id=unit_id)
-        units[unit_id] = recording_timestamps[spike_times_in_samples]
-        units_valid_times[unit_id] = sort_interval_valid_times
-        units_sort_interval[unit_id] = [sort_interval]
+    all_unit_ids = sorting.get_unit_ids()
+    if unit_ids is None:
+        unit_ids = all_unit_ids
+    for unit_id in all_unit_ids:
+        if unit_id in unit_ids:
+            spike_times_in_samples = sorting.get_unit_spike_train(
+                unit_id=unit_id)
+            units[unit_id] = recording_timestamps[spike_times_in_samples]
+            units_valid_times[unit_id] = sort_interval_valid_times
+            units_sort_interval[unit_id] = [sort_interval]
 
     analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
     units_object_id, _ = AnalysisNwbfile().add_units(analysis_file_name,
