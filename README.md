@@ -41,8 +41,12 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
      export KACHERY_DAEMON_HOST="typhoon"
      export KACHERY_DAEMON_PORT="14747"
      export KACHERY_TEMP_DIR="/stelmo/nwb/tmp"
-     export FIGURL_CHANNEL="franklab"
+     export NWB_DATAJOINT_TEMP_DIR="/stelmo/nwb/tmp"
+     export KACHERY_STORAGE_DIR="/stelmo/nwb/kachery-storage"
+     export FIGURL_CHANNEL="franklab2"
+     
      ```
+     Note that a local NWB_DATAJOINT_TEMP_DIR (e.g. one on your machine) will speed up spikesorting, but make sure it has enough free space (ideally at least 500GB)
 
 3. Check if you have access to the `kachery` daemon. Open up a terminal, activate the conda environment, and type
 
