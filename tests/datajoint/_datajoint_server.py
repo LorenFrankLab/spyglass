@@ -1,4 +1,4 @@
-import hither as hi
+import hither2 as hi
 import multiprocessing
 import os
 
