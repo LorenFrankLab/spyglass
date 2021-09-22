@@ -1,11 +1,12 @@
 import datajoint as dj
+import sortingview as sv
 import labbox_ephys as le
 import numpy as np
 import pandas as pd
 import pynwb
 
 from ..common.common_nwbfile import AnalysisNwbfile
-from ..common.common_spikesorting import (CuratedSpikeSorting, SpikeSorting,
+from ..common.common_spikesorting import (CuratedSpikeSorting, SpikeSortingWorkspace,
                                           UnitInclusionParameters)
 from ..common.dj_helper_fn import fetch_nwb  # dj_replace
 
@@ -74,15 +75,15 @@ class UnitMarks(dj.Computed):
         units = UnitInclusionParameters().get_included_units(key, key)
 
         # retrieve the units from the NWB file
-        nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[
-            0]['units'].to_dataframe()
-
-        # get the labbox workspace so we can get the waveforms from the recording
-        curation_feed_uri = (SpikeSorting & key).fetch('curation_feed_uri')[0]
-        workspace = le.load_workspace(curation_feed_uri)
+        nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
+    
+        # get the  workspace so we can get the waveforms from the recording
+        workspace_uri = (SpikeSortingWorkspace & key).fetch1('workspace_uri')
+        sorting_id = (CuratedSpikeSorting & key).fetch1('sorting_id')
+        workspace = sv.load_workspace(workspace_uri)
         recording = workspace.get_recording_extractor(
             workspace.recording_ids[0])
-        sorting = workspace.get_sorting_extractor(workspace.sorting_ids[0])
+        sorting = workspace.get_sorting_extractor(sorting_id)
         channel_ids = recording.get_channel_ids()
         # assume the channels are all the same for the moment. This would need to be changed for larger probes
         channel_ids_by_unit = [channel_ids] * (max(units['unit_id']) + 1)

@@ -536,6 +536,9 @@ class SpikeSortingRecording(dj.Computed):
                                              'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
 
             sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
+            # correct for sort intervals that go beyond the data
+            if sort_indices[1] == len(timestamps):
+                sort_indices[1] = len(timestamps)-1
             assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
 
             electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
@@ -910,7 +913,7 @@ class SpikeSorting(dj.Computed):
         sorting_label = key['sorter_name'] + '_' + key['spikesorter_parameter_set_name']
         key['sorting_id'] = SpikeSortingWorkspace().store_sorting(key, sorting=sorting, sorting_label=sorting_label)
         # also set the snippet length
-        
+
         
         key['analysis_file_name'], key['units_object_id'] = \
             store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
@@ -1437,8 +1440,7 @@ class CuratedSpikeSorting(dj.Computed):
 
     def make(self, key):
         # define the list of properties. TODO: get this from table definition.
-        unit_fields = ['label', 'noise_overlap', 
-                           'isi_violation', 'firing_rate', 'num_spikes']
+        non_metric_fields = ['spike_times', 'obs_intervals', 'sort_interval']
 
         # Creating the curated units table involves 4 steps:
         # 1. Merging units labeled for merge
@@ -1509,7 +1511,7 @@ class CuratedSpikeSorting(dj.Computed):
         else:
             # create the metrics table
             for col_name in orig_units.columns:
-                if not col_name in unit_fields:
+                if col_name in non_metric_fields:
                     orig_units = orig_units.drop(col_name, axis=1)
             metrics = orig_units
  
@@ -1536,12 +1538,20 @@ class CuratedSpikeSorting(dj.Computed):
         unit_key = key
         for unit_num, unit in units_table.iterrows():
             unit_key['unit_id'] = unit_num
-            for property in unit_fields:
-                if property in unit:
+            for property in unit:
+                if property not in non_metric_fields:
                     unit_key[property] = unit[property]
             CuratedSpikeSorting.Unit.insert1(unit_key)
 
         print('Done with dj Unit table.')
+
+    def metrics_fields(self):
+        """Returns a list of the metrics that are currently in the Units table
+        """
+        unit_fields = list(self.Unit().fetch(limit=1, as_dict=True)[0].keys())
+        parent_fields = list(CuratedSpikeSorting.fetch(limit=1, as_dict=True)[0].keys())
+        parent_fields.extend(['unit_id', 'label'])
+        return [field for field in unit_fields if field not in parent_fields]
 
     def delete(self):
         """
@@ -1597,7 +1607,7 @@ class UnitInclusionParameters(dj.Manual):
     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
     ---
     max_noise_overlap=1:        float   # noise overlap threshold (include below) 
-    min_nn_hit_rate=-1:         float   # isolation score threshold (include above)
+    min_nn_isolation=-1:         float   # isolation score threshold (include above)
     max_isi_violation=100:      float   # ISI violation threshold
     min_firing_rate=0:          float   # minimum firing rate threshold
     max_firing_rate=100000:     float   # maximum fring rate thershold
@@ -1614,16 +1624,29 @@ class UnitInclusionParameters(dj.Manual):
         :param unit_inclusion_key: key to a single unit inclusion parameter set
         :type unit_inclusion_key: dict
         """
+ 
 
         curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
         inclusion_key = (UnitInclusionParameters & unit_inclusion_key).fetch1()
-        units = (CuratedSpikeSorting().Unit() & curated_sortings &
-                                               f'noise_overlap <= {inclusion_key["max_noise_overlap"]}' &
-                                               f'nn_hit_rate >= {inclusion_key["min_nn_hit_rate"]}' &
-                                               f'isi_violation <= {inclusion_key["max_isi_violation"]}' &
-                                               f'firing_rate >= {inclusion_key["min_firing_rate"]}' &
-                                               f'firing_rate <= {inclusion_key["max_firing_rate"]}' &
-                                               f'num_spikes >= {inclusion_key["min_num_spikes"]}').fetch()
+     
+        units = (CuratedSpikeSorting().Unit() & curated_sortings).fetch()
+        # get a list of the metrics in the units table
+        metrics_list = CuratedSpikeSorting().metrics_fields()
+        # create a list of the units to kepp. 
+        #TODO: make this code more flexible
+        keep = np.asarray([True] * len(units))
+        if 'noise_overlap' in metrics_list and "max_noise_overlap" in inclusion_key:
+            keep = np.logical_and(keep, units['noise_overlap'] <= inclusion_key["max_noise_overlap"])
+        if 'nn_isolation' in metrics_list and "min_isolation" in inclusion_key:
+            keep = np.logical_and(keep, units['nn_isolation'] >= inclusion_key["min_isolation"])
+        if 'isi_violation' in metrics_list and "isi_violation" in inclusion_key:
+            keep = np.logical_and(keep, units['isi_violation'] <= inclusion_key["isi_violation"])
+        if 'firing_rate' in metrics_list and "firing_rate" in inclusion_key:
+            keep = np.logical_and(keep, units['firing_rate'] >= inclusion_key["min_firing_rate"])
+            keep = np.logical_and(keep, units['firing_rate'] <= inclusion_key["max_firing_rate"])
+        if 'num_spikes' in metrics_list and "min_num_spikes" in inclusion_key:
+            keep = np.logical_and(keep, units['num_spikes'] >= inclusion_key["min_num_spikes"])
+        units = units[keep]
         #now exclude by label if it is specified
         if inclusion_key['exclude_label_list'] is not None:
             included_units = []
