@@ -1,4 +1,5 @@
 import hither2 as hi
+import kachery_client as kc
 import multiprocessing
 import os
 
@@ -18,7 +19,7 @@ def run_service_datajoint_server():
     os.environ['RUNNING_PYTEST'] = 'TRUE'
 
     with hi.ConsoleCapture(label='[datajoint-server]'):
-        ss = hi.ShellScript(f"""
+        ss = kc.ShellScript(f"""
         #!/bin/bash
         set -ex
 
@@ -33,7 +34,7 @@ def run_service_datajoint_server():
 def run_datajoint_server():
     print('Starting datajoint server')
 
-    ss_pull = hi.ShellScript("""
+    ss_pull = kc.ShellScript("""
     #!/bin/bash
     set -ex
 
@@ -61,7 +62,7 @@ def run_datajoint_server():
 def kill_datajoint_server():
     print('Terminating datajoint server')
 
-    ss2 = hi.ShellScript(f"""
+    ss2 = kc.ShellScript(f"""
     #!/bin/bash
 
     set -ex
