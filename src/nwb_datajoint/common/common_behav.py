@@ -1,5 +1,8 @@
+
 import datajoint as dj
 import ndx_franklab_novela
+from operator import pos
+import pandas as pd
 import pynwb
 
 from .common_ephys import Raw  # noqa: F401
@@ -86,6 +89,13 @@ class RawPosition(dj.Imported):
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
+
+    def fetch1_dataframe(self):
+        raw_position_nwb = self.fetch_nwb()[0]['raw_position']
+        return pd.DataFrame(
+            data=raw_position_nwb.data,
+            index=pd.Index(raw_position_nwb.timestamps, name='time'),
+            columns=raw_position_nwb.description.split(', '))
 
 
 @schema
