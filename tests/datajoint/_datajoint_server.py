@@ -75,6 +75,7 @@ def kill_datajoint_server():
 
 
 def _wait_for_datajoint_server_to_start():
+    time.sleep(15)  # it takes a while to start the server
     timer = time.time()
     while True:
         try:
