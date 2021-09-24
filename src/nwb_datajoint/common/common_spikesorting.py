@@ -1488,7 +1488,7 @@ class CuratedSpikeSorting(dj.Computed):
         orig_units = (AutomaticCuration & key).fetch_nwb()[0]['units']
         orig_units = orig_units.loc[accepted_units]
         #TODO: fix if unit 1 doesn't exist
-        sort_interval = orig_units.iloc[1]['sort_interval']
+        sort_interval = orig_units.iloc[0]]['sort_interval']
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
 
         # 2. Recalculate metrics for curated units to account for merges if there were any
