@@ -15,6 +15,7 @@ sys.path.append(thisdir)
 
 
 global __PROCESS
+__PROCESS = None
 
 
 def pytest_addoption(parser):
