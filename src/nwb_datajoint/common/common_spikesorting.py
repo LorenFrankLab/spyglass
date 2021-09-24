@@ -1534,16 +1534,13 @@ class CuratedSpikeSorting(dj.Computed):
         units_table = (CuratedSpikeSorting & key).fetch_nwb()[0]['units']
 
         # Add entries to CuratedSpikeSorting.Units table
-        print('\nAdding to dj Unit table...')
         unit_key = key
         for unit_num, unit in units_table.iterrows():
             unit_key['unit_id'] = unit_num
-            for property in unit:
+            for property in unit.index:
                 if property not in non_metric_fields:
                     unit_key[property] = unit[property]
             CuratedSpikeSorting.Unit.insert1(unit_key)
-
-        print('Done with dj Unit table.')
 
     def metrics_fields(self):
         """Returns a list of the metrics that are currently in the Units table
