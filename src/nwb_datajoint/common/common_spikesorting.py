@@ -778,6 +778,23 @@ class SpikeSortingWorkspace(dj.Computed):
         else:
             return url_list
 
+    def precalculate(self, key):
+        """For each workspace specified by the key, this will run the snipped precalculation code
+
+        Args:
+            key ([dict]): key to one or more SpikeSortingWorkspaces
+        Returns:
+            None
+        """
+        workspace_uri_list = (self & key).fetch('workspace_uri')
+        #TODO: consider running in parallel
+        for workspace_uri in workspace_uri_list:
+            try:
+                workspace = sv.load_workspace(workspace_uri)
+                workspace.precalculate()
+            except:
+                Warning(f'Error precomputing for workspace {workspace_uri}')
+
 @schema
 class SortingID(dj.Manual):
     definition = """
@@ -1489,7 +1506,7 @@ class CuratedSpikeSorting(dj.Computed):
         # get the original units from the Automatic curation NWB file
         orig_units = (AutomaticCuration & key).fetch_nwb()[0]['units']
         orig_units = orig_units.loc[accepted_units]
-        #TODO: fix if unit 1 doesn't exist
+        #TODO: fix if unit 0 doesn't exist
         sort_interval = orig_units.iloc[0]['sort_interval']
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
 
