@@ -7,39 +7,30 @@ from .common_dio import DIOEvents
 from .common_ephys import (LFP, Electrode, ElectrodeGroup, LFPBand,
                            LFPBandSelection, LFPSelection, Raw, SampleCount)
 from .common_filter import FirFilter
-from .common_interval import (IntervalList, SortInterval, interval_list_censor,
+from .common_interval import (IntervalList, SortInterval,
                               interval_list_contains,
                               interval_list_contains_ind,
                               interval_list_excludes,
                               interval_list_excludes_ind,
-                              interval_list_intersect, interval_list_union)
+                              interval_list_intersect,
+                              interval_list_censor, 
+                              interval_list_union)
 from .common_lab import Institution, Lab, LabMember, LabTeam
 from .common_nwbfile import (AnalysisNwbfile, AnalysisNwbfileKachery, Nwbfile,
                              NwbfileKachery)
-from .common_position import (IntervalLinearizationSelection,
-                              IntervalLinearizedPosition, IntervalPositionInfo,
-                              IntervalPositionInfoSelection,
-                              LinearizationParameters, NodePicker,
-                              PositionInfoParameters, PositionVideo,
-                              SelectFromCollection, TrackGraph)
 from .common_region import BrainRegion
 from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session
-from .common_spikesorting import (AutomaticCuration,
-                                  AutomaticCurationParameters,
-                                  AutomaticCurationSelection,
-                                  CuratedSpikeSorting,
-                                  CuratedSpikeSortingSelection, ModifySorting,
-                                  ModifySortingParameters,
-                                  ModifySortingSelection, SortGroup, SortingID,
-                                  SpikeSorter, SpikeSorterParameters,
-                                  SpikeSorting,
-                                  SpikeSortingArtifactDetectionParameters,
-                                  SpikeSortingFilterParameters,
+from .common_spikesorting import (SortGroup, SpikeSortingFilterParameters, SpikeSortingArtifactDetectionParameters,
+                                  SpikeSortingRecordingSelection, SpikeSortingRecording, 
+                                  SpikeSortingWorkspace, 
+                                  SpikeSorter, SpikeSorterParameters, SortingID,
+                                  SpikeSortingSelection, SpikeSorting, 
                                   SpikeSortingMetricParameters,
-                                  SpikeSortingRecording,
-                                  SpikeSortingRecordingSelection,
-                                  SpikeSortingSelection, SpikeSortingWorkspace,
+                                  ModifySortingParameters, ModifySortingSelection, ModifySorting, 
+                                  AutomaticCurationParameters, AutomaticCurationSelection,
+                                  AutomaticCuration,
+                                  CuratedSpikeSortingSelection, CuratedSpikeSorting,
                                   UnitInclusionParameters)
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
