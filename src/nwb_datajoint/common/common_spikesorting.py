@@ -419,7 +419,7 @@ class SpikeSortingRecording(dj.Computed):
             recording = se.CacheRecordingExtractor(
                         recording, save_path=tmpfile.name, chunk_mb=1000, n_jobs=4)
             h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording, 
-                                                                                    key["recording_extractor_path"])
+                                                 key["recording_extractor_path"], dtype='int16')
         key['recording_extractor_object'] = h5_recording.object()
         self.insert1(key)
 
