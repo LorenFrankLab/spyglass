@@ -4,7 +4,7 @@ import random
 import string
 
 import datajoint as dj
-import kachery as ka
+import kachery_client as kc
 import pandas as pd
 import pynwb
 
@@ -413,15 +413,12 @@ class NwbfileKachery(dj.Computed):
     definition = """
     -> Nwbfile
     ---
-    nwb_file_sha1: varchar(40)  # the sha1 hash of the NWB file for kachery
+    nwb_file_uri: varchar(200)  # the uri the NWB file for kachery
     """
 
     def make(self, key):
-        print('Computing SHA-1 and storing in kachery...')
-        nwb_file_abs_path = Nwbfile.get_abs_path(key['nwb_file_name'])
-        with ka.config(use_hard_links=True):
-            kachery_path = ka.store_file(nwb_file_abs_path)
-            key['nwb_file_sha1'] = ka.get_file_hash(kachery_path)
+        print(f'Linking {key["nwb_file_name"]} and storing in kachery...')
+        key['nwb_file_uri'] = kc.link_file(Nwbfile().get_abs_path(key['nwb_file_name']))
         self.insert1(key)
 
 
@@ -430,16 +427,10 @@ class AnalysisNwbfileKachery(dj.Computed):
     definition = """
     -> AnalysisNwbfile
     ---
-    analysis_file_sha1: varchar(40)  # the sha1 hash of the file
+    analysis_file_uri: varchar(200)  # the uri of the file
     """
 
     def make(self, key):
-        print('Computing SHA-1 and storing in kachery...')
-        analysis_file_abs_path = AnalysisNwbfile(
-        ).get_abs_path(key['analysis_file_name'])
-        with ka.config(use_hard_links=True):
-            kachery_path = ka.store_file(analysis_file_abs_path)
-            key['analysis_file_sha1'] = ka.get_file_hash(kachery_path)
+        print(f'Linking {key["analysis_file_name"]} and storing in kachery...')
+        key['analysis_file_uri'] = kc.link_file(AnalysisNwbfile().get_abs_path(key['analysis_file_name']))
         self.insert1(key)
-
-    # TODO: load from kachery and

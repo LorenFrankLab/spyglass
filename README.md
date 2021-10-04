@@ -30,7 +30,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 
 1. Ask Loren or Eric to set up an account for you on the Frank lab `datajoint` database. Note that you have to be connected to UCSF LAN to access this server.
 
-   > If you're not affiliated with UCSF or if you are just looking to try out `nwb_datajoint`, then you will need to set up your own MySQL server. For example, you can do so with a [Docker image of a MySQL server configured for Datajoint](https://tutorials.datajoint.io/setting-up/local-database.html)
+   > If you're not affiliated with UCSF or if you are just looking to try out `nwb_datajoint`, then you will need to set up a different MySQL server. For example, you can set up your own local server with a Docker image of a MySQL server configured for Datajoint (see [instructions](https://tutorials.datajoint.io/setting-up/local-database.html) and/or [tutorial notebook](./notebooks/docker_mysql_tutorial.ipynb)).
 
 2. Add the following environment variables (e.g. in `~/.bashrc`). We assumes that you are interacting with the database on a computer that has mounted `stelmo` at `/stelmo` (if the mount location is different, change accordingly). For this to take effect, log out and log back in, or run `source ~/.bashrc` in the terminal.
 
@@ -41,10 +41,12 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
      export KACHERY_DAEMON_HOST="typhoon"
      export KACHERY_DAEMON_PORT="14747"
      export KACHERY_TEMP_DIR="/stelmo/nwb/tmp"
-     export FIGURL_CHANNEL="franklab"
+     export NWB_DATAJOINT_TEMP_DIR="/stelmo/nwb/tmp"
+     export KACHERY_STORAGE_DIR="/stelmo/nwb/kachery-storage"
+     export FIGURL_CHANNEL="franklab2"
      ```
 
-    > If you're not connected to UCSF network, then you will have to host your own `kachery` node for curating spike sorting. Go to [kacheryhub](https://www.kacheryhub.org), log in with your Google credentials, and then click on 'How to host a kachery node' for more information. Similarly, you will have to run your own backend for `figurl` and specify the channel accordingly. 
+     Note that a local NWB_DATAJOINT_TEMP_DIR (e.g. one on your machine) will speed up spike sorting, but make sure it has enough free space (ideally at least 500GB)
 
 3. Check if you have access to the `kachery` daemon. Open up a terminal, activate the conda environment, and type
 

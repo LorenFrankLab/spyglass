@@ -2,6 +2,8 @@ import datetime
 import pynwb
 import unittest
 
+# NOTE: importing this calls nwb_datajoint.__init__ whichand nwb_datajoint.common.__init__ which both require the
+# DataJoint MySQL server to be already set up and running
 from nwb_datajoint.common import get_electrode_indices
 
 

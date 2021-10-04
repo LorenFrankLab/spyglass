@@ -1,5 +1,6 @@
 """NWB helper functions for finding processing modules and data interfaces."""
 
+import os
 import warnings
 
 import numpy as np
@@ -224,7 +225,8 @@ def get_electrode_indices(nwb_object, electrode_ids):
         # electrodes is a DynamicTable that contains all electrodes
         selected_elect_ids = nwb_object.electrodes.id[:]
     else:
-        raise ValueError('nwb_object must be of type ElectricalSeries or NWBFile')
+        raise ValueError(
+            'nwb_object must be of type ElectricalSeries or NWBFile')
 
     return [elect_idx for elect_idx, elect_id in enumerate(selected_elect_ids) if elect_id in electrode_ids]
 
@@ -260,3 +262,11 @@ def get_all_spatial_series(nwbf, verbose=False):
         pos_data_dict[pos_epoch]['raw_position_object_id'] = spatial_series.object_id
 
     return pos_data_dict
+
+
+def get_nwb_copy_filename(nwb_file_name):
+    '''Get file name of copy of nwb file without the electrophys data'''
+
+    filename, file_extension = os.path.splitext(nwb_file_name)
+
+    return f'{filename}_{file_extension}'
