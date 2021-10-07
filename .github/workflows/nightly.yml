@@ -1,4 +1,4 @@
-name: Nightly import test
+name: Nightly Test
 
 on:
   schedule:

@@ -1,4 +1,4 @@
-name: Import test
+name: PR Test
 
 on: push
 
