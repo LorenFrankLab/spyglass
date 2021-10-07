@@ -64,17 +64,25 @@ def _set_env():
     print('Setting datajoint and kachery environment variables.')
 
     nwb_datajoint_base_dir = pathlib.Path(tempfile.mkdtemp())
+
+    spike_sorting_storage_dir = nwb_datajoint_base_dir / 'spikesorting'
     kachery_storage_dir = nwb_datajoint_base_dir / 'kachery-storage'
     tmp_dir = nwb_datajoint_base_dir / 'tmp'
 
     os.environ['NWB_DATAJOINT_BASE_DIR'] = str(nwb_datajoint_base_dir)
     print('NWB_DATAJOINT_BASE_DIR set to', nwb_datajoint_base_dir)
-    os.environ['KACHERY_STORAGE_DIR'] = str(kachery_storage_dir)
-    os.environ['KACHERY_TEMP_DIR'] = str(tmp_dir)
     os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
+    os.environ['SPIKE_SORTING_STORAGE_DIR'] = str(spike_sorting_storage_dir)
+    # export KACHERY_DAEMON_HOST="typhoon"
+    # export KACHERY_DAEMON_PORT="14747"
+    os.environ['KACHERY_TEMP_DIR'] = str(tmp_dir)
+    os.environ['NWB_DATAJOINT_TEMP_DIR'] = str(tmp_dir)
+    os.environ['KACHERY_STORAGE_DIR'] = str(kachery_storage_dir)
+    os.environ['FIGURL_CHANNEL'] = 'franklab2'
 
-    os.mkdir(kachery_storage_dir)
+    os.mkdir(spike_sorting_storage_dir)
     os.mkdir(tmp_dir)
+    os.mkdir(kachery_storage_dir)
 
     raw_dir = nwb_datajoint_base_dir / 'raw'
     analysis_dir = nwb_datajoint_base_dir / 'analysis'
