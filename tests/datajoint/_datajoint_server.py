@@ -18,8 +18,6 @@ def run_service_datajoint_server():
     from pytest_cov.embed import cleanup_on_sigterm
     cleanup_on_sigterm()
 
-    os.environ['RUNNING_PYTEST'] = 'TRUE'
-
     with hi.ConsoleCapture(label='[datajoint-server]'):
         ss = kc.ShellScript(f"""
         #!/bin/bash
@@ -85,13 +83,14 @@ def _wait_for_datajoint_server_to_start():
             from nwb_datajoint.common import Session  # noqa: F401
             return
         except OperationalError as e:  # e.g. Connection Error
-            print('DataJoint server not started yet. Time', time.time())
+            print('DataJoint server not yet started. Time', time.time())
             print(e)
         except Exception:
-            print('DataJoint server not started yet. Time', time.time())
+            print('Failed to import Session. Time', time.time())
             print(traceback.format_exc())
         current_time = time.time()
         elapsed = current_time - timer
         if elapsed > 300:
-            raise Exception('Timeout while waiting for datajoint server to start. Time', current_time)
+            raise Exception('Timeout while waiting for datajoint server to start and '
+                            'import Session to succeed. Time', current_time)
         time.sleep(5)

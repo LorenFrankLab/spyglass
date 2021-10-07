@@ -4,11 +4,14 @@ from typing import List
 import numpy as np
 import os
 import kachery_client as kc
-import sortingview as sv
 from .common_lab import LabMember
 from .common_interval import IntervalList
 from .common_nwbfile import AnalysisNwbfile
 from .common_spikesorting import SpikeSortingRecording, SpikeSortingWorkspace, SortingID
+
+if os.getenv('RUNNING_PYTEST') != 'TRUE':
+    # do not import sortingview during tests because it requires an accessible registered kachery daemon node
+    import sortingview as sv
 
 def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, metrics=None, unit_ids=None):
     """store a sorting in a new AnalysisNwbfile
@@ -61,14 +64,14 @@ def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, m
 def set_workspace_permission(workspace_name: str, team_members: List[str]):
     """
     Sets permission to sortingview workspace based on google ID
-    
+
     Parameters
     ----------
     workspace_name: str
         name of workspace
     team_members: List[str]
         list of team members to be given permission to edit the workspace
-    
+
     Output
     ------
     workspace_uri: str
@@ -84,11 +87,11 @@ def set_workspace_permission(workspace_name: str, team_members: List[str]):
         raise ValueError('The specified team does not exist or there are no members in the team;\
                             create or change the entry in LabTeam table first')
     for team_member in team_members:
-        google_user_id = (LabMember.LabMemberInfo & {'lab_member_name': team_member}).fetch('google_user_name')  
+        google_user_id = (LabMember.LabMemberInfo & {'lab_member_name': team_member}).fetch('google_user_name')
         if len(google_user_id)!=1:
             print(f'Google user ID for {team_member} does not exist or more than one ID detected;\
                     permission not given to {team_member}, skipping...')
-            continue          
+            continue
         workspace.set_user_permissions(google_user_id[0], {'edit': True})
         print(f'Permissions for {google_user_id[0]} set to: {workspace.get_user_permissions(google_user_id[0])}')
     return workspace_uri

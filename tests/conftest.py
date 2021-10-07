@@ -80,6 +80,8 @@ def _set_env():
     os.environ['KACHERY_STORAGE_DIR'] = str(kachery_storage_dir)
     os.environ['FIGURL_CHANNEL'] = 'franklab2'
 
+    os.environ['RUNNING_PYTEST'] = 'TRUE'
+
     os.mkdir(spike_sorting_storage_dir)
     os.mkdir(tmp_dir)
     os.mkdir(kachery_storage_dir)
