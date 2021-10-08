@@ -73,14 +73,12 @@ def _set_env():
     print('NWB_DATAJOINT_BASE_DIR set to', nwb_datajoint_base_dir)
     os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
     os.environ['SPIKE_SORTING_STORAGE_DIR'] = str(spike_sorting_storage_dir)
-    # export KACHERY_DAEMON_HOST="typhoon"
-    # export KACHERY_DAEMON_PORT="14747"
+    # export KACHERY_DAEMON_HOST=...
+    # export KACHERY_DAEMON_PORT=...
     os.environ['KACHERY_TEMP_DIR'] = str(tmp_dir)
     os.environ['NWB_DATAJOINT_TEMP_DIR'] = str(tmp_dir)
     os.environ['KACHERY_STORAGE_DIR'] = str(kachery_storage_dir)
-    os.environ['FIGURL_CHANNEL'] = 'franklab2'
-
-    os.environ['RUNNING_PYTEST'] = 'TRUE'
+    # os.environ['FIGURL_CHANNEL'] = 'franklab2'
 
     os.mkdir(spike_sorting_storage_dir)
     os.mkdir(tmp_dir)

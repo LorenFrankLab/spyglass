@@ -16,6 +16,7 @@ import os
 import pandas as pd
 import pynwb
 import scipy.stats as stats
+import sortingview as sv
 import spikeextractors as se
 from spikeextractors.extractors.numpyextractors.numpyextractors import NumpySortingExtractor
 from spikeextractors.extractors.nwbextractors.nwbextractors import NwbSortingExtractor
@@ -34,9 +35,6 @@ from .common_session import Session
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
 
-if os.getenv('RUNNING_PYTEST') != 'TRUE':
-    # do not import sortingview during tests because it requires an accessible registered kachery daemon node
-    import sortingview as sv
 
 class Timer:
     """

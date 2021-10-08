@@ -18,6 +18,8 @@ def run_service_datajoint_server():
     from pytest_cov.embed import cleanup_on_sigterm
     cleanup_on_sigterm()
 
+    os.environ['RUNNING_PYTEST'] = 'TRUE'
+
     with hi.ConsoleCapture(label='[datajoint-server]'):
         ss = kc.ShellScript(f"""
         #!/bin/bash

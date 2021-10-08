@@ -1,17 +1,16 @@
 "Functions that are commonly used"
 
-from typing import List
+import kachery_client as kc
 import numpy as np
 import os
-import kachery_client as kc
+import sortingview as sv
+from typing import List
+
 from .common_lab import LabMember
 from .common_interval import IntervalList
 from .common_nwbfile import AnalysisNwbfile
 from .common_spikesorting import SpikeSortingRecording, SpikeSortingWorkspace, SortingID
 
-if os.getenv('RUNNING_PYTEST') != 'TRUE':
-    # do not import sortingview during tests because it requires an accessible registered kachery daemon node
-    import sortingview as sv
 
 def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, metrics=None, unit_ids=None):
     """store a sorting in a new AnalysisNwbfile
