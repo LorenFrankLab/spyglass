@@ -1,14 +1,17 @@
+import pprint
+
 import datajoint as dj
-import sortingview as sv
 import labbox_ephys as le
 import numpy as np
 import pandas as pd
 import pynwb
-
-from ..common.common_nwbfile import AnalysisNwbfile
-from ..common.common_spikesorting import (CuratedSpikeSorting, SpikeSortingWorkspace,
-                                          UnitInclusionParameters)
-from ..common.dj_helper_fn import fetch_nwb  # dj_replace
+import xarray as xr
+from nwb_datajoint.common.common_interval import IntervalList
+from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
+from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
+                                                      SpikeSorting,
+                                                      UnitInclusionParameters)
+from nwb_datajoint.common.dj_helper_fn import fetch_nwb  # dj_replace
 
 schema = dj.schema('decoding_clusterless')
 
@@ -75,15 +78,15 @@ class UnitMarks(dj.Computed):
         units = UnitInclusionParameters().get_included_units(key, key)
 
         # retrieve the units from the NWB file
-        nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
-    
-        # get the  workspace so we can get the waveforms from the recording
-        workspace_uri = (SpikeSortingWorkspace & key).fetch1('workspace_uri')
-        sorting_id = (CuratedSpikeSorting & key).fetch1('sorting_id')
-        workspace = sv.load_workspace(workspace_uri)
+        nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[
+            0]['units'].to_dataframe()
+
+        # get the labbox workspace so we can get the waveforms from the recording
+        curation_feed_uri = (SpikeSorting & key).fetch('curation_feed_uri')[0]
+        workspace = le.load_workspace(curation_feed_uri)
         recording = workspace.get_recording_extractor(
             workspace.recording_ids[0])
-        sorting = workspace.get_sorting_extractor(sorting_id)
+        sorting = workspace.get_sorting_extractor(workspace.sorting_ids[0])
         channel_ids = recording.get_channel_ids()
         # assume the channels are all the same for the moment. This would need to be changed for larger probes
         channel_ids_by_unit = [channel_ids] * (max(units['unit_id']) + 1)
@@ -154,3 +157,110 @@ class UnitMarks(dj.Computed):
                             index=pd.Index(nwb_data['marks'].timestamps,
                                            name='time'),
                             columns=columns)
+
+
+@schema
+class UnitMarksIndicatorSelection(dj.Lookup):
+    definition = """
+    -> UnitMarks
+    -> nd.common.IntervalList
+    sampling_rate=500 : float
+    ---
+    """
+
+
+@schema
+class UnitMarksIndicator(dj.Computed):
+    definition = """
+    -> UnitMarks
+    -> UnitMarksIndicatorSelection
+    ---
+    -> nd.common.AnalysisNwbfile
+    marks_indicator_object_id: varchar(40)
+    """
+
+    def make(self, key):
+        pprint.pprint(key)
+        # TODO: intersection of sort interval and interval list
+        interval_times = (IntervalList &
+                          {
+                              'nwb_file_name': key['nwb_file_name'],
+                              'interval_list_name': key['interval_list_name']
+                          }
+                          ).fetch1('valid_times')[0]
+
+        sampling_rate = (UnitMarksIndicatorSelection & {
+            'nwb_file_name': key['nwb_file_name'],
+            'sort_interval_name': key['sort_interval_name'],
+            'filter_parameter_set_name': key['filter_parameter_set_name'],
+            'sorting_id': key['sorting_id'],
+            'unit_inclusion_param_name': key['unit_inclusion_param_name'],
+            'mark_param_name': key['mark_param_name'],
+            'interval_list_name': key['interval_list_name']
+        }).fetch('sampling_rate')
+
+        marks_df = (UnitMarks & {
+            'nwb_file_name': key['nwb_file_name'],
+            'sort_interval_name': key['sort_interval_name'],
+            'filter_parameter_set_name': key['filter_parameter_set_name'],
+            'sorting_id': key['sorting_id'],
+            'unit_inclusion_param_name': key['unit_inclusion_param_name'],
+            'mark_param_name': key['mark_param_name'],
+        }).fetch1_dataframe()
+
+        time = self.get_time_bins_from_interval(interval_times, sampling_rate)
+
+        # Bin marks into time bins. No spike bins will have NaN
+        marks_df = marks_df.loc[time.min():time.max()]
+        time_index = np.digitize(marks_df.index, time[1:-1])
+        marks_indicator_df = (marks_df
+                              .groupby(time[time_index])
+                              .mean()
+                              .reindex(index=pd.Index(time, name='time')))
+
+        # Exclude times without valid neural data
+        raw_valid_times = (IntervalList() &
+                           {'nwb_file_name': key['nwb_file_name'],
+                            'interval_list_name': 'raw data valid times'}
+                           ).fetch1()['valid_times']
+
+        marks_indicator_df = pd.concat(
+            [marks_indicator_df.loc[start:end]
+             for start, end in raw_valid_times
+             if marks_indicator_df.loc[start:end].shape[0] > 0], axis=0)
+
+        # Insert into analysis nwb file
+        nwb_analysis_file = AnalysisNwbfile()
+        key['analysis_file_name'] = nwb_analysis_file.create(
+            key['nwb_file_name'])
+
+        key['marks_indicator_object_id'] = nwb_analysis_file.add_nwb_object(
+            analysis_file_name=key['analysis_file_name'],
+            nwb_object=marks_indicator_df.reset_index(),
+        )
+
+        nwb_analysis_file.add(
+            nwb_file_name=key['nwb_file_name'],
+            analysis_file_name=key['analysis_file_name'])
+
+        self.insert1(key)
+
+    @staticmethod
+    def get_time_bins_from_interval(interval_times, sampling_rate):
+        start_time, end_time = interval_times
+        n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
+
+        return np.linspace(start_time, end_time, n_samples)
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+
+    def fetch1_dataframe(self):
+        return self.fetch_dataframe()[0]
+
+    def fetch_dataframe(self):
+        return [data['marks_indicator'].set_index('time') for data in self.fetch_nwb()]
+
+    def fetch_xarray(self):
+        return (xr.concat([df.to_xarray().to_array('marks') for df in self.fetch_dataframe()], dim='electrodes')
+                .transpose('time', 'marks', 'electrodes'))
