@@ -12,6 +12,7 @@ from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
                                                       SpikeSorting,
                                                       UnitInclusionParameters)
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb  # dj_replace
+from replay_trajectory_classification.misc import NumbaKDE
 
 schema = dj.schema('decoding_clusterless')
 
@@ -264,3 +265,112 @@ class UnitMarksIndicator(dj.Computed):
     def fetch_xarray(self):
         return (xr.concat([df.to_xarray().to_array('marks') for df in self.fetch_dataframe()], dim='electrodes')
                 .transpose('time', 'marks', 'electrodes'))
+
+
+def make_default_decoding_parameters_cpu():
+    continuous_transition_types = (
+        [['random_walk', 'uniform'],
+         ['uniform',     'uniform']])
+
+    clusterless_algorithm = 'multiunit_likelihood'
+    clusterless_algorithm_params = {
+        'model': NumbaKDE,
+        'model_kwargs': {
+            'bandwidth': np.array([20.0, 20.0, 20.0, 20.0, 8.0, 8.0])},
+    }
+
+    classifier_parameters = {
+        'replay_speed': 1,
+        'place_bin_size': 2.0,
+        'movement_var': 6.0,
+        'position_range': None,
+        'continuous_transition_types': continuous_transition_types,
+        'discrete_transition_type': 'strong_diagonal',
+        'initial_conditions_type': 'uniform_on_track',
+        'discrete_transition_diag': 0.968,
+        'infer_track_interior': True,
+        'clusterless_algorithm': clusterless_algorithm,
+        'clusterless_algorithm_params': clusterless_algorithm_params
+    }
+
+    return classifier_parameters
+
+
+def make_default_decoding_parameters_gpu():
+    continuous_transition_types = (
+        [['random_walk', 'uniform'],
+         ['uniform',     'uniform']])
+
+    clusterless_algorithm = 'multiunit_likelihood_gpu'
+    clusterless_algorithm_params = {
+        'mark_std': 20.0,
+        'position_std': 8.0,
+    }
+
+    classifier_parameters = {
+        'replay_speed': 1,
+        'place_bin_size': 2.0,
+        'movement_var': 6.0,
+        'position_range': None,
+        'continuous_transition_types': continuous_transition_types,
+        'discrete_transition_type': 'strong_diagonal',
+        'initial_conditions_type': 'uniform_on_track',
+        'discrete_transition_diag': 0.968,
+        'infer_track_interior': True,
+        'clusterless_algorithm': clusterless_algorithm,
+        'clusterless_algorithm_params': clusterless_algorithm_params
+    }
+
+    return classifier_parameters
+
+
+def make_default_forward_reverse_decoding_parameters_gpu():
+    continuous_transition_types = [['random_walk_direction2', 'random_walk',            'uniform', 'random_walk',            'random_walk',            'uniform'],  # noqa
+                                   ['random_walk',            'random_walk_direction1', 'uniform', 'random_walk',            'random_walk',            'uniform'],  # noqa
+                                   ['uniform',                'uniform',                'uniform', 'uniform',                'uniform',                'uniform'],  # noqa
+                                   ['random_walk',            'random_walk',            'uniform', 'random_walk_direction1', 'random_walk',            'uniform'],  # noqa
+                                   ['random_walk',            'random_walk',            'uniform', 'random_walk',            'random_walk_direction2', 'uniform'],  # noqa
+                                   ['uniform',                'uniform',                'uniform', 'uniform',                'uniform',                'uniform'],  # noqa
+                                   ]
+
+    clusterless_algorithm = 'multiunit_likelihood_gpu'
+    clusterless_algorithm_params = {
+        'mark_std': 20.0,
+        'position_std': 8.0,
+    }
+
+    classifier_parameters = {
+        'replay_speed': 1,
+        'place_bin_size': 2.0,
+        'movement_var': 6.0,
+        'position_range': None,
+        'continuous_transition_types': continuous_transition_types,
+        'discrete_transition_type': 'strong_diagonal',
+        'initial_conditions_type': 'uniform_on_track',
+        'discrete_transition_diag': 0.968,
+        'clusterless_algorithm': clusterless_algorithm,
+        'infer_track_interior': True,
+        'clusterless_algorithm_params': clusterless_algorithm_params
+    }
+
+    return classifier_parameters
+
+
+@schema
+class ClassifierParameters(dj.Manual):
+    definition = """
+    classifier_param_name : varchar(80) # a name for this set of parameters
+    ---
+    classifier_param_dict:    BLOB    # dictionary of parameters
+    """
+
+    def insert_default_param(self):
+        self.insert1(
+            {'classifier_param_name': 'default_decoding_cpu',
+             'classifier_param_dict': make_default_decoding_parameters_cpu()},
+            skip_duplicates=True)
+
+        self.insert1(
+            {'classifier_param_name': 'default_decoding_gpu',
+             'classifier_param_dict': make_default_decoding_parameters_gpu()},
+            skip_duplicates=True)
