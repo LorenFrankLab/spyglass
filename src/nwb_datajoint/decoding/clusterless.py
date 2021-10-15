@@ -164,7 +164,7 @@ class UnitMarks(dj.Computed):
 class UnitMarksIndicatorSelection(dj.Lookup):
     definition = """
     -> UnitMarks
-    -> nd.common.IntervalList
+    -> IntervalList
     sampling_rate=500 : float
     ---
     """
@@ -176,7 +176,7 @@ class UnitMarksIndicator(dj.Computed):
     -> UnitMarks
     -> UnitMarksIndicatorSelection
     ---
-    -> nd.common.AnalysisNwbfile
+    -> AnalysisNwbfile
     marks_indicator_object_id: varchar(40)
     """
 
@@ -219,16 +219,16 @@ class UnitMarksIndicator(dj.Computed):
                               .mean()
                               .reindex(index=pd.Index(time, name='time')))
 
-        # Exclude times without valid neural data
-        raw_valid_times = (IntervalList() &
-                           {'nwb_file_name': key['nwb_file_name'],
-                            'interval_list_name': 'raw data valid times'}
-                           ).fetch1()['valid_times']
+#         # Exclude times without valid neural data
+#         raw_valid_times = (IntervalList() &
+#                            {'nwb_file_name': key['nwb_file_name'],
+#                             'interval_list_name': 'raw data valid times'}
+#                            ).fetch1()['valid_times']
 
-        marks_indicator_df = pd.concat(
-            [marks_indicator_df.loc[start:end]
-             for start, end in raw_valid_times
-             if marks_indicator_df.loc[start:end].shape[0] > 0], axis=0)
+#         marks_indicator_df = pd.concat(
+#             [marks_indicator_df.loc[start:end]
+#              for start, end in raw_valid_times
+#              if marks_indicator_df.loc[start:end].shape[0] > 0], axis=0)
 
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
