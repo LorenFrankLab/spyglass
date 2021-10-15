@@ -272,11 +272,10 @@ def make_default_decoding_parameters_cpu():
         [['random_walk', 'uniform'],
          ['uniform',     'uniform']])
 
-    clusterless_algorithm = 'multiunit_likelihood'
+    clusterless_algorithm = 'multiunit_likelihood_integer'
     clusterless_algorithm_params = {
-        'model': NumbaKDE,
-        'model_kwargs': {
-            'bandwidth': np.array([20.0, 20.0, 20.0, 20.0, 8.0, 8.0])},
+        'mark_std': 20.0,
+        'position_std': 8.0,
     }
 
     classifier_parameters = {
