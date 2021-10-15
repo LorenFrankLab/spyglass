@@ -12,7 +12,6 @@ from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
                                                       SpikeSorting,
                                                       UnitInclusionParameters)
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb  # dj_replace
-from replay_trajectory_classification.misc import NumbaKDE
 
 schema = dj.schema('decoding_clusterless')
 
@@ -292,7 +291,15 @@ def make_default_decoding_parameters_cpu():
         'clusterless_algorithm_params': clusterless_algorithm_params
     }
 
-    return classifier_parameters
+    encoding_group_to_state = None
+
+    predict_parameters = {
+        'is_compute_acausal': True,
+        'use_gpu':  False,
+        'state_names':  ['Continuous', 'Uniform']
+    }
+
+    return classifier_parameters, encoding_group_to_state, predict_parameters
 
 
 def make_default_decoding_parameters_gpu():
@@ -320,7 +327,15 @@ def make_default_decoding_parameters_gpu():
         'clusterless_algorithm_params': clusterless_algorithm_params
     }
 
-    return classifier_parameters
+    encoding_group_to_state = None
+
+    predict_parameters = {
+        'is_compute_acausal': True,
+        'use_gpu':  True,
+        'state_names':  ['Continuous', 'Uniform']
+    }
+
+    return classifier_parameters, encoding_group_to_state, predict_parameters
 
 
 def make_default_forward_reverse_decoding_parameters_gpu():
@@ -352,7 +367,18 @@ def make_default_forward_reverse_decoding_parameters_gpu():
         'clusterless_algorithm_params': clusterless_algorithm_params
     }
 
-    return classifier_parameters
+    encoding_group_to_state = ['Inbound', 'Inbound', 'Inbound',
+                               'Outbound', 'Outbound', 'Outbound']
+
+    predict_parameters = {
+        'is_compute_acausal': True,
+        'use_gpu':  True,
+        'state_names': [
+            'Inbound-Forward', 'Inbound-Reverse', 'Inbound-Fragmented',
+            'Outbound-Forward', 'Outbound-Reverse', 'Outbound-Fragmented']
+    }
+
+    return classifier_parameters, encoding_group_to_state, predict_parameters
 
 
 @schema
@@ -361,15 +387,25 @@ class ClassifierParameters(dj.Manual):
     classifier_param_name : varchar(80) # a name for this set of parameters
     ---
     classifier_param_dict:    BLOB    # dictionary of parameters
+    encoding_group_to_state : BLOB    # how the encoding groups map to state
+    predict_param_dict :      BLOB    # prediction parameters
     """
 
     def insert_default_param(self):
+        (classifier_parameters, encoding_group_to_state,
+         predict_parameters) = make_default_decoding_parameters_cpu()
         self.insert1(
             {'classifier_param_name': 'default_decoding_cpu',
-             'classifier_param_dict': make_default_decoding_parameters_cpu()},
+             'classifier_param_dict': classifier_parameters,
+             'encoding_group_to_state': encoding_group_to_state,
+             'predict_param_dict': predict_parameters},
             skip_duplicates=True)
 
+        (classifier_parameters, encoding_group_to_state,
+         predict_parameters) = make_default_decoding_parameters_gpu()
         self.insert1(
             {'classifier_param_name': 'default_decoding_gpu',
-             'classifier_param_dict': make_default_decoding_parameters_gpu()},
+             'classifier_param_dict': classifier_parameters,
+             'encoding_group_to_state': encoding_group_to_state,
+             'predict_param_dict': predict_parameters},
             skip_duplicates=True)
