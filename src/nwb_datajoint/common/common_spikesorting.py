@@ -945,9 +945,9 @@ class SpikeSorting(dj.Computed):
                                         **sort_parameters['parameter_dict'])
         else:
             sorting = ss.run_sorter(key['sorter_name'], recording,
-                        output_folder=os.getenv(
-                            'SORTING_TEMP_DIR', None),
-                        **sort_parameters['parameter_dict'])
+                                    output_folder=os.getenv(
+                                    'SORTING_TEMP_DIR', None),
+                                    **sort_parameters['parameter_dict'])
         key['time_of_sort'] = int(time.time())
 
         print('\nSaving sorting results...')       # get the sort interval valid times and the original sort interval
