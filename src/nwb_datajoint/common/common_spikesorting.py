@@ -936,19 +936,12 @@ class SpikeSorting(dj.Computed):
         print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'spikesorter_parameter_set_name': key['spikesorter_parameter_set_name']}).fetch1()
-        # print(os.getenv('NWB_DATAJOINT_TEMP_DIR'))
         tempfile.tempdir = os.getenv('NWB_DATAJOINT_TEMP_DIR')
         with tempfile.TemporaryDirectory() as tmp_output_folder:
             os.environ['MS4_TMP_OUTPUT'] = tmp_output_folder
-            print('tmp_output_folder = ' + os.getenv('MS4_TMP_OUTPUT'))
             sorting = ss.run_sorter(key['sorter_name'], recording,
                                     output_folder=os.getenv('MS4_TMP_OUTPUT'),
                                     **sort_parameters['parameter_dict'])
-            # sorting = ss.run_sorter(key['sorter_name'], recording,
-            #                         output_folder=os.getenv(
-            #                             'NWB_DATAJOINT_TEMP_DIR', None),
-            #                         **sort_parameters['parameter_dict'])
-
         key['time_of_sort'] = int(time.time())
 
         print('\nSaving sorting results...')       # get the sort interval valid times and the original sort interval
