@@ -242,9 +242,9 @@ class IntervalPositionInfo(dj.Computed):
             upsampling_start_time = time[0]
             upsampling_end_time = time[-1]
 
-            dt = 1 / upsampling_sampling_rate
             n_samples = int(np.ceil(
-                (upsampling_end_time - upsampling_start_time) / dt)) + 1
+                (upsampling_end_time - upsampling_start_time) *
+                upsampling_sampling_rate)) + 1
             new_time = np.linspace(upsampling_start_time,
                                    upsampling_end_time, n_samples)
             new_index = pd.Index(np.unique(np.concatenate(
