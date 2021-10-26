@@ -291,7 +291,9 @@ def make_default_decoding_parameters_cpu():
         'clusterless_algorithm_params': clusterless_algorithm_params
     }
 
-    encoding_group_to_state = None
+    fit_parameters = {
+        'encoding_group_to_state': None
+    }
 
     predict_parameters = {
         'is_compute_acausal': True,
@@ -299,7 +301,7 @@ def make_default_decoding_parameters_cpu():
         'state_names':  ['Continuous', 'Uniform']
     }
 
-    return classifier_parameters, encoding_group_to_state, predict_parameters
+    return classifier_parameters, fit_parameters, predict_parameters
 
 
 def make_default_decoding_parameters_gpu():
@@ -327,7 +329,9 @@ def make_default_decoding_parameters_gpu():
         'clusterless_algorithm_params': clusterless_algorithm_params
     }
 
-    encoding_group_to_state = None
+    fit_parameters = {
+        'encoding_group_to_state': None
+    }
 
     predict_parameters = {
         'is_compute_acausal': True,
@@ -335,7 +339,7 @@ def make_default_decoding_parameters_gpu():
         'state_names':  ['Continuous', 'Uniform']
     }
 
-    return classifier_parameters, encoding_group_to_state, predict_parameters
+    return classifier_parameters, fit_parameters, predict_parameters
 
 
 def make_default_forward_reverse_decoding_parameters_gpu():
@@ -367,8 +371,10 @@ def make_default_forward_reverse_decoding_parameters_gpu():
         'clusterless_algorithm_params': clusterless_algorithm_params
     }
 
-    encoding_group_to_state = ['Inbound', 'Inbound', 'Inbound',
-                               'Outbound', 'Outbound', 'Outbound']
+    fit_parameters = {
+        'encoding_group_to_state': ['Inbound', 'Inbound', 'Inbound',
+                                    'Outbound', 'Outbound', 'Outbound']
+    }
 
     predict_parameters = {
         'is_compute_acausal': True,
@@ -378,7 +384,7 @@ def make_default_forward_reverse_decoding_parameters_gpu():
             'Outbound-Forward', 'Outbound-Reverse', 'Outbound-Fragmented']
     }
 
-    return classifier_parameters, encoding_group_to_state, predict_parameters
+    return classifier_parameters, fit_parameters, predict_parameters
 
 
 @schema
@@ -386,26 +392,26 @@ class ClassifierParameters(dj.Manual):
     definition = """
     classifier_param_name : varchar(80) # a name for this set of parameters
     ---
-    classifier_param_dict:    BLOB    # dictionary of parameters
-    encoding_group_to_state : BLOB    # how the encoding groups map to state
-    predict_param_dict :      BLOB    # prediction parameters
+    classifier_params :   BLOB    # initialization parameters
+    fit_params :          BLOB    # fit parameters
+    predict_params :      BLOB    # prediction parameters
     """
 
     def insert_default_param(self):
-        (classifier_parameters, encoding_group_to_state,
+        (classifier_parameters, fit_parameters,
          predict_parameters) = make_default_decoding_parameters_cpu()
         self.insert1(
             {'classifier_param_name': 'default_decoding_cpu',
-             'classifier_param_dict': classifier_parameters,
-             'encoding_group_to_state': encoding_group_to_state,
-             'predict_param_dict': predict_parameters},
+             'classifier_params': classifier_parameters,
+             'fit_params': fit_parameters,
+             'predict_params': predict_parameters},
             skip_duplicates=True)
 
-        (classifier_parameters, encoding_group_to_state,
+        (classifier_parameters, fit_parameters,
          predict_parameters) = make_default_decoding_parameters_gpu()
         self.insert1(
             {'classifier_param_name': 'default_decoding_gpu',
-             'classifier_param_dict': classifier_parameters,
-             'encoding_group_to_state': encoding_group_to_state,
-             'predict_param_dict': predict_parameters},
+             'classifier_params': classifier_parameters,
+             'fit_params': fit_parameters,
+             'predict_params': predict_parameters},
             skip_duplicates=True)
