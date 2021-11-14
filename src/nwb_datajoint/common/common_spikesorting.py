@@ -68,9 +68,9 @@ class SortGroup(dj.Manual):
     definition = """
     # Table for holding the set of electrodes that will be sorted together
     -> Session
-    sort_group_id : int  # identifier for a group of electrodes
+    sort_group_id: int  # identifier for a group of electrodes
     ---
-    sort_reference_electrode_id = -1 : int  # the electrode to use for reference. -1: no reference, -2: common median
+    sort_reference_electrode_id = -1: int  # the electrode to use for reference. -1: no reference, -2: common median
     """
 
     class SortGroupElectrode(dj.Part):
@@ -81,17 +81,18 @@ class SortGroup(dj.Manual):
 
     def set_group_by_shank(self, nwb_file_name, references=None):
         """
-        Assigns groups to all non-bad channel electrodes based on their shank:
+        Divides electrodes into groups based on their shank position:
         - Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
           single group
         - Electrodes from probes with multiple shanks (e.g. polymer probes) are
           placed in one group per shank
+        - Bad channels are omitted
 
         Parameters
         ----------
-        nwb_file_name : str
+        nwb_file_name: str
             the name of the NWB file whose electrodes should be put into sorting groups
-        references : dict
+        references: dict
             Optional. If passed, used to set references. Otherwise, references set using
             original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
         """
@@ -275,7 +276,7 @@ class SpikeSortingArtifactDetectionParameters(dj.Manual):
     # Parameters related to artifact detection
     artifact_parameter_name: varchar(200)
     ---
-    parameter_dict: BLOB  # dictionary of parameters for get_no_artifact_times() function
+    parameter_dict: blob  # dictionary of parameters for get_no_artifact_times() function
     """
     # TODO: use function calls to new spikeinterface (e.g. remove_artifact)
     def insert_default(self):
@@ -345,7 +346,6 @@ class SpikeSortingArtifactDetectionParameters(dj.Manual):
         # use get_valid_intervals to find all of the resulting valid times.
         return get_valid_intervals(valid_timestamps[valid_timestamps != -1], recording.get_sampling_frequency(), 1.5, 0.001)
 
-
 @schema
 class SpikeSortingRecordingSelection(dj.Manual):
     definition = """
@@ -396,7 +396,10 @@ class SpikeSortingRecording(dj.Computed):
         #             sort_interval_valid_times, recording_timestamps)] = False
         #     recording = st.preprocessing.mask(recording, mask)
         
-        # Q: why do this? why is IntervalList a foreign key? why have SortInterval and IntervalList?
+        # Q: why is IntervalList a foreign key? 
+        # because SortInterval is just where the user specifies a generic interval and 
+        # intervalList is where you find the valid times for that interval  (i.e. intervals modulo missing timestamps)
+        # why have SortInterval and IntervalList?
         # add the sort_interval_valid_times as an interval list
         tmp_key = {}
         tmp_key['nwb_file_name'] = key['nwb_file_name']
@@ -523,14 +526,13 @@ class SpikeSortingRecording(dj.Computed):
 
         Returns
         -------
-        recording: spikeinterface Recording
+        recording: spikeinterface.Recording
         """
         
         nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
-        with Timer(label='getting timestamps', verbose=True):
-            with pynwb.NWBHDF5IO(nwb_file_abs_path, 'r', load_namespaces=True) as io:
-                nwbfile = io.read()
-                timestamps = nwbfile.acquisition['e-series'].timestamps[:]
+        with pynwb.NWBHDF5IO(nwb_file_abs_path, 'r', load_namespaces=True) as io:
+            nwbfile = io.read()
+            timestamps = nwbfile.acquisition['e-series'].timestamps[:]
 
         # TODO: allow multiple sort intervals to be appended as a single sort interval
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
@@ -543,7 +545,7 @@ class SpikeSortingRecording(dj.Computed):
         assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
 
         electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
-                                                            'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
+                                                         'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
         electrode_group_name = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
                                                                 'sort_group_id': key['sort_group_id']}).fetch('electrode_group_name')
         electrode_group_name = np.int(electrode_group_name[0])
@@ -567,14 +569,6 @@ class SpikeSortingRecording(dj.Computed):
         # slice in channels
         recording = recording.channel_slice(channel_ids=channel_ids)
         
-        # # in the new spikeinterface, caching may not be necessary; commeting below:
-        # Caching the extractor GREATLY speeds up the subsequent processing and NWB writing
-        # tmpfile = tempfile.NamedTemporaryFile(dir=os.environ['NWB_DATAJOINT_TEMP_DIR'])
-        # sub_R = se.CacheRecordingExtractor(
-        #     sub_R, save_path=tmpfile.name, chunk_mb=10000)
-        # # version in new spikeinterface
-        # recording = recording.save()
-        
         if sort_reference_electrode_id >= 0:
             recording = st.preprocessing.common_reference(recording, reference='single',
                                                           ref_channels=sort_reference_electrode_id)
@@ -589,7 +583,7 @@ class SpikeSortingRecording(dj.Computed):
                                                     #  margin_ms=filter_params['margin_ms'])
 
         # TODO: change this with spikeinterface.probe
-        # recording.set_channel_locations(SortGroup().get_geometry(key['sort_group_id'], key['nwb_file_name']))
+        recording.set_channel_locations(SortGroup().get_geometry(key['sort_group_id'], key['nwb_file_name']))
 
         # set timestamps
         # TODO: change this once spikeextractors is updated
@@ -889,7 +883,6 @@ class SpikeSorting(dj.Computed):
         recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
         # get the uri for that file, assuming h5_v1 format for the moment.
         recording = sv.LabboxEphysRecordingExtractor(recording_object)
-        
 
         # whiten the extractor for sorting and metric calculations
         print('\nWhitening recording...')
