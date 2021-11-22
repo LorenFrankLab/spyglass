@@ -154,3 +154,6 @@ temp_nwb/*
 
 notebooks/mountainsort4_output/
 notebooks/mark_extraction_test.ipynb
+
+*.mp4
+dj_local_conf.json

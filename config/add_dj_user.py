@@ -17,6 +17,8 @@ def add_user(user_name):
         f"GRANT ALL PRIVILEGES ON `{user_name}\_%`.* TO `{user_name}`@\'%\' IDENTIFIED BY \'temppass\';\n")
     file.write(
         f"GRANT ALL PRIVILEGES ON `common\_%`.* TO `{user_name}`@'%';\n")
+    file.write(
+        f"GRANT ALL PRIVILEGES ON `decoding\_%`.* TO `{user_name}`@'%';\n")
     file.write(f"GRANT SELECT ON `%`.* TO `{user_name}`@'%';\n")
     file.flush()
 

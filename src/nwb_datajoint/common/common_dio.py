@@ -37,7 +37,7 @@ class DIOEvents(dj.Imported):
             Raw() & {'nwb_file_name': nwb_file_name}).fetch1('interval_list_name')
         for event_series in behav_events_ts:
             key['dio_event_name'] = event_series
-            key['nwb_object_id'] = behav_events_ts[event_series].object_id
+            key['dio_object_id'] = behav_events_ts[event_series].object_id
             self.insert1(key, skip_duplicates=True)
 
     def fetch_nwb(self, *attrs, **kwargs):

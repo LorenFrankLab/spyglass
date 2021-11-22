@@ -1,6 +1,6 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
 import inspect
-import re
+import os
 
 import datajoint as dj
 import numpy as np
@@ -80,10 +80,20 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
         nwbf = get_nwb_file(rec_dict.pop('nwb2load_filepath'))
         # for each attr that contains substring 'object_id', store key-value: attr name to NWB object
         # remove '_object_id' from attr name
-        nwb_objs = {re.sub('(_?)object_id', '', id_attr): nwbf.objects[rec_dict[id_attr]]
-                    for id_attr in attrs if 'object_id' in id_attr and rec_dict[id_attr] != ''}
+        nwb_objs = {
+            id_attr.replace("_object_id", ""): _get_nwb_object(nwbf.objects, rec_dict[id_attr])
+            for id_attr in attrs
+            if 'object_id' in id_attr and rec_dict[id_attr] != ''}
         ret.append({**rec_dict, **nwb_objs})
     return ret
+
+
+def _get_nwb_object(objects, object_id):
+    """Retreive NWB object and try to convert to dataframe if possible"""
+    try:
+        return objects[object_id].to_dataframe()
+    except AttributeError:
+        return objects[object_id]
 
 
 def get_child_tables(table):
