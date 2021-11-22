@@ -536,32 +536,27 @@ class SpikeSortingRecording(dj.Computed):
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
         
         # get all the intervals
-        valid_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
-                                       'sort_interval_name': 'raw data valid times'}).fetch1('valid_times')
+        valid_interval_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
+                                                'interval_list_name': 'raw data valid times'}).fetch1('valid_times')
         
         # find intersections between sort interval and all the intervals valid times
+        valid_sort_times = interval_list_intersect(sort_interval, valid_interval_times)
         # get sort indices for the intersections valid times
+        valid_sort_times_indices = np.searchsorted(recording.get_times(), np.ravel(valid_sort_times))
         # concatenate
-        # filter
-        # reference
-        
-        sort_indices = np.searchsorted(recording.get_times(), np.ravel(sort_interval))
-        # correct for sort intervals that go beyond the data
-        if sort_indices[1] == len(timestamps):
-            sort_indices[1] = len(timestamps)-1
-        assert sort_indices[1] - sort_indices[0] > 1000, f'Error in get_recording_extractor: sort indices {sort_indices} are not valid'
+        recordings_list = []
+        for i in range(len(valid_sort_times_indices)/2):
+            recording_single = recording.frame_slice(start_frame=valid_sort_times_indices[2*i],
+                                                     end_frame=valid_sort_times_indices[2*i+1])
+            recordings_list.append(recording_single)
+        recording = si.concatenate_recordings(recordings_list)
 
+        # electrodes
         electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
                                                          'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
         electrode_group_name = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
                                                                 'sort_group_id': key['sort_group_id']}).fetch('electrode_group_name')
         electrode_group_name = np.int(electrode_group_name[0])
-            
-        
-
-        # slice in time
-        recording = recording.frame_slice(start_frame=sort_indices[0], end_frame=sort_indices[1])
-
         sort_reference_electrode_id = (SortGroup & {'nwb_file_name': key['nwb_file_name'],
                                                     'sort_group_id': key['sort_group_id']}).fetch('sort_reference_electrode_id')
         sort_reference_electrode_id = np.int(sort_reference_electrode_id)
@@ -585,15 +580,10 @@ class SpikeSortingRecording(dj.Computed):
         filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
         recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
                                                      freq_max=filter_params['frequency_max'])
-                                                    #  margin_ms=filter_params['margin_ms'])
-
+        
         # TODO: change this with spikeinterface.probe
         recording.set_channel_locations(SortGroup().get_geometry(key['sort_group_id'], key['nwb_file_name']))
-
-        # set timestamps
-        # TODO: change this once spikeextractors is updated
-        recording._timestamps = timestamps[sort_indices[0]:sort_indices[1]]
-
+        
         return recording
 
     @staticmethod
