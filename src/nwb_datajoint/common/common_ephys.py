@@ -57,10 +57,10 @@ class ElectrodeGroup(dj.Imported):
                 query = BrainRegion() & region_dict
                 # we also need to get the region_id for this new region or find the right region_id
             region_id_dict = query.fetch1()
+            # TODO check and replace this with
             key['region_id'] = region_id_dict['region_id']
             key['description'] = electrode_group.description
             # the following should probably be a function that returns the probe devices from the file
-            # TODO check and replace this with
             # if isinstance(electrode_group.device, ndx_franklab_novela.Probe):
             # key['probe_type'] = electrode_group.device.probe_type
             # else:
@@ -74,8 +74,7 @@ class ElectrodeGroup(dj.Imported):
                         break
             if 'probe_type' not in key:
                 key['probe_type'] = 'unknown-probe-type'
-            self.insert1(key, skip_duplicates=True)
-
+            self.insert1(key, replace=True) #skip_duplicates=True)
 
 @schema
 class Electrode(dj.Imported):
