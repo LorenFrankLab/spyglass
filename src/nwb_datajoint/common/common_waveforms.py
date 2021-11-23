@@ -19,16 +19,8 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
-# from mountainsort4.mdaio_impl import readmda
 
-from .common_device import Probe
-from .common_lab import LabMember, LabTeam
-from .common_ephys import Electrode, ElectrodeGroup, Raw
-from .common_nwbfile import AnalysisNwbfile, Nwbfile
-from .common_session import Session
-from .dj_helper_fn import dj_replace, fetch_nwb
-from .nwb_helper_fn import get_valid_intervals
-from .sortingview_utils import add_to_sortingview_workspace, set_workspace_permission
+from .common_spikesorting import SpikeSorting
 
 si.set_global_tmp_folder(os.environ['KACHERY_TEMP_DIR'])
 
@@ -41,19 +33,23 @@ class WaveformParameters(dj.Manual):
     ---
     waveform_parameter_dict: blob # a dictionary containing waveform extraction parameters
     """
+    def insert_default_params(self):
+        key = {}
+        self.insert1(key)
+        
 
 @schema
-class Waveforms(dj.Manual):
+class WaveformSelection(dj.Manual):
     definition = """
     -> SpikeSorting
-    ---
     -> WaveformParameters
+    ---
     """
 
 @schema
-class WaveformsComputed(dj.Computed):
+class Waveforms(dj.Computed):
     definition = """
-    -> Waveforms
+    -> WaveformSelection
     ---
     -> AnalysisNwbfile
     """

@@ -32,7 +32,7 @@ class MetricParameters(dj.Manual):
         metric_parmas = _get_metric_default_params(metric)
         return metric_params
 
-    def insert_default_metric_params(self):
+    def insert_default_params(self):
         """
         Re-inserts the entry for Frank lab default parameters
         (run in case it gets accidentally deleted)
@@ -86,7 +86,11 @@ class MetricParameters(dj.Manual):
                                                      as_dataframe=True,
                                                      **m['metric_parameter_dict'])
 
-class QualityMetrics(dj.Computed):
+class MetricSelection(dj.Computed):
+    defition="""
+    -> SpikeSorting
+    -> MetricParameters
+    """
     def make(self, key):
         sorting = key['sorting']
         metric_params = key['metric_params']
