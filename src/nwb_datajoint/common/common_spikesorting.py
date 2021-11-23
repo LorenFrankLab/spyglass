@@ -29,7 +29,6 @@ from .common_device import Probe
 from .common_lab import LabMember, LabTeam
 from .common_ephys import Electrode, ElectrodeGroup, Raw
 from .common_interval import (IntervalList, SortInterval,
-                              interval_list_excludes_ind,
                               interval_list_intersect)
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
@@ -374,9 +373,7 @@ class SpikeSortingRecording(dj.Computed):
     """
     def make(self, key):
         sort_interval_valid_times = self.get_sort_interval_valid_times(key)
-        with Timer(label='getting filtered recording', verbose=True):
-            recording = self.get_filtered_recording_extractor(key)
-            recording_timestamps = recording._timestamps
+        recording = self.get_filtered_recording_extractor(key)
 
         # get the artifact detection parameters and apply artifact detection to zero out artifacts
         artifact_key = (SpikeSortingRecordingSelection & key).fetch1('artifact_parameter_name')
@@ -416,7 +413,8 @@ class SpikeSortingRecording(dj.Computed):
 
         with Timer(label=f'writing to h5 recording extractor at {key["recording_extractor_path"]}',
                    verbose=True):
-            old_recording = WrapperRecordingExtractor(recording)
+            # old_recording = WrapperRecordingExtractor(recording)
+            old_recording = si.create_extractor_from_new_recording(recording)
             h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
                                                  key["recording_extractor_path"], dtype='int16')
 
@@ -447,8 +445,7 @@ class SpikeSortingRecording(dj.Computed):
 
     @staticmethod
     def get_recording_extractor_save_path(key, type='h5v1'):
-        """
-        Generates a path for saving a recording of the specified type
+        """Generates a path for saving a recording of the specified type
 
         Parameters
         ----------
@@ -487,8 +484,7 @@ class SpikeSortingRecording(dj.Computed):
             return full_path + '.' + type
 
     def get_sort_interval_valid_times(self, key):
-        """
-        Identifies the intersection between sort interval specified by the user
+        """Identifies the intersection between sort interval specified by the user
         and the valid times (times for which neural data exist)
 
         Parameters
@@ -503,18 +499,16 @@ class SpikeSortingRecording(dj.Computed):
         """
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
-        interval_list_name = (SpikeSortingRecordingSelection &
-                              key).fetch1('interval_list_name')
-        valid_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
-                                       'interval_list_name': interval_list_name}).fetch1('valid_times')
-        sort_interval_valid_times = interval_list_intersect(sort_interval, valid_times)
-        return sort_interval_valid_times
+        valid_interval_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
+                                                'interval_list_name': 'raw data valid times'}).fetch1('valid_times')
+        valid_sort_times = interval_list_intersect(sort_interval, valid_interval_times)
+        return valid_sort_times
 
     def get_filtered_recording_extractor(self, key: dict):
-        """
-        Filters and references a recording
+        """Filters and references a recording
         (1) Loads the NWB file created during insertion as a spikeinterface Recording
-        (2) Slices recording in time (interval) and space (channels)
+        (2) Slices recording in time (interval) and space (channels);
+            recording chunks fromdisjoint intervals are concatenated
         (3) Applies referencing and bandpass filtering
 
         Parameters
@@ -531,23 +525,15 @@ class SpikeSortingRecording(dj.Computed):
         
         recording = se.read_nwb_recording(nwb_file_abs_path, load_time_vector=True)
 
-        # TODO: allow multiple sort intervals to be appended as a single sort interval
-        sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
-                                         'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
+        valid_sort_times = SpikeSortingRecording().get_sort_interval_valid_times(key)
+        valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval) \
+                                             for interval in valid_sort_times])
         
-        # get all the intervals
-        valid_interval_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
-                                                'interval_list_name': 'raw data valid times'}).fetch1('valid_times')
-        
-        # find intersections between sort interval and all the intervals valid times
-        valid_sort_times = interval_list_intersect(sort_interval, valid_interval_times)
-        # get sort indices for the intersections valid times
-        valid_sort_times_indices = np.searchsorted(recording.get_times(), np.ravel(valid_sort_times))
         # concatenate
         recordings_list = []
-        for i in range(len(valid_sort_times_indices)/2):
-            recording_single = recording.frame_slice(start_frame=valid_sort_times_indices[2*i],
-                                                     end_frame=valid_sort_times_indices[2*i+1])
+        for interval_indices in valid_sort_times_indices:
+            recording_single = recording.frame_slice(start_frame=interval_indices[0],
+                                                     end_frame=interval_indices[1])
             recordings_list.append(recording_single)
         recording = si.concatenate_recordings(recordings_list)
 
@@ -577,23 +563,28 @@ class SpikeSortingRecording(dj.Computed):
         elif sort_reference_electrode_id == -2:
             recording = st.preprocessing.common_reference(recording, reference='median')
 
+        # filter
         filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
         recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
                                                      freq_max=filter_params['frequency_max'])
         
         # TODO: change this with spikeinterface.probe
-        recording.set_channel_locations(SortGroup().get_geometry(key['sort_group_id'], key['nwb_file_name']))
+        recording.set_channel_locations(SortGroup().get_geometry(key['sort_group_id'],
+                                                                 key['nwb_file_name']))
         
         return recording
 
     @staticmethod
-    def get_recording_timestamps(key):
+    def get_recording_timestamps(key: dict):
         """Returns the timestamps for the specified SpikeSortingRecording entry
 
-        Args:
-            key (dict): the SpikeSortingRecording key
-        Returns:
-            timestamps (numpy array)
+        Parameters
+        ---------
+        key: dict
+        
+        Returns
+        -------
+        timestamps: np.array, (N, )
         """
         nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
         # TODO fix to work with any electrical series object
@@ -617,8 +608,15 @@ class SpikeSortingWorkspace(dj.Computed):
     workspace_uri: varchar(1000)
     """
 
-    def make(self, key):
-        # creates a workspace for each Recording extractor
+    def make(self, key: dict):
+        """Creates a workspace for each recording
+
+        Parameters
+        ----------
+        key : dict
+            [description]
+        """
+        
         # get the dictionary that defines the recording extractor object
         recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
         # get the uri for that file, assuming h5_v1 format for the moment.
@@ -645,6 +643,7 @@ class SpikeSortingWorkspace(dj.Computed):
         recording_label = key['nwb_file_name'] + '_' + \
             key['sort_interval_name'] + '_' + str(key['sort_group_id'])+ '_recording'
         workspace.add_recording(recording=recording, label=recording_label)
+        
         # insert
         key['workspace_uri'] = workspace_uri
         self.insert1(key)
@@ -669,7 +668,6 @@ class SpikeSortingWorkspace(dj.Computed):
         :returns: sorting_id 
         :type: str
         """
-        # add the sorting to the workspace and the SortingID table
         # get the path from the Recording
         sorting_h5_path  = SpikeSortingRecording.get_sorting_extractor_save_path(key, path_suffix=path_suffix)
         if os.path.exists(sorting_h5_path):
@@ -917,8 +915,9 @@ class SpikeSorting(dj.Computed):
         print('\nDone - entry inserted to table.')
 
     def delete(self):
-        """
-        Extends the delete method of base class to implement permission checking
+        """Extends the delete method of base class to implement permission checking
+        Note that this is NOT a security feature, as anyone that has access to source code
+        can disable it; it just makes it less likely for the user to accidentally delete entries
         """
         current_user_name = dj.config['database.user']
         entries = self.fetch()
@@ -1116,147 +1115,6 @@ class ModifySorting(dj.Computed):
     #     # https://spikeinterface.readthedocs.io/en/0.13.0/api.html#module-spiketoolkit.postprocessing
 
     #     sorting_modified = True
-
-
-@schema
-class SpikeSortingWaveformParameters(dj.Manual):
-    definition = """
-    waveform_parameters_name: varchar(80) # the name for this set of waveform extraction parameters
-    ---
-    waveform_parameter_dict: blob # a dictionary containing the SpikeInterface waveform parameters
-    """
-
-
-@schema
-class SpikeSortingMetricParameters(dj.Manual):
-    definition = """
-    # Table for holding the parameters for computing quality metrics
-    cluster_metrics_list_name: varchar(80) # the name for this list of cluster metrics
-    ---
-    metric_dict: blob            # dict of SpikeInterface metrics with True / False elements to indicate whether a given metric should be computed.
-    metric_parameter_dict: blob  # dict of parameters for the metrics
-    """
-
-    def get_metric_dict(self):
-        """Get the current list of metrics from spike interface and create a
-        dictionary with all False elemnets.
-        Users should set the desired set of metrics to be true and insert a new
-        entry for that set.
-        """
-        metrics_list = st.validation.get_quality_metrics_list()
-        metric_dict = {metric: False for metric in metrics_list}
-        return metric_dict
-
-    def get_metric_parameter_dict(self):
-        """
-        Get params for the metrics specified in the metric dict
-
-        Parameters
-        ----------
-        metric_dict: dict
-          a dictionary in which a key is the name of a quality metric and the value
-          is a boolean
-        """
-        # TODO replace with call to spiketoolkit when available
-        metric_params_dict = {'isi_threshold': 0.003,                 # Interspike interval threshold in s for ISI metric (default 0.003)
-                              # SNR mode: median absolute deviation ('mad) or standard deviation ('std') (default 'mad')
-                              'snr_mode': 'mad',
-                              # length of data to use for noise estimation (default 10.0)
-                              'snr_noise_duration': 10.0,
-                              # Maximum number of spikes to compute templates for SNR from (default 1000)
-                              'max_spikes_per_unit_for_snr': 1000,
-                              # Use 'mean' or 'median' to compute templates
-                              'template_mode': 'mean',
-                              # direction of the maximum channel peak: 'both', 'neg', or 'pos' (default 'both')
-                              'max_channel_peak': 'both',
-                              # Maximum number of spikes to compute templates for noise overlap from (default 1000)
-                              'max_spikes_per_unit_for_noise_overlap': 1000,
-                              # Number of features to use for PCA for noise overlap
-                              'noise_overlap_num_features': 5,
-                              # Number of nearest neighbors for noise overlap
-                              'noise_overlap_num_knn': 1,
-                              # length of period in s for evaluating drift (default 60 s)
-                              'drift_metrics_interval_s': 60,
-                              # Minimum number of spikes in an interval for evaluation of drift (default 10)
-                              'drift_metrics_min_spikes_per_interval': 10,
-                              # Max spikes to be used for silhouette metric
-                              'max_spikes_for_silhouette': 1000,
-                              # Number of channels to be used for the PC extraction and comparison (default 7)
-                              'num_channels_to_compare': 7,
-                              'max_spikes_per_cluster': 1000,         # Max spikes to be used from each unit
-                              # Max spikes to be used for nearest-neighbors calculation
-                              'max_spikes_for_nn': 1000,
-                              # number of nearest clusters to use for nearest neighbor calculation (default 4)
-                              'n_neighbors': 4,
-                              # number of parallel jobs (default 96 in spiketoolkit, changed to 24)
-                              'n_jobs': 24,
-                              # If True, waveforms are saved as memmap object (recommended for long recordings with many channels)
-                              'memmap': False,
-                              'max_spikes_per_unit': 2000,            # Max spikes to use for computing waveform
-                              'seed': 47,                             # Random seed for reproducibility
-                              'verbose': True}                        # If nonzero (True), will be verbose in metric computation
-        return metric_params_dict
-
-    def get_default_metrics_entry(self):
-        """
-        Re-inserts the entry for Frank lab default parameters
-        (run in case it gets accidentally deleted)
-        """
-        cluster_metrics_list_name = 'franklab_default_cluster_metrics'
-        metric_dict = self.get_metric_dict()
-        metric_dict['firing_rate'] = True
-        metric_dict['nn_hit_rate'] = True
-        metric_dict['noise_overlap'] = True
-        metric_parameter_dict = self.get_metric_parameter_dict()
-        self.insert1([cluster_metrics_list_name, metric_dict,
-                      metric_parameter_dict], replace=True)
-
-    @staticmethod
-    def selected_metrics_list(metric_dict):
-        return [metric for metric in metric_dict.keys() if metric_dict[metric]]
-
-    def validate_metrics_list(self, key):
-        """ Checks whether metrics_list contains only valid metric names
-
-        :param key: key for metrics to validate
-        :type key: dict
-        :return: True or False
-        :rtype: boolean
-        """
-        # TODO: get list of valid metrics from spiketoolkit when available
-        valid_metrics = self.get_metric_dict()
-        metric_dict = (self & key).fetch1('metric_dict')
-        valid = True
-        for metric in metric_dict:
-            if not metric in valid_metrics.keys():
-                print(
-                    f'Error: {metric} not in list of valid metrics: {valid_metrics}')
-                valid = False
-        return valid
-
-    def compute_metrics(self, cluster_metrics_list_name, recording, sorting):
-        """
-        Use spikeinterface to compute the list of selected metrics for a sorting
-
-        Parameters
-        ----------
-        cluster_metrics_list_name: str
-        recording: spikeinterface SpikeSortingRecording
-        sorting: spikeinterface SortingExtractor
-
-        Returns
-        -------
-        metrics: pandas.dataframe
-        """
-        m = (self & {'cluster_metrics_list_name': cluster_metrics_list_name}).fetch1()
-
-        return st.validation.compute_quality_metrics(sorting=sorting,
-                                                     recording=recording,
-                                                     metric_names=self.selected_metrics_list(
-                                                         m['metric_dict']),
-                                                     as_dataframe=True,
-                                                     **m['metric_parameter_dict'])
-
 
 @schema
 class AutomaticCurationParameters(dj.Manual):
