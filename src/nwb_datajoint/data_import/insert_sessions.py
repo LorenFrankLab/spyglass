@@ -87,9 +87,10 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
                 nwbf_export.add_acquisition(eseries)
 
             # add link to processing module in raw data file
-            nwbf_export.add_processing_module(analog_processing)
-            nwbf_export.set_modified()
+            if analog_processing:
+                nwbf_export.add_processing_module(analog_processing)
 
+            nwbf_export.set_modified()
             export_io.write(nwbf_export)
 
     return out_nwb_file_abs_path
