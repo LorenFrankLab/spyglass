@@ -59,8 +59,7 @@ def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, m
 
 
 def set_workspace_permission(workspace_name: str, team_members: List[str]):
-    """
-    Sets permission to sortingview workspace based on google ID
+    """Sets permission to sortingview workspace based on google ID
     
     Parameters
     ----------
@@ -69,7 +68,7 @@ def set_workspace_permission(workspace_name: str, team_members: List[str]):
     team_members: List[str]
         list of team members to be given permission to edit the workspace
     
-    Output
+    Returns
     ------
     workspace_uri: str
         URI of workspace

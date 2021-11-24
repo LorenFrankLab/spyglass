@@ -1,12 +1,6 @@
 from copy import Error
-import json
 import os
-import pathlib
-import re
-import tempfile
-import time
 from pathlib import Path
-import shutil
 
 import datajoint as dj
 import kachery_client as kc
@@ -29,9 +23,9 @@ schema = dj.schema('common_waveforms')
 @schema
 class WaveformParameters(dj.Manual):
     definition = """
-    waveform_parameters_name: varchar(80) # name of waveform extraction parameters
+    list_name: varchar(80) # name of waveform extraction parameters
     ---
-    waveform_parameter_dict: blob # a dictionary containing waveform extraction parameters
+    params: blob # a dictionary containing waveform extraction parameters
     """
     def insert_default_params(self):
         key = {}

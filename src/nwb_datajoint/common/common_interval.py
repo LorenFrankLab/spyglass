@@ -124,8 +124,7 @@ def interval_list_excludes(valid_times, timestamps):
 
 
 def interval_list_intersect(interval_list1, interval_list2):
-    """
-    Finds the intersection (overlapping times) for two interval lists
+    """Finds the intersection (overlapping times) for two interval lists
 
     Parameters
     ----------
@@ -156,7 +155,7 @@ def interval_list_intersect(interval_list1, interval_list2):
     return intersecting_intervals
 
 def _overlapping(interval1, interval2):
-    """ Checks if the two intervals overlap
+    """Checks if the two intervals overlap
     
     Returns
     -------

@@ -49,7 +49,6 @@ class Task(dj.Manual):
      task_description = '': varchar(255)  # description of this task
      task_type = '': varchar(80)          # type of task
      task_subtype = '': varchar(80)       # subtype of task
-
      """
 
     # def insert_from_nwbfile(self, nwbf):

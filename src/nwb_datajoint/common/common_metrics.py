@@ -9,7 +9,7 @@ class MetricParameters(dj.Manual):
     # Parameters for quality metrics of sorted units
     list_name: varchar(80)
     ---
-    metric_parameters: blob  # {'metric_name': {'parameter': 'value'}}
+    params: blob  # {'metric_name': {'parameter': 'value'}}
     """
 
     def get_metric_list(self):
@@ -29,7 +29,7 @@ class MetricParameters(dj.Manual):
         ----------
         metric_dict: dict, {'metric name': bool}
         """
-        metric_parmas = _get_metric_default_params(metric)
+        metric_params = _get_metric_default_params(metric)
         return metric_params
 
     def insert_default_params(self):
@@ -85,8 +85,8 @@ class MetricParameters(dj.Manual):
                                                          m['metric_dict']),
                                                      as_dataframe=True,
                                                      **m['metric_parameter_dict'])
-
-class MetricSelection(dj.Computed):
+@schema
+class MetricSelection(dj.Manual):
     defition="""
     -> SpikeSorting
     -> MetricParameters
@@ -96,11 +96,31 @@ class MetricSelection(dj.Computed):
         metric_params = key['metric_params']
         MetricParameters.compute_metrics(sorting, metric_params)
     
+@schema
+class QualityMetrics(dj.Computed):
+    defition="""
+    -> MetricSelection
+    ---
+    -> AnalysisNwbfile
+    """
+    def make(self, key):
+        sorting = key['sorting']
+        metric_params = key['metric_params']
+        MetricParameters.compute_metrics(sorting, metric_params)
+
 
 def _get_metric_default_params(metric):
-    if metric is 'nn_isolation':
+    if metric == 'nn_isolation':
         return {'max_spikes_for_nn': 1000,
                 'n_neighbors': 5, 
                 'n_components': 7,
                 'radius_um': 100,
                 'seed': 0}
+    elif metric == 'nn_noise_overlap':
+        return {'max_spikes_for_nn': 1000,
+                'n_neighbors': 5, 
+                'n_components': 7,
+                'radius_um': 100,
+                'seed': 0}
+    elif metric == 'isi_violation':
+        return {'isi_threshold_ms': 1.5}

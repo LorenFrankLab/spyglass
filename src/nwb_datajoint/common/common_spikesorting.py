@@ -854,22 +854,19 @@ class SpikeSorting(dj.Computed):
     """
 
     def make(self, key):
-        """
-        Runs spike sorting on the data and parameters specified by the
-        SpikeSortingParameter table and inserts a new entry to SpikeSorting table.
+        """Runs spike sorting on the data and parameters specified by the
+        SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
         Specifically,
 
         (1) Creates a new NWB file (analysis NWB file) that will hold the results of
             the sort (in .../analysis/)
-        (2) Creates a se.SortingExtractor based on (2) (i.e. runs the sort)
+        (2) Runs the sort with spikeinterface
         (3) Stores the sort and adds it to the workspace
         (4) Saves (2) and (3) to another NWB file (in .../spikesorting/)
 
         Parameters
         ----------
         key: dict
-            partially filled entity; value of primary keys from key source
-            (in this case SpikeSortingSelection)
         """
 
         # GET the recording extractor from the workspace
@@ -1026,8 +1023,6 @@ class SpikeSorting(dj.Computed):
     def nightly_cleanup(self):
         """Clean up spike sorting directories that are not in the SpikeSorting table. 
         This should be run after AnalysisNwbFile().nightly_cleanup()
-
-        :return: None
         """
         # get a list of the files in the spike sorting storage directory
         dir_names = next(os.walk(os.environ['SPIKE_SORTING_STORAGE_DIR']))[1]

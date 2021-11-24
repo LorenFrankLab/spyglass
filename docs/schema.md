@@ -1,8 +1,0 @@
-## Rules about defining schema and tables
-* Tables that are about similar things are grouped into a schema. Each schema is placed inside a `.py` file. For example, all the tables related to quality metrics are part of the `common_metrics` schema and are defined in `common_metrics.py` under `common` directory. 
-* The `common` directory will only hold schema that will be useful for everyone in the lab. If you want to add things to `common`, first discuss with Loren. 
-* For a given schema, there are usually at least three tables:
-  * __Parameters__ table: this is usualy a `dj.Manual` table that holds a set of parameters for the particular analysis; the primary key should be the name of the parameter set, and the other key is usually a python dictionary (use `blob` in the definition) that holds the parameters as key-value pairs. Example: `MetricParameters`
-  * __Selection__ table: this is a `dj.Manual` table that associates a set of parameters to the data to be applied. For example, in the case of computing quality metrics, one might put the results of spike sorting and a set of metrics parameters as a single entry of this table. Usually inherits primary keys from other tables. Example: `MetricSelection`
-  * __Computed__: this is a `dj.Computed` table that is downstream of the Selection table and generates . Example: `QualityMetrics`
-* There might be exceptions to the rule above; if you're not sure about how it should be designed, please contact Loren.
