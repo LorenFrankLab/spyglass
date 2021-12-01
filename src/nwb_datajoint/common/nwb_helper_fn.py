@@ -142,8 +142,7 @@ def estimate_sampling_rate(timestamps, multiplier):
 
 
 def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len):
-    """
-    Finds the set of all valid intervals in a list of timestamps.
+    """Finds the set of all valid intervals in a list of timestamps.
     Valid interval: (start time, stop time) during which there are
     no gaps (i.e. missing samples). 
 

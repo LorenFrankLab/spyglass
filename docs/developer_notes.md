@@ -1,10 +1,14 @@
 ## Developer notes
-Here are a set of notes on how the repo is organized, intended for a new developer.
+Here are a set of notes on how the repo / database is organized, intended for a new developer.
+
+
+
 
 * Tables that are about similar things are grouped into a schema. Each schema is placed inside a `.py` file. For example, all the tables related to quality metrics are part of the `common_metrics` schema and are defined in `common_metrics.py` under `common` directory. 
   * The `common` directory will only hold schema that will be useful for everyone in the lab. If you want to add things to `common`, first check with Loren. 
   * For analysis that will be only useful to you, create your own schema.
-* For a typical analysis schema, there are usually three tables (at least):
+* The Datajoint database is designed to mimic the structure of the NWB file. As such, there are at least two groups of tables. The first group is called *NWB-related* tables. These tables all have `dj.Imported` data tier. They mimic the data structure inside an NWB file. They each have a pointer to an object ID within an NWB file.
+* The next group of tables is called *analysis* tables. Each type of analysis is given a schmea. For a typical analysis schema, there are usually three tables (at least):
   * __Parameters__ table
     * This is a `dj.Manual` table that holds a set of parameters for the particular analysis.
     * The primary key should be `list_name` (str; the name of the parameter set). The other (non-primary) key is usually a python dictionary (use `blob` in the definition) that holds the parameters as key-value pairs. 
@@ -12,16 +16,18 @@ Here are a set of notes on how the repo is organized, intended for a new develop
     * Must contain a method called `insert_default_params` that inserts a reasonable default parameter into the table.
   * __Selection__ table
     * This is a `dj.Manual` table that associates a set of parameters to the data to be applied. For example, in the case of computing quality metrics, one might put the results of a spike sorting run and a set of metrics parameters as a single entry in this table.
-    * The primary key should be inherited from the data table and the Parameters table. In other words, it is downstream of the two tables. 
+    * The primary key should be inherited from the data table and the Parameters table. In other words, it is downstream of these two tables. 
+      * Of course, it is possible for a Selection table to collect information from more than one Parameter table. For example, during the Selection table for spike sorting holds information about the interval (`SortInterval`) and the group of electrodes (`SortGroup`) to be sorted.
     * Example: `MetricSelection`
-    * Of course, it is possible for a Selection table to pull information from multiple Parameter tables. For example, during the Selection table for spike sorting holds information about the interval (`SortInterval`) and the group of electrodes (`SortGroup`) to be sorted.
   * __Data__ table
     * This is a `dj.Computed` table that is downstream of the Selection table. It carries out the computation specified in the Selection table when `populate` is called. All the code that does this should go in the `make` method. 
-    * The primary key should be inherited from the Selection table. The other key should include the name of an analysis NWB file that will hold the output of the computation.
+    * The primary key should be inherited from the Selection table. The non-primary key should inherit from `AnalysisNwbfile` table (i.e. name of the analysis NWB file that will hold the output of the computation).
+      * As a result `make` should include code that creates such an analysis NWB file and inserts it to the `AnalysisNwbfile` table.
+    * Must contain an extension of the `delete` method that checks user privilege before deleting entries as a way to prevent accidental deletion of computations that take a long time
     * Example: `QualityMetrics`
 * Analysis NWB files are NWB files that hold the results of intermediate steps in the analysis. Examples include those that store filtered recordings, spike times of putative units after sorting, or waveform snippets. These are located in `/stelmo/nwb/analysis`. Each Analysis NWB file is also listed as an entry in the `AnalysisNwbfile` table. Note that just becuase a file is not listed in the table, doesn't mean the file does not exist in the directory. 
   * On the other hand, the raw data is stored in `/stelmo/nwb/raw`.
-  If your table stores results in an Analysis NWB file, then you must 
+* Another group of tables is called *list* tables. These just hold lists of things. They include `Nwbfile`, `AnalysisNwbfile`, `IntervalList`. They are `dj.Manual`. 
 * If your table refers to some data located inside an NWB file, you may want to create an object ID and store it as a key. An object ID is a hash that points to a particular data inside an NWB file. If you choose to store the object ID, then your table must have a `fetch_nwb` method, which makes it easy to retrieve the data without having to deal with `pynwb`. Search the repo for examples.
 * If your table is to populated automatically when an NWB file is first ingested into the database, it should be a `dj.Imported` table and define in the `make` method the steps to read information from NWB file and insert it to the table. Be sure to also include the `populate` call in the `make` method of `Session`.
   * Some tables accepts both manual insertions and insertion from an NWB file (e.g. `IntervalList`). These are `dj.Manual` and have an `insert_from_nwbfile` method. This is discouraged. 
