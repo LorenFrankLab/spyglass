@@ -295,7 +295,14 @@ class LFP(dj.Imported):
 
         valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'],
                                          'interval_list_name': interval_list_name}).fetch1('valid_times')
-
+        # keep only the intervals > 1 second long
+        min_interval_length = 1.0
+        valid = []
+        for count, interval in enumerate(valid_times):
+            if interval[1] - interval[0] > min_interval_length:
+                valid.append(count)
+        valid_times = valid_times[valid]   
+        
         # target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
