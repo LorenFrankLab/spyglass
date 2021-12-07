@@ -301,7 +301,8 @@ class LFP(dj.Imported):
         for count, interval in enumerate(valid_times):
             if interval[1] - interval[0] > min_interval_length:
                 valid.append(count)
-        valid_times = valid_times[valid]   
+        valid_times = valid_times[valid] 
+        print(f'LFP: filtering {len(valid)} of {count+1} interals.')  
         
         # target 1 KHz sampling rate
         decimation = sampling_rate // 1000
