@@ -184,7 +184,7 @@ class FirFilter(dj.Manual):
             shape, dtype = gsp.filter_data_fir(data_on_disk,
                                                filter_coeff,
                                                axis=time_axis,
-                                               input_index_bounds=[frm, to],
+                                               input_index_bounds=[frm, to-1],
                                                output_index_bounds=[
                                                    filter_delay, filter_delay + to - frm],
                                                describe_dims=True,
@@ -238,8 +238,8 @@ class FirFilter(dj.Manual):
                         data = np.asarray(data_on_disk[start:stop, :], dtype=data_dtype)
                     else:
                         data = np.asarray(data_on_disk[:, start:stop], dtype=data_dtype)
-                    
-                    extracted_ts = timestamps[0:-1:decimation]
+                    # FIX for exclustion of last datapoint in array indexing; timestamps[0,-1,decimation] can exclude the last point
+                    extracted_ts = timestamps[np.arange(0,len(timestamps),decimation)]
                     new_timestamps[ts_offset:ts_offset +
                                len(extracted_ts)] = extracted_ts
                     ts_offset += len(extracted_ts)
@@ -258,7 +258,6 @@ class FirFilter(dj.Manual):
                     print(f'Interval {ii}: leaving data on disk')
                     data = data_on_disk
                     timestamps = timestamps_on_disk
-
                     extracted_ts = timestamps[start:stop:decimation]
                     new_timestamps[ts_offset:ts_offset +
                                 len(extracted_ts)] = extracted_ts
