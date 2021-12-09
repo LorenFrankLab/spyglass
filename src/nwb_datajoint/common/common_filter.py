@@ -238,8 +238,7 @@ class FirFilter(dj.Manual):
                         data = np.asarray(data_on_disk[start:stop, :], dtype=data_dtype)
                     else:
                         data = np.asarray(data_on_disk[:, start:stop], dtype=data_dtype)
-                    # FIX for exclustion of last datapoint in array indexing; timestamps[0,-1,decimation] can exclude the last point
-                    extracted_ts = timestamps[np.arange(0,len(timestamps),decimation)]
+                    extracted_ts = timestamps[0::decimation]
                     new_timestamps[ts_offset:ts_offset +
                                len(extracted_ts)] = extracted_ts
                     ts_offset += len(extracted_ts)
