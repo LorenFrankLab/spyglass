@@ -1,113 +1,85 @@
 import datajoint as dj
+from spikeinterface.core import waveform_extractor
 import spikeinterface.toolkit as st
+from spikeinterface.toolkit.qualitymetrics.quality_metric_list import _metric_name_to_func
+    
+from .common_waveforms import Waveforms
+from .common_nwbfile import AnalysisNwbfile
 
 schema = dj.schema('common_metrics')
 
 @schema
 class MetricParameters(dj.Manual):
     definition = """
-    # Parameters for quality metrics of sorted units
-    list_name: varchar(80)
+    # Parameters for computing quality metrics of sorted units
+    list_name: varchar(200)
     ---
-    params: blob  # {'metric_name': {'parameter': 'value'}}
+    params: blob
     """
 
-    def get_metric_list(self):
-        """Create a dict where the keys are names of metrics in spikeinterface
-        and values are False.
-        
-        Users should set the desired set of metrics to be true and insert a new
-        entry for that set.
+    def get_metrics_list(self):
+        """Returns a list of quality metrics available in spikeinterface
         """
         metric_list = st.qualitymetrics.get_quality_metric_list()
         return metric_list
 
-    def get_metric_params_dict(self, metric):
-        """Provides default params for the given metric
-
-        Parameters
-        ----------
-        metric_dict: dict, {'metric name': bool}
+    def get_metric_params_dict(self, metric: str):
+        """Returns default params for the given metric
         """
         metric_params = _get_metric_default_params(metric)
         return metric_params
 
     def insert_default_params(self):
-        """
-        Re-inserts the entry for Frank lab default parameters
-        (run in case it gets accidentally deleted)
+        """Inserts default parameters
         """
         list_name = 'franklab_default'
-        metric_parameters = {'isi': _get_metric_default_params('isi'),
-                             'nn_isolation': _get_metric_default_params('nn_isolation'),
-                             'nn_noise_overlap': _get_metric_default_params('nn_noise_overlap')}
-
-        self.insert1([list_name, metric_parameters], replace=True)
-
-    def validate_metrics_list(self, key):
-        """Checks whether metrics_list contains only valid metric names
-
-        :param key: key for metrics to validate
-        :type key: dict
-        :return: True or False
-        :rtype: boolean
-        """
-        # TODO: get list of valid metrics from spiketoolkit when available
-        valid_metrics = self.get_metric_dict()
-        metric_dict = (self & key).fetch1('metric_dict')
-        valid = True
-        for metric in metric_dict:
-            if not metric in valid_metrics.keys():
-                print(
-                    f'Error: {metric} not in list of valid metrics: {valid_metrics}')
-                valid = False
-        return valid
+        params = {'isi': _get_metric_default_params('isi'),
+                  'snr': _get_metric_default_params('snr'),
+                  'nn_isolation': _get_metric_default_params('nn_isolation'),
+                  'nn_noise_overlap': _get_metric_default_params('nn_noise_overlap')}
+        self.insert1([list_name, params], replace=True)
     
-    @staticmethod
-    def compute_metrics(recording, sorting):
+    # TODO
+    def _validate_metrics_list(self, key):
+        """Checks whether a row to be inserted contains only the available metrics
         """
-        Parameters
-        ----------
-        cluster_metrics_list_name: str
-        recording: spikeinterface SpikeSortingRecording
-        sorting: spikeinterface SortingExtractor
-
-        Returns
-        -------
-        metrics: pandas.dataframe
-        """
-        # validate input
-        m = (self & {'cluster_metrics_list_name': cluster_metrics_list_name}).fetch1()
-
-        return st.validation.compute_quality_metrics(sorting=sorting,
-                                                     recording=recording,
-                                                     metric_names=self.selected_metrics_list(
-                                                         m['metric_dict']),
-                                                     as_dataframe=True,
-                                                     **m['metric_parameter_dict'])
+        # get available metrics list
+        # get metric list from key
+        # compare
+        return NotImplementedError
 @schema
 class MetricSelection(dj.Manual):
-    defition="""
-    -> SpikeSorting
+    definition="""
+    -> Waveforms
     -> MetricParameters
-    """
-    def make(self, key):
-        sorting = key['sorting']
-        metric_params = key['metric_params']
-        MetricParameters.compute_metrics(sorting, metric_params)
+    ---
+    """        
     
 @schema
 class QualityMetrics(dj.Computed):
-    defition="""
+    definition="""
     -> MetricSelection
     ---
     -> AnalysisNwbfile
     """
     def make(self, key):
-        sorting = key['sorting']
-        metric_params = key['metric_params']
-        MetricParameters.compute_metrics(sorting, metric_params)
-
+        waveform_extractor = Waveforms().load_waveforms(key)
+        qm = {}
+        for metric_name, metric_params in key['params']:
+            metric_func = _metric_name_to_func[metric_name]
+            metric = metric_func(waveform_extractor, **metric_params)
+            qm[metric_name] = metric
+        qm_name =  self._get_waveform_extractor_name(key)
+        key['analysis_file_name'] = qm_name + '.nwb'
+        # TODO: add metrics to analysis NWB file
+        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
+        
+        self.insert1(key)
+        
+    def _get_quality_metrics_name(self, key):
+        wf_name = Waveforms().get_sorting_name(key)
+        qm_name = wf_name + '_qm'
+        return qm_name
 
 def _get_metric_default_params(metric):
     if metric == 'nn_isolation':
@@ -123,4 +95,10 @@ def _get_metric_default_params(metric):
                 'radius_um': 100,
                 'seed': 0}
     elif metric == 'isi_violation':
-        return {'isi_threshold_ms': 1.5}
+        return {'isi_threshold_ms': 1.5,
+                'min_isi_ms': 0}
+    elif metric == 'snr':
+        return {'peak_sign': 'neg',
+                'num_chunks_per_segment':20,
+                'chunk_size':10000,
+                'seed':0}
