@@ -89,3 +89,5 @@ There are a few places where a name needs to be given to objects. Follow these r
 * In general, use `numpy` style docstring.
 * Don't overload a single `.py` file. For each analysis make a new `.py` file and define your tables and schema. 
 * Some of the 'rules' above may need to change or be inappropriate for some cases. If you want to start a discussion, talk to Loren.
+* Fetch nwb method is currently implemented for each table. This is unnecessary because (1) what matters is the query, not what table the method is attached to; and (2) you either look up the Nwbfile or the AnalysisNwbfile table for it, so really there are only two versions. It would be better to just have two standalone functions. Or just one that figures out which Nwb file to look up. 
+* Currently some tables are inserted with `from nwb file` and others are done with populate when data is first ingetested. we should get rid of those that use the former method. some of them probably don't even deserve to be separate tables (e.g. Institution) and should instead just be columns in Session table.
