@@ -300,7 +300,15 @@ class LFP(dj.Imported):
 
         valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'],
                                          'interval_list_name': interval_list_name}).fetch1('valid_times')
-
+        # keep only the intervals > 1 second long
+        min_interval_length = 1.0
+        valid = []
+        for count, interval in enumerate(valid_times):
+            if interval[1] - interval[0] > min_interval_length:
+                valid.append(count)
+        valid_times = valid_times[valid] 
+        print(f'LFP: found {len(valid)} of {count+1} intervals > {min_interval_length} sec long.')  
+        
         # target 1 KHz sampling rate
         decimation = sampling_rate // 1000
 
@@ -365,6 +373,8 @@ class LFPBandSelection(dj.Manual):
     -> FirFilter                 # the filter to use for the data
     -> IntervalList.proj(target_interval_list_name='interval_list_name') # the original set of times to be filtered
     lfp_band_sampling_rate: int # the sampling rate for this band
+    ---
+    min_interval_len=1.0 : float #the minimum length of a valid interval to filter
     """
 
     class LFPBandElectrode(dj.Part):
@@ -500,7 +510,8 @@ class LFPBand(dj.Computed):
         lfp_interval_list = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1('interval_list_name')
         lfp_valid_times = (IntervalList() & {'nwb_file_name': key['nwb_file_name'], 
                                              'interval_list_name': lfp_interval_list}).fetch1('valid_times')
-        lfp_band_valid_times = interval_list_intersect(valid_times, lfp_valid_times)
+        min_length = (LFPBandSelection & key).fetch1('min_interval_len')
+        lfp_band_valid_times = interval_list_intersect(valid_times, lfp_valid_times, min_length=min_length)
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1(
             'filter_name', 'filter_sampling_rate', 'lfp_band_sampling_rate')
 
