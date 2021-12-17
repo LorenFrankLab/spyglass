@@ -1,4 +1,4 @@
-"Functions that are commonly used"
+"Sortingview helper functions"
 
 from typing import List
 import numpy as np
@@ -125,5 +125,5 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None):
     for unit_id in sorting.get_unit_ids():
         isolation[unit_id] = st.qualitymetrics.pca_metrics.nearest_neighbors_isolation(waveforms, this_unit_id=unit_id)
         noise_overlap[unit_id] = st.qualitymetrics.pca_metrics.nearest_neighbors_noise_overlap(waveforms, this_unit_id=unit_id)
-    workspace.set_unit_metrics_for_sorting(sorting_id=sorting_id, metrics=[isoaltion, noise_overlap])
+    workspace.set_unit_metrics_for_sorting(sorting_id=sorting_id, metrics=[isolation, noise_overlap])
     return None
