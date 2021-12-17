@@ -4,6 +4,8 @@ from typing import List
 import numpy as np
 import os
 import kachery_client as kc
+import spikeinterface as si
+import spikeinterface.toolkit as st
 import sortingview as sv
 from .common_lab import LabMember
 from .common_interval import IntervalList
@@ -91,3 +93,37 @@ def set_workspace_permission(workspace_name: str, team_members: List[str]):
         workspace.set_user_permissions(google_user_id[0], {'edit': True})
         print(f'Permissions for {google_user_id[0]} set to: {workspace.get_user_permissions(google_user_id[0])}')
     return workspace_uri
+
+def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None):
+    """Computes nearest neighbor isolation and noise overlap metrics and inserts them
+    in the specified sorting of the workspace.
+
+    Parameters
+    ----------
+    workspace_uri : str
+        [description]
+    sorting_id : str, optional
+        [description], by default None
+
+    Returns
+    -------
+    [type]
+        [description]
+    """
+    workspace = sv.load_workspace(workspace_uri)
+    recording_id = workspace.recording_ids[0]
+    recording = workspace.get_recording_extractor(recording_id=recording_id)
+    if sorting_id is None:
+        sorting_id = workspace.sorting_ids[0]
+    sorting = workspace.get_sorting_extractor(sorting_id=sorting_id)
+    recording = si.core.create_recording_from_old_extractor(recording)
+    waveforms = si.extract_waveforms(recording, sorting, folder='name', ms_before=1,
+                                     ms_after=1, max_spikes_per_unit=2000, return_scaled=True,
+                                     n_jobs=5, total_memory='5G')
+    isolation = {}
+    noise_overlap = {}
+    for unit_id in sorting.get_unit_ids():
+        isolation[unit_id] = st.qualitymetrics.pca_metrics.nearest_neighbors_isolation(waveforms, this_unit_id=unit_id)
+        noise_overlap[unit_id] = st.qualitymetrics.pca_metrics.nearest_neighbors_noise_overlap(waveforms, this_unit_id=unit_id)
+    workspace.set_unit_metrics_for_sorting(sorting_id=sorting_id, metrics=[isoaltion, noise_overlap])
+    return None
