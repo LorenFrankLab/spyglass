@@ -11,7 +11,13 @@ from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
 from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
                                                       SpikeSorting,
                                                       UnitInclusionParameters)
-from nwb_datajoint.common.dj_helper_fn import fetch_nwb  # dj_replace
+from nwb_datajoint.common.dj_helper_fn import fetch_nwb
+
+from replay_trajectory_classification.classifier import (
+    _DEFAULT_ENVIRONMENT, _DEFAULT_CONTINUOUS_TRANSITIONS, _DEFAULT_CLUSTERLESS_MODEL_KWARGS)
+from replay_trajectory_classification.discrete_state_transitions import DiagonalDiscrete
+from replay_trajectory_classification.initial_conditions import UniformInitialConditions
+
 
 schema = dj.schema('decoding_clusterless')
 
@@ -256,33 +262,16 @@ class UnitMarksIndicator(dj.Computed):
 
 
 def make_default_decoding_parameters_cpu():
-    continuous_transition_types = (
-        [['random_walk', 'uniform'],
-         ['uniform',     'uniform']])
-
-    clusterless_algorithm = 'multiunit_likelihood_integer'
-    clusterless_algorithm_params = {
-        'mark_std': 20.0,
-        'position_std': 8.0,
-    }
-
-    classifier_parameters = {
-        'replay_speed': 1,
-        'place_bin_size': 2.0,
-        'movement_var': 6.0,
-        'position_range': None,
-        'continuous_transition_types': continuous_transition_types,
-        'discrete_transition_type': 'strong_diagonal',
-        'initial_conditions_type': 'uniform_on_track',
-        'discrete_transition_diag': 0.968,
-        'infer_track_interior': True,
-        'clusterless_algorithm': clusterless_algorithm,
-        'clusterless_algorithm_params': clusterless_algorithm_params
-    }
-
-    fit_parameters = {
-        'encoding_group_to_state': None
-    }
+    classifier_parameters = dict(
+        environments=_DEFAULT_ENVIRONMENT,
+        observation_models=None,
+        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
+        discrete_transition_type=DiagonalDiscrete(0.98),
+        initial_conditions_type=UniformInitialConditions(),
+        infer_track_interior=True,
+        clusterless_algorithm='multiunit_likelihood',
+        clusterless_algorithm_params=_DEFAULT_CLUSTERLESS_MODEL_KWARGS
+    )
 
     predict_parameters = {
         'is_compute_acausal': True,
@@ -290,37 +279,20 @@ def make_default_decoding_parameters_cpu():
         'state_names':  ['Continuous', 'Uniform']
     }
 
-    return classifier_parameters, fit_parameters, predict_parameters
+    return classifier_parameters, predict_parameters
 
 
 def make_default_decoding_parameters_gpu():
-    continuous_transition_types = (
-        [['random_walk', 'uniform'],
-         ['uniform',     'uniform']])
-
-    clusterless_algorithm = 'multiunit_likelihood_gpu'
-    clusterless_algorithm_params = {
-        'mark_std': 20.0,
-        'position_std': 8.0,
-    }
-
-    classifier_parameters = {
-        'replay_speed': 1,
-        'place_bin_size': 2.0,
-        'movement_var': 6.0,
-        'position_range': None,
-        'continuous_transition_types': continuous_transition_types,
-        'discrete_transition_type': 'strong_diagonal',
-        'initial_conditions_type': 'uniform_on_track',
-        'discrete_transition_diag': 0.968,
-        'infer_track_interior': True,
-        'clusterless_algorithm': clusterless_algorithm,
-        'clusterless_algorithm_params': clusterless_algorithm_params
-    }
-
-    fit_parameters = {
-        'encoding_group_to_state': None
-    }
+    classifier_parameters = dict(
+        environments=_DEFAULT_ENVIRONMENT,
+        observation_models=None,
+        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
+        discrete_transition_type=DiagonalDiscrete(0.98),
+        initial_conditions_type=UniformInitialConditions(),
+        infer_track_interior=True,
+        clusterless_algorithm='multiunit_likelihood',
+        clusterless_algorithm_params=_DEFAULT_CLUSTERLESS_MODEL_KWARGS
+    )
 
     predict_parameters = {
         'is_compute_acausal': True,
@@ -328,52 +300,7 @@ def make_default_decoding_parameters_gpu():
         'state_names':  ['Continuous', 'Uniform']
     }
 
-    return classifier_parameters, fit_parameters, predict_parameters
-
-
-def make_default_forward_reverse_decoding_parameters_gpu():
-    continuous_transition_types = [['random_walk_direction2', 'random_walk',            'uniform', 'random_walk',            'random_walk',            'uniform'],  # noqa
-                                   ['random_walk',            'random_walk_direction1', 'uniform', 'random_walk',            'random_walk',            'uniform'],  # noqa
-                                   ['uniform',                'uniform',                'uniform', 'uniform',                'uniform',                'uniform'],  # noqa
-                                   ['random_walk',            'random_walk',            'uniform', 'random_walk_direction1', 'random_walk',            'uniform'],  # noqa
-                                   ['random_walk',            'random_walk',            'uniform', 'random_walk',            'random_walk_direction2', 'uniform'],  # noqa
-                                   ['uniform',                'uniform',                'uniform', 'uniform',                'uniform',                'uniform'],  # noqa
-                                   ]
-
-    clusterless_algorithm = 'multiunit_likelihood_gpu'
-    clusterless_algorithm_params = {
-        'mark_std': 20.0,
-        'position_std': 8.0,
-    }
-
-    classifier_parameters = {
-        'replay_speed': 1,
-        'place_bin_size': 2.0,
-        'movement_var': 6.0,
-        'position_range': None,
-        'continuous_transition_types': continuous_transition_types,
-        'discrete_transition_type': 'strong_diagonal',
-        'initial_conditions_type': 'uniform_on_track',
-        'discrete_transition_diag': 0.968,
-        'clusterless_algorithm': clusterless_algorithm,
-        'infer_track_interior': True,
-        'clusterless_algorithm_params': clusterless_algorithm_params
-    }
-
-    fit_parameters = {
-        'encoding_group_to_state': ['Inbound', 'Inbound', 'Inbound',
-                                    'Outbound', 'Outbound', 'Outbound']
-    }
-
-    predict_parameters = {
-        'is_compute_acausal': True,
-        'use_gpu':  True,
-        'state_names': [
-            'Inbound-Forward', 'Inbound-Reverse', 'Inbound-Fragmented',
-            'Outbound-Forward', 'Outbound-Reverse', 'Outbound-Fragmented']
-    }
-
-    return classifier_parameters, fit_parameters, predict_parameters
+    return classifier_parameters, predict_parameters
 
 
 @schema
@@ -387,20 +314,18 @@ class ClassifierParameters(dj.Manual):
     """
 
     def insert_default_param(self):
-        (classifier_parameters, fit_parameters,
+        (classifier_parameters,
          predict_parameters) = make_default_decoding_parameters_cpu()
         self.insert1(
             {'classifier_param_name': 'default_decoding_cpu',
              'classifier_params': classifier_parameters,
-             'fit_params': fit_parameters,
              'predict_params': predict_parameters},
             skip_duplicates=True)
 
-        (classifier_parameters, fit_parameters,
+        (classifier_parameters,
          predict_parameters) = make_default_decoding_parameters_gpu()
         self.insert1(
             {'classifier_param_name': 'default_decoding_gpu',
              'classifier_params': classifier_parameters,
-             'fit_params': fit_parameters,
              'predict_params': predict_parameters},
             skip_duplicates=True)
