@@ -3,6 +3,7 @@ channels:
   - conda-forge
   - defaults
   - franklab
+  - edeno
 dependencies:
   - python=3.8
   - jupyterlab>=3.*
@@ -12,6 +13,7 @@ dependencies:
   - pip>=20.2.*
   - position_tools
   - track_linearization
+  - replay_trajectory_classification
   - skan
   - bottleneck
   - ipympl
@@ -37,3 +39,4 @@ dependencies:
     - h5py==2.10.*
     - sortingview>=0.6.16
     - git+git://github.com/LorenFrankLab/ndx-franklab-novela
+    - git+git://github.com/rly/ndx-xarray
