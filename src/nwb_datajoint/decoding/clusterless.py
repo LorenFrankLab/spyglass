@@ -263,11 +263,11 @@ class UnitMarksIndicator(dj.Computed):
 
 def make_default_decoding_parameters_cpu():
     classifier_parameters = dict(
-        environments=_DEFAULT_ENVIRONMENT,
+        environments=vars(_DEFAULT_ENVIRONMENT),
         observation_models=None,
-        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
-        discrete_transition_type=DiagonalDiscrete(0.98),
-        initial_conditions_type=UniformInitialConditions(),
+        continuous_transition_types=vars(_DEFAULT_CONTINUOUS_TRANSITIONS),
+        discrete_transition_type=vars(DiagonalDiscrete(0.98)),
+        initial_conditions_type=vars(UniformInitialConditions()),
         infer_track_interior=True,
         clusterless_algorithm='multiunit_likelihood',
         clusterless_algorithm_params=_DEFAULT_CLUSTERLESS_MODEL_KWARGS
@@ -284,11 +284,11 @@ def make_default_decoding_parameters_cpu():
 
 def make_default_decoding_parameters_gpu():
     classifier_parameters = dict(
-        environments=_DEFAULT_ENVIRONMENT,
+        environments=vars(_DEFAULT_ENVIRONMENT),
         observation_models=None,
-        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
-        discrete_transition_type=DiagonalDiscrete(0.98),
-        initial_conditions_type=UniformInitialConditions(),
+        continuous_transition_types=vars(_DEFAULT_CONTINUOUS_TRANSITIONS),
+        discrete_transition_type=vars(DiagonalDiscrete(0.98)),
+        initial_conditions_type=vars(UniformInitialConditions()),
         infer_track_interior=True,
         clusterless_algorithm='multiunit_likelihood',
         clusterless_algorithm_params=_DEFAULT_CLUSTERLESS_MODEL_KWARGS
