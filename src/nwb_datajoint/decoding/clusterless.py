@@ -265,7 +265,7 @@ def make_default_decoding_parameters_cpu():
     classifier_parameters = dict(
         environments=vars(_DEFAULT_ENVIRONMENT),
         observation_models=None,
-        continuous_transition_types=vars(_DEFAULT_CONTINUOUS_TRANSITIONS),
+        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
         discrete_transition_type=vars(DiagonalDiscrete(0.98)),
         initial_conditions_type=vars(UniformInitialConditions()),
         infer_track_interior=True,
