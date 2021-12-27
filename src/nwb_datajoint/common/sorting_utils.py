@@ -94,22 +94,27 @@ def set_workspace_permission(workspace_name: str, team_members: List[str]):
         print(f'Permissions for {google_user_id[0]} set to: {workspace.get_user_permissions(google_user_id[0])}')
     return workspace_uri
 
-def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None):
+def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
+                             user_ids: List[str]=None):
     """Computes nearest neighbor isolation and noise overlap metrics and inserts them
     in the specified sorting of the workspace.
 
     Parameters
     ----------
     workspace_uri : str
-        [description]
+        workspace URI
     sorting_id : str, optional
-        [description], by default None
-
+        sorting id, by default None
+    user_ids : list of str, optional
+        google ids to confer curation permission, by default None
+        
     Returns
     -------
-    [type]
-        [description]
+    url : str
+        new URL for the view
     """
+    si.set_global_tmp_folder(os.environ['KACHERY_TEMP_DIR'])
+
     workspace = sv.load_workspace(workspace_uri)
     recording_id = workspace.recording_ids[0]
     recording = workspace.get_recording_extractor(recording_id=recording_id)
@@ -117,13 +122,25 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None):
         sorting_id = workspace.sorting_ids[0]
     sorting = workspace.get_sorting_extractor(sorting_id=sorting_id)
     recording = si.core.create_recording_from_old_extractor(recording)
-    waveforms = si.extract_waveforms(recording, sorting, folder='name', ms_before=1,
-                                     ms_after=1, max_spikes_per_unit=2000, return_scaled=True,
-                                     n_jobs=5, total_memory='5G')
+    sorting = si.core.create_sorting_from_old_extractor(sorting)
+    recording = recording.save()
+    sorting = sorting.save()
+    waveforms = si.extract_waveforms(recording, sorting, folder=os.environ['KACHERY_TEMP_DIR'],
+                                     ms_before=1,ms_after=1, max_spikes_per_unit=2000,
+                                     return_scaled=True, n_jobs=5, total_memory='5G')
+    
     isolation = {}
     noise_overlap = {}
     for unit_id in sorting.get_unit_ids():
         isolation[unit_id] = st.qualitymetrics.pca_metrics.nearest_neighbors_isolation(waveforms, this_unit_id=unit_id)
         noise_overlap[unit_id] = st.qualitymetrics.pca_metrics.nearest_neighbors_noise_overlap(waveforms, this_unit_id=unit_id)
     workspace.set_unit_metrics_for_sorting(sorting_id=sorting_id, metrics=[isolation, noise_overlap])
-    return None
+    
+    if user_ids is not None:
+        workspace.set_sorting_curation_authorized_users(sorting_id=sorting_id, user_ids=user_ids)
+
+    url = workspace.experimental_spikesortingview(recording_id=recording_id, sorting_id=sorting_id,
+                                                  label=workspace.label, include_curation=True)
+    print(f'go to this URL for the new view: {url}')
+
+    return url
