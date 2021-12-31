@@ -139,8 +139,14 @@ def interval_list_intersect(interval_list1, interval_list2):
     """
     
     # order input interval lists based on start times
-    interval_list1 = interval_list1[np.argsort(interval_list1[:,0])]
-    interval_list2 = interval_list2[np.argsort(interval_list2[:,0])]
+    if interval_list1.ndim==1:
+        interval_list1 = np.expand_dims(interval_list1,0)
+    else:
+        interval_list1 = interval_list1[np.argsort(interval_list1[:,0])]
+    if interval_list2.ndim==1:
+        interval_list2 = np.expand_dims(interval_list2,0)
+    else:
+        interval_list2 = interval_list2[np.argsort(interval_list2[:,0])]
     
     # take pairwise intersections and save them
     intersecting_intervals = []
@@ -161,7 +167,8 @@ def _overlapping(interval1, interval2):
     -------
     True if overlap, False otherwise
     """
-    return (_intersection(interval1, interval2)[1]-_intersection(interval1, interval2)[0]) > 0
+    x = _intersection(interval1, interval2)
+    return x[1] > x[0]
 
 def _overlapping_interval_list(interval, interval_list):
     """Checks if an interval overlaps with any interval in the list
@@ -178,18 +185,12 @@ def _overlapping_interval_list(interval, interval_list):
 def _intersection(interval1, interval2):
     """Take intersection of the two intervals
     """
-    if _overlapping(interval1, interval2):
-        return [np.max([interval1[0],interval2[0]]), np.min([interval1[1],interval2[1]])]
-    else:
-        raise ValueError('Two intervals are disjoint')
-
+    return [np.max([interval1[0],interval2[0]]), np.min([interval1[1],interval2[1]])]
+    
 def _union(interval1, interval2):
     """Take union of the two intervals
     """
-    if _overlapping(interval1, interval2):
-        return [np.min([interval1[0],interval2[0]]), np.max([interval1[1],interval2[1]])]
-    else:
-        raise ValueError('Two intervals are disjoint')
+    return [np.min([interval1[0],interval2[0]]), np.max([interval1[1],interval2[1]])]
 
 def _union_list(interval_list):
     """Unions intervals in the list

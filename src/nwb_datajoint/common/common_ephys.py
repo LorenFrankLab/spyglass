@@ -19,7 +19,6 @@ from .nwb_helper_fn import (estimate_sampling_rate, get_data_interface,
 
 schema = dj.schema('common_ephys')
 
-
 @schema
 class ElectrodeGroup(dj.Imported):
     definition = """

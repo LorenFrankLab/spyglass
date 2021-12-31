@@ -529,8 +529,6 @@ class SpikeSortingRecording(dj.Computed):
         
         recording = se.read_nwb_recording(nwb_file_abs_path, load_time_vector=True)
         recording.set_channel_offsets(0)
-        conversion = (Raw & {'nwb_file_name': key['nwb_file_name']}).fetch1('conversion')
-        recording.set_channel_gains(conversion)
         
         valid_sort_times = SpikeSortingRecording().get_sort_interval_valid_times(key)
         valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval) \
