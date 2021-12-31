@@ -177,11 +177,11 @@ class IntervalPositionInfo(dj.Computed):
 
         # Define LEDs
         if led1_is_front:
-            front_LED = position[:, [0, 1]].astype(np.float64)
-            back_LED = position[:, [2, 3]].astype(np.float64)
+            front_LED = position[:, [0, 1]].astype('float')
+            back_LED = position[:, [2, 3]].astype('float')
         else:
-            back_LED = position[:, [0, 1]].astype(np.float64)
-            front_LED = position[:, [2, 3]].astype(np.float64)
+            back_LED = position[:, [0, 1]].astype('float')
+            front_LED = position[:, [2, 3]].astype('float')
 
         # Convert to cm
         back_LED *= meters_to_pixels * CM_TO_METERS
