@@ -9,6 +9,8 @@ import pynwb
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
 
+global invalid_electrode_index 
+invalid_electrode_index = 99999999
 
 def get_nwb_file(nwb_file_path):
     """Return an NWBFile object with the given file path in read mode.
@@ -196,6 +198,8 @@ def get_electrode_indices(nwb_object, electrode_ids):
     nwbfile.electrodes has ID 10, then calling get_electrode_indices(electricalseries, 10) will return 0, the
     index of the matching electrode in electricalseries.electrodes.
 
+    Indices for electrode_ids that are not in the electrical series are returned as np.nan
+
     If an NWBFile is given, then the row indices with the matching IDs in the file's electrodes table are returned.
 
     Parameters
@@ -214,15 +218,21 @@ def get_electrode_indices(nwb_object, electrode_ids):
         # electrodes is a DynamicTableRegion which may contain a subset of the rows in NWBFile.electrodes
         # match against only the subset of electrodes referenced by this ElectricalSeries
         electrode_table_indices = nwb_object.electrodes.data[:]
-        selected_elect_ids = nwb_object.electrodes.table.id[electrode_table_indices]
+        selected_elect_ids = np.asarray(nwb_object.electrodes.table.id[electrode_table_indices])
     elif isinstance(nwb_object, pynwb.NWBFile):
         # electrodes is a DynamicTable that contains all electrodes
-        selected_elect_ids = nwb_object.electrodes.id[:]
+        selected_elect_ids = np.asarray(nwb_object.electrodes.id[:])
     else:
         raise ValueError(
             'nwb_object must be of type ElectricalSeries or NWBFile')
 
-    return [elect_idx for elect_idx, elect_id in enumerate(selected_elect_ids) if elect_id in electrode_ids]
+    #look up all of the valid indices
+    electrode_indices = np.searchsorted(selected_elect_ids, electrode_ids)
+
+    #set the invalid indices (identified by the indices where the value is not in the selected_elect_ids list)
+    electrode_indices[np.where(~np.isclose(selected_elect_ids[electrode_indices], electrode_ids))[0]] = invalid_electrode_index
+
+    return electrode_indices
 
 
 def get_all_spatial_series(nwbf, verbose=False):
