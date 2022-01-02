@@ -144,6 +144,7 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
                                    time_axis=0,
                                    is_filtered=True)
     new_recording.set_channel_locations(locations=recording.get_channel_locations())
+    # metric is computed on filtered and whitened recording
     new_recording = st.preprocessing.whiten(recording=new_recording, seed=0)
     
     if sorting_id is None:
@@ -186,5 +187,3 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
     print(f'URL for sortingview: {url}')
     
     return url, external_metrics
-
-

@@ -1,6 +1,7 @@
 import datajoint as dj
 import numpy as np
 from numpy.lib import emath
+from functools import reduce
 
 from .common_session import Session  # noqa: F401
 
@@ -122,7 +123,6 @@ def interval_list_excludes(valid_times, timestamps):
                                                    timestamps < invalid_time[1]))).tolist()
     return timestamps[ind]
 
-
 def interval_list_intersect(interval_list1, interval_list2):
     """Finds the intersection (overlapping times) for two interval lists
 
@@ -138,49 +138,28 @@ def interval_list_intersect(interval_list1, interval_list2):
     interval_list: np.array, (N,2)
     """
     
-    # order input interval lists based on start times
     if interval_list1.ndim==1:
         interval_list1 = np.expand_dims(interval_list1,0)
     else:
         interval_list1 = interval_list1[np.argsort(interval_list1[:,0])]
+        interval_list1 = reduce(_union_overlapping_intervals, interval_list1)
+        
     if interval_list2.ndim==1:
         interval_list2 = np.expand_dims(interval_list2,0)
     else:
         interval_list2 = interval_list2[np.argsort(interval_list2[:,0])]
-    
-    # take pairwise intersections and save them
+        interval_list2 = reduce(_union_overlapping_intervals, interval_list2)
+
     intersecting_intervals = []
     for interval2 in interval_list2:
         for interval1 in interval_list1:
             if _overlapping(interval2, interval1):
                 intersecting_intervals.append(_intersection(interval1, interval2))   
-   
-    # consolidate the intersections to nonoverlapping list of intervals
-    intersecting_intervals=_make_nonoverlapping_by_union(np.array(intersecting_intervals))
+                
+    intersecting_intervals = np.array(intersecting_intervals)
+    intersecting_intervals = intersecting_intervals[np.argsort(intersecting_intervals[:,0])]
     
     return intersecting_intervals
-
-def _overlapping(interval1, interval2):
-    """Checks if the two intervals overlap
-    
-    Returns
-    -------
-    True if overlap, False otherwise
-    """
-    x = _intersection(interval1, interval2)
-    return x[1] > x[0]
-
-def _overlapping_interval_list(interval, interval_list):
-    """Checks if an interval overlaps with any interval in the list
-    
-    Returns
-    -------
-    Index of overlapping intervals in the list
-    """
-    overlapping_bool = []
-    for interval2 in interval_list:
-        overlapping_bool.append(_overlapping(interval, interval2))
-    return np.nonzero(overlapping_bool)[0]
 
 def _intersection(interval1, interval2):
     """Take intersection of the two intervals
@@ -192,37 +171,26 @@ def _union(interval1, interval2):
     """
     return [np.min([interval1[0],interval2[0]]), np.max([interval1[1],interval2[1]])]
 
-def _union_list(interval_list):
-    """Unions intervals in the list
-    Input must not contain any interval disjoint from all others
-    
-    Return
-    -------
-    a single interval; shape is (2,) not (1,2)
+def _overlapping(interval1, interval2):
+    """Checks if the two intervals overlap
     """
-    while len(interval_list)>1:
-        joined_interval = _union(interval_list[0], interval_list[1])
-        if len(interval_list)==2:
-            interval_list = np.array([joined_interval])
-        else:
-            interval_list = np.append([joined_interval], interval_list[2:], axis=0)
-    return interval_list[0]
+    x = _intersection(interval1, interval2)
+    return x[1] > x[0]
 
-def _make_nonoverlapping_by_union(interval_list):
-    """Consolidate an interval list to a disjoint one by unioning overlapping intervals
+def _union_overlapping_intervals(interval1, interval2):
+    """Given two intervals, takes their union if overlapping;
+    concatenates if not
     """
-    nonoverlapping_intervals = []
-    for i in range(len(interval_list)):
-        # check if it overlaps with other sets
-        idx_overlap = _overlapping_interval_list(interval_list[i], interval_list)        
-        # if only overlaps with itself, then must be disjoint from others;
-        # keep in the list of nonoverlapping intervals
-        if idx_overlap.size==1:
-            nonoverlapping_intervals.append(interval_list[i])
-        # if it has overlapping intervals then join by union
-        else:
-            nonoverlapping_intervals.append(_union_list(interval_list[idx_overlap]))
-    return np.unique(nonoverlapping_intervals, axis=0)
+    if interval1.ndim==1:
+        interval1 = np.expand_dims(interval1, 0)
+    if interval2.ndim==1:
+        interval2 = np.expand_dims(interval2, 0)
+
+    if _overlapping(interval1[-1], interval2[0]):
+        x = np.array([_union(interval1[-1], interval2[0])])
+        return np.concatenate((interval1[:-1], x), axis=0)
+    else:
+        return np.concatenate((interval1, interval2),axis=0)
 
 # def interval_list_intersect(interval_list1, interval_list2):
 #     """

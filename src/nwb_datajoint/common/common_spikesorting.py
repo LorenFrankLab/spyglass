@@ -6,6 +6,7 @@ import time
 import tempfile
 from pathlib import Path
 import shutil
+from functools import reduce
 
 import datajoint as dj
 import kachery_client as kc
@@ -534,6 +535,8 @@ class SpikeSortingRecording(dj.Computed):
         # shape is (N, 2)
         valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval) \
                                              for interval in valid_sort_times])
+        # join intervals of indices that are adjacent
+        valid_sort_times_indices = reduce(_join_adjacent_intervals, valid_sort_times_indices)
         
         # concatenate if there is more than one disjoint sort interval
         if len(valid_sort_times_indices)>1:
@@ -903,7 +906,7 @@ class SpikeSorting(dj.Computed):
             store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
                               sort_interval=sort_interval)
         self.insert1(key)
-
+    
     def delete(self):
         """Extends the delete method of base class to implement permission checking
         Note that this is NOT a security feature, as anyone that has access to source code
@@ -1111,3 +1114,15 @@ class ModifySorting(dj.Computed):
 
     #     sorting_modified = True
 
+def _join_adjacent_intervals(interval1, interval2):
+    if interval1.ndim==1:
+        interval1 = np.expand_dims(interval1, 0)
+    if interval2.ndim==1:
+        interval2 = np.expand_dims(interval2, 0)
+
+    if interval1[-1][1]+1 == interval2[0][0] or interval2[0][1]+1 == interval1[-1][0]:
+        x = np.array([[np.min([interval1[-1][0],interval2[0][0]]), 
+                       np.max([interval1[-1][1],interval2[0][1]])]])
+        return np.concatenate((interval1[:-1], x), axis=0)
+    else:
+        return np.concatenate((interval1, interval2),axis=0)
