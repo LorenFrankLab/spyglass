@@ -16,67 +16,73 @@ from .common_spikesorting import SpikeSortingRecording, SpikeSortingWorkspace, S
 from pathlib import Path
 import tempfile
 
-def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, metrics=None, unit_ids=None):
-    """store a sorting in a new AnalysisNwbfile
-    :param key: key to SpikeSortingRecoring
-    :type key: dict
-    :param sorting: sorting extractor
-    :type sorting: BaseSortingExtractor
-    :param sort_interval_list_name: name of interval list for sort
-    :type sort_interval_list_name: str
-    :param sort_interval: interval for start and end of sort
-    :type sort_interval: list
-    :param path_suffix: string to append to end of sorting extractor file name
-    :type path_suffix: str
-    :param metrics: spikesorting metrics, optional, defaults to None
-    :type metrics: dict
-    :param unit_ids: the ids of the units to save, optional, defaults to None
-    :type list
-    :returns: analysis_file_name, units_object_id
-    :rtype (str, str)
+def store_sorting_nwb(key:dict, *, sorting, sort_interval_list_name:str, sort_interval,
+                      metrics=None, unit_ids=None):
+    """Store a sorting in a new AnalysisNwbfile
+
+    Parameters
+    ----------
+    key : dict
+        [description]
+    sorting : [type]
+        [description]
+    sort_interval_list_name : str
+        [description]
+    sort_interval : list
+        interval for start and end of sort
+    metrics : dict, optional
+        quality metrics, by default None
+    unit_ids : list, optional
+        [description], by default None
+
+    Returns
+    -------
+    analysis_file_name : str
+    units_object_id : str
     """
 
     sort_interval_valid_times = (IntervalList & \
             {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
 
-    recording_timestamps = SpikeSortingRecording.get_recording_timestamps(key)
+    times = SpikeSortingRecording.get_recording_timestamps(key)
+    # times = sorting.recording.get_times()
     units = dict()
     units_valid_times = dict()
     units_sort_interval = dict()
-    all_unit_ids = sorting.get_unit_ids()
     if unit_ids is None:
-        unit_ids = all_unit_ids
-    for unit_id in all_unit_ids:
-        if unit_id in unit_ids:
-            spike_times_in_samples = sorting.get_unit_spike_train(
-                unit_id=unit_id)
-            units[unit_id] = recording_timestamps[spike_times_in_samples]
-            units_valid_times[unit_id] = sort_interval_valid_times
-            units_sort_interval[unit_id] = [sort_interval]
+        unit_ids = sorting.get_unit_ids()
+    for unit_id in unit_ids:
+        spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
+        units[unit_id] = times[spike_times_in_samples]
+        units_valid_times[unit_id] = sort_interval_valid_times
+        units_sort_interval[unit_id] = [sort_interval]
 
     analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
-    units_object_id, _ = AnalysisNwbfile().add_units(analysis_file_name,
-                                                    units, units_valid_times,
-                                                    units_sort_interval,
-                                                    metrics=metrics)
-
+    u = AnalysisNwbfile().add_units(analysis_file_name,
+                                                     units, units_valid_times,
+                                                     units_sort_interval,
+                                                     metrics=metrics)
+    if u=='':
+        print('Sorting contains no units. Created an empty analysis nwb file anyway.')
+        units_object_id = ''
+    else:
+        units_object_id = u[0]
     AnalysisNwbfile().add(key['nwb_file_name'], analysis_file_name)
     return analysis_file_name,  units_object_id
-
 
 def set_workspace_permission(workspace_name: str, team_members: List[str]):
     """Sets permission to sortingview workspace based on google ID
     
     Parameters
     ----------
-    workspace_name: str
+    workspace_name : str
         name of workspace
-    team_members: List[str]
+    team_members : List[str]
         list of team members to be given permission to edit the workspace
     
     Returns
     ------
-    workspace_uri: str
+    workspace_uri : str
         URI of workspace
     """
     workspace_uri = kc.get(workspace_name)
@@ -138,7 +144,8 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
                                    time_axis=0,
                                    is_filtered=True)
     new_recording.set_channel_locations(locations=recording.get_channel_locations())
-
+    new_recording = st.preprocessing.whiten(recording=new_recording, seed=0)
+    
     if sorting_id is None:
         sorting_id = workspace.sorting_ids[0]
     sorting = workspace.get_sorting_extractor(sorting_id=sorting_id)
@@ -147,8 +154,8 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
     new_sorting = new_sorting.save(folder=str(Path(tmpdir.name) / 's'),)
 
     waveforms = si.extract_waveforms(new_recording, new_sorting, folder=str(Path(tmpdir.name) / 'wf'),
-                                     ms_before=1,ms_after=1, max_spikes_per_unit=2000,
-                                     overwrite=True,return_scaled=True, n_jobs=5, total_memory='5G')
+                                     ms_before=1, ms_after=1, max_spikes_per_unit=2000,
+                                     overwrite=True, return_scaled=True, n_jobs=5, total_memory='5G')
 
     isolation = {}
     noise_overlap = {}

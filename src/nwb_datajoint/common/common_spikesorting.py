@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import time
+import tempfile
 from pathlib import Path
 import shutil
 
@@ -14,6 +15,7 @@ import pandas as pd
 import pynwb
 import scipy.stats as stats
 import sortingview as sv
+import spikeextractors
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
@@ -525,57 +527,48 @@ class SpikeSortingRecording(dj.Computed):
         recording: spikeinterface.Recording
         """
         
-        nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
-        
+        nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])   
         recording = se.read_nwb_recording(nwb_file_abs_path, load_time_vector=True)
-        recording.set_channel_offsets(0)
         
         valid_sort_times = SpikeSortingRecording().get_sort_interval_valid_times(key)
+        # shape is (N, 2)
         valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval) \
                                              for interval in valid_sort_times])
         
-        # concatenate
-        recordings_list = []
-        for interval_indices in valid_sort_times_indices:
-            recording_single = recording.frame_slice(start_frame=interval_indices[0],
-                                                     end_frame=interval_indices[1])
-            recordings_list.append(recording_single)
-        recording = si.concatenate_recordings(recordings_list)
+        # concatenate if there is more than one disjoint sort interval
+        if len(valid_sort_times_indices)>1:
+            recordings_list = []
+            for interval_indices in valid_sort_times_indices:
+                recording_single = recording.frame_slice(start_frame=interval_indices[0],
+                                                        end_frame=interval_indices[1])
+                recordings_list.append(recording_single)
+            recording = si.concatenate_recordings(recordings_list)
+        else:
+            recording = recording.frame_slice(start_frame=valid_sort_times_indices[0][0],
+                                              end_frame=valid_sort_times_indices[0][1])
 
-        # electrodes
-        electrode_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
-                                                         'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
-        electrode_group_name = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
-                                                                'sort_group_id': key['sort_group_id']}).fetch('electrode_group_name')
-        electrode_group_name = np.int(electrode_group_name[0])
-        sort_reference_electrode_id = (SortGroup & {'nwb_file_name': key['nwb_file_name'],
-                                                    'sort_group_id': key['sort_group_id']}).fetch('sort_reference_electrode_id')
-        sort_reference_electrode_id = np.int(sort_reference_electrode_id)
+        channel_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
+                                                       'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
+        channel_ids = channel_ids.tolist()
+        ref_channel_id = (SortGroup & {'nwb_file_name': key['nwb_file_name'],
+                                       'sort_group_id': key['sort_group_id']}).fetch('sort_reference_electrode_id')
+        ref_channel_id = int(ref_channel_id)
         
-        # make a list of the channels in the sort group and the reference channel if it exists
-        channel_ids = electrode_ids.tolist()
-        if sort_reference_electrode_id >= 0:            
-            channel_ids.append(sort_reference_electrode_id)
-
-        # slice in channels
-        recording = recording.channel_slice(channel_ids=channel_ids)
-        
-        if sort_reference_electrode_id >= 0:
+        # include ref channel in first slice, then exclude it in second slice
+        if ref_channel_id >= 0:            
+            channel_ids_ref = channel_ids.append(ref_channel_id)
+            recording = recording.channel_slice(channel_ids=channel_ids_ref)
             recording = st.preprocessing.common_reference(recording, reference='single',
-                                                          ref_channels=sort_reference_electrode_id)
-            # now restrict it to just the electrode IDs in the sort group
-            recording = recording.channel_slice(channel_ids=electrode_ids.tolist())
-        elif sort_reference_electrode_id == -2:
-            recording = st.preprocessing.common_reference(recording, reference='median')
+                                                          ref_channels=ref_channel_id)
+            recording = recording.channel_slice(channel_ids=channel_ids)
+        elif ref_channel_id == -2:
+            recording = recording.channel_slice(channel_ids=channel_ids)
+            recording = st.preprocessing.common_reference(recording, reference='global',
+                                                          operator='median')
 
-        # filter
         filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
         recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
                                                      freq_max=filter_params['frequency_max'])
-        
-        # TODO: change this with spikeinterface.probe
-        recording.set_channel_locations(SortGroup().get_geometry(key['sort_group_id'],
-                                                                 key['nwb_file_name']))
         
         return recording
 
@@ -622,34 +615,28 @@ class SpikeSortingWorkspace(dj.Computed):
             [description]
         """
         
-        # get the dictionary that defines the recording extractor object
         recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
-        # get the uri for that file, assuming h5_v1 format for the moment.
+        # TODO: check if this works for not just h1v1 format but also others like nwb
         recording = sv.LabboxEphysRecordingExtractor(recording_object)
-        # create the workspace
+
         workspace_name = key['nwb_file_name'] + '_' + \
             key['sort_interval_name'] + '_' + str(key['sort_group_id'])
-        # get uri for workspace; if does not exist, create new one
         workspace_uri = kc.get(workspace_name)
         if not workspace_uri:
             workspace_uri = sv.create_workspace(label=workspace_name).uri
             kc.set(workspace_name, workspace_uri)   
         workspace = sv.load_workspace(workspace_uri)
 
-        # delete any recordings associated with this workspace
+        # TODO: is this the best practice?
         for recording_id in workspace.recording_ids:
             workspace.delete_recording(recording_id)
-        
-        # delete any sortings associated with this workspace
         for sorting_id in workspace.sorting_ids:
             workspace.delete_sorting(sorting_id)
 
-        # add the recording
         recording_label = key['nwb_file_name'] + '_' + \
             key['sort_interval_name'] + '_' + str(key['sort_group_id'])+ '_recording'
         workspace.add_recording(recording=recording, label=recording_label)
         
-        # insert
         key['workspace_uri'] = workspace_uri
         self.insert1(key)
 
@@ -798,14 +785,12 @@ class SpikeSorter(dj.Manual):
     # Table that holds the list of spike sorters avaialbe through spikeinterface
     sorter_name: varchar(80) # the name of the spike sorting algorithm
     """
-    def insert_from_spikeinterface(self):
-        '''
-        Add each of the sorters from spikeinterface.sorters
-        :return: None
-        '''
+    def insert_default(self):
+        """Add each of the sorters from spikeinterface.sorters
+        """
         sorters = ss.available_sorters()
         for sorter in sorters:
-            self.insert1({'sorter_name': sorter}, skip_duplicates="True")
+            self.insert1({'sorter_name': sorter}, skip_duplicates=True)
 
 @schema
 class SpikeSorterParameters(dj.Manual):
@@ -816,11 +801,9 @@ class SpikeSorterParameters(dj.Manual):
     parameter_dict: blob # dictionary of parameter names and values
     """
 
-    def insert_from_spikeinterface(self):
-        '''
-        Add each of the default parameter dictionaries from spikeinterface.sorters
-        :return: None
-        '''
+    def insert_default(self):
+        """Insert default parameters for each sorter
+        """
         # set up the default filter parameters
         sort_param_dict = dict()
         sort_param_dict['spikesorter_parameter_set_name'] = 'default'
@@ -828,9 +811,8 @@ class SpikeSorterParameters(dj.Manual):
         for sorter in sorters:
             if len((SpikeSorter() & {'sorter_name': sorter}).fetch()):
                 sort_param_dict['sorter_name'] = sorter
-                sort_param_dict['parameter_dict'] = ss.get_default_params(
-                    sorter)
-                self.insert1(sort_param_dict, skip_duplicates=True)
+                sort_param_dict['parameter_dict'] = ss.get_default_params(sorter)
+                self.insert1(sort_param_dict, replace=True)
             else:
                 print(
                     f'Error in SpikeSorterParameter: sorter {sorter} not in SpikeSorter schema')
@@ -874,19 +856,33 @@ class SpikeSorting(dj.Computed):
         key: dict
         """
 
-        # GET the recording extractor from the workspace
+        # TODO: check that this works for formats other than h5_v1
         recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
-        # get the uri for that file, assuming h5_v1 format for the moment.
         recording = sv.LabboxEphysRecordingExtractor(recording_object)
+        
+        # currently, sorting cannot use multiple workers if it is not first saved to disk
+        # in a format that can be read by new spikeinterface. as a workaround, we save this
+        # to binary first and then reload with new spikeinterface. in the future we will not
+        # use h1v1 recording extractor; instead we will use nwb recording, which can directly
+        # be loaded with new si and will not need this step
+        tmpdir = tempfile.TemporaryDirectory(dir=os.environ['KACHERY_TEMP_DIR'])
+        cached_recording = spikeextractors.CacheRecordingExtractor(recording, 
+                                                                   save_path=str(Path(tmpdir.name) / 'r.dat'))
 
-        # whiten the extractor for sorting and metric calculations
-        print('\nWhitening recording...')
-        with Timer(label=f'whitening', verbose=True):
-            filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
-            # TODO: turn SpikeSortingFilterParameters to SpikeSortingPreprocessingParameters and include seed, chunk size etc
-            recording = st.preprocessing.whiten(recording, seed=0)
+        # then load with spikeinterface
+        new_recording = si.read_binary(file_paths=str(Path(tmpdir.name) / 'r.dat'),
+                                       sampling_frequency=cached_recording.get_sampling_frequency(),
+                                       num_chan=cached_recording.get_num_channels(),
+                                       dtype=cached_recording.get_dtype(),
+                                       time_axis=0,
+                                       is_filtered=True)
+        new_recording.set_channel_locations(locations=recording.get_channel_locations())
 
-        print(f'\nRunning spike sorting on {key}...')
+        # TODO: turn SpikeSortingFilterParameters to SpikeSortingPreprocessingParameters
+        # and include seed, chunk size etc
+        recording = st.preprocessing.whiten(new_recording, seed=0)
+
+        print(f'Running spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'spikesorter_parameter_set_name': key['spikesorter_parameter_set_name']}).fetch1()
 
@@ -894,27 +890,19 @@ class SpikeSorting(dj.Computed):
                                 output_folder=os.getenv(
                                     'SORTING_TEMP_DIR', None),
                                 **sort_parameters['parameter_dict'])
-
         key['time_of_sort'] = int(time.time())
 
-        print('\nSaving sorting results...')       # get the sort interval valid times and the original sort interval
+        print('Saving sorting results...')
+        sorting_label = self.get_sorting_name(key)
+        key['sorting_id'] = SpikeSortingWorkspace().store_sorting(key, sorting=sorting,
+                                                                  sorting_label=sorting_label)
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
- 
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
- 
-        sorting_label = key['sorter_name'] + '_' + key['spikesorter_parameter_set_name']
-        key['sorting_id'] = SpikeSortingWorkspace().store_sorting(key, sorting=sorting, sorting_label=sorting_label)
-        # also set the snippet length
-
-        
         key['analysis_file_name'], key['units_object_id'] = \
             store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
                               sort_interval=sort_interval)
-        # add the sort_info_key to the main key
-    
         self.insert1(key)
-        print('\nDone - entry inserted to table.')
 
     def delete(self):
         """Extends the delete method of base class to implement permission checking
