@@ -29,7 +29,7 @@ class MetricParameters(dj.Manual):
         metric_params = _get_metric_default_params(metric)
         return metric_params
 
-    def insert_default_params(self):
+    def insert_default(self):
         """Inserts default parameters
         """
         list_name = 'franklab_default'

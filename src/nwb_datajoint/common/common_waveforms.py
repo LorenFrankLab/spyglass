@@ -20,7 +20,7 @@ class WaveformParameters(dj.Manual):
     ---
     params: blob # a dict of waveform extraction parameters
     """
-    def insert_default_params(self):
+    def insert_default(self):
         key = {}
         key['list_name'] = 'default'
         key['params'] = {'ms_before':1, 'ms_after':1, 'max_spikes_per_unit':1000}

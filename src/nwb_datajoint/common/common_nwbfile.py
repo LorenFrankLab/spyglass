@@ -298,19 +298,19 @@ class AnalysisNwbfile(dj.Manual):
 
     def add_units(self, analysis_file_name, units, units_valid_times,
                   units_sort_interval, metrics=None, units_waveforms=None, labels=None):
-        """Add units, given a units dictionary where each entry is (unit id, spike times).
+        """Add units to analysis NWB file
 
         Parameters
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
         units : dict
-            Dictionary of units and times with unit ids as keys.
+            keys are unit ids, values are spike times
         units_valid_times : dict
             Dictionary of units and valid times with unit ids as keys.
         units_sort_interval : dict
             Dictionary of units and sort_interval with unit ids as keys.
-        units_waveforms : dataframe, optional
+        units_waveforms : dict, optional
             Dictionary of unit waveforms with unit ids as keys.
         metrics : dict, optional
             Cluster metrics.
@@ -342,7 +342,7 @@ class AnalysisNwbfile(dj.Manual):
                         metric_data = metrics[metric].to_list()
                         print(f'Adding metric {metric} : {metric_data}')
                         nwbf.add_unit_column(name=metric,
-                                             description=f'{metric} sorting metric',
+                                             description=f'{metric} metric',
                                              data=metric_data)
                 if labels is not None:
                     nwbf.add_unit_column(
