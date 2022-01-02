@@ -409,14 +409,14 @@ class SpikeSortingRecording(dj.Computed):
             # update the sort interval valid times to exclude the artifacts
             sort_interval_valid_times = interval_list_intersect(
                 sort_interval_valid_times, no_artifact_valid_times)
-            # exclude the invalid times
-            mask = np.full(recording.get_num_frames(), True, dtype='bool')
-            excluded_ind = interval_list_excludes_ind(
-                sort_interval_valid_times, recording_timestamps)
-            if len(excluded_ind) > 0:
-                mask[interval_list_excludes_ind(
-                    sort_interval_valid_times, recording_timestamps)] = False
-            recording = st.preprocessing.mask(recording, mask)
+        # exclude the invalid times
+        mask = np.full(recording.get_num_frames(), True, dtype='bool')
+        excluded_ind = interval_list_excludes_ind(
+            sort_interval_valid_times, recording_timestamps)
+        if len(excluded_ind) > 0:
+            mask[interval_list_excludes_ind(
+                sort_interval_valid_times, recording_timestamps)] = False
+        recording = st.preprocessing.mask(recording, mask)
 
         #add the sort_interval_valid_times as an interval list
         tmp_key = {}
