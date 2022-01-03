@@ -236,9 +236,17 @@ def get_all_spatial_series(nwbf, verbose=False):
     if position is None:
         return None
 
-    pos_data_dict = dict()
+    # for some reason the spatial_series do not necessarily come out in order, so we need to figure out the right order
+    epoch_start_time = np.zeros(len(position.spatial_series.values()))
     for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
-        pos_data_dict[pos_epoch] = dict()
+        epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
+
+    sorted_order = np.argsort(epoch_start_time)
+    pos_data_dict = dict()
+    #for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
+    for index, orig_epoch in enumerate(sorted_order):
+        spatial_series = position.spatial_series.values()[orig_epoch]
+        pos_data_dict[index] = dict()
         # get the valid intervals for the position data
         timestamps = np.asarray(spatial_series.timestamps)
 
@@ -246,14 +254,14 @@ def get_all_spatial_series(nwbf, verbose=False):
         sampling_rate = estimate_sampling_rate(timestamps, 1.75)
         if sampling_rate < 0:
             raise ValueError(
-                f'Error adding position data for position epoch {pos_epoch}')
+                f'Error adding position data for position epoch {index}')
         if verbose:
             print("Processing raw position data. Estimated sampling rate: {} Hz".format(
                 sampling_rate))
         # add the valid intervals to the Interval list
-        pos_data_dict[pos_epoch]['valid_times'] = get_valid_intervals(
+        pos_data_dict[index]['valid_times'] = get_valid_intervals(
             timestamps, sampling_rate, 2.5, 0)
-        pos_data_dict[pos_epoch]['raw_position_object_id'] = spatial_series.object_id
+        pos_data_dict[index]['raw_position_object_id'] = spatial_series.object_id
 
     return pos_data_dict
 
