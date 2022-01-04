@@ -131,30 +131,19 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
     recording_id = workspace.recording_ids[0]
     recording = workspace.get_recording_extractor(recording_id=recording_id)
 
-    # first cache as binary using old spikeextractors to make it compatible with new si
-    tmpdir = tempfile.TemporaryDirectory(dir=os.environ['KACHERY_TEMP_DIR'])
-    cached_recording = spikeextractors.CacheRecordingExtractor(recording, 
-                                                               save_path=str(Path(tmpdir.name) / 'r.dat'))
-
-    # then load with spikeinterface
-    new_recording = si.read_binary(file_paths=str(Path(tmpdir.name) / 'r.dat'),
-                                   sampling_frequency=cached_recording.get_sampling_frequency(),
-                                   num_chan=cached_recording.get_num_channels(),
-                                   dtype=cached_recording.get_dtype(),
-                                   time_axis=0,
-                                   is_filtered=True)
-    new_recording.set_channel_locations(locations=recording.get_channel_locations())
-    # metric is computed on filtered and whitened recording
+    new_recording = si.create_recording_from_old_extractor(recording)
     new_recording = st.preprocessing.whiten(recording=new_recording, seed=0)
+    new_recording.annotate(is_filtered=True)
+    new_recording.is_dumpable=False 
     
     if sorting_id is None:
         sorting_id = workspace.sorting_ids[0]
     sorting = workspace.get_sorting_extractor(sorting_id=sorting_id)
     new_sorting = si.core.create_sorting_from_old_extractor(sorting)
-    # save sorting to enable parallelized waveform extraction
-    new_sorting = new_sorting.save(folder=str(Path(tmpdir.name) / 's'),)
+    new_sorting.is_dumpable=False
 
-    waveforms = si.extract_waveforms(new_recording, new_sorting, folder=str(Path(tmpdir.name) / 'wf'),
+    tmpdir = tempfile.TemporaryDirectory(dir=os.environ['KACHERY_TEMP_DIR'])
+    waveforms = si.extract_waveforms(new_recording, new_sorting, folder=tmpdir.name,
                                      ms_before=1, ms_after=1, max_spikes_per_unit=2000,
                                      overwrite=True, return_scaled=True, n_jobs=5, total_memory='5G')
 

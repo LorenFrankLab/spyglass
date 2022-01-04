@@ -11,8 +11,6 @@ from functools import reduce
 import datajoint as dj
 import kachery_client as kc
 import numpy as np
-from numpy.core.records import record
-import pandas as pd
 import pynwb
 import scipy.stats as stats
 import sortingview as sv
@@ -22,7 +20,7 @@ import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
-from sortingview.extractors.wrapperrecordingextractor import WrapperRecordingExtractor
+# from sortingview.extractors.wrapperrecordingextractor import WrapperRecordingExtractor
 
 # from mountainsort4.mdaio_impl import readmda
 
@@ -537,7 +535,10 @@ class SpikeSortingRecording(dj.Computed):
                                              for interval in valid_sort_times])
         # join intervals of indices that are adjacent
         valid_sort_times_indices = reduce(_join_adjacent_intervals, valid_sort_times_indices)
-        
+
+        if valid_sort_times_indices.ndim==1:
+            valid_sort_times_indices = np.expand_dims(valid_sort_times_indices, 0)
+            
         # concatenate if there is more than one disjoint sort interval
         if len(valid_sort_times_indices)>1:
             recordings_list = []
@@ -549,22 +550,29 @@ class SpikeSortingRecording(dj.Computed):
         else:
             recording = recording.frame_slice(start_frame=valid_sort_times_indices[0][0],
                                               end_frame=valid_sort_times_indices[0][1])
-
+        
         channel_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
                                                        'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
         channel_ids = channel_ids.tolist()
         ref_channel_id = (SortGroup & {'nwb_file_name': key['nwb_file_name'],
                                        'sort_group_id': key['sort_group_id']}).fetch('sort_reference_electrode_id')
-        ref_channel_id = int(ref_channel_id)
+        ref_channel_id = ref_channel_id.tolist()
         
         # include ref channel in first slice, then exclude it in second slice
-        if ref_channel_id >= 0:            
-            channel_ids_ref = channel_ids.append(ref_channel_id)
+        if ref_channel_id[0] >= 0:
+            channel_ids_ref = channel_ids + ref_channel_id
             recording = recording.channel_slice(channel_ids=channel_ids_ref)
+            print(recording)
+            print(recording.get_traces(start_frame=0, end_frame=1000))
             recording = st.preprocessing.common_reference(recording, reference='single',
-                                                          ref_channels=ref_channel_id)
+                                                          ref_channels=ref_channel_id[0])
+            print(recording)
+            print(recording.get_traces(start_frame=0, end_frame=1000))
             recording = recording.channel_slice(channel_ids=channel_ids)
-        elif ref_channel_id == -2:
+            print(recording)
+            print(recording.get_traces(start_frame=0, end_frame=1000))
+
+        elif ref_channel_id[0] == -2:
             recording = recording.channel_slice(channel_ids=channel_ids)
             recording = st.preprocessing.common_reference(recording, reference='global',
                                                           operator='median')
@@ -572,7 +580,7 @@ class SpikeSortingRecording(dj.Computed):
         filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
         recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
                                                      freq_max=filter_params['frequency_max'])
-        
+       
         return recording
 
     @staticmethod
@@ -880,19 +888,20 @@ class SpikeSorting(dj.Computed):
                                        time_axis=0,
                                        is_filtered=True)
         new_recording.set_channel_locations(locations=recording.get_channel_locations())
-
+        print(new_recording)
+        print(new_recording.get_traces(start_frame=0, end_frame=1000))
         # TODO: turn SpikeSortingFilterParameters to SpikeSortingPreprocessingParameters
         # and include seed, chunk size etc
         recording = st.preprocessing.whiten(new_recording, seed=0)
-
+        print(recording)
+        print(recording.get_traces(start_frame=0, end_frame=1000))
         print(f'Running spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'spikesorter_parameter_set_name': key['spikesorter_parameter_set_name']}).fetch1()
-
         sorting = ss.run_sorter(key['sorter_name'], recording,
-                                output_folder=os.getenv(
-                                    'SORTING_TEMP_DIR', None),
+                                output_folder=os.getenv('SORTING_TEMP_DIR', None),
                                 **sort_parameters['parameter_dict'])
+        print(sorting)
         key['time_of_sort'] = int(time.time())
 
         print('Saving sorting results...')
