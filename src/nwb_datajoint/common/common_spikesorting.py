@@ -1382,10 +1382,12 @@ class AutomaticCuration(dj.Computed):
 
         # get the cluster metrics list name and add a name for this sorting
         cluster_metrics_list_name = (AutomaticCurationSelection & key).fetch1('cluster_metrics_list_name')
+        metric_dict = (AutomaticCurationSelection & key).fetch1('metric_dict')
+        n_metrics = sum(metric_dict.values())
 
         # 2. Calculate the metrics
         #First, whiten the recording
-        with Timer(label=f'whitening and computing new quality metrics', verbose=True):
+        if n_metrics>0:
             filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
             recording = st.preprocessing.whiten(
                 recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
@@ -1393,12 +1395,12 @@ class AutomaticCuration(dj.Computed):
             metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
             metrics = SpikeSortingMetricParameters().compute_metrics(cluster_metrics_list_name, metrics_recording, sorting)
 
-        # add labels to the sorting based on metrics?
-        if 'noise_reject' in acpd:
-                if acpd['noise_reject']:
-                    # get the noise rejection parameters
-                    noise_reject_param = acpd['noise_reject_param']
-                    #TODO write noise/ rejection code
+            # add labels to the sorting based on metrics?
+            if 'noise_reject' in acpd:
+                    if acpd['noise_reject']:
+                        # get the noise rejection parameters
+                        noise_reject_param = acpd['noise_reject_param']
+                        #TODO write noise/ rejection code
 
         # Store the sorting with metrics in the NWB file and update the metrics in the workspace
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
@@ -1409,8 +1411,8 @@ class AutomaticCuration(dj.Computed):
         key['analysis_file_name'], key['units_object_id'] = \
             store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name,
             sort_interval=sort_interval, metrics=metrics)
-
-        SpikeSortingWorkspace().add_metrics_to_sorting(key, sorting_id=sorting_id, metrics=metrics)
+        if n_metrics>0:
+            SpikeSortingWorkspace().add_metrics_to_sorting(key, sorting_id=sorting_id, metrics=metrics)
         self.insert1(key)
 
 
