@@ -1381,8 +1381,8 @@ class AutomaticCuration(dj.Computed):
         analysis_file_created = False
 
         # get the cluster metrics list name and add a name for this sorting
-        cluster_metrics_list_name = (AutomaticCurationSelection & key).fetch1('cluster_metrics_list_name')
-        metric_dict = (AutomaticCurationSelection & key).fetch1('metric_dict')
+        cluster_metrics_list_name = (AutomaticCurationSelection & key).fetch1('cluster_metrics_list_name') 
+        metric_dict = (SpikeSortingMetricParameters & {'cluster_metrics_list_name':cluster_metrics_list_name}).fetch1('metric_dict')
         n_metrics = sum(metric_dict.values())
 
         # 2. Calculate the metrics
