@@ -1,26 +1,14 @@
-from copy import Error
-import json
 import os
-import pathlib
-import re
 import tempfile
-from pathlib import Path
 import shutil
 
 import datajoint as dj
-import kachery_client as kc
 import numpy as np
-from numpy.core.records import record
-import pandas as pd
-import pynwb
-import scipy.stats as stats
 import sortingview as sv
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
-
-from sortingview.extractors.wrapperrecordingextractor import WrapperRecordingExtractor
 
 from .common_lab import LabMember, LabTeam
 from .common_interval import (IntervalList, SortInterval,
@@ -42,10 +30,10 @@ schema = dj.schema('common_curation')
 @schema
 class AutomaticCurationParameters(dj.Manual):
     definition = """
-    # Table for holding parameters for automatic aspects of curation
-    automatic_curation_parameter_set_name: varchar(200)   #name of this parameter set
+    # Parameters for automatic curation
+    automatic_curation_parameter_set_name: varchar(200)   # name of this parameter set
     ---
-    automatic_curation_parameter_dict: BLOB         #dictionary of variables and values for automatic curation
+    automatic_curation_parameter_dict: BLOB   # dictionary of variables and values for automatic curation
     """
     @staticmethod
     def get_default_parameters(): 
@@ -190,7 +178,7 @@ class CuratedSpikeSortingSelection(dj.Manual):
 @schema
 class CuratedSpikeSorting(dj.Computed):
     definition = """
-    # Table for holding the output of fully curated spike sorting
+    # Fully curated spike sorting
     -> CuratedSpikeSortingSelection
     ---
     -> AnalysisNwbfile    # New analysis NWB file to hold unit info
@@ -376,7 +364,7 @@ class UnitInclusionParameters(dj.Manual):
     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
     ---
     max_noise_overlap=1:        float   # noise overlap threshold (include below) 
-    min_nn_isolation=-1:         float   # isolation score threshold (include above)
+    min_nn_isolation=-1:        float   # isolation score threshold (include above)
     max_isi_violation=100:      float   # ISI violation threshold
     min_firing_rate=0:          float   # minimum firing rate threshold
     max_firing_rate=100000:     float   # maximum fring rate thershold

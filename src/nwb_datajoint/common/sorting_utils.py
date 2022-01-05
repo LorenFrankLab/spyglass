@@ -7,7 +7,6 @@ import kachery_client as kc
 import spikeinterface as si
 import spikeinterface.toolkit as st
 import sortingview as sv
-import spikeextractors
 from .common_lab import LabMember
 from .common_interval import IntervalList
 from .common_nwbfile import AnalysisNwbfile
@@ -132,15 +131,14 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
     recording = workspace.get_recording_extractor(recording_id=recording_id)
 
     new_recording = si.create_recording_from_old_extractor(recording)
-    new_recording = st.preprocessing.whiten(recording=new_recording, seed=0)
     new_recording.annotate(is_filtered=True)
+    new_recording = st.preprocessing.whiten(recording=new_recording, seed=0)
     new_recording.is_dumpable=False 
     
     if sorting_id is None:
         sorting_id = workspace.sorting_ids[0]
     sorting = workspace.get_sorting_extractor(sorting_id=sorting_id)
     new_sorting = si.core.create_sorting_from_old_extractor(sorting)
-    new_sorting.is_dumpable=False
 
     tmpdir = tempfile.TemporaryDirectory(dir=os.environ['KACHERY_TEMP_DIR'])
     waveforms = si.extract_waveforms(new_recording, new_sorting, folder=tmpdir.name,
@@ -157,21 +155,21 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
     external_metrics = [{'name': 'isolation', 'label': 'isolation', 'tooltip': 'isolation',
                         'data': isolation},
                         {'name': 'noise_overlap', 'label': 'noise_overlap', 'tooltip': 'noise_overlap',
-                        'data': noise_overlap}
-                        ] 
+                        'data': noise_overlap}]
     workspace.set_unit_metrics_for_sorting(sorting_id=sorting_id, metrics=external_metrics)
+    
+    # this is for old sortingview; keep this bit around for a while
+    # if user_ids is not None:
+    #     for user_id in user_ids:
+    #         workspace.set_user_permissions(user_id, {'edit': True})
 
+    # F = workspace.figurl()
+    # url = F.url(label=workspace.label, channel='franklab2')
+    
     if user_ids is not None:
-        for user_id in user_ids:
-            workspace.set_user_permissions(user_id, {'edit': True})
-
-    F = workspace.figurl()
-    url = F.url(label=workspace.label, channel='franklab2')
-
-    # in the future (once new view works fully):
-    # workspace.set_sorting_curation_authorized_users(sorting_id=sorting_id, user_ids=user_ids)
-    # url = workspace.experimental_spikesortingview(recording_id=recording_id, sorting_id=sorting_id,
-    #                                               label=workspace.label, include_curation=True)
+        workspace.set_sorting_curation_authorized_users(sorting_id=sorting_id, user_ids=user_ids)
+    url = workspace.experimental_spikesortingview(recording_id=recording_id, sorting_id=sorting_id,
+                                                  label=workspace.label, include_curation=True)
 
     print(f'URL for sortingview: {url}')
     
