@@ -31,12 +31,7 @@ class AutomaticCurationParameters(dj.Manual):
     merge_params: BLOB   # params to merge units
     reject_params: BLOB   # params to reject units
     """
-    def insert_default(self): 
-        """returns a dictionary with the parameters that can be defined 
-
-        Returns:
-            [dict]: dictionary of parameters
-        """
+    def insert_default(self):
         automatic_curation_params_name = 'default'
         merge_params = {}
         reject_params = {}
