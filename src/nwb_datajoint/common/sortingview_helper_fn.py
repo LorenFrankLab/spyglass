@@ -58,9 +58,9 @@ def store_sorting_nwb(key:dict, *, sorting, sort_interval_list_name:str, sort_in
 
     analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
     u = AnalysisNwbfile().add_units(analysis_file_name,
-                                                     units, units_valid_times,
-                                                     units_sort_interval,
-                                                     metrics=metrics)
+                                    units, units_valid_times,
+                                    units_sort_interval,
+                                    metrics=metrics)
     if u=='':
         print('Sorting contains no units. Created an empty analysis nwb file anyway.')
         units_object_id = ''

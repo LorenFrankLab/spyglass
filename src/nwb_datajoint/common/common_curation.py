@@ -11,66 +11,55 @@ import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
 from .common_lab import LabMember, LabTeam
-from .common_interval import (IntervalList, SortInterval,
-                              interval_list_intersect)
+from .common_interval import IntervalList, SortInterval
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .common_metrics import QualityMetrics
 from .common_spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
                                   SpikeSortingWorkspace, SpikeSortingFilterParameters)
 
-from .dj_helper_fn import dj_replace, fetch_nwb
-from .nwb_helper_fn import get_valid_intervals
-from .sorting_utils import store_sorting_nwb
-
-si.set_global_tmp_folder(os.environ['KACHERY_TEMP_DIR'])
+from .dj_helper_fn import fetch_nwb
+from .sortingview_helper_fn import store_sorting_nwb
 
 schema = dj.schema('common_curation')
 
 @schema
 class AutomaticCurationParameters(dj.Manual):
     definition = """
-    # Parameters for automatic curation
-    automatic_curation_parameter_set_name: varchar(200)   # name of this parameter set
+    automatic_curation_params_name: varchar(200)   # name of this parameter set
     ---
-    automatic_curation_parameter_dict: BLOB   # dictionary of variables and values for automatic curation
+    merge_params: BLOB   # params to merge units
+    reject_params: BLOB   # params to reject units
     """
-    @staticmethod
-    def get_default_parameters(): 
+    def insert_default(self): 
         """returns a dictionary with the parameters that can be defined 
 
         Returns:
             [dict]: dictionary of parameters
         """
-        param_dict = dict()
-        #param_dict['delete_duplicate_spikes'] = False
-        param_dict['burst_merge'] = False
-        param_dict['burst_merge_param'] = dict()
-        param_dict['noise_reject'] = False
-        param_dict['noise_reject_param'] = dict()
-        return param_dict
+        automatic_curation_params_name = 'default'
+        merge_params = {}
+        reject_params = {}
+        self.insert1([automatic_curation_params_name, merge_params, reject_params])
 
 @schema
 class AutomaticCurationSelection(dj.Manual):
     definition = """
     # Table for holding the output
-    -> SpikeSortingRecording
     -> SortingID
-    ---
     -> AutomaticCurationParameters
-    -> MetricParameters
+    -> QualityMetrics
     """
  
-
 @schema
 class AutomaticCuration(dj.Computed):
     definition = """
-    # Table for holding the output of automated curation applied to each spike sorting
+    # Automated curation applied to sortings
     -> AutomaticCurationSelection
     ---
     -> AnalysisNwbfile
-    units_object_id: varchar(40)           # Object ID for the units in NWB file
-    automatic_curation_results_dict=NULL: BLOB       #dictionary of outputs from automatic curation
+    units_object_id: varchar(40)   # Object ID for the units in NWB file
+    automatic_curation_results_dict=NULL: BLOB   #dictionary of outputs from automatic curation
     """
 
     def make(self, key):
@@ -167,12 +156,12 @@ class AutomaticCuration(dj.Computed):
             super().delete()
         else:
             raise Exception('You do not have permission to delete all specified entries. Not deleting anything.')
+
 @schema 
 class CuratedSpikeSortingSelection(dj.Manual):
     definition = """
     -> AutomaticCuration
     ---
-    -> MetricParameters.proj(list_name='default')
     """
 
 @schema
@@ -181,22 +170,22 @@ class CuratedSpikeSorting(dj.Computed):
     # Fully curated spike sorting
     -> CuratedSpikeSortingSelection
     ---
-    -> AnalysisNwbfile    # New analysis NWB file to hold unit info
-    units_object_id: varchar(40)           # Object ID for the units in NWB file
+    -> AnalysisNwbfile   # New analysis NWB file to hold unit info
+    units_object_id: varchar(40)   # Object ID for the units in NWB file
     """
 
     class Unit(dj.Part):
         definition = """
         # Table for holding sorted units
         -> master
-        unit_id: int            # ID for each unit
+        unit_id: int   # ID for each unit
         ---
-        label='' :              varchar(80)      # optional label for each unit
-        noise_overlap=-1 :      float    # noise overlap metric for each unit
-        nn_isolation=-1:         float  # isolation score metric for each unit
-        isi_violation=-1:       float # ISI violation score for each unit
-        firing_rate=-1:         float   # firing rate
-        num_spikes=-1:          int          # total number of spikes
+        label='': varchar(80)   # optional label for each unit
+        noise_overlap=-1: float   # noise overlap metric for each unit
+        nn_isolation=-1: float   # isolation score metric for each unit
+        isi_violation=-1: float   # ISI violation score for each unit
+        firing_rate=-1: float   # firing rate
+        num_spikes=-1: int   # total number of spikes
         """
 
     def make(self, key):
@@ -358,8 +347,9 @@ class CuratedSpikeSorting(dj.Computed):
             return
         print('No files deleted')
     # def delete(self, key)
+
 @schema
-class UnitInclusionParameters(dj.Manual):
+class SelectedUnitsParameters(dj.Manual):
     definition = """
     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
     ---
@@ -381,10 +371,8 @@ class UnitInclusionParameters(dj.Manual):
         :param unit_inclusion_key: key to a single unit inclusion parameter set
         :type unit_inclusion_key: dict
         """
- 
-
         curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
-        inclusion_key = (UnitInclusionParameters & unit_inclusion_key).fetch1()
+        inclusion_key = (self & unit_inclusion_key).fetch1()
      
         units = (CuratedSpikeSorting().Unit() & curated_sortings).fetch()
         # get a list of the metrics in the units table
@@ -418,3 +406,14 @@ class UnitInclusionParameters(dj.Manual):
             return included_units
         else:
             return units
+
+@schema
+class SelectedUnits(dj.Computed):
+    definition = """
+    -> CuratedSpikeSorting
+    -> SelectedUnitsParameters    
+    ---
+    -> AnalysisNwbfile   # New analysis NWB file to hold unit info
+    units_object_id: varchar(40)   # Object ID for the units in NWB file
+    """
+    

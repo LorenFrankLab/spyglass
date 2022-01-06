@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 import datajoint as dj
-import pynwb
 import sortingview as sv
 import spikeinterface as si
 
@@ -16,20 +15,21 @@ schema = dj.schema('common_waveforms')
 @schema
 class WaveformParameters(dj.Manual):
     definition = """
-    list_name: varchar(80) # name of waveform extraction parameters
+    waveform_params_name: varchar(80) # name of waveform extraction parameters
     ---
     params: blob # a dict of waveform extraction parameters
     """
     def insert_default(self):
         key = {}
         key['list_name'] = 'default'
-        key['params'] = {'ms_before':1, 'ms_after':1, 'max_spikes_per_unit':1000}
+        key['params'] = {'ms_before':1, 'ms_after':1, 'max_spikes_per_unit': 2000,
+                         'n_jobs':5, 'total_memory': '5G'}
         self.insert1(key) 
 
 @schema
 class WaveformSelection(dj.Manual):
     definition = """
-    -> SpikeSorting
+    -> SortingID
     -> WaveformParameters
     ---
     """

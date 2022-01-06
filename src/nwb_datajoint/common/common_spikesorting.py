@@ -3,38 +3,33 @@ import json
 import os
 import pathlib
 import time
-import tempfile
 from pathlib import Path
 import shutil
 from functools import reduce
+import tempfile
 
+import spikeextractors
 import datajoint as dj
 import kachery_client as kc
 import numpy as np
 import pynwb
 import scipy.stats as stats
 import sortingview as sv
-import spikeextractors
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
-# from sortingview.extractors.wrapperrecordingextractor import WrapperRecordingExtractor
-
-# from mountainsort4.mdaio_impl import readmda
-
 from .common_device import Probe
 from .common_lab import LabMember, LabTeam
 from .common_ephys import Electrode, ElectrodeGroup, Raw
 from .common_interval import (IntervalList, SortInterval,
-                              interval_list_intersect)
+                              interval_list_intersect, union_adjacent_index)
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
-
-si.set_global_tmp_folder(os.environ['KACHERY_TEMP_DIR'])
+from .sortingview_helper_fn import set_workspace_permission, store_sorting_nwb
 
 class Timer:
     """
@@ -411,7 +406,6 @@ class SpikeSortingRecording(dj.Computed):
 
         with Timer(label=f'writing to h5 recording extractor at {key["recording_extractor_path"]}',
                    verbose=True):
-            # old_recording = WrapperRecordingExtractor(recording)
             old_recording = si.create_extractor_from_new_recording(recording)
             h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
                                                  key["recording_extractor_path"], dtype='int16')
@@ -511,10 +505,10 @@ class SpikeSortingRecording(dj.Computed):
 
     def get_filtered_recording_extractor(self, key: dict):
         """Filters and references a recording
-        (1) Loads the NWB file created during insertion as a spikeinterface Recording
-        (2) Slices recording in time (interval) and space (channels);
-            recording chunks fromdisjoint intervals are concatenated
-        (3) Applies referencing and bandpass filtering
+        * Loads the NWB file created during insertion as a spikeinterface Recording
+        * Slices recording in time (interval) and space (channels);
+          recording chunks fromdisjoint intervals are concatenated
+        * Applies referencing and bandpass filtering
 
         Parameters
         ----------
@@ -534,7 +528,7 @@ class SpikeSortingRecording(dj.Computed):
         valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval) \
                                              for interval in valid_sort_times])
         # join intervals of indices that are adjacent
-        valid_sort_times_indices = reduce(_join_adjacent_intervals, valid_sort_times_indices)
+        valid_sort_times_indices = reduce(union_adjacent_index, valid_sort_times_indices)
 
         if valid_sort_times_indices.ndim==1:
             valid_sort_times_indices = np.expand_dims(valid_sort_times_indices, 0)
@@ -562,16 +556,10 @@ class SpikeSortingRecording(dj.Computed):
         if ref_channel_id[0] >= 0:
             channel_ids_ref = channel_ids + ref_channel_id
             recording = recording.channel_slice(channel_ids=channel_ids_ref)
-            print(recording)
-            print(recording.get_traces(start_frame=0, end_frame=1000))
+            
             recording = st.preprocessing.common_reference(recording, reference='single',
-                                                          ref_channels=ref_channel_id[0])
-            print(recording)
-            print(recording.get_traces(start_frame=0, end_frame=1000))
+                                                          ref_channel_ids=ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids)
-            print(recording)
-            print(recording.get_traces(start_frame=0, end_frame=1000))
-
         elif ref_channel_id[0] == -2:
             recording = recording.channel_slice(channel_ids=channel_ids)
             recording = st.preprocessing.common_reference(recording, reference='global',
@@ -782,13 +770,10 @@ class SortingID(dj.Manual):
     definition = """
     # Table for holding the a sorting ID and and the sorting extractor object associated with a recording
     -> SpikeSortingRecording
-    sorting_id: varchar(20) # the sorting id of the sorting that was added
+    sorting_id: varchar(20)
     ---
-    sorting_extractor_object: BLOB         # the sorting extractor dictionary to get the extract from kachery
+    sorting_extractor_object: BLOB  # to retrieve with kachery
     """  
-
-# this needs to be here because it depends on functions above
-from .sorting_utils import set_workspace_permission, store_sorting_nwb
 
 @schema
 class SpikeSorter(dj.Manual):
@@ -880,7 +865,7 @@ class SpikeSorting(dj.Computed):
         cached_recording = spikeextractors.CacheRecordingExtractor(recording, 
                                                                    save_path=str(Path(tmpdir.name) / 'r.dat'))
 
-        # then load with spikeinterface
+        # reload with new spikeinterface
         new_recording = si.read_binary(file_paths=str(Path(tmpdir.name) / 'r.dat'),
                                        sampling_frequency=cached_recording.get_sampling_frequency(),
                                        num_chan=cached_recording.get_num_channels(),
@@ -888,20 +873,17 @@ class SpikeSorting(dj.Computed):
                                        time_axis=0,
                                        is_filtered=True)
         new_recording.set_channel_locations(locations=recording.get_channel_locations())
-        print(new_recording)
-        print(new_recording.get_traces(start_frame=0, end_frame=1000))
+        
         # TODO: turn SpikeSortingFilterParameters to SpikeSortingPreprocessingParameters
         # and include seed, chunk size etc
-        recording = st.preprocessing.whiten(new_recording, seed=0)
-        print(recording)
-        print(recording.get_traces(start_frame=0, end_frame=1000))
+        recording = st.preprocessing.whiten(recording=new_recording, seed=0)
+        
         print(f'Running spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'spikesorter_parameter_set_name': key['spikesorter_parameter_set_name']}).fetch1()
         sorting = ss.run_sorter(key['sorter_name'], recording,
                                 output_folder=os.getenv('SORTING_TEMP_DIR', None),
                                 **sort_parameters['parameter_dict'])
-        print(sorting)
         key['time_of_sort'] = int(time.time())
 
         print('Saving sorting results...')
@@ -1047,39 +1029,39 @@ class SpikeSorting(dj.Computed):
                 shutil.rmtree(str(pathlib.Path(os.environ['SPIKE_SORTING_STORAGE_DIR']) / dir))
 
 
-@schema
-class ModifySortingParameters(dj.Manual):
-    definition = """
-    # Table for holding parameters for modifying the sorting (e.g. merging clusters, )
-    modify_sorting_parameter_set_name: varchar(200)   #name of this parameter set
-    ---
-    modify_sorting_parameter_dict: BLOB         #dictionary of variables and values for cluster merging
-    """
+# @schema
+# class ModifySortingParameters(dj.Manual):
+#     definition = """
+#     # Table for holding parameters for modifying the sorting (e.g. merging clusters, )
+#     modify_sorting_parameter_set_name: varchar(200)   #name of this parameter set
+#     ---
+#     modify_sorting_parameter_dict: BLOB         #dictionary of variables and values for cluster merging
+#     """
 
-@schema
-class ModifySortingSelection(dj.Manual):
-    definition = """
-    # Table for selecting a sorting and cluster merge parameters for merging
-    -> SpikeSortingRecording
-    -> ModifySortingParameters
-    """
-    class SortingsIDs(dj.Part):
-        # one entry for each sorting ID that should be used.
-        definition = """
-        -> SortingID
-        """
+# @schema
+# class ModifySortingSelection(dj.Manual):
+#     definition = """
+#     # Table for selecting a sorting and cluster merge parameters for merging
+#     -> SpikeSortingRecording
+#     -> ModifySortingParameters
+#     """
+#     class SortingsIDs(dj.Part):
+#         # one entry for each sorting ID that should be used.
+#         definition = """
+#         -> SortingID
+#         """
    
 
-@schema
-class ModifySorting(dj.Computed):
-    definition = """
-    # Table for merging / modifying clusters based on parameters
-    -> ModifySortingSelection
-    ---
-    -> SortingID
-    -> AnalysisNwbfile
-    units_object_id: varchar(40)           # Object ID for the units in NWB file
-    """
+# @schema
+# class ModifySorting(dj.Computed):
+#     definition = """
+#     # Table for merging / modifying clusters based on parameters
+#     -> ModifySortingSelection
+#     ---
+#     -> SortingID
+#     -> AnalysisNwbfile
+#     units_object_id: varchar(40)           # Object ID for the units in NWB file
+#     """
     #TODO: implement cluster merge, burst merge
 
     # if 'delete_duplicate_spikes' in acpd:
@@ -1122,16 +1104,3 @@ class ModifySorting(dj.Computed):
     #     # https://spikeinterface.readthedocs.io/en/0.13.0/api.html#module-spiketoolkit.postprocessing
 
     #     sorting_modified = True
-
-def _join_adjacent_intervals(interval1, interval2):
-    if interval1.ndim==1:
-        interval1 = np.expand_dims(interval1, 0)
-    if interval2.ndim==1:
-        interval2 = np.expand_dims(interval2, 0)
-
-    if interval1[-1][1]+1 == interval2[0][0] or interval2[0][1]+1 == interval1[-1][0]:
-        x = np.array([[np.min([interval1[-1][0],interval2[0][0]]), 
-                       np.max([interval1[-1][1],interval2[0][1]])]])
-        return np.concatenate((interval1[:-1], x), axis=0)
-    else:
-        return np.concatenate((interval1, interval2),axis=0)

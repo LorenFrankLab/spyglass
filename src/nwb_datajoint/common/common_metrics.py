@@ -12,7 +12,7 @@ schema = dj.schema('common_metrics')
 class MetricParameters(dj.Manual):
     definition = """
     # Parameters for computing quality metrics of sorted units
-    list_name: varchar(200)
+    metric_params_name: varchar(200)
     ---
     params: blob
     """

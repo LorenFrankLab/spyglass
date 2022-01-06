@@ -28,11 +28,16 @@ from .common_spikesorting import (SortGroup, SpikeSortingFilterParameters, Spike
                                   SpikeSortingSelection, SpikeSorting, 
                                   ModifySortingParameters, ModifySortingSelection, ModifySorting, 
                                   )
-from .common_waveforms import (WaveformParameters, WaveformSelection, Waveforms)
-from .common_metrics import (MetricParameters, MetricSelection, QualityMetrics)
+from .common_waveforms import WaveformParameters, WaveformSelection, Waveforms
+from .common_metrics import MetricParameters, MetricSelection, QualityMetrics
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
 from .nwb_helper_fn import (close_nwb_files, estimate_sampling_rate,
                             get_data_interface, get_electrode_indices,
                             get_nwb_file, get_raw_eseries, get_valid_intervals)
 from .populate_all_common import populate_all_common
+
+import spikeinterface as si
+import os
+
+si.set_global_tmp_folder(os.environ['KACHERY_TEMP_DIR'])
