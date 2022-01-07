@@ -1,73 +1,14 @@
 "Sortingview helper functions"
 
 from typing import List
-import numpy as np
 import os
 import kachery_client as kc
 import spikeinterface as si
 import spikeinterface.toolkit as st
 import sortingview as sv
 from .common_lab import LabMember
-from .common_interval import IntervalList
-from .common_nwbfile import AnalysisNwbfile
-from .common_spikesorting import SpikeSortingRecording, SpikeSortingWorkspace, SortingID
 
-from pathlib import Path
 import tempfile
-
-def store_sorting_nwb(key:dict, *, sorting, sort_interval_list_name:str, sort_interval,
-                      metrics=None, unit_ids=None):
-    """Store a sorting in a new AnalysisNwbfile
-
-    Parameters
-    ----------
-    key : dict
-        [description]
-    sorting : [type]
-        [description]
-    sort_interval_list_name : str
-        [description]
-    sort_interval : list
-        interval for start and end of sort
-    metrics : dict, optional
-        quality metrics, by default None
-    unit_ids : list, optional
-        [description], by default None
-
-    Returns
-    -------
-    analysis_file_name : str
-    units_object_id : str
-    """
-
-    sort_interval_valid_times = (IntervalList & \
-            {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
-
-    times = SpikeSortingRecording.get_recording_timestamps(key)
-    # times = sorting.recording.get_times()
-    units = dict()
-    units_valid_times = dict()
-    units_sort_interval = dict()
-    if unit_ids is None:
-        unit_ids = sorting.get_unit_ids()
-    for unit_id in unit_ids:
-        spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
-        units[unit_id] = times[spike_times_in_samples]
-        units_valid_times[unit_id] = sort_interval_valid_times
-        units_sort_interval[unit_id] = [sort_interval]
-
-    analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
-    u = AnalysisNwbfile().add_units(analysis_file_name,
-                                    units, units_valid_times,
-                                    units_sort_interval,
-                                    metrics=metrics)
-    if u=='':
-        print('Sorting contains no units. Created an empty analysis nwb file anyway.')
-        units_object_id = ''
-    else:
-        units_object_id = u[0]
-    AnalysisNwbfile().add(key['nwb_file_name'], analysis_file_name)
-    return analysis_file_name,  units_object_id
 
 def set_workspace_permission(workspace_name: str, team_members: List[str]):
     """Sets permission to sortingview workspace based on google ID
@@ -148,8 +89,8 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
     isolation = {}
     noise_overlap = {}
     for unit_id in sorting.get_unit_ids():
-        isolation[unit_id] = st.qualitymetrics.pca_metrics.nearest_neighbors_isolation(waveforms, this_unit_id=unit_id)
-        noise_overlap[unit_id] = st.qualitymetrics.pca_metrics.nearest_neighbors_noise_overlap(waveforms, this_unit_id=unit_id)
+        isolation[str(unit_id)] = st.qualitymetrics.pca_metrics.nearest_neighbors_isolation(waveforms, this_unit_id=unit_id)
+        noise_overlap[str(unit_id)] = st.qualitymetrics.pca_metrics.nearest_neighbors_noise_overlap(waveforms, this_unit_id=unit_id)
     
     # external metrics must be in this format to be added to workspace
     external_metrics = [{'name': 'isolation', 'label': 'isolation', 'tooltip': 'isolation',

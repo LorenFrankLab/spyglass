@@ -6,9 +6,7 @@ import sortingview as sv
 import spikeinterface as si
 
 from .common_nwbfile import AnalysisNwbfile
-from .common_spikesorting import (SpikeSorting, SpikeSortingRecording, SortingID)
-
-si.set_global_tmp_folder(os.environ['KACHERY_TEMP_DIR'])
+from .common_spikesorting import SpikeSortingRecording, SpikeSorting, SortingID
 
 schema = dj.schema('common_waveforms')
 
@@ -40,30 +38,39 @@ class Waveforms(dj.Computed):
     -> WaveformSelection
     ---
     -> AnalysisNwbfile
+    object_id: varchar(40) # Object ID for the waveforms in NWB file
     waveform_extractor_path: varchar(220)
     """
     def make(self, key):
+        waveform_extractor_name = self._get_waveform_extractor_name(key)
+        key['waveform_extractor_path'] = self._get_waveform_save_path(waveform_extractor_name)
+        
+        params = (WaveformParameters & key['waveform_params_name']).fetch1('params')
+
         recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
         recording = sv.LabboxEphysRecordingExtractor(recording_object)
+        new_recording = si.create_recording_from_old_extractor(recording)
+        new_recording.annotate(is_filtered=True)
         
         sorting_object = (SortingID & key).fetch1('sorting_extractor_object')
         sorting = sv.LabboxEphysSortingExtractor(sorting_object)
-
-        waveform_extractor_name =  self._get_waveform_extractor_name(key)
-        key['analysis_file_name'] = waveform_extractor_name + '.nwb'
-        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
+        new_sorting = si.create_sorting_from_old_extractor(sorting)
         
-        key['waveform_extractor_path'] = self._get_waveform_save_path(waveform_extractor_name)
+        waveforms = si.extract_waveforms(recording=new_recording, 
+                                         sorting=new_sorting, 
+                                         folder=key['waveform_extractor_path'],
+                                         **params)
         
-        si.extract_waveforms(recording=recording, 
-                             sorting=sorting, 
-                             folder=key['waveform_extractor_path'],
-                             **key['params'])
+        key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
+        
+        object_id = AnalysisNwbfile().add_waveforms(key['analysis_file_name'],
+                                                    new_sorting, waveforms)
+        key['object_id'] = object_id       
+        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
         
         self.insert1(key)
-
-        # TODO: save waveforms as nwb file
-        # The following is a rough sketch
+        
+        # The following is a rough sketch of AnalysisNwbfile().add_waveforms
         # analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         # or
         # nwbfile = pynwb.NWBFile(...)
@@ -86,9 +93,7 @@ class Waveforms(dj.Computed):
         #         ]
         # ]
         # elecs = ... # DynamicTableRegion referring to three electrodes (rows) of the electrodes table
-        # nwbfile.add_unit(spike_times=[1, 2, 3], electrodes=elecs, waveforms=wfs)
-        
-        # key['analysis_nwb_file'] = analysis_nwb_file_path
+        # nwbfile.add_unit(spike_times=[1, 2, 3], electrodes=elecs, waveforms=wfs)        
     
     def load_waveforms(self, key):
         # TODO: check if multiple entries are passed
@@ -97,15 +102,16 @@ class Waveforms(dj.Computed):
         return we
     
     def fetch_nwb(self, key):
+        # TODO: implement fetching waveforms from NWB
         return NotImplementedError
     
     def _get_waveform_extractor_name(self, key):
-        sorting_name = SpikeSorting().get_sorting_name(key)
+        sorting_name = SpikeSorting()._get_sorting_name(key)
         we_name = sorting_name + '_waveform'
         return we_name
 
     def _get_waveform_save_path(self, waveform_extractor_name):
         waveforms_dir = Path(os.environ['NWB_DATAJOINT_BASE_DIR']) / 'waveforms' / waveform_extractor_name
-        if (waveforms_dir).exists() is False:
+        if waveforms_dir.exists() is False:
             os.mkdir(waveforms_dir)
         return str(waveforms_dir)

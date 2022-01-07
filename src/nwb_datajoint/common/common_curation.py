@@ -15,11 +15,10 @@ from .common_interval import IntervalList, SortInterval
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .common_metrics import QualityMetrics
-from .common_spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
+from .common_spikesorting import (SortingID, SpikeSortingRecordingSelection, SpikeSortingRecording,
                                   SpikeSortingWorkspace, SpikeSortingFilterParameters)
 
 from .dj_helper_fn import fetch_nwb
-from .sortingview_helper_fn import store_sorting_nwb
 
 schema = dj.schema('common_curation')
 
@@ -107,7 +106,7 @@ class AutomaticCuration(dj.Computed):
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
  
         key['analysis_file_name'], key['units_object_id'] = \
-            store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
+            SortingID.store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
             sort_interval=sort_interval, metrics=metrics)
 
         SpikeSortingWorkspace().add_metrics_to_sorting(key, sorting_id=sorting_id, metrics=metrics)
@@ -265,7 +264,7 @@ class CuratedSpikeSorting(dj.Computed):
         # 3. Save the accepted, merged units and their metrics
         # load the AnalysisNWBFile from the original sort to get the sort_interval_valid times and the sort_interval
         key['analysis_file_name'], key['units_object_id'] = \
-            store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
+            SortingID.store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
                               sort_interval=sort_interval, metrics=metrics, unit_ids=accepted_units)
 
         # Insert entry to CuratedSpikeSorting table

@@ -25,9 +25,7 @@ from .common_spikesorting import (SortGroup, SpikeSortingFilterParameters, Spike
                                   SpikeSortingRecordingSelection, SpikeSortingRecording, 
                                   SpikeSortingWorkspace, 
                                   SpikeSorter, SpikeSorterParameters, SortingID,
-                                  SpikeSortingSelection, SpikeSorting, 
-                                  ModifySortingParameters, ModifySortingSelection, ModifySorting, 
-                                  )
+                                  SpikeSortingSelection, SpikeSorting)
 from .common_waveforms import WaveformParameters, WaveformSelection, Waveforms
 from .common_metrics import MetricParameters, MetricSelection, QualityMetrics
 from .common_subject import Subject

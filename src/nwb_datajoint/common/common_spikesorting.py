@@ -29,7 +29,7 @@ from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
-from .sortingview_helper_fn import set_workspace_permission, store_sorting_nwb
+from .sortingview_helper_fn import set_workspace_permission
 
 class Timer:
     """
@@ -413,7 +413,7 @@ class SpikeSortingRecording(dj.Computed):
         key['recording_extractor_object'] = h5_recording.object()
         self.insert1(key)
     
-    def get_recording_name(self, key):
+    def _get_recording_name(self, key):
         recording_name = key['nwb_file_name'] + '_' \
         + key['sort_interval_name'] + '_' \
         + str(key['sort_group_id']) + '_' \
@@ -774,6 +774,60 @@ class SortingID(dj.Manual):
     ---
     sorting_extractor_object: BLOB  # to retrieve with kachery
     """  
+    @staticmethod
+    def store_sorting_nwb(key, *, sorting, sort_interval_list_name,
+                          sort_interval, metrics=None, unit_ids=None):
+        """Store a sorting in a new AnalysisNwbfile
+
+        Parameters
+        ----------
+        key : dict
+            [description]
+        sorting : [type]
+            [description]
+        sort_interval_list_name : str
+            [description]
+        sort_interval : list
+            interval for start and end of sort
+        metrics : dict, optional
+            quality metrics, by default None
+        unit_ids : list, optional
+            [description], by default None
+
+        Returns
+        -------
+        analysis_file_name : str
+        units_object_id : str
+        """
+
+        sort_interval_valid_times = (IntervalList & \
+                {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
+
+        times = SpikeSortingRecording.get_recording_timestamps(key)
+        # times = sorting.recording.get_times()
+        units = dict()
+        units_valid_times = dict()
+        units_sort_interval = dict()
+        if unit_ids is None:
+            unit_ids = sorting.get_unit_ids()
+        for unit_id in unit_ids:
+            spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
+            units[unit_id] = times[spike_times_in_samples]
+            units_valid_times[unit_id] = sort_interval_valid_times
+            units_sort_interval[unit_id] = [sort_interval]
+
+        analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
+        u = AnalysisNwbfile().add_units(analysis_file_name,
+                                        units, units_valid_times,
+                                        units_sort_interval,
+                                        metrics=metrics)
+        if u=='':
+            print('Sorting contains no units. Created an empty analysis nwb file anyway.')
+            units_object_id = ''
+        else:
+            units_object_id = u[0]
+        AnalysisNwbfile().add(key['nwb_file_name'], analysis_file_name)
+        return analysis_file_name,  units_object_id
 
 @schema
 class SpikeSorter(dj.Manual):
@@ -894,8 +948,8 @@ class SpikeSorting(dj.Computed):
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
         key['analysis_file_name'], key['units_object_id'] = \
-            store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
-                              sort_interval=sort_interval)
+            SortingID.store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
+                                                sort_interval=sort_interval)
         self.insert1(key)
     
     def delete(self):
@@ -922,8 +976,8 @@ class SpikeSorting(dj.Computed):
         else:
             raise Exception('You do not have permission to delete all specified entries. Not deleting anything.')
 
-    def get_sorting_name(self, key):
-        recording_name = SpikeSortingRecording().get_recording_name(key)
+    def _get_sorting_name(self, key):
+        recording_name = SpikeSortingRecording()._get_recording_name(key)
         sorting_name = recording_name + '_' \
                        + key['sorter_name'] + '_' \
                        + key['spikesorter_parameter_set_name']

@@ -380,7 +380,7 @@ class AnalysisNwbfile(dj.Manual):
         """
         nwbf = get_nwb_file(cls.get_abs_path(analysis_file_name))
         return get_electrode_indices(nwbf.electrodes, electrode_ids)
-
+    
     def cleanup(self, delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
