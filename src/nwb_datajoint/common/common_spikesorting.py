@@ -1688,8 +1688,8 @@ class UnitInclusionParameters(dj.Manual):
         if 'firing_rate' in metrics_list and "firing_rate" in inclusion_key:
             keep = np.logical_and(keep, units['firing_rate'] >= inclusion_key["min_firing_rate"])
             keep = np.logical_and(keep, units['firing_rate'] <= inclusion_key["max_firing_rate"])
-        if 'num_spikes' in metrics_list and "min_num_spikes" in inclusion_key:
-            keep = np.logical_and(keep, units['num_spikes'] >= inclusion_key["min_num_spikes"])
+        #if 'num_spikes' in metrics_list and "min_num_spikes" in inclusion_key:
+        #    keep = np.logical_and(keep, units['num_spikes'] >= inclusion_key["min_num_spikes"])
         units = units[keep]
         #now exclude by label if it is specified
         if inclusion_key['exclude_label_list'] is not None:

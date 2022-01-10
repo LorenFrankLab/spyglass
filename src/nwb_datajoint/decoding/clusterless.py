@@ -73,9 +73,11 @@ class UnitMarks(dj.Computed):
 
         # get the list of units
         units = UnitInclusionParameters().get_included_units(key, key)
+        print(units)
 
         # retrieve the units from the NWB file
         nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
+        print(nwb_units)
     
         # get the  workspace so we can get the waveforms from the recording
         workspace_uri = (SpikeSortingWorkspace & key).fetch1('workspace_uri')
@@ -90,10 +92,13 @@ class UnitMarks(dj.Computed):
         # here we only get 8 points because that should be plenty to find the minimum/maximum
         waveforms = le.get_unit_waveforms(
             recording, sorting, units['unit_id'], channel_ids_by_unit, 8)
+        print(waveforms[0][0].shape[0])
 
         if mark_param['mark_type'] == 'amplitude':
             # get the marks and timestamps
-            marks = np.empty((0, 4), dtype='int16')
+            #marks = np.empty((0, 4), dtype='int16')
+            # more flexible if there are dead channels
+            marks = np.empty((0, waveforms[0][0].shape[0]), dtype='int16')
             timestamps = np.empty((0), dtype='float64')
             for index, unit in enumerate(waveforms):
                 marks = np.concatenate(
