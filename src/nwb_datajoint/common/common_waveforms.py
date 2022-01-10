@@ -63,37 +63,12 @@ class Waveforms(dj.Computed):
         
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
         
-        object_id = AnalysisNwbfile().add_waveforms(key['analysis_file_name'],
-                                                    new_sorting, waveforms)
+        object_id = AnalysisNwbfile().add_units_waveforms(key['analysis_file_name'],
+                                                          waveforms)
         key['object_id'] = object_id       
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
-        
+             
         self.insert1(key)
-        
-        # The following is a rough sketch of AnalysisNwbfile().add_waveforms
-        # analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
-        # or
-        # nwbfile = pynwb.NWBFile(...)
-        # wfs = [
-        #         [     # elec 1
-        #             [1, 2, 3],  # spike 1, [sample 1, sample 2, sample 3]
-        #             [1, 2, 3],  # spike 2
-        #             [1, 2, 3],  # spike 3
-        #             [1, 2, 3]   # spike 4
-        #         ], [  # elec 2
-        #             [1, 2, 3],  # spike 1
-        #             [1, 2, 3],  # spike 2
-        #             [1, 2, 3],  # spike 3
-        #             [1, 2, 3]   # spike 4
-        #         ], [  # elec 3
-        #             [1, 2, 3],  # spike 1
-        #             [1, 2, 3],  # spike 2
-        #             [1, 2, 3],  # spike 3
-        #             [1, 2, 3]   # spike 4
-        #         ]
-        # ]
-        # elecs = ... # DynamicTableRegion referring to three electrodes (rows) of the electrodes table
-        # nwbfile.add_unit(spike_times=[1, 2, 3], electrodes=elecs, waveforms=wfs)        
     
     def load_waveforms(self, key):
         # TODO: check if multiple entries are passed
