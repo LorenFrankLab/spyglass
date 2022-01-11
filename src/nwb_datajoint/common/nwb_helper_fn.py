@@ -211,7 +211,7 @@ def get_electrode_indices(nwb_object, electrode_ids):
 
     Returns
     -------
-    electrode_indices : np.ndarray
+    electrode_indices : list
         Array of indices of the specified electrode IDs.
     """
     if isinstance(nwb_object, pynwb.ecephys.ElectricalSeries):
@@ -232,7 +232,7 @@ def get_electrode_indices(nwb_object, electrode_ids):
     #set the invalid indices (identified by the indices where the value is not in the selected_elect_ids list)
     electrode_indices[np.where(~np.isclose(selected_elect_ids[electrode_indices], electrode_ids))[0]] = invalid_electrode_index
 
-    return electrode_indices
+    return electrode_indices.tolist()
 
 
 def get_all_spatial_series(nwbf, verbose=False):
