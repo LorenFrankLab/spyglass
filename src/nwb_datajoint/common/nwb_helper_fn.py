@@ -218,22 +218,15 @@ def get_electrode_indices(nwb_object, electrode_ids):
         # electrodes is a DynamicTableRegion which may contain a subset of the rows in NWBFile.electrodes
         # match against only the subset of electrodes referenced by this ElectricalSeries
         electrode_table_indices = nwb_object.electrodes.data[:]
-        selected_elect_ids = np.asarray(nwb_object.electrodes.table.id[electrode_table_indices])
+        selected_elect_ids = nwb_object.electrodes.table.id[electrode_table_indices]
     elif isinstance(nwb_object, pynwb.NWBFile):
         # electrodes is a DynamicTable that contains all electrodes
-        selected_elect_ids = np.asarray(nwb_object.electrodes.id[:])
+        selected_elect_ids = nwb_object.electrodes.id[:]
     else:
         raise ValueError(
             'nwb_object must be of type ElectricalSeries or NWBFile')
-
-    #look up all of the valid indices
-    electrode_indices = np.searchsorted(selected_elect_ids, electrode_ids)
-
-    #set the invalid indices (identified by the indices where the value is not in the selected_elect_ids list)
-    electrode_indices[np.where(~np.isclose(selected_elect_ids[electrode_indices], electrode_ids))[0]] = invalid_electrode_index
-
-    return electrode_indices.tolist()
-
+    # for each electrode_id, find it's index in selected_elect_ids and return that if it's there and invalid_electrode_index if not.
+    electrode_indices = [selected_elect_ids.index(elect_id) if selected_elect_ids.count(elect_id) else invalid_electrode_index for elect_id in electrode_ids ]
 
 def get_all_spatial_series(nwbf, verbose=False):
     """Given an nwb file object, gets the spatial series and Interval lists from the file and returns a dictionary by epoch
