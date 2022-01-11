@@ -93,7 +93,9 @@ class UnitMarks(dj.Computed):
 
         if mark_param['mark_type'] == 'amplitude':
             # get the marks and timestamps
-            marks = np.empty((0, 4), dtype='int16')
+            #marks = np.empty((0, 4), dtype='int16')
+            # more flexible if there are dead channels
+            marks = np.empty((0, waveforms[0][0].shape[0]), dtype='int16')
             timestamps = np.empty((0), dtype='float64')
             for index, unit in enumerate(waveforms):
                 marks = np.concatenate(
