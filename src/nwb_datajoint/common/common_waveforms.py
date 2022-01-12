@@ -15,14 +15,14 @@ class WaveformParameters(dj.Manual):
     definition = """
     waveform_params_name: varchar(80) # name of waveform extraction parameters
     ---
-    params: blob # a dict of waveform extraction parameters
+    waveform_params: blob # a dict of waveform extraction parameters
     """
     def insert_default(self):
         key = {}
-        key['list_name'] = 'default'
-        key['params'] = {'ms_before':1, 'ms_after':1, 'max_spikes_per_unit': 2000,
-                         'n_jobs':5, 'total_memory': '5G'}
-        self.insert1(key) 
+        key['waveform_params_name'] = 'default'
+        key['waveform_params'] = {'ms_before':1, 'ms_after':1, 'max_spikes_per_unit': 2000,
+                                  'n_jobs':5, 'total_memory': '5G'}
+        self.insert1(key, skip_duplicates=True) 
 
 @schema
 class WaveformSelection(dj.Manual):
@@ -45,7 +45,7 @@ class Waveforms(dj.Computed):
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key['waveform_extractor_path'] = self._get_waveform_save_path(waveform_extractor_name)
         
-        params = (WaveformParameters & key['waveform_params_name']).fetch1('params')
+        params = (WaveformParameters & {'waveform_params_name': key['waveform_params_name']}).fetch1('waveform_params')
 
         recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
         recording = sv.LabboxEphysRecordingExtractor(recording_object)
@@ -56,6 +56,7 @@ class Waveforms(dj.Computed):
         sorting = sv.LabboxEphysSortingExtractor(sorting_object)
         new_sorting = si.create_sorting_from_old_extractor(sorting)
         
+        print('Extracting waveforms...')
         waveforms = si.extract_waveforms(recording=new_recording, 
                                          sorting=new_sorting, 
                                          folder=key['waveform_extractor_path'],
@@ -72,6 +73,7 @@ class Waveforms(dj.Computed):
     
     def load_waveforms(self, key):
         # TODO: check if multiple entries are passed
+        key = (Waveforms & key).fetch1()
         folder = key['waveform_extractor_path']
         we = si.WaveformExtractor.load_from_folder(folder)
         return we
@@ -81,6 +83,7 @@ class Waveforms(dj.Computed):
         return NotImplementedError
     
     def _get_waveform_extractor_name(self, key):
+        key = (SpikeSorting & key).fetch1()
         sorting_name = SpikeSorting()._get_sorting_name(key)
         we_name = sorting_name + '_waveform'
         return we_name

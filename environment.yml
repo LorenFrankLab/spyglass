@@ -24,6 +24,7 @@ dependencies:
     - kachery-client
     - kachery-daemon
     - mountainsort4
+    - spikeextractors
     - spikeinterface>=0.90
     - pynwb>=1.4,<2
     - hdmf>=2.5.8,<3
@@ -32,4 +33,4 @@ dependencies:
     - pymysql>=1.0.*
     - h5py==2.10.*
     - sortingview>=0.6.14
-    - git+git://github.com/LorenFrankLab/ndx-franklab-novela
+    - git+https://github.com/LorenFrankLab/ndx-franklab-novela
