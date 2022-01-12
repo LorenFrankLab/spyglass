@@ -498,7 +498,7 @@ class LFPBand(dj.Computed):
         for index, elect_index in enumerate(lfp_band_elect_index):
             if lfp_band_ref_id[index] != -1:
                 lfp_data[:, elect_index] = lfp_data[:, elect_index] - \
-                    lfp_data[:, lfp_band_ref_index]
+                    lfp_data[:, lfp_band_ref_index[0]]
 
         lfp_sampling_rate = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1(
             'lfp_sampling_rate')
