@@ -79,7 +79,7 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
     if sorting_id is None:
         sorting_id = workspace.sorting_ids[0]
     sorting = workspace.get_sorting_extractor(sorting_id=sorting_id)
-    new_sorting = si.core.create_sorting_from_old_extractor(sorting)
+    new_sorting = si.create_sorting_from_old_extractor(sorting)
 
     tmpdir = tempfile.TemporaryDirectory(dir=os.environ['KACHERY_TEMP_DIR'])
     waveforms = si.extract_waveforms(new_recording, new_sorting, folder=tmpdir.name,
@@ -98,14 +98,6 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
                         {'name': 'noise_overlap', 'label': 'noise_overlap', 'tooltip': 'noise_overlap',
                         'data': noise_overlap}]
     workspace.set_unit_metrics_for_sorting(sorting_id=sorting_id, metrics=external_metrics)
-    
-    # this is for old sortingview; keep this bit around for a while
-    # if user_ids is not None:
-    #     for user_id in user_ids:
-    #         workspace.set_user_permissions(user_id, {'edit': True})
-
-    # F = workspace.figurl()
-    # url = F.url(label=workspace.label, channel='franklab2')
     
     if user_ids is not None:
         workspace.set_sorting_curation_authorized_users(sorting_id=sorting_id, user_ids=user_ids)

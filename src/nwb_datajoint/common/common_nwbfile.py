@@ -365,20 +365,13 @@ class AnalysisNwbfile(dj.Manual):
     
     def add_units_waveforms(self, analysis_file_name, waveform_extractor: si.WaveformExtractor, 
                             metrics=None, labels=None):
-        """Add units to analysis NWB file
+        """Add units to analysis NWB file along with the waveforms
 
         Parameters
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        units : dict
-            keys are unit ids, values are spike times
-        units_valid_times : dict
-            Dictionary of units and valid times with unit ids as keys.
-        units_sort_interval : dict
-            Dictionary of units and sort_interval with unit ids as keys.
         waveform_extractor : si.WaveformExtractor object
-            Dictionary of unit waveforms with unit ids as keys.
         metrics : dict, optional
             Cluster metrics.
         labels : dict, optional
@@ -390,7 +383,7 @@ class AnalysisNwbfile(dj.Manual):
             The NWB object id of the Units object
         """
         
-        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
+        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode='a', load_namespaces=True) as io:
             nwbf = io.read()
             for id in waveform_extractor.sorting.get_unit_ids():
                 # (spikes, samples, channels)
@@ -398,7 +391,7 @@ class AnalysisNwbfile(dj.Manual):
                 # (channels, spikes, samples)
                 waveforms = np.moveaxis(waveforms, source=2, destination=0)
                 nwbf.add_unit(spike_times=waveform_extractor.sorting.get_unit_spike_train(unit_id=id),
-                              id=id,
+                              id=id, electrodes=waveform_extractor.recording.get_channel_ids(),
                               waveforms=waveforms)
                 
             # The following is a rough sketch of AnalysisNwbfile().add_waveforms
@@ -433,8 +426,8 @@ class AnalysisNwbfile(dj.Manual):
                     metric_data = metrics[metric].to_list()
                     print(f'Adding metric {metric} : {metric_data}')
                     nwbf.add_unit_column(name=metric,
-                                            description=f'{metric} metric',
-                                            data=metric_data)
+                                         description=f'{metric} metric',
+                                         data=metric_data)
             if labels is not None:
                 nwbf.add_unit_column(
                     name='label', description='label given during curation', data=labels)
