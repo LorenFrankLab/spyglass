@@ -75,20 +75,20 @@ class SortGroup(dj.Manual):
         -> Electrode
         """
 
-    def set_group_by_shank(self, nwb_file_name, references=None):
-        """Divides electrodes into groups based on their shank position:
-        - Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
+    def set_group_by_shank(self, nwb_file_name: str, references: dict=None):
+        """Divides electrodes into groups based on their shank position.
+        * Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
           single group
-        - Electrodes from probes with multiple shanks (e.g. polymer probes) are
+        * Electrodes from probes with multiple shanks (e.g. polymer probes) are
           placed in one group per shank
-        - Bad channels are omitted
+        * Bad channels are omitted
 
         Parameters
         ----------
-        nwb_file_name: str
+        nwb_file_name : str
             the name of the NWB file whose electrodes should be put into sorting groups
-        references: dict
-            Optional. If passed, used to set references. Otherwise, references set using
+        references : dict, optional
+            If passed, used to set references. Otherwise, references set using
             original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
         """
         # delete any current groups
@@ -134,15 +134,14 @@ class SortGroup(dj.Manual):
                 sort_group += 1
 
     def set_group_by_electrode_group(self, nwb_file_name: str):
-        '''
-        Assign groups to all non-bad channel electrodes based on their electrode group and sets the reference for each group
-        to the reference for the first channel of the group.
+        """Assign groups to all non-bad channel electrodes based on their electrode group
+        and sets the reference for each group to the reference for the first channel of the group.
         
         Parameters
         ----------
         nwb_file_name: str
             the name of the nwb whose electrodes should be put into sorting groups
-        '''
+        """
         # delete any current groups
         (SortGroup & {'nwb_file_name': nwb_file_name}).delete()
         # get the electrodes from this NWB file
@@ -245,48 +244,47 @@ class SortGroup(dj.Manual):
         return np.ndarray.tolist(geometry)
 
 @schema
-class SpikeSortingFilterParameters(dj.Manual):
+class SpikeSortingPreprocessingParameters(dj.Manual):
     definition = """
-    # Parameters related to filtering the recording
-    filter_parameter_set_name: varchar(200)
+    preproc_params_name: varchar(200)
     ---
-    filter_parameter_dict: blob 
+    preproc_params: blob 
     """
     def insert_default(self):
         # set up the default filter parameters
         freq_min = 300  # high pass filter value
         freq_max = 6000  # low pass filter value
-        margin_ms = 5 # Margin in ms on border to avoid border effect
+        margin_ms = 5 # margin in ms on border to avoid border effect
+        seed = 0 # random seed for whitening
         
-        filter_param_dict = dict()
-        filter_param_dict['filter_parameter_set_name'] = 'default'
-        filter_param_dict['filter_parameter_dict'] = {'frequency_min': freq_min,
-                                                      'frequency_max': freq_max,
-                                                      'margin_ms': margin_ms}
-        self.insert1(filter_param_dict, skip_duplicates=True)
+        key = dict()
+        key['preproc_params_name'] = 'default'
+        key['preproc_params'] = {'frequency_min': freq_min,
+                                 'frequency_max': freq_max,
+                                 'margin_ms': margin_ms,
+                                 'seed': seed}
+        self.insert1(key, skip_duplicates=True)
     
 @schema
 class SpikeSortingArtifactDetectionParameters(dj.Manual):
     definition = """
-    # Parameters related to artifact detection
-    artifact_parameter_name: varchar(200)
+    artifact_params_name: varchar(200)
     ---
-    parameter_dict: blob  # dictionary of parameters for get_no_artifact_times() function
+    artifact_params: blob  # dictionary of parameters for get_no_artifact_times() function
     """
     # TODO: use function calls to new spikeinterface (e.g. remove_artifact)
     def insert_default(self):
+        """Insert the default artifact parameters with a appropriate parameter dict.
         """
-        Insert the default artifact parameters ('none') with a appropriate parameter dict. 
-        """
-        param_dict = {}
-        param_dict['skip'] = True
-        param_dict['zscore_thresh'] = -1.0 
-        param_dict['amplitude_thresh'] = -1.0
-        param_dict['proportion_above_thresh'] = -1.0
-        param_dict['zero_window_len'] = 30 # 1 ms at 30 KHz, but this is of course skipped
-        self.insert1({'artifact_parameter_name': 'none', 'parameter_dict' : param_dict}, 
-                     skip_duplicates=True)
+        artifact_params = {}
+        artifact_params['skip'] = True
+        artifact_params['zscore_thresh'] = -1.0 
+        artifact_params['amplitude_thresh'] = -1.0
+        artifact_params['proportion_above_thresh'] = -1.0
+        artifact_params['zero_window_len'] = 30 # 1 ms at 30 KHz, but this is of course skipped
+        self.insert1(['none', artifact_params], skip_duplicates=True)
 
+    # TODO: check this function
     def get_no_artifact_times(self, recording, zscore_thresh=-1.0, amplitude_thresh=-1.0,
                               proportion_above_thresh=1.0, zero_window_len=1.0, skip: bool=True):
         """returns an interval list of valid times, excluding detected artifacts found in data within recording extractor.
@@ -347,7 +345,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
     # Defines recordings to be sorted
     -> SortGroup
     -> SortInterval
-    -> SpikeSortingFilterParameters
+    -> SpikeSortingPreprocessingParameters
     ---
     -> SpikeSortingArtifactDetectionParameters
     -> IntervalList
@@ -357,23 +355,20 @@ class SpikeSortingRecordingSelection(dj.Manual):
 @schema
 class SpikeSortingRecording(dj.Computed):
     definition = """
-    # Stores recordings to be sorted
     -> SpikeSortingRecordingSelection
     ---
-    -> IntervalList.proj(sort_interval_list_name='interval_list_name')
     recording_extractor_path: varchar(1000)
-    recording_extractor_object: BLOB # the dictionary that allows kachery to retrieve the extractor 
     """
     def make(self, key):
         sort_interval_valid_times = self.get_sort_interval_valid_times(key)
-        recording = self.get_filtered_recording_extractor(key)
+        recording = self._get_filtered_recording_extractor(key)
 
         # get the artifact detection parameters and apply artifact detection to zero out artifacts
-        artifact_key = (SpikeSortingRecordingSelection & key).fetch1('artifact_parameter_name')
-        artifact_param_dict = (SpikeSortingArtifactDetectionParameters & 
-                               {'artifact_parameter_name': artifact_key}).fetch1('parameter_dict')
+        artifact_params_name = (SpikeSortingRecordingSelection & key).fetch1('artifact_params_name')
+        artifact_params = (SpikeSortingArtifactDetectionParameters & 
+                               {'artifact_params_name': artifact_params_name}).fetch1('artifact_params')
         
-        # TODO: write this with new spikeinterface function call
+        # TODO: write this with new spikeinterface function call; turn it into a function
         # if not artifact_param_dict['skip']:
         #     no_artifact_valid_times = SpikeSortingArtifactDetectionParameters().get_no_artifact_times(
         #         recording, **artifact_param_dict)
@@ -401,16 +396,15 @@ class SpikeSortingRecording(dj.Computed):
         # store the list of valid times for the sort
         key['sort_interval_list_name'] = tmp_key['interval_list_name']
 
+        # TODO: save the recording extractor
         # Path to files that will hold the recording extractors
         key['recording_extractor_path'] = self.get_recording_extractor_save_path(key, type='h5v1')
 
-        with Timer(label=f'writing to h5 recording extractor at {key["recording_extractor_path"]}',
-                   verbose=True):
-            old_recording = si.create_extractor_from_new_recording(recording)
-            h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
-                                                 key["recording_extractor_path"], dtype='int16')
-
-        key['recording_extractor_object'] = h5_recording.object()
+        # with Timer(label=f'writing to h5 recording extractor at {key["recording_extractor_path"]}',
+        #            verbose=True):
+        #     old_recording = si.create_extractor_from_new_recording(recording)
+        #     h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
+        #                                          key["recording_extractor_path"], dtype='int16')
         self.insert1(key)
     
     def _get_recording_name(self, key):
@@ -503,7 +497,7 @@ class SpikeSortingRecording(dj.Computed):
         valid_sort_times = interval_list_intersect(sort_interval, valid_interval_times)
         return valid_sort_times
 
-    def get_filtered_recording_extractor(self, key: dict):
+    def _get_filtered_recording_extractor(self, key: dict):
         """Filters and references a recording
         * Loads the NWB file created during insertion as a spikeinterface Recording
         * Slices recording in time (interval) and space (channels);
@@ -512,12 +506,12 @@ class SpikeSortingRecording(dj.Computed):
 
         Parameters
         ----------
-        key: dict, entry of SpikeSortingRecording table
-            specifies the parameters for filtering and recording
+        key: dict, 
+            primary key of SpikeSortingRecording table
 
         Returns
         -------
-        recording: spikeinterface.Recording
+        recording: si.Recording
         """
         
         nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])   
@@ -529,11 +523,11 @@ class SpikeSortingRecording(dj.Computed):
                                              for interval in valid_sort_times])
         # join intervals of indices that are adjacent
         valid_sort_times_indices = reduce(union_adjacent_index, valid_sort_times_indices)
-
         if valid_sort_times_indices.ndim==1:
             valid_sort_times_indices = np.expand_dims(valid_sort_times_indices, 0)
             
         # concatenate if there is more than one disjoint sort interval
+        # TODO: this doens't work; fix
         if len(valid_sort_times_indices)>1:
             recordings_list = []
             for interval_indices in valid_sort_times_indices:
@@ -565,7 +559,7 @@ class SpikeSortingRecording(dj.Computed):
             recording = st.preprocessing.common_reference(recording, reference='global',
                                                           operator='median')
 
-        filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
+        filter_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
         recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
                                                      freq_max=filter_params['frequency_max'])
        
