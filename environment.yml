@@ -27,7 +27,7 @@ dependencies:
     - spikeextractors
     - spikeinterface>=0.90
     - pynwb>=1.4,<2
-    - hdmf>=2.5.8,<3
+    - hdmf>=3.1.1,<4
     - datajoint>=0.13.*
     - ghostipy
     - pymysql>=1.0.*
