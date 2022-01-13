@@ -341,7 +341,69 @@ class CuratedSpikeSorting(dj.Computed):
             return
         print('No files deleted')
     # def delete(self, key)
+@schema
+class SortingID(dj.Manual):
+    definition = """
+    # Table for holding the a sorting ID and and the sorting extractor object associated with a recording
+    -> SpikeSortingRecording
+    sorting_id: varchar(20)
+    ---
+    sorting_extractor_object: BLOB  # to retrieve with kachery
+    """  
+    @staticmethod
+    def store_sorting_nwb(key, *, sorting, sort_interval_list_name,
+                          sort_interval, metrics=None, unit_ids=None):
+        """Store a sorting in a new AnalysisNwbfile
 
+        Parameters
+        ----------
+        key : dict
+            [description]
+        sorting : [type]
+            [description]
+        sort_interval_list_name : str
+            [description]
+        sort_interval : list
+            interval for start and end of sort
+        metrics : dict, optional
+            quality metrics, by default None
+        unit_ids : list, optional
+            [description], by default None
+
+        Returns
+        -------
+        analysis_file_name : str
+        units_object_id : str
+        """
+
+        sort_interval_valid_times = (IntervalList & \
+                {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
+
+        times = SpikeSortingRecording.get_recording_timestamps(key)
+        # times = sorting.recording.get_times()
+        units = dict()
+        units_valid_times = dict()
+        units_sort_interval = dict()
+        if unit_ids is None:
+            unit_ids = sorting.get_unit_ids()
+        for unit_id in unit_ids:
+            spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
+            units[unit_id] = times[spike_times_in_samples]
+            units_valid_times[unit_id] = sort_interval_valid_times
+            units_sort_interval[unit_id] = [sort_interval]
+
+        analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
+        u = AnalysisNwbfile().add_units(analysis_file_name,
+                                        units, units_valid_times,
+                                        units_sort_interval,
+                                        metrics=metrics)
+        if u=='':
+            print('Sorting contains no units. Created an empty analysis nwb file anyway.')
+            units_object_id = ''
+        else:
+            units_object_id = u[0]
+        AnalysisNwbfile().add(key['nwb_file_name'], analysis_file_name)
+        return analysis_file_name,  units_object_id
 @schema
 class SelectedUnitsParameters(dj.Manual):
     definition = """

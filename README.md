@@ -35,15 +35,17 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
 2. Add the following environment variables (e.g. in `~/.bashrc`). We assumes that you are interacting with the database on a computer that has mounted `stelmo` at `/stelmo` (if the mount location is different, change accordingly). For this to take effect, log out and log back in, or run `source ~/.bashrc` in the terminal.
 
      ```bash
-     export NWB_DATAJOINT_BASE_DIR="/stelmo/nwb/"
-     export SPIKE_SORTING_STORAGE_DIR="/stelmo/nwb/spikesorting"
-     export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
+     export SPYGLASS_BASE_DIR="/stelmo/nwb/"
+     export SPYGLASS_RECORDING_DIR="/stelmo/nwb/recording"
+     export SPYGLASS_SORTING_DIR="/stelmo/nwb/sorting"
+     export SPYGLASS_WAVEFORMS_DIR="/stelmo/nwb/waveforms"
+     export SPYGLASS_TEMP_DIR="/stelmo/nwb/tmp"
      export KACHERY_DAEMON_HOST="typhoon"
      export KACHERY_DAEMON_PORT="14747"
-     export KACHERY_TEMP_DIR="/stelmo/nwb/tmp"
-     export NWB_DATAJOINT_TEMP_DIR="/stelmo/nwb/tmp"
      export KACHERY_STORAGE_DIR="/stelmo/nwb/kachery-storage"
+     export KACHERY_TEMP_DIR="/stelmo/nwb/tmp"
      export FIGURL_CHANNEL="franklab2"
+     export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
      ```
 
      Note that a local NWB_DATAJOINT_TEMP_DIR (e.g. one on your machine) will speed up spike sorting, but make sure it has enough free space (ideally at least 500GB)
