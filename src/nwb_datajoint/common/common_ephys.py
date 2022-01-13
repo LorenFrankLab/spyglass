@@ -488,6 +488,8 @@ class LFPBand(dj.Computed):
         # get the electrodes to be filtered and their references
         lfp_band_elect_id, lfp_band_ref_id = (LFPBandSelection().LFPBandElectrode() & key).fetch('electrode_id',
                                                                                                  'reference_elect_id')
+        print('tets',lfp_band_elect_id)
+        print('ref',lfp_band_ref_id)
 
         # get the indices of the electrodes to be filtered and the references
         lfp_band_elect_index = get_electrode_indices(
@@ -497,8 +499,11 @@ class LFPBand(dj.Computed):
         # subtract off the references for the selected channels
         for index, elect_index in enumerate(lfp_band_elect_index):
             if lfp_band_ref_id[index] != -1:
+                print('current electrode',elect_index,'ref electrode',lfp_band_ref_index[0])
                 lfp_data[:, elect_index] = lfp_data[:, elect_index] - \
                     lfp_data[:, lfp_band_ref_index[0]]
+
+        print(lfp_data[0:100, lfp_band_ref_index[0]])
 
         lfp_sampling_rate = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1(
             'lfp_sampling_rate')
@@ -534,8 +539,11 @@ class LFPBand(dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
         # filter the data and write to an the nwb file
-        filtered_data_object_id, timestamp_interval = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_object, filter_coeff,
-                                                              lfp_band_valid_times, lfp_band_elect_id, decimation)
+        #filtered_data_object_id, timestamp_interval = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_object, filter_coeff,
+        #                                                      lfp_band_valid_times, lfp_band_elect_id, decimation)
+        # try to run the filter on the referenced data
+        filtered_data_object_id, timestamp_interval = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_data, filter_coeff,
+                                                              lfp_band_valid_times, lfp_band_elect_id, decimation)        
 
         # now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table                                             
         AnalysisNwbfile().add(key['nwb_file_name'], lfp_band_file_name)        
