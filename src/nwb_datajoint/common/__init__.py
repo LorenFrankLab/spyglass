@@ -21,7 +21,7 @@ from .common_nwbfile import (AnalysisNwbfile, AnalysisNwbfileKachery, Nwbfile,
 from .common_region import BrainRegion
 from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session
-from .common_spikesorting import (SortGroup, SpikeSortingFilterParameters, SpikeSortingArtifactDetectionParameters,
+from .common_spikesorting import (SortGroup, SpikeSortingPreprocessingParameters, SpikeSortingArtifactDetectionParameters,
                                   SpikeSortingRecordingSelection, SpikeSortingRecording, 
                                   SpikeSortingWorkspace, 
                                   SpikeSorter, SpikeSorterParameters, SortingID,
