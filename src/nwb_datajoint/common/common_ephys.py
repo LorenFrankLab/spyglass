@@ -15,10 +15,9 @@ from .common_session import Session  # noqa: F401
 from .dj_helper_fn import fetch_nwb  # dj_replace
 from .nwb_helper_fn import (estimate_sampling_rate, get_data_interface,
                             get_electrode_indices, get_nwb_file,
-                            get_valid_intervals)
+                            get_valid_intervals, invalid_electrode_index)
 
 schema = dj.schema('common_ephys')
-
 
 @schema
 class ElectrodeGroup(dj.Imported):
@@ -490,15 +489,15 @@ class LFPBand(dj.Computed):
                                                                                                  'reference_elect_id')
 
         # get the indices of the electrodes to be filtered and the references
-        lfp_band_elect_index = get_electrode_indices(
+        lfp_band_elect_indices = get_electrode_indices(
             lfp_object, lfp_band_elect_id)
-        lfp_band_ref_index = get_electrode_indices(lfp_object, lfp_band_ref_id)
+        lfp_band_ref_indeces = get_electrode_indices(lfp_object, lfp_band_ref_id)
 
-        # subtract off the references for the selected channels
-        for index, elect_index in enumerate(lfp_band_elect_index):
-            if lfp_band_ref_id[index] != -1:
+        # subtract off the references for the selected channels if they were specified 
+        for index, elect_index in enumerate(lfp_band_elect_indices):
+            if lfp_band_ref_indeces[index] != invalid_electrode_index:
                 lfp_data[:, elect_index] = lfp_data[:, elect_index] - \
-                    lfp_data[:, lfp_band_ref_index]
+                                           lfp_data[:, lfp_band_ref_indeces[index]]
 
         lfp_sampling_rate = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1(
             'lfp_sampling_rate')
