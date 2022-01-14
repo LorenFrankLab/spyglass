@@ -671,6 +671,12 @@ class SpikeSorterParameters(dj.Manual):
     ---
     sorter_params: blob
     """
+    def available_sorters(self):
+        return ss.available_sorters()
+    
+    def get_default_params(self, sorter):
+        return ss.get_default_params(sorter)
+    
     def insert_default(self):
         """Default params from spike sorters available via spikeinterface
         """

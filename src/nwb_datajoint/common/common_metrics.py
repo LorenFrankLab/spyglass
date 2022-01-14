@@ -12,7 +12,7 @@ class MetricParameters(dj.Manual):
     # Parameters for computing quality metrics of sorted units
     metric_params_name: varchar(200)
     ---
-    params: blob
+    metric_params: blob
     """
 
     def get_metrics_list(self):
