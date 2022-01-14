@@ -15,10 +15,9 @@ from .common_session import Session  # noqa: F401
 from .dj_helper_fn import fetch_nwb  # dj_replace
 from .nwb_helper_fn import (estimate_sampling_rate, get_data_interface,
                             get_electrode_indices, get_nwb_file,
-                            get_valid_intervals)
+                            get_valid_intervals, invalid_electrode_index)
 
 schema = dj.schema('common_ephys')
-
 
 @schema
 class ElectrodeGroup(dj.Imported):
