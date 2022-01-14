@@ -1,5 +1,3 @@
-from copy import Error
-import json
 import os
 import pathlib
 import time
@@ -270,7 +268,6 @@ class SpikeSortingArtifactDetectionParameters(dj.Manual):
     ---
     artifact_params: blob  # dictionary of parameters for get_no_artifact_times() function
     """
-    # TODO: use function calls to new spikeinterface (e.g. remove_artifact)
     def insert_default(self):
         """Insert the default artifact parameters with a appropriate parameter dict.
         """
@@ -485,7 +482,7 @@ class SpikeSortingRecording(dj.Computed):
         return recording
 
     @staticmethod
-    def get_recording_timestamps(key: dict):
+    def _get_recording_timestamps(key: dict):
         """Returns the timestamps for the specified SpikeSortingRecording entry
 
         Parameters
@@ -777,44 +774,6 @@ class SpikeSorting(dj.Computed):
     
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
- 
-    def get_sorting_extractor(self, key, sort_interval):
-        # TODO: replace with spikeinterface call if possible
-        """Generates a numpy sorting extractor given a key that retrieves a SpikeSorting and a specified sort interval
-
-        :param key: key for a single SpikeSorting
-        :type key: dict
-        :param sort_interval: [start_time, end_time]
-        :type sort_interval: numpy array
-        :return: a spikeextractors sorting extractor with the sorting information
-        """
-        # get the units object from the NWB file that the data are stored in.
-        units = (SpikeSorting & key).fetch_nwb()[0]['units'].to_dataframe()
-        unit_timestamps = []
-        unit_labels = []
-
-        raw_data_obj = (Raw() & {'nwb_file_name': key['nwb_file_name']}).fetch_nwb()[
-            0]['raw']
-        # get the indices of the data to use. Note that spike_extractors has a time_to_frame function,
-        # but it seems to set the time of the first sample to 0, which will not match our intervals
-        timestamps = np.asarray(raw_data_obj.timestamps)
-        sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
-
-        unit_timestamps_list = []
-        # TODO: do something more efficient here; note that searching for maching sort_intervals within pandas doesn't seem to work
-        for index, unit in units.iterrows():
-            if np.ndarray.all(np.ravel(unit['sort_interval']) == sort_interval):
-                # unit_timestamps.extend(unit['spike_times'])
-                unit_frames = np.searchsorted(
-                    timestamps, unit['spike_times']) - sort_indices[0]
-                unit_timestamps.extend(unit_frames)
-                # unit_timestamps_list.append(unit_frames)
-                unit_labels.extend([index] * len(unit['spike_times']))
-
-        output = se.NumpySortingExtractor()
-        output.set_times_labels(times=np.asarray(
-            unit_timestamps), labels=np.asarray(unit_labels))
-        return output
     
     @staticmethod
     def store_sorting_nwb(key, *, sorting, sort_interval_list_name,
@@ -845,7 +804,7 @@ class SpikeSorting(dj.Computed):
         sort_interval_valid_times = (IntervalList & \
                 {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
 
-        times = SpikeSortingRecording.get_recording_timestamps(key)
+        times = SpikeSortingRecording._get_recording_timestamps(key)
         # times = sorting.recording.get_times()
         units = dict()
         units_valid_times = dict()
