@@ -6,7 +6,7 @@ import sortingview as sv
 import spikeinterface as si
 
 from .common_nwbfile import AnalysisNwbfile
-from .common_spikesorting import SpikeSortingRecording, SpikeSorting, SortingID
+from .common_spikesorting import SpikeSortingRecording, SpikeSorting, SortingList
 
 schema = dj.schema('common_waveforms')
 
@@ -18,16 +18,15 @@ class WaveformParameters(dj.Manual):
     waveform_params: blob # a dict of waveform extraction parameters
     """
     def insert_default(self):
-        key = {}
-        key['waveform_params_name'] = 'default'
-        key['waveform_params'] = {'ms_before':1, 'ms_after':1, 'max_spikes_per_unit': 2000,
-                                  'n_jobs':5, 'total_memory': '5G'}
-        self.insert1(key, skip_duplicates=True) 
+        waveform_params_name = 'default'
+        waveform_params = {'ms_before':1, 'ms_after':1, 'max_spikes_per_unit': 2000,
+                           'n_jobs':5, 'total_memory': '5G'}
+        self.insert1([waveform_params_name, waveform_params], skip_duplicates=True) 
 
 @schema
 class WaveformSelection(dj.Manual):
     definition = """
-    -> SortingID
+    -> SortingList
     -> WaveformParameters
     ---
     """
@@ -52,13 +51,12 @@ class Waveforms(dj.Computed):
         new_recording = si.create_recording_from_old_extractor(recording)
         new_recording.annotate(is_filtered=True)
         
-        sorting_object = (SortingID & key).fetch1('sorting_extractor_object')
-        sorting = sv.LabboxEphysSortingExtractor(sorting_object)
-        new_sorting = si.create_sorting_from_old_extractor(sorting)
+        sorting_path = (SortingList & key).fetch1('sorting_path')
+        sorting = si.load_extractor(sorting_path)
         
         print('Extracting waveforms...')
         waveforms = si.extract_waveforms(recording=new_recording, 
-                                         sorting=new_sorting, 
+                                         sorting=sorting, 
                                          folder=key['waveform_extractor_path'],
                                          **params)
         
@@ -92,4 +90,5 @@ class Waveforms(dj.Computed):
         waveforms_dir = Path(os.environ['NWB_DATAJOINT_BASE_DIR']) / 'waveforms' / waveform_extractor_name
         if waveforms_dir.exists() is False:
             os.mkdir(waveforms_dir)
-        return str(waveforms_dir)
+        return str(waveforms_dir) 
+    

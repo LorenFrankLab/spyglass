@@ -6,9 +6,7 @@ import time
 from pathlib import Path
 import shutil
 from functools import reduce
-import tempfile
 
-import spikeextractors
 import datajoint as dj
 import kachery_client as kc
 import numpy as np
@@ -284,27 +282,29 @@ class SpikeSortingArtifactDetectionParameters(dj.Manual):
         artifact_params['zero_window_len'] = 30 # 1 ms at 30 KHz, but this is of course skipped
         self.insert1(['none', artifact_params], skip_duplicates=True)
 
-    # TODO: check this function
-    def get_no_artifact_times(self, recording, zscore_thresh=-1.0, amplitude_thresh=-1.0,
-                              proportion_above_thresh=1.0, zero_window_len=1.0, skip: bool=True):
-        """returns an interval list of valid times, excluding detected artifacts found in data within recording extractor.
+    # TODO: fix
+    def get_artifact_times(self, recording, zscore_thresh=-1.0, amplitude_thresh=-1.0,
+                           proportion_above_thresh=1.0, zero_window_len=1.0, skip=True):
+        """Detects times during which artifacts occur.
         Artifacts are defined as periods where the absolute amplitude of the signal exceeds one
-        or both specified thresholds on the proportion of channels specified, with the period extended
-        by the zero_window/2 samples on each side
+        or both specified thresholds on the proportion of channels specified, with the period 
+        extended by the zero_window/2 samples on each side.
         Threshold values <0 are ignored.
 
-        :param recording: recording extractor
-        :type recording: SpikeInterface recording extractor object
-        :param zscore_thresh: Stdev threshold for exclusion, defaults to -1.0
-        :type zscore_thresh: float, optional
-        :param amplitude_thresh: Amplitude threshold for exclusion, defaults to -1.0
-        :type amplitude_thresh: float, optional
-        :param proportion_above_thresh:
-        :type float, optional
-        :param zero_window_len: the width of the window in milliseconds to zero out (window/2 on each side of threshold crossing)
-        :type int, optional
-        :return: [array of valid times]
-        :type: [numpy array]
+        Parameters
+        ----------
+        recording: si.Recording
+        zscore_thresh: float, optional
+            Stdev threshold for exclusion, defaults to -1.0
+        amplitude_thresh: float, optional
+            Amplitude threshold for exclusion, defaults to -1.0
+        proportion_above_thresh: float, optional
+        zero_window_len: int, optional
+            the width of the window in milliseconds to zero out (window/2 on each side of threshold crossing)
+        
+        Return
+        ------
+        List, timestamps for artifacts
         """
 
         # if no thresholds were specified, we return an array with the timestamps of the first and last samples
@@ -364,13 +364,11 @@ class SpikeSortingRecording(dj.Computed):
         recording = self._get_filtered_recording_extractor(key)
 
         # get the artifact detection parameters and apply artifact detection to zero out artifacts
-        artifact_params_name = (SpikeSortingRecordingSelection & key).fetch1('artifact_params_name')
-        artifact_params = (SpikeSortingArtifactDetectionParameters & 
-                               {'artifact_params_name': artifact_params_name}).fetch1('artifact_params')
+        artifact_params = (SpikeSortingArtifactDetectionParameters & key).fetch1('artifact_params')
+        list_triggers = SpikeSortingArtifactDetectionParameters.get_artifact_times(recording, **artifact_params)
         
-        # TODO: write function to get list_triggers
-        # if not artifact_params['skip']:
-            # recording = st.remove_artifacts(recording, list_triggers, **artifact_params)
+        if not artifact_params['skip']:
+            recording = st.remove_artifacts(recording, list_triggers, **artifact_params)
         
         # find valid time for the sort interval and add to IntervalList
         recording_name = self._get_recording_name(key)
@@ -385,15 +383,9 @@ class SpikeSortingRecording(dj.Computed):
         key['sort_interval_list_name'] = tmp_key['interval_list_name']
 
         # Path to files that will hold the recording extractors
-        recording_folder = Path(os.getenv('RECORDING_DIR'))
+        recording_folder = Path(os.getenv('SPYGLASS_RECORDING_DIR'))
         key['recording_path'] = str(recording_folder / Path(recording_name))
         recording = recording.save(folder=key['recording_extractor_path'])
-
-        # with Timer(label=f'writing to h5 recording extractor at {key["recording_extractor_path"]}',
-        #            verbose=True):
-        #     old_recording = si.create_extractor_from_new_recording(recording)
-        #     h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
-        #                                          key["recording_extractor_path"], dtype='int16')
         self.insert1(key)
     
     def _get_recording_name(self, key):
@@ -673,43 +665,19 @@ class SpikeSortingWorkspace(dj.Computed):
                 Warning(f'Error precomputing for workspace {workspace_uri}')
 
 @schema
-class SpikeSorter(dj.Manual):
-    definition = """
-    # Table that holds the list of spike sorters avaialbe through spikeinterface
-    sorter_name: varchar(80) # the name of the spike sorting algorithm
-    """
-    def insert_default(self):
-        """Add each of the sorters from spikeinterface.sorters
-        """
-        sorters = ss.available_sorters()
-        for sorter in sorters:
-            self.insert1({'sorter_name': sorter}, skip_duplicates=True)
-
-@schema
 class SpikeSorterParameters(dj.Manual):
     definition = """
-    -> SpikeSorter
-    spikesorter_parameter_set_name: varchar(80) # label for this set of parameters
+    sorter: varchar(80)
     ---
-    parameter_dict: blob # dictionary of parameter names and values
+    sorter_params: blob
     """
-
     def insert_default(self):
-        """Insert default parameters for each sorter
+        """Default params from spike sorters available via spikeinterface
         """
-        # set up the default filter parameters
-        sort_param_dict = dict()
-        sort_param_dict['spikesorter_parameter_set_name'] = 'default'
         sorters = ss.available_sorters()
         for sorter in sorters:
-            if len((SpikeSorter() & {'sorter_name': sorter}).fetch()):
-                sort_param_dict['sorter_name'] = sorter
-                sort_param_dict['parameter_dict'] = ss.get_default_params(sorter)
-                self.insert1(sort_param_dict, replace=True)
-            else:
-                print(
-                    f'Error in SpikeSorterParameter: sorter {sorter} not in SpikeSorter schema')
-                continue
+            sorter_params = ss.get_default_params(sorter)
+            self.insert1([sorter, sorter_params], skip_duplicates=True)
 
 @schema
 class SpikeSortingSelection(dj.Manual):
@@ -724,7 +692,6 @@ class SpikeSortingSelection(dj.Manual):
 @schema
 class SpikeSorting(dj.Computed):
     definition = """
-    # Table for holding spike sorting runs
     -> SpikeSortingSelection
     ---
     sorting_path: varchar(200)
@@ -742,57 +709,39 @@ class SpikeSorting(dj.Computed):
         3. Creates an analysis NWB file and saves the sorting there
            (this is redundant with 2; will change in the future)
         """
-
-        # TODO: check that this works for formats other than h5_v1
-        recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
-        recording = sv.LabboxEphysRecordingExtractor(recording_object)
         
-        # currently, sorting cannot use multiple workers if it is not first saved to disk
-        # in a format that can be read by new spikeinterface. as a workaround, we save this
-        # to binary first and then reload with new spikeinterface. in the future we will not
-        # use h1v1 recording extractor; instead we will use nwb recording, which can directly
-        # be loaded with new si and will not need this step
-        tmpdir = tempfile.TemporaryDirectory(dir=os.environ['KACHERY_TEMP_DIR'])
-        cached_recording = spikeextractors.CacheRecordingExtractor(recording, 
-                                                                   save_path=str(Path(tmpdir.name) / 'r.dat'))
-
-        # reload with new spikeinterface
-        new_recording = si.read_binary(file_paths=str(Path(tmpdir.name) / 'r.dat'),
-                                       sampling_frequency=cached_recording.get_sampling_frequency(),
-                                       num_chan=cached_recording.get_num_channels(),
-                                       dtype=cached_recording.get_dtype(),
-                                       time_axis=0,
-                                       is_filtered=True)
-        new_recording.set_channel_locations(locations=recording.get_channel_locations())
+        recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
+        recording = si.load_extractor(recording_path)
         
-        # TODO: turn SpikeSortingFilterParameters to SpikeSortingPreprocessingParameters
-        # and include seed, chunk size etc
-        recording = st.preprocessing.whiten(recording=new_recording, seed=0)
+        preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
+        recording = st.preprocessing.whiten(recording=recording, seed=preproc_params['seed'])
         
         print(f'Running spike sorting on {key}...')
-        sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
-                                                    'spikesorter_parameter_set_name': key['spikesorter_parameter_set_name']}).fetch1()
-        sorting = ss.run_sorter(key['sorter_name'], recording,
-                                output_folder=os.getenv('SORTING_TEMP_DIR', None),
-                                **sort_parameters['parameter_dict'])
+        sorter, sorter_params = (SpikeSorterParameters & key).fetch1('sorter','sorter_params')
+        sorting = ss.run_sorter(sorter, recording,
+                                output_folder=os.getenv('KACHERY_TEMP_DIR'),
+                                delete_output_folder=True,
+                                **sorter_params)
         key['time_of_sort'] = int(time.time())
 
         print('Saving sorting results...')
-        sorting_label = self.get_sorting_name(key)
-        key['sorting_id'] = SpikeSortingWorkspace().store_sorting(key, sorting=sorting,
-                                                                  sorting_label=sorting_label)
+        sorting_folder = Path(os.getenv('SPYGLASS_SORTING_DIR'))
+        sorting_name = self._get_sorting_name(key)
+        key['sorting_path'] = str(sorting_folder / Path(sorting_name))
+        sorting = sorting.save(folder=key['sorting_path'])
+        
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
         key['analysis_file_name'], key['units_object_id'] = \
-            SortingID.store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
-                                                sort_interval=sort_interval)
+            self.store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
+                                        sort_interval=sort_interval)
         self.insert1(key)
     
     def delete(self):
-        """Extends the delete method of base class to implement permission checking
+        """Extends the delete method of base class to implement permission checking.
         Note that this is NOT a security feature, as anyone that has access to source code
-        can disable it; it just makes it less likely for the user to accidentally delete entries
+        can disable it; it just makes it less likely to accidentally delete entries.
         """
         current_user_name = dj.config['database.user']
         entries = self.fetch()
@@ -860,51 +809,66 @@ class SpikeSorting(dj.Computed):
         output.set_times_labels(times=np.asarray(
             unit_timestamps), labels=np.asarray(unit_labels))
         return output
+    
+    @staticmethod
+    def store_sorting_nwb(key, *, sorting, sort_interval_list_name,
+                          sort_interval, metrics=None, unit_ids=None):
+        """Store a sorting in a new AnalysisNwbfile
 
-    # TODO: write a function to import sorted data
-    def import_sorted_data(self, key):
-        # Check if spikesorting has already been run on this dataset;
-        # if import_path is not empty, that means there exists a previous spikesorting run
-        import_path = (SpikeSortingSelection() & key).fetch1('import_path')
-        if import_path != '':
-            sort_path = Path(import_path)
-            assert sort_path.exists(
-            ), f'Error: import_path {import_path} does not exist when attempting to import {(SpikeSortingSelection() & key).fetch1()}'
-            # the following assumes very specific file names from the franklab, change as needed
-            firings_path = sort_path / 'firings_processed.mda'
-            assert firings_path.exists(
-            ), f'Error: {firings_path} does not exist when attempting to import {(SpikeSortingSelection() & key).fetch1()}'
-            # The firings has three rows, the electrode where the peak was detected, the sample count, and the cluster ID
-            firings = readmda(str(firings_path))
-            # get the clips
-            clips_path = sort_path / 'clips.mda'
-            assert clips_path.exists(
-            ), f'Error: {clips_path} does not exist when attempting to import {(SpikeSortingSelection() & key).fetch1()}'
-            clips = readmda(str(clips_path))
-            # get the timestamps corresponding to this sort interval
-            # TODO: make sure this works on previously sorted data
-            # timestamps = timestamps[np.logical_and(
-            #     timestamps >= sort_interval[0], timestamps <= sort_interval[1])]
-            # # get the valid times for the sort_interval
-            # sort_interval_valid_times = interval_list_intersect(
-            #     np.array([sort_interval]), valid_times)
+        Parameters
+        ----------
+        key : dict
+            [description]
+        sorting : [type]
+            [description]
+        sort_interval_list_name : str
+            [description]
+        sort_interval : list
+            interval for start and end of sort
+        metrics : dict, optional
+            quality metrics, by default None
+        unit_ids : list, optional
+            [description], by default None
 
-            # # get a list of the cluster numbers
-            # unit_ids = np.unique(firings[2, :])
-            # for index, unit_id in enumerate(unit_ids):
-            #     unit_indices = np.ravel(np.argwhere(firings[2, :] == unit_id))
-            #     units[unit_id] = timestamps[firings[1, unit_indices]]
-            #     units_templates[unit_id] = np.mean(
-            #         clips[:, :, unit_indices], axis=2)
-            #     units_valid_times[unit_id] = sort_interval_valid_times
-            #     units_sort_interval[unit_id] = [sort_interval]
+        Returns
+        -------
+        analysis_file_name : str
+        units_object_id : str
+        """
 
-            # TODO: Process metrics and store in Units table.
-            metrics_path = (sort_path / 'metrics_processed.json').exists()
-            assert metrics_path.exists(
-            ), f'Error: {metrics_path} does not exist when attempting to import {(SpikeSortingSelection() & key).fetch1()}'
-            metrics_processed = json.load(metrics_path)
+        sort_interval_valid_times = (IntervalList & \
+                {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
 
+        times = SpikeSortingRecording.get_recording_timestamps(key)
+        # times = sorting.recording.get_times()
+        units = dict()
+        units_valid_times = dict()
+        units_sort_interval = dict()
+        if unit_ids is None:
+            unit_ids = sorting.get_unit_ids()
+        for unit_id in unit_ids:
+            spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
+            units[unit_id] = times[spike_times_in_samples]
+            units_valid_times[unit_id] = sort_interval_valid_times
+            units_sort_interval[unit_id] = [sort_interval]
+
+        analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
+        u = AnalysisNwbfile().add_units(analysis_file_name,
+                                        units, units_valid_times,
+                                        units_sort_interval,
+                                        metrics=metrics)
+        if u=='':
+            print('Sorting contains no units. Created an empty analysis nwb file anyway.')
+            units_object_id = ''
+        else:
+            units_object_id = u[0]
+        AnalysisNwbfile().add(key['nwb_file_name'], analysis_file_name)
+        return analysis_file_name,  units_object_id
+    
+    # TODO: write a function to import sortings done outisde of dj
+    def import_sorting(self, key):
+        raise NotImplementedError
+    
     def nightly_cleanup(self):
         """Clean up spike sorting directories that are not in the SpikeSorting table. 
         This should be run after AnalysisNwbFile().nightly_cleanup()
@@ -918,80 +882,11 @@ class SpikeSorting(dj.Computed):
                 full_path = str(pathlib.Path(os.environ['SPIKE_SORTING_STORAGE_DIR']) / dir)
                 print(f'removing {full_path}')
                 shutil.rmtree(str(pathlib.Path(os.environ['SPIKE_SORTING_STORAGE_DIR']) / dir))
-
-
-# @schema
-# class ModifySortingParameters(dj.Manual):
-#     definition = """
-#     # Table for holding parameters for modifying the sorting (e.g. merging clusters, )
-#     modify_sorting_parameter_set_name: varchar(200)   #name of this parameter set
-#     ---
-#     modify_sorting_parameter_dict: BLOB         #dictionary of variables and values for cluster merging
-#     """
-
-# @schema
-# class ModifySortingSelection(dj.Manual):
-#     definition = """
-#     # Table for selecting a sorting and cluster merge parameters for merging
-#     -> SpikeSortingRecording
-#     -> ModifySortingParameters
-#     """
-#     class SortingsIDs(dj.Part):
-#         # one entry for each sorting ID that should be used.
-#         definition = """
-#         -> SortingID
-#         """
-   
-
-# @schema
-# class ModifySorting(dj.Computed):
-#     definition = """
-#     # Table for merging / modifying clusters based on parameters
-#     -> ModifySortingSelection
-#     ---
-#     -> SortingID
-#     -> AnalysisNwbfile
-#     units_object_id: varchar(40)           # Object ID for the units in NWB file
-#     """
-    #TODO: implement cluster merge, burst merge
-
-    # if 'delete_duplicate_spikes' in acpd:
-    #     if acpd['delete_duplicate_spikes']:
-    #         print('deleting duplicate spikes')
-    #         # look up the detection interval 
-    #         param_dict = (SpikeSorterParameters & key).fetch1('parameter_dict')
-    #         if 'detect_interval' not in param_dict:
-    #             Warning(f'delete_duplicate_spikes enabled, but detect_interval is not specified in the spike sorter parameters {key["parameter_set_name"]}; skipping')
-    #         else:
-    #             unit_samples = np.empty((0,),dtype='int64')
-    #             unit_labels = np.empty((0,),dtype='int64')
-    #             for unit in sorting.get_unit_ids():
-    #                 tmp_samples = sorting.get_unit_spike_train(unit)
-    #                 invalid = np.where(np.diff(tmp_samples) < param_dict['detect_interval'])[0]
-    #                 tmp_samples = np.delete(tmp_samples, invalid)    
-    #                 print(f'Unit {unit}: {len(invalid)} spikes deleted')
-    #                 tmp_labels = np.asarray([unit]*len(tmp_samples))
-    #                 unit_samples = np.hstack((unit_samples, tmp_samples))
-    #                 unit_labels = np.hstack((unit_labels, tmp_labels))
-    #             # sort the times and labels
-    #             sort_ind = np.argsort(unit_samples)
-    #             unit_samples = unit_samples[sort_ind]
-    #             unit_labels = unit_labels[sort_ind]
-    #             # create a numpy sorting extractor
-    #             new_sorting = se.NumpySortingExtractor()
-    #             new_sorting.set_times_labels(times=unit_samples, labels=unit_labels.tolist())
-    #             new_sorting.set_sampling_frequency((Raw & key).fetch1('sampling_rate'))
-    #             sorting_modified = True
-    # if 'merge_clusters' in acpd:
-    #     # do merge stuff here
-    #     # initialize the labels dictionary
-    #     labels = dict()
-    #     labels['mergeGroups'] = []
-    #     # format: labels['mergeGroups'] = [[1, 2, 5], [3, 4]] would merge units 1,2,and 5 and, separately, 3 and4
-    #     labels['labelsByUnit'] = dict()
-    #     # format: labels['labelsByUnit'] = {1:'accept', 2:'noise,reject'}] would label unit 1 as 'accept' and unit 2 as 'noise' and 'reject'
-        
-    #     # List of available functions for spike waveform extraction: 
-    #     # https://spikeinterface.readthedocs.io/en/0.13.0/api.html#module-spiketoolkit.postprocessing
-
-    #     sorting_modified = True
+                
+@schema
+class SortingList(dj.Manual):
+    definition = """
+    # Has records for every sorting; similar to IntervalList
+    -> SpikeSortingRecording
+    sorting_path: varchar(500)
+    """ 
