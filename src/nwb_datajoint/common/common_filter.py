@@ -172,11 +172,13 @@ class FirFilter(dj.Manual):
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
             if a_start < timestamps_on_disk[0]:
-                raise ValueError('Interval start time %f is smaller than first timestamp %f' % (
+                raise Warning('Interval start time %f is smaller than first timestamp %f, using first timestamp instead' % (
                     a_start, timestamps_on_disk[0]))
+                a_start = timestamps_on_disk[0]
             if a_stop > timestamps_on_disk[-1]:
-                raise ValueError('Interval stop time %f is larger than last timestamp %f' % (
+                raise Warning('Interval stop time %f is larger than last timestamp %f, using last timestamp instead' % (
                     a_stop, timestamps_on_disk[-1]))
+                a_stop = timestamps_on_disk[-1]
             frm, to = np.searchsorted(timestamps_on_disk, (a_start, a_stop))
             if to > n_samples:
                 to = n_samples
@@ -304,11 +306,11 @@ class FirFilter(dj.Manual):
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
             if a_start < timestamps[0]:
-                raise ValueError('Interval start time %f is smaller than first timestamp %f' % (
-                    a_start, timestamps[0]))
+                print(f'Interval start time {a_start} is smaller than first timestamp {timestamps[0]}, using first timestamp instead')
+                a_start = timestamps[0]
             if a_stop > timestamps[-1]:
-                raise ValueError('Interval stop time %f is larger than last timestamp %f' % (
-                    a_stop, timestamps[-1]))
+                print(f'Interval stop time {a_stop} is larger than last timestamp {timestamps[-1]}, using last timestamp instead')
+                a_stop = timestamps[-1]
             frm, to = np.searchsorted(timestamps, (a_start, a_stop))
             if to > n_samples:
                 to = n_samples

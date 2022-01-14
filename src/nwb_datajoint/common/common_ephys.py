@@ -504,6 +504,11 @@ class LFPBand(dj.Computed):
         timestamps = np.asarray(lfp_object.timestamps)
         # get the indices of the first timestamp and the last timestamp that are within the valid times
         included_indices = interval_list_contains_ind(lfp_band_valid_times, timestamps)
+        # pad the indices by 1 on each side to avoid message in filter_data
+        if included_indices[0] > 0:
+            included_indices[0] -= 1
+        if included_indices[-1] != len(timestamps) - 1:
+            included_indices[-1] += 1
 
         timestamps = timestamps[included_indices[0]:included_indices[-1]]
 
@@ -540,7 +545,7 @@ class LFPBand(dj.Computed):
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
         # filter the data and write to an the nwb file
         filtered_data, new_timestamps = FirFilter().filter_data(timestamps, lfp_data, filter_coeff,
-                                                              lfp_band_valid_times, lfp_band_elect_id, decimation)
+                                                              lfp_band_valid_times, lfp_band_elect_index, decimation)
 
         # now that the LFP is filtered, we create an electrical series for it and add it to the file
         with pynwb.NWBHDF5IO(path=lfp_band_file_abspath, mode="a", load_namespaces=True) as io:
