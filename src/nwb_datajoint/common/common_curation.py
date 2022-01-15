@@ -12,11 +12,10 @@ import spikeinterface.toolkit as st
 
 from .common_lab import LabMember, LabTeam
 from .common_interval import IntervalList, SortInterval
-from .common_nwbfile import AnalysisNwbfile, Nwbfile
-from .common_session import Session
+from .common_nwbfile import AnalysisNwbfile
 from .common_metrics import QualityMetrics
-from .common_spikesorting import (SortingID, SpikeSortingRecordingSelection, SpikeSortingRecording,
-                                  SpikeSortingWorkspace, SpikeSortingFilterParameters)
+from .common_spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
+                                  SortingList)
 
 from .dj_helper_fn import fetch_nwb
 
@@ -25,7 +24,7 @@ schema = dj.schema('common_curation')
 @schema
 class AutomaticCurationParameters(dj.Manual):
     definition = """
-    automatic_curation_params_name: varchar(200)   # name of this parameter set
+    auto_curation_params_name: varchar(200)   # name of this parameter set
     ---
     merge_params: BLOB   # params to merge units
     reject_params: BLOB   # params to reject units
@@ -34,47 +33,59 @@ class AutomaticCurationParameters(dj.Manual):
         automatic_curation_params_name = 'default'
         merge_params = {}
         reject_params = {}
-        self.insert1([automatic_curation_params_name, merge_params, reject_params])
+        self.insert1([automatic_curation_params_name, merge_params, reject_params], skip_duplicates=True)
 
 @schema
 class AutomaticCurationSelection(dj.Manual):
     definition = """
-    # Table for holding the output
-    -> SortingID
+    -> SortingList.proj(original_sorting_id='sorting_id')
     -> AutomaticCurationParameters
     -> QualityMetrics
     """
  
 @schema
-class AutomaticCuration(dj.Computed):
+class AutomaticCurationSorting(dj.Computed):
     definition = """
-    # Automated curation applied to sortings
     -> AutomaticCurationSelection
+    sorting_id: varchar(15)
     ---
+    sorting_path: varchar(1000)
     -> AnalysisNwbfile
     units_object_id: varchar(40)   # Object ID for the units in NWB file
-    automatic_curation_results_dict=NULL: BLOB   #dictionary of outputs from automatic curation
     """
 
     def make(self, key):
+        
+        # find noise units from quality metrics
+        # reject noise units
+        # find units to merge from quality metrics
+        # merge units
+        # save sorting
+        # save sorting to nwb
+        # insert to SortingList
+        original_sorting_path = (SortingList & key['original_sorting_id']).fetch('sorting_path')
+        original_sorting = si.load_extractor(original_sorting_path)
+        # (QualityMetrics & key)
+        
+        
         # LOGIC:
         #1. Compute the requested metrics
         #3. Using metrics, add labels for noise clusters, etc. 
 
-        key['automatic_curation_results_dict'] = dict()
-        re_key = (SpikeSortingRecording & key).fetch1()
-        workspace_uri = (SpikeSortingWorkspace & key).fetch1('workspace_uri')
+        # key['automatic_curation_results_dict'] = dict()
+        # re_key = (SpikeSortingRecording & key).fetch1()
+        # workspace_uri = (SpikeSortingWorkspace & key).fetch1('workspace_uri')
 
         # get the sortings to be used. 
-        sorting_id = key['sorting_id']
+        # sorting_id = key['sorting_id']
   
         # load the workspace, the sorting, and the recording
-        workspace = sv.load_workspace(workspace_uri)
-        sorting = workspace.get_sorting_extractor(sorting_id)
-        recording = workspace.get_recording_extractor(workspace.recording_ids[0])
+        # workspace = sv.load_workspace(workspace_uri)
+        # sorting = workspace.get_sorting_extractor(sorting_id)
+        # recording = workspace.get_recording_extractor(workspace.recording_ids[0])
 
-        auto_curate_param_name = (AutomaticCurationSelection & key).fetch1('automatic_curation_parameter_set_name')
-        acpd = (AutomaticCurationParameters & {'automatic_curation_parameter_set_name': auto_curate_param_name}).fetch1('automatic_curation_parameter_dict')
+        # auto_curate_param_name = (AutomaticCurationSelection & key).fetch1('automatic_curation_parameter_set_name')
+        # acpd = (AutomaticCurationParameters & {'automatic_curation_parameter_set_name': auto_curate_param_name}).fetch1('automatic_curation_parameter_dict')
         # check for defined automatic curation keys / parameters
         
         #1. Get the sorting

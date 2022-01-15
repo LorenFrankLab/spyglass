@@ -3,10 +3,10 @@ import pathlib
 import time
 from pathlib import Path
 import shutil
+import uuid
 from functools import reduce
 
 import datajoint as dj
-import kachery_client as kc
 import numpy as np
 import pynwb
 import scipy.stats as stats
@@ -353,6 +353,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
 class SpikeSortingRecording(dj.Computed):
     definition = """
     -> SpikeSortingRecordingSelection
+    recording_id: varchar(20)
     ---
     recording_path: varchar(1000)
     """
@@ -383,6 +384,9 @@ class SpikeSortingRecording(dj.Computed):
         recording_folder = Path(os.getenv('SPYGLASS_RECORDING_DIR'))
         key['recording_path'] = str(recording_folder / Path(recording_name))
         recording = recording.save(folder=key['recording_extractor_path'])
+        
+        key['recording_id'] = 'R_'+str(uuid.uuid4())[:8]
+        
         self.insert1(key)
     
     def _get_recording_name(self, key):
@@ -542,8 +546,9 @@ class SpikeSortingSelection(dj.Manual):
 class SpikeSorting(dj.Computed):
     definition = """
     -> SpikeSortingSelection
+    sorting_id: varchar(500)
     ---
-    sorting_path: varchar(200)
+    sorting_path: varchar(1000)
     time_of_sort: int   # in Unix time, to the nearest second
     -> AnalysisNwbfile
     units_object_id: varchar(40)   # Object ID for the units in NWB file
@@ -583,9 +588,15 @@ class SpikeSorting(dj.Computed):
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
         key['analysis_file_name'], key['units_object_id'] = \
-            self.store_sorting_nwb(key, sorting=sorting,
+            self._save_sorting_nwb(key, sorting=sorting,
                                    sort_interval_list_name=sort_interval_list_name, 
                                    sort_interval=sort_interval)
+        
+        key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
+
+        # add sorting to SortingList
+        SortingList.insert1([key['sorting_id'], key['sorting_path']], skip_duplicates=True)
+        
         self.insert1(key)
     
     def delete(self):
@@ -611,19 +622,32 @@ class SpikeSorting(dj.Computed):
             super().delete()
         else:
             raise Exception('You do not have permission to delete all specified entries. Not deleting anything.')
-
+        
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+    
+    def nightly_cleanup(self):
+        """Clean up spike sorting directories that are not in the SpikeSorting table. 
+        This should be run after AnalysisNwbFile().nightly_cleanup()
+        """
+        # get a list of the files in the spike sorting storage directory
+        dir_names = next(os.walk(os.environ['SPYGLASS_SORTING_DIR']))[1]
+        # now retrieve a list of the currently used analysis nwb files
+        analysis_file_names = self.fetch('analysis_file_name')
+        for dir in dir_names:
+            if not dir in analysis_file_names:
+                full_path = str(pathlib.Path(os.environ['SPYGLASS_SORTING_DIR']) / dir)
+                print(f'removing {full_path}')
+                shutil.rmtree(str(pathlib.Path(os.environ['SPYGLASS_SORTING_DIR']) / dir))
+                
     def _get_sorting_name(self, key):
-        recording_name = SpikeSortingRecording()._get_recording_name(key)
+        recording_name = (SpikeSortingRecording & key).fetch1('recording_name')
         sorting_name = recording_name + '_' \
                        + key['sorter_name'] + '_' \
                        + key['spikesorter_parameter_set_name']
         return sorting_name
     
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
-    
-    @staticmethod
-    def store_sorting_nwb(key, sorting, sort_interval_list_name,
+    def _save_sorting_nwb(key, sorting, sort_interval_list_name,
                           sort_interval, metrics=None, unit_ids=None):
         """Store a sorting in a new AnalysisNwbfile
 
@@ -677,68 +701,21 @@ class SpikeSorting(dj.Computed):
         AnalysisNwbfile().add(key['nwb_file_name'], analysis_file_name)
         return analysis_file_name,  units_object_id
     
-    @staticmethod
-    def store_sorting_sortingview(self, key):
-        """Add a sorting to the sortingview workspace defined by the key.
-        
-        Parameters
-        ----------
-        key : dict
-        sorting : spikeinterface Sorting object
-        
-        :param sorting_label: label for sort
-        :type sorting_label: str
-        :param path_suffix: string to append to end of sorting extractor file name
-        :type path_suffix: str
-        :param metrics: spikesorting metrics, defaults to None
-        :type metrics: dict
-        :returns: sorting_id 
-        :type: str
-        """
-        # get the path from the Recording
-        sorting_h5_path  = SpikeSortingRecording.get_sorting_extractor_save_path(key, path_suffix=path_suffix)
-        if os.path.exists(sorting_h5_path):
-            Warning(f'{sorting_h5_path} exists; overwriting')
-        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
-        s_key = (SpikeSortingRecording & key).fetch1("KEY")
-        sorting_object = s_key['sorting_extractor_object'] = h5_sorting.object()
-        
-        # add the sorting to the workspace
-        workspace_uri = (self & key).fetch1('workspace_uri')
-        workspace = sv.load_workspace(workspace_uri)
-        # sorting = si.create_extractor_from_new_sorting(sorting)
-        sorting = sv.LabboxEphysSortingExtractor(sorting_object)
-        
-        sorting_name = SpikeSorting()._get_sorting_name
-        # note that we only ever have one recording per workspace
-        sorting_id = s_key['sorting_id'] = workspace.add_sorting(recording_id=workspace.recording_ids[0], 
-                                                                 sorting=sorting,
-                                                                 label=sorting_name)
-
-        return sorting_id
-    
     # TODO: write a function to import sortings done outside of dj
-    def import_sorting(self, key):
+    def _import_sorting(self, key):
         raise NotImplementedError
     
-    def nightly_cleanup(self):
-        """Clean up spike sorting directories that are not in the SpikeSorting table. 
-        This should be run after AnalysisNwbFile().nightly_cleanup()
-        """
-        # get a list of the files in the spike sorting storage directory
-        dir_names = next(os.walk(os.environ['SPIKE_SORTING_STORAGE_DIR']))[1]
-        # now retrieve a list of the currently used analysis nwb files
-        analysis_file_names = self.fetch('analysis_file_name')
-        for dir in dir_names:
-            if not dir in analysis_file_names:
-                full_path = str(pathlib.Path(os.environ['SPIKE_SORTING_STORAGE_DIR']) / dir)
-                print(f'removing {full_path}')
-                shutil.rmtree(str(pathlib.Path(os.environ['SPIKE_SORTING_STORAGE_DIR']) / dir))
+    
                 
 @schema
 class SortingList(dj.Manual):
     definition = """
     # Has records for every sorting; similar to IntervalList
-    -> SpikeSortingRecording
-    sorting_path: varchar(500)
+    recording_id: varchar(15)
+    sorting_id: varchar(15)
+    ---
+    sorting_path: varchar(1000)
     """ 
+    def add_sorting_from_workspace(self, workspace_uri):
+        return NotImplementedError
+    

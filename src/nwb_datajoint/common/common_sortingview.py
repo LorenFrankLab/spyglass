@@ -11,11 +11,8 @@ import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
-from .common_spikesorting import SpikeSortingRecording
+from .common_spikesorting import SpikeSortingRecordingSelection, SpikeSortingRecording
 from .common_lab import LabTeam
-from .common_ephys import Electrode, ElectrodeGroup, Raw
-from .common_interval import (IntervalList, SortInterval,
-                              interval_list_intersect, union_adjacent_index)
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .sortingview_helper_fn import set_workspace_permission
@@ -23,13 +20,21 @@ from .sortingview_helper_fn import set_workspace_permission
 schema = dj.schema('common_sortingview')
 
 @schema
-class SpikeSortingWorkspace(dj.Computed):
+class SortingviewWorkspace(dj.Computed):
     definition = """
     -> SpikeSortingRecording
     ---
     channel = 'franklab2' : varchar(80) # the name of the kachery channel for data sharing
+    sortingview_recording_id: varchar(30)
     workspace_uri: varchar(1000)
     """
+    class SortingID(dj.Part):
+        definition = """
+        # Information about lab member in the context of Frank lab network
+        -> master
+        sorting_id: varchar(30)
+        sortingview_sorting_id: varchar(30)
+        """
 
     def make(self, key: dict):
         # load recording, wrap it as old spikeextractors recording, then save as h5 (sortingview requires this format)
@@ -37,20 +42,68 @@ class SpikeSortingWorkspace(dj.Computed):
         recording = si.load_extractor(recording_path)
         old_recording = si.create_extractor_from_new_recording(recording)
         h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
-                                                recording_path, dtype='int16')
+                                                                                recording_path,
+                                                                                dtype='int16')
 
         workspace_name = SpikeSortingRecording()._get_recording_name(key)
         workspace = sv.create_workspace(label=workspace_name)
-        workspace.add_recording(recording=h5_recording, label=workspace_name)
-        
+        key['workspace_uri'] = workspace.uri
+        key['sortingview_recording_id'] = workspace.add_recording(recording=h5_recording,
+                                                                  label=workspace_name)
+
         # Give permission to workspace based on Google account
         team_name = (SpikeSortingRecordingSelection & key).fetch1('team_name')
         team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
         set_workspace_permission(workspace_name, team_members)    
         
-        key['workspace_uri'] = workspace.uri
         self.insert1(key)
+        
+    # TODO: finish
+    def add_sorting_to_workspace(self, key: dict, sorting_id: str):
+        """Add a sorting (defined by sorting_id) to the 
+        sortingview workspace (defined by key).
+        
+        Parameters
+        ----------
+        key : dict
+        sorting_id : spikeinterface Sorting object
+            sorting id given during spike sorting, but the same as sortingview sorting_id
+        
+        Returns
+        -------
+        sortingview_sorting_id
+        """
+        parent_key = (SortingviewWorkspace & key).fetch1()
+        workspace = sv.load_workspace(parent_key['workspace_uri'])
+        parent_key['sorting_id'] = sorting_id
+        # parent_key['sortingview_sorting_id'] = 
+        old_recording = si.create_extractor_from_new_recording(recording)
+        h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
+                                                                                recording_path,
+                                                                                dtype='int16')
+        SortingviewWorkspace.SortingID.insert1(key)
+        # get the path from the Recording
+        sorting_h5_path  = SpikeSortingRecording.get_sorting_extractor_save_path(key, path_suffix=path_suffix)
+        if os.path.exists(sorting_h5_path):
+            Warning(f'{sorting_h5_path} exists; overwriting')
+        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
+        s_key = (SpikeSortingRecording & key).fetch1("KEY")
+        sorting_object = s_key['sorting_extractor_object'] = h5_sorting.object()
+        
+        # add the sorting to the workspace
+        workspace_uri = (self & key).fetch1('workspace_uri')
+        workspace = sv.load_workspace(workspace_uri)
+        # sorting = si.create_extractor_from_new_sorting(sorting)
+        sorting = sv.LabboxEphysSortingExtractor(sorting_object)
+        
+        sorting_name = SpikeSorting()._get_sorting_name
+        # note that we only ever have one recording per workspace
+        sorting_id = s_key['sorting_id'] = workspace.add_sorting(recording_id=workspace.recording_ids[0], 
+                                                                 sorting=sorting,
+                                                                 label=sorting_name)
 
+        return sorting_id
+    
     # TODO: check
     def add_metrics_to_sorting(self, key: dict, *, sorting_id, metrics, workspace=None):
         """Adds a metrics to the specified sorting
