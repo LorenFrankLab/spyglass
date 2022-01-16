@@ -36,9 +36,9 @@ class Waveforms(dj.Computed):
     definition = """
     -> WaveformSelection
     ---
-    -> AnalysisNwbfile
-    object_id: varchar(40) # Object ID for the waveforms in NWB file
     waveform_extractor_path: varchar(220)
+    -> AnalysisNwbfile
+    object_id: varchar(40)   # Object ID for the waveforms in NWB file
     """
     def make(self, key):
         waveform_extractor_name = self._get_waveform_extractor_name(key)

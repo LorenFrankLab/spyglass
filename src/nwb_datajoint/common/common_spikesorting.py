@@ -353,7 +353,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
 class SpikeSortingRecording(dj.Computed):
     definition = """
     -> SpikeSortingRecordingSelection
-    recording_id: varchar(20)
+    recording_id: varchar(15)
     ---
     recording_path: varchar(1000)
     """
@@ -595,7 +595,7 @@ class SpikeSorting(dj.Computed):
         key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
 
         # add sorting to SortingList
-        SortingList.insert1([key['sorting_id'], key['sorting_path']], skip_duplicates=True)
+        SortingList.insert1([key['recording_id'], key['sorting_id'], key['sorting_path']], skip_duplicates=True)
         
         self.insert1(key)
     
@@ -704,8 +704,6 @@ class SpikeSorting(dj.Computed):
     # TODO: write a function to import sortings done outside of dj
     def _import_sorting(self, key):
         raise NotImplementedError
-    
-    
                 
 @schema
 class SortingList(dj.Manual):

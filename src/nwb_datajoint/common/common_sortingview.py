@@ -11,7 +11,8 @@ import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
-from .common_spikesorting import SpikeSortingRecordingSelection, SpikeSortingRecording
+from .common_spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
+                                  SpikeSorting, SortingList)
 from .common_lab import LabTeam
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
@@ -58,7 +59,6 @@ class SortingviewWorkspace(dj.Computed):
         
         self.insert1(key)
         
-    # TODO: finish
     def add_sorting_to_workspace(self, key: dict, sorting_id: str):
         """Add a sorting (defined by sorting_id) to the 
         sortingview workspace (defined by key).
@@ -67,41 +67,29 @@ class SortingviewWorkspace(dj.Computed):
         ----------
         key : dict
         sorting_id : spikeinterface Sorting object
-            sorting id given during spike sorting, but the same as sortingview sorting_id
+            sorting id given during spike sorting, not the same as sortingview sorting_id
         
         Returns
         -------
-        sortingview_sorting_id
+        sortingview_sorting_id : str
+            unique id given to each sorting by sortingview
         """
-        parent_key = (SortingviewWorkspace & key).fetch1()
-        workspace = sv.load_workspace(parent_key['workspace_uri'])
-        parent_key['sorting_id'] = sorting_id
-        # parent_key['sortingview_sorting_id'] = 
-        old_recording = si.create_extractor_from_new_recording(recording)
-        h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
-                                                                                recording_path,
-                                                                                dtype='int16')
-        SortingviewWorkspace.SortingID.insert1(key)
-        # get the path from the Recording
-        sorting_h5_path  = SpikeSortingRecording.get_sorting_extractor_save_path(key, path_suffix=path_suffix)
-        if os.path.exists(sorting_h5_path):
-            Warning(f'{sorting_h5_path} exists; overwriting')
-        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_h5_path)
-        s_key = (SpikeSortingRecording & key).fetch1("KEY")
-        sorting_object = s_key['sorting_extractor_object'] = h5_sorting.object()
-        
-        # add the sorting to the workspace
-        workspace_uri = (self & key).fetch1('workspace_uri')
+        sorting_path = (SortingList & {'sorting_id': sorting_id}).fetch1('sorting_path')
+        sorting = si.load_extractor(sorting_path)
+        # convert to old sorting extractor
+        sorting = si.create_extractor_from_new_sorting(sorting)
+        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_path)
+        workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri') 
         workspace = sv.load_workspace(workspace_uri)
-        # sorting = si.create_extractor_from_new_sorting(sorting)
-        sorting = sv.LabboxEphysSortingExtractor(sorting_object)
+        sorting_key = (SpikeSorting & {'sorting_id':sorting_id}).fetch1()
+        sorting_name = SpikeSorting()._get_sorting_name(sorting_key)
+        sortingview_sorting_id = workspace.add_sorting(recording_id=workspace.recording_ids[0], 
+                                                       sorting=h5_sorting,
+                                                       label=sorting_name)
+        key['sorting_id'] = sorting_id
+        key['sortingview_sorting_id'] = sortingview_sorting_id
+        SortingviewWorkspace.SortingID.insert1(key)
         
-        sorting_name = SpikeSorting()._get_sorting_name
-        # note that we only ever have one recording per workspace
-        sorting_id = s_key['sorting_id'] = workspace.add_sorting(recording_id=workspace.recording_ids[0], 
-                                                                 sorting=sorting,
-                                                                 label=sorting_name)
-
         return sorting_id
     
     # TODO: check
