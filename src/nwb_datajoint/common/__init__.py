@@ -19,6 +19,8 @@ from .common_interval import (IntervalList, SortInterval,
 from .common_lab import Institution, Lab, LabMember, LabTeam
 from .common_nwbfile import (AnalysisNwbfile, AnalysisNwbfileKachery, Nwbfile,
                              NwbfileKachery)
+from .common_position import (PositionInfoParameters, IntervalPositionInfoSelection, IntervalPositionInfo, LinearizationParameters, 
+                              TrackGraph, IntervalLinearizationSelection, IntervalLinearizedPosition, PositionVideo)
 from .common_region import BrainRegion
 from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session
