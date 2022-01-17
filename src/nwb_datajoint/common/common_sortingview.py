@@ -60,8 +60,7 @@ class SortingviewWorkspace(dj.Computed):
         self.insert1(key)
         
     def add_sorting_to_workspace(self, key: dict, sorting_id: str):
-        """Add a sorting (defined by sorting_id) to the 
-        sortingview workspace (defined by key).
+        """Add a sorting (defined by sorting_id) to the sortingview workspace (defined by key).
         
         Parameters
         ----------
@@ -93,7 +92,7 @@ class SortingviewWorkspace(dj.Computed):
         return sorting_id
     
     # TODO: check
-    def add_metrics_to_sorting(self, key: dict, *, sorting_id, metrics, workspace=None):
+    def add_metrics_to_sorting(self, key: dict, metrics, sorting_id: str=None):
         """Adds a metrics to the specified sorting
         :param key: key for a Workspace
         :type key: dict
