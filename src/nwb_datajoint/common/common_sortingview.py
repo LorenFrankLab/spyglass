@@ -1,21 +1,13 @@
-import os
-from pathlib import Path
+from typing import Dict
 
 import datajoint as dj
-import kachery_client as kc
 import numpy as np
-import pynwb
 import sortingview as sv
 import spikeinterface as si
-import spikeinterface.extractors as se
-import spikeinterface.sorters as ss
-import spikeinterface.toolkit as st
 
 from .common_spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
                                   SpikeSorting, SortingList)
 from .common_lab import LabTeam
-from .common_nwbfile import AnalysisNwbfile, Nwbfile
-from .common_session import Session
 from .sortingview_helper_fn import set_workspace_permission
 
 schema = dj.schema('common_sortingview')
@@ -38,7 +30,8 @@ class SortingviewWorkspace(dj.Computed):
         """
 
     def make(self, key: dict):
-        # load recording, wrap it as old spikeextractors recording, then save as h5 (sortingview requires this format)
+        # Load recording, wrap it as old spikeextractors recording extractor, 
+        # then save as h5 (sortingview requires this format)
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
         old_recording = si.create_extractor_from_new_recording(recording)
@@ -65,8 +58,8 @@ class SortingviewWorkspace(dj.Computed):
         Parameters
         ----------
         key : dict
-        sorting_id : spikeinterface Sorting object
-            sorting id given during spike sorting, not the same as sortingview sorting_id
+        sorting_id : str
+            sorting id given during spike sorting, NOT the same as sortingview sorting_id
         
         Returns
         -------
@@ -78,7 +71,7 @@ class SortingviewWorkspace(dj.Computed):
         # convert to old sorting extractor
         sorting = si.create_extractor_from_new_sorting(sorting)
         h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_path)
-        workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri') 
+        workspace_uri = (self & key).fetch1('workspace_uri') 
         workspace = sv.load_workspace(workspace_uri)
         sorting_key = (SpikeSorting & {'sorting_id':sorting_id}).fetch1()
         sorting_name = SpikeSorting()._get_sorting_name(sorting_key)
@@ -87,89 +80,87 @@ class SortingviewWorkspace(dj.Computed):
                                                        label=sorting_name)
         key['sorting_id'] = sorting_id
         key['sortingview_sorting_id'] = sortingview_sorting_id
-        SortingviewWorkspace.SortingID.insert1(key)
+        self.SortingID.insert1(key)
         
-        return sorting_id
+        return sortingview_sorting_id
     
-    # TODO: check
-    def add_metrics_to_sorting(self, key: dict, metrics, sorting_id: str=None):
-        """Adds a metrics to the specified sorting
-        :param key: key for a Workspace
-        :type key: dict
-        :param sorting_id: the sorting_id
-        :type sorting_id: str
-        :param metrics: dictionary of computed metrics
-        :type dict
-        :param workspace: SortingView workspace (default None; this will be loaded if it is not specified)
-        :type SortingView workspace object
+    def add_metrics_to_sorting(self, key: dict, metrics: Dict[Dict[str]],
+                               sortingview_sorting_id: str=None):
+        """Adds a metrics to the specified sorting.
+        
+        Parameters
+        ----------
+        key : dict
+        metrics : dict
+            Quality metrics.
+            Key: name of quality metric
+            Value: another dict in which key: unit ID (must be str),
+                                         value: metric value (float)
+        sortingview_sorting_id : str, optional
+            if not specified, just uses the first sorting ID of the workspace
         """
-        # convert the metrics for storage in the workspace 
-        external_metrics = [{'name': metric, 'label': metric, 'tooltip': metric,
-                            'data': metrics[metric].to_dict()} for metric in metrics.columns]    
-        # change unit id to string
-        for metric_ind in range(len(external_metrics)):
-            for old_unit_id in metrics.index:
-                external_metrics[metric_ind]['data'][str(
-                    old_unit_id)] = external_metrics[metric_ind]['data'].pop(old_unit_id)
-                # change nan to none so that json can handle it
-                if np.isnan(external_metrics[metric_ind]['data'][str(old_unit_id)]):
-                    external_metrics[metric_ind]['data'][str(old_unit_id)] = None
-        # load the workspace if necessary
-        if workspace is None:
-            workspace_uri = (self & key).fetch1('workspace_uri')
-            workspace = sv.load_workspace(workspace_uri)    
-        workspace.set_unit_metrics_for_sorting(sorting_id=sorting_id, 
+        
+        # check that the unit ids are str
+        for metric_name in metrics:
+            unit_ids = metrics[metric_name].keys()
+            assert np.all([isinstance(unit_id, int)] for unit_id in unit_ids)
+        
+        # the metrics must be in this form to be added to sortingview 
+        external_metrics = [{'name': metric_name,
+                             'label': metric_name,
+                             'tooltip': metric_name,
+                             'data': metric} for metric_name, metric in metrics.items()]    
+        
+        workspace_uri = (self & key).fetch1('workspace_uri') 
+        workspace = sv.load_workspace(workspace_uri)
+        if sortingview_sorting_id is None:
+            print('sortingview sorting ID not specified, using the first sorting in the workspace...')
+            sortingview_sorting_id = workspace.sorting_ids[0]
+            
+        workspace.set_unit_metrics_for_sorting(sorting_id=sortingview_sorting_id, 
                                                metrics=external_metrics)  
     
-    # TODO: check
-    def set_snippet_len(self, key, snippet_len):
-        """Sets the snippet length based on the sorting parameters for the workspaces specified by the key
-
-        :param key: SpikeSortingWorkspace key
-        :type key: dict
-        :param snippet_len: the number of points to display before and after the peak or trough
-        :type snippet_len: tuple (int, int)
+    def set_snippet_len(self, key: dict, snippet_len: int):
+        """Sets the snippet length of a workspace specified by the key
+        
+        Parameters
+        ----------
+        key : dict
+            defines a workspace
         """
-        workspace_list = (self & key).fetch()
-        if len(workspace_list) == 0:
-            return 
-        for ss_workspace in workspace_list:
-            # load the workspace
-            workspace = sv.load_workspace(ss_workspace['workspace_uri'])
-            workspace.set_snippet_len(snippet_len)
+        workspace_uri = (self & key).fetch1('workspace_uri')
+        workspace = sv.load_workspace(workspace_uri) 
+        workspace.set_snippet_len(snippet_len)
 
-    # TODO: check
-    def url(self, key):
-        """generate a single url or a list of urls for curation from the key
-
-        :param key: key to select one or a set of workspaces
-        :type key: dict
-        :return: url or a list of urls
-        :rtype: string or a list of strings
+    def url(self, key, sortingview_sorting_id: str=None):
+        """Generate a URL for visualizing the sorting on the browser
+        
+        Parameters
+        ----------
+        key : dict
+            defines a workspace
+        sortingview_sorting_id : str, optional
+            sortingview sorting ID to visualize; if None then chooses the first one
+            
+        Returns
+        -------
+        url : str
         """
-        # generate a single website or a list of websites for the selected key
-        workspace_list = (self & key).fetch()
-        if len(workspace_list) == 0:
-            return None
-        url_list = []
-        for ss_workspace in workspace_list:
-            # load the workspace
-            workspace = sv.load_workspace(ss_workspace['workspace_uri'])
-            F = workspace.figurl()
-            url_list.append(F.url(label=workspace.label, channel=ss_workspace['channel']))
-        if len(url_list) == 1:
-            return url_list[0]
-        else:
-            return url_list
+
+        workspace_uri = (self & key).fetch1('workspace_uri')
+        workspace = sv.load_workspace(workspace_uri)
+        recording_id = workspace.recording_ids[0]
+        if sortingview_sorting_id is None:
+            sortingview_sorting_id = workspace.sorting_ids[0]
+        url = workspace.experimental_spikesortingview(recording_id=recording_id, 
+                                                      sorting_id=sortingview_sorting_id,
+                                                      label=workspace.label,
+                                                      include_curation=True)
+        return url
     
     # TODO: check
     def precalculate(self, key):
         """For each workspace specified by the key, this will run the snipped precalculation code
-
-        Args:
-            key ([dict]): key to one or more SpikeSortingWorkspaces
-        Returns:
-            None
         """
         workspace_uri_list = (self & key).fetch('workspace_uri')
         #TODO: consider running in parallel

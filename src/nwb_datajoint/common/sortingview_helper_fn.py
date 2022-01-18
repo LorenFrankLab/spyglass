@@ -49,7 +49,8 @@ def add_metrics_to_workspace_nocuration(workspace_uri: str, sorting_id: str=None
     """Computes nearest neighbor isolation and noise overlap metrics and inserts them
     in the specified sorting of the workspace. This bypasses the spyglass pipeline
     for computing metrics and should be used only for spike sortings done in the
-    old nwb_datajoint pipeline. It also assumes that a sorting is already
+    old nwb_datajoint pipeline. It also assumes that a sorting is already added to the
+    workspace.
 
     Parameters
     ----------

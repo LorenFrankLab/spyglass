@@ -437,7 +437,7 @@ class SpikeSortingRecording(dj.Computed):
         nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])   
         recording = se.read_nwb_recording(nwb_file_abs_path, load_time_vector=True)
         
-        valid_sort_times = SpikeSortingRecording().get_sort_interval_valid_times(key)
+        valid_sort_times = self.get_sort_interval_valid_times(key)
         # shape is (N, 2)
         valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval) \
                                              for interval in valid_sort_times])
@@ -559,7 +559,7 @@ class SpikeSorting(dj.Computed):
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
         Specifically,
         1. Loads saved recording and runs the sort on it with spikeinterface
-        2. Saves the sorting with spikeinterface and adds it to the workspace (if it exists)
+        2. Saves the sorting with spikeinterface
         3. Creates an analysis NWB file and saves the sorting there
            (this is redundant with 2; will change in the future)
         """
@@ -584,6 +584,7 @@ class SpikeSorting(dj.Computed):
         key['sorting_path'] = str(sorting_folder / Path(sorting_name))
         sorting = sorting.save(folder=key['sorting_path'])
         
+        # NWB stuff
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
@@ -714,6 +715,4 @@ class SortingList(dj.Manual):
     ---
     sorting_path: varchar(1000)
     """ 
-    def add_sorting_from_workspace(self, workspace_uri):
-        return NotImplementedError
     
