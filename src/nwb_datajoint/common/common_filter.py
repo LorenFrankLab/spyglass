@@ -197,7 +197,7 @@ class FirFilter(dj.Manual):
             output_shape_list[time_axis] += shape[time_axis]
 
         # open the nwb file to create the dynamic table region and electrode series, then write and close the file
-        #print(f'Creating and writing electrical series to analysis file')
+        print(f'Creating and writing electrical series to analysis file')
         with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             # get the indices of the electrodes in the electrode table
@@ -253,7 +253,8 @@ class FirFilter(dj.Manual):
                                         ds=decimation,
                                         input_dim_restrictions=input_dim_restrictions,
                                         outarray=filtered_data,
-                                        output_offset=output_offsets[ii])
+                                        output_offset=output_offsets[ii],
+                                        nfft=200000000, verbose=True)
                 else:
                     print(f'Interval {ii}: leaving data on disk')
                     data = data_on_disk
@@ -272,7 +273,8 @@ class FirFilter(dj.Manual):
                                         ds=decimation,
                                         input_dim_restrictions=input_dim_restrictions,
                                         outarray=filtered_data,
-                                        output_offset=output_offsets[ii])
+                                        output_offset=output_offsets[ii],
+                                        nfft=200000000, verbose=True)
 
             start_end = [new_timestamps[0], new_timestamps[-1]]
 

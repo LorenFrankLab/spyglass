@@ -307,6 +307,7 @@ class LFP(dj.Imported):
                 valid.append(count)
         valid_times = valid_times[valid] 
         print(f'LFP: found {len(valid)} of {count+1} intervals > {min_interval_length} sec long.')  
+        print('running new LFP filtering')
         
         # target 1 KHz sampling rate
         decimation = sampling_rate // 1000
