@@ -579,7 +579,7 @@ class PositionVideo(dj.Computed):
         M_TO_CM = 100
 
         print('Loading position data...')
-        raw_position_df = (nd.common.common_behav.RawPosition() & {
+        raw_position_df = (RawPosition() & {
                            'nwb_file_name': key['nwb_file_name'],
                            'interval_list_name': key['interval_list_name']}
                            ).fetch1_dataframe()
