@@ -22,6 +22,7 @@ from track_linearization import (get_linearized_position, make_track_graph,
                                  plot_graph_as_1D, plot_track_graph)
 
 from .common_interval import IntervalList
+from .common_nwbfile import AnalysisNwbfile
 
 schema = dj.schema('common_position')
 
@@ -57,7 +58,7 @@ class IntervalPositionInfo(dj.Computed):
     definition = """
     -> IntervalPositionInfoSelection
     ---
-    -> nd.common.common_nwbfile.AnalysisNwbfile
+    -> AnalysisNwbfile
     head_position_object_id : varchar(40)
     head_orientation_object_id : varchar(40)
     head_velocity_object_id : varchar(40)
@@ -65,7 +66,7 @@ class IntervalPositionInfo(dj.Computed):
 
     def make(self, key):
         print(f'Computing position for: {key}')
-        key['analysis_file_name'] = nd.common.common_nwbfile.AnalysisNwbfile().create(
+        key['analysis_file_name'] = AnalysisNwbfile().create(
             key['nwb_file_name'])
         raw_position = (nd.common.common_behav.RawPosition() &
                         {'nwb_file_name': key['nwb_file_name'],
@@ -134,7 +135,7 @@ class IntervalPositionInfo(dj.Computed):
             pass
 
         # Insert into analysis nwb file
-        nwb_analysis_file = nd.common.common_nwbfile.AnalysisNwbfile()
+        nwb_analysis_file = AnalysisNwbfile()
 
         key['head_position_object_id'] = nwb_analysis_file.add_nwb_object(
             key['analysis_file_name'], head_position)
@@ -143,7 +144,7 @@ class IntervalPositionInfo(dj.Computed):
         key['head_velocity_object_id'] = nwb_analysis_file.add_nwb_object(
             key['analysis_file_name'], head_velocity)
 
-        nd.common.common_nwbfile.AnalysisNwbfile().add(
+        AnalysisNwbfile().add(
             key['nwb_file_name'], key['analysis_file_name'])
 
         self.insert1(key)
@@ -295,7 +296,7 @@ class IntervalPositionInfo(dj.Computed):
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self,
-                         (nd.common.common_nwbfile.AnalysisNwbfile,
+                         (AnalysisNwbfile,
                           'analysis_file_abs_path'),
                          *attrs, **kwargs)
 
@@ -388,14 +389,14 @@ class IntervalLinearizedPosition(dj.Computed):
     definition = """
     -> IntervalLinearizationSelection
     ---
-    -> nd.common.common_nwbfile.AnalysisNwbfile
+    -> AnalysisNwbfile
     linearized_position_object_id : varchar(40)
     """
 
     def make(self, key):
         print(f'Computing linear position for: {key}')
 
-        key['analysis_file_name'] = nd.common.common_nwbfile.AnalysisNwbfile().create(
+        key['analysis_file_name'] = AnalysisNwbfile().create(
             key['nwb_file_name'])
 
         position_nwb = (
@@ -437,7 +438,7 @@ class IntervalLinearizedPosition(dj.Computed):
         linear_position_df['time'] = time
 
         # Insert into analysis nwb file
-        nwb_analysis_file = nd.common.common_nwbfile.AnalysisNwbfile()
+        nwb_analysis_file = AnalysisNwbfile()
 
         key['linearized_position_object_id'] = nwb_analysis_file.add_nwb_object(
             analysis_file_name=key['analysis_file_name'],
@@ -451,7 +452,7 @@ class IntervalLinearizedPosition(dj.Computed):
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (nd.common.common_nwbfile.AnalysisNwbfile, 'analysis_file_abs_path'),
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
                          *attrs, **kwargs)
 
     def fetch1_dataframe(self):
