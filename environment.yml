@@ -24,7 +24,7 @@ dependencies:
     - kachery-daemon
     - mountainsort4
     - spikeextractors
-    - spikeinterface>=0.90
+    - git+https://github.com/SpikeInterface/spikeinterface.git
     - pynwb>=2.0.0,<3
     - hdmf>=3.1.1,<4
     - datajoint>=0.13.*
