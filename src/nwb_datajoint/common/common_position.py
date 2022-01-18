@@ -21,6 +21,8 @@ from tqdm import tqdm_notebook as tqdm
 from track_linearization import (get_linearized_position, make_track_graph,
                                  plot_graph_as_1D, plot_track_graph)
 
+from .common_interval import IntervalList
+
 schema = dj.schema('common_position')
 
 
@@ -45,7 +47,7 @@ class PositionInfoParameters(dj.Lookup):
 class IntervalPositionInfoSelection(dj.Lookup):
     definition = """
     -> PositionInfoParameters
-    -> nd.common.common_interval.IntervalList
+    -> IntervalList
     ---
     """
 
