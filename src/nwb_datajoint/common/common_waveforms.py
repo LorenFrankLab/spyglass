@@ -19,7 +19,7 @@ class WaveformParameters(dj.Manual):
     """
     def insert_default(self):
         waveform_params_name = 'default'
-        waveform_params = {'ms_before':1, 'ms_after':1, 'max_spikes_per_unit': 2000,
+        waveform_params = {'ms_before':1, 'ms_after':1, 'max_spikes_per_unit': 5000,
                            'n_jobs':5, 'total_memory': '5G'}
         self.insert1([waveform_params_name, waveform_params], skip_duplicates=True) 
 
@@ -41,27 +41,22 @@ class Waveforms(dj.Computed):
     object_id: varchar(40)   # Object ID for the waveforms in NWB file
     """
     def make(self, key):
-        waveform_extractor_name = self._get_waveform_extractor_name(key)
-        key['waveform_extractor_path'] = self._get_waveform_save_path(waveform_extractor_name)
-        
-        params = (WaveformParameters & {'waveform_params_name': key['waveform_params_name']}).fetch1('waveform_params')
-
-        recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
-        recording = sv.LabboxEphysRecordingExtractor(recording_object)
-        new_recording = si.create_recording_from_old_extractor(recording)
-        new_recording.annotate(is_filtered=True)
+        recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
+        recording = si.load_extractor(recording_path)
         
         sorting_path = (SortingList & key).fetch1('sorting_path')
         sorting = si.load_extractor(sorting_path)
         
         print('Extracting waveforms...')
-        waveforms = si.extract_waveforms(recording=new_recording, 
+        waveform_params = (WaveformParameters & key).fetch1('waveform_params')
+        waveform_extractor_name = self._get_waveform_extractor_name(key)
+        key['waveform_extractor_path'] = str(Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) / Path(waveform_extractor_name))
+        waveforms = si.extract_waveforms(recording=recording, 
                                          sorting=sorting, 
                                          folder=key['waveform_extractor_path'],
-                                         **params)
+                                         **waveform_params)
         
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
-        
         object_id = AnalysisNwbfile().add_units_waveforms(key['analysis_file_name'],
                                                           waveforms)
         key['object_id'] = object_id       
@@ -69,11 +64,22 @@ class Waveforms(dj.Computed):
              
         self.insert1(key)
     
-    def load_waveforms(self, key):
+    def load_waveforms(self, key: dict):
+        """Returns a spikeinterface waveform extractor specified by key
+
+        Parameters
+        ----------
+        key : dict
+            Could be an entry in Waveforms, or some other key that uniquely defines
+            an entry in Waveforms
+
+        Returns
+        -------
+        we : spikeinterface.WaveformExtractor
+        """
         # TODO: check if multiple entries are passed
-        key = (Waveforms & key).fetch1()
-        folder = key['waveform_extractor_path']
-        we = si.WaveformExtractor.load_from_folder(folder)
+        key = (self & key).fetch1()
+        we = si.WaveformExtractor.load_from_folder(key['waveform_extractor_path'])
         return we
     
     def fetch_nwb(self, key):
@@ -85,10 +91,4 @@ class Waveforms(dj.Computed):
         sorting_name = SpikeSorting()._get_sorting_name(key)
         we_name = sorting_name + '_waveform'
         return we_name
-
-    def _get_waveform_save_path(self, waveform_extractor_name):
-        waveforms_dir = Path(os.environ['NWB_DATAJOINT_BASE_DIR']) / 'waveforms' / waveform_extractor_name
-        if waveforms_dir.exists() is False:
-            os.mkdir(waveforms_dir)
-        return str(waveforms_dir) 
     

@@ -587,11 +587,12 @@ class SpikeSorting(dj.Computed):
         # NWB stuff
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
-                                         'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
+                                         'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')        
         key['analysis_file_name'], key['units_object_id'] = \
             self._save_sorting_nwb(key, sorting=sorting,
                                    sort_interval_list_name=sort_interval_list_name, 
                                    sort_interval=sort_interval)
+        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
         
         key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
 
@@ -715,4 +716,7 @@ class SortingList(dj.Manual):
     ---
     sorting_path: varchar(1000)
     """ 
-    
+    def insert_manually_curated_sorting():
+        
+        # 
+        return NotImplementedError

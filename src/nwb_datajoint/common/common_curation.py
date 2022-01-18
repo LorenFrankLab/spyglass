@@ -1,13 +1,15 @@
 import os
 import tempfile
 import shutil
+import json
+import uuid
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
 import sortingview as sv
 import spikeinterface as si
 import spikeinterface.extractors as se
-import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
 from .common_lab import LabMember, LabTeam
@@ -26,8 +28,8 @@ class AutomaticCurationParameters(dj.Manual):
     definition = """
     auto_curation_params_name: varchar(200)   # name of this parameter set
     ---
-    merge_params: BLOB   # params to merge units
-    reject_params: BLOB   # params to reject units
+    merge_params: blob   # params to merge units
+    reject_params: blob   # params to reject units
     """
     def insert_default(self):
         automatic_curation_params_name = 'default'
@@ -55,118 +57,63 @@ class AutomaticCurationSorting(dj.Computed):
     """
 
     def make(self, key):
-        
-        # find noise units from quality metrics
-        # reject noise units
-        # find units to merge from quality metrics
-        # merge units
-        # save sorting
-        # save sorting to nwb
-        # insert to SortingList
-        original_sorting_path = (SortingList & key['original_sorting_id']).fetch('sorting_path')
+        original_sorting_path = (SortingList & {'sorting_id': key['original_sorting_id']}).fetch1('sorting_path')
         original_sorting = si.load_extractor(original_sorting_path)
-        # (QualityMetrics & key)
         
+        metrics_path = (QualityMetrics & key).fetch1('quality_metrics_path')
+        with open(metrics_path) as f:
+            quality_metrics = json.load(f)
         
-        # LOGIC:
-        #1. Compute the requested metrics
-        #3. Using metrics, add labels for noise clusters, etc. 
-
-        # key['automatic_curation_results_dict'] = dict()
-        # re_key = (SpikeSortingRecording & key).fetch1()
-        # workspace_uri = (SpikeSortingWorkspace & key).fetch1('workspace_uri')
-
-        # get the sortings to be used. 
-        # sorting_id = key['sorting_id']
-  
-        # load the workspace, the sorting, and the recording
-        # workspace = sv.load_workspace(workspace_uri)
-        # sorting = workspace.get_sorting_extractor(sorting_id)
-        # recording = workspace.get_recording_extractor(workspace.recording_ids[0])
-
-        # auto_curate_param_name = (AutomaticCurationSelection & key).fetch1('automatic_curation_parameter_set_name')
-        # acpd = (AutomaticCurationParameters & {'automatic_curation_parameter_set_name': auto_curate_param_name}).fetch1('automatic_curation_parameter_dict')
-        # check for defined automatic curation keys / parameters
+        sorting = self._sorting_after_reject(original_sorting, key['reject_params'])
+        sorting = self._sorting_after_merge(sorting, key['merge_params'])
         
-        #1. Get the sorting
-        analysis_file_created = False
- 
-        # get the cluster metrics list name and add a name for this sorting
-        cluster_metrics_list_name = (AutomaticCurationSelection & key).fetch1('cluster_metrics_list_name')
- 
-        # 2. Calculate the metrics
-        #First, whiten the recording     
-        filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
-        recording = st.preprocessing.whiten(
-            recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
-        tmpfile = tempfile.NamedTemporaryFile(dir=os.environ['NWB_DATAJOINT_TEMP_DIR'])
-        metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
-        metrics = QualityMetrics().compute_metrics(cluster_metrics_list_name, metrics_recording, sorting)  
+        sorting_folder = Path(os.getenv('SPYGLASS_SORTING_DIR'))
+        curated_sorting_name = self._get_curated_sorting_name(key)
+        key['sorting_path'] = str(sorting_folder / Path(curated_sorting_name))
+        sorting = sorting.save(folder=key['sorting_path'])
         
-        # add labels to the sorting based on metrics?
-        if 'noise_reject' in acpd:
-                if acpd['noise_reject']:
-                    # get the noise rejection parameters
-                    noise_reject_param = acpd['noise_reject_param']
-                    #TODO write noise/ rejection code
-
-        # Store the sorting with metrics in the NWB file and update the metrics in the workspace
+        # NWB stuff
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
- 
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
- 
         key['analysis_file_name'], key['units_object_id'] = \
-            SortingID.store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name, 
-            sort_interval=sort_interval, metrics=metrics)
+            self._save_sorting_nwb(key, sorting=sorting,
+                                   sort_interval_list_name=sort_interval_list_name, 
+                                   sort_interval=sort_interval)
+        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
 
-        SpikeSortingWorkspace().add_metrics_to_sorting(key, sorting_id=sorting_id, metrics=metrics)
-        self.insert1(key)
+        key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
+
+        # add sorting to SortingList
+        SortingList.insert1([key['recording_id'], key['sorting_id'], key['sorting_path']], skip_duplicates=True)
         
+        self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
-
-    def delete(self):
-        """
-        Extends the delete method of base class to implement permission checking
-        """
-        current_user_name = dj.config['database.user']
-        entries = self.fetch()
-        permission_bool = np.zeros((len(entries),))
-        print(f'Attempting to delete {len(entries)} entries, checking permission...')
     
-        for entry_idx in range(len(entries)):
-            # check the team name for the entry, then look up the members in that team, then get their datajoint user names
-            team_name = (SpikeSortingRecordingSelection & (SpikeSortingRecordingSelection & entries[entry_idx]).proj()).fetch1()['team_name']
-            lab_member_name_list = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
-            datajoint_user_names = []
-            for lab_member_name in lab_member_name_list:
-                datajoint_user_names.append((LabMember.LabMemberInfo & {'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
-            permission_bool[entry_idx] = current_user_name in datajoint_user_names
+    # TODO: Fix
+    def _get_curated_sorting_name(key):
+        original_sorting_name = (SpikeSortingRecording & key).fetch1('recording_name')
+        sorting_name = original_sorting_name + '_' \
+                       + key['auto_curation_params_name'] + '_' \
+                       + key['spikesorter_parameter_set_name']
+        return sorting_name
 
-        if np.sum(permission_bool)==len(entries):
-            print('Permission to delete all specified entries granted.')
-            # delete the sortings from the workspaces
-            #for entry_idx in range(len(entries)):
-                #print(entries[entry_idx])
-                #TODO FIX:
-                #key = (self & (self & entries[entry_idx]).proj())
-                # workspace_uri = key['curation_feed_uri'] 
-                #print(key)
-                # # load the workspace and the sorting
-                # workspace = sv.load_workspace(workspace_uri)
-                # sorting_id = key['sorting_id']
-                # workspace.delete_sorting(sorting_id)
-            super().delete()
-        else:
-            raise Exception('You do not have permission to delete all specified entries. Not deleting anything.')
+    @staticmethod
+    def _sorting_after_reject(sorting, reject_params):
+        return NotImplementedError
+    
+    @staticmethod
+    def _sorting_after_merge(sorting, merge_params):
+        return NotImplementedError
 
 @schema 
 class CuratedSpikeSortingSelection(dj.Manual):
     definition = """
-    -> AutomaticCuration
+    -> SortingList
     ---
+    manual_curation = 0: tinyint(1)   # 0 if False (default); 1 if True
     """
 
 @schema
@@ -178,7 +125,6 @@ class CuratedSpikeSorting(dj.Computed):
     -> AnalysisNwbfile   # New analysis NWB file to hold unit info
     units_object_id: varchar(40)   # Object ID for the units in NWB file
     """
-
     class Unit(dj.Part):
         definition = """
         # Table for holding sorted units
@@ -194,6 +140,13 @@ class CuratedSpikeSorting(dj.Computed):
         """
 
     def make(self, key):
+        
+        # if the workspace uri is specified, load the sorting from workspace
+            # else if workspace is not specified, then just duplicate entry from automaticcuration
+        # save it
+        # save it to nwb
+        
+        
         # define the list of properties. TODO: get this from table definition.
         non_metric_fields = ['spike_times', 'obs_intervals', 'sort_interval']
 

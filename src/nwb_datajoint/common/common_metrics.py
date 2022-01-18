@@ -1,5 +1,8 @@
+from pathlib import Path
+import os
+import json
 import datajoint as dj
-from spikeinterface.toolkit.qualitymetrics.quality_metric_list import _metric_name_to_func
+import spikeinterface.toolkit as st
     
 from .common_waveforms import Waveforms
 from .common_nwbfile import AnalysisNwbfile
@@ -16,28 +19,23 @@ class MetricParameters(dj.Manual):
     """
 
     def get_metrics_list(self):
-        """Returns a list of quality metrics available in spikeinterface
-        """
+        "Returns a list of quality metrics available in spikeinterface"
         # not all metrics in spikeinterface are supported yet
         # metric_list = st.qualitymetrics.get_quality_metric_list()
         metric_list = ['snr','isi_violation','nn_isolation','nn_noise_overlap']
         return metric_list
 
     def get_metric_default_params(self, metric: str):
-        """Returns default params for the given metric
-        """
-        metric_params = _get_metric_default_params(metric)
-        return metric_params
+        "Returns default params for the given metric"
+        return _get_metric_default_params(metric)
 
     def insert_default(self):
-        """Inserts default parameters
-        """
         list_name = 'franklab_default'
         params = {'isi': _get_metric_default_params('isi'),
                   'snr': _get_metric_default_params('snr'),
                   'nn_isolation': _get_metric_default_params('nn_isolation'),
                   'nn_noise_overlap': _get_metric_default_params('nn_noise_overlap')}
-        self.insert1([list_name, params], replace=True)
+        self.insert1([list_name, params], skip_duplicates=True)
     
     # TODO
     def _validate_metrics_list(self, key):
@@ -59,8 +57,9 @@ class MetricSelection(dj.Manual):
 @schema
 class QualityMetrics(dj.Computed):
     definition="""
-    -> MetricSelection
+    -> MetricSelection    
     ---
+    quality_metrics_path: varchar(500)
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the metrics in NWB file
     """
@@ -70,12 +69,16 @@ class QualityMetrics(dj.Computed):
         for metric_name, metric_params in key['params']:
             metric = self._compute_metric(waveform_extractor, metric_name, **metric_params)
             qm[metric_name] = metric
-        qm_name = self._get_waveform_extractor_name(key)
-        key['analysis_file_name'] = qm_name + '.nwb'
+        qm_name = self._get_quality_metrics_name(key)
+        key['quality_metrics_path'] = str(Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) / Path(qm_name+'.json'))
+        # save metrics dict as json
+        with open(key['quality_metrics_path'], 'w', encoding='utf-8') as f:
+            json.dump(qm, f, ensure_ascii=False, indent=4)
         # TODO: implement AnalysisNwbfile().add_metrics
+        key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
         AnalysisNwbfile().add_metrics(key['analysis_file_name'],
                                       waveform_extractor.sorting, metrics=qm)
-        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
+        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
         
         self.insert1(key)
         
@@ -91,8 +94,15 @@ class QualityMetrics(dj.Computed):
         else:
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():
-                metric[unit_id] = metric_func(waveform_extractor, this_unit_id=unit_id, **metric_params)
+                metric[str(unit_id)] = metric_func(waveform_extractor, this_unit_id=unit_id, **metric_params)
         return metric
+
+_metric_name_to_func = {
+    "snr": st.qualitymetrics.compute_snrs,
+    "isi_violation": st.qualitymetrics.compute_isi_violations,
+    'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
+    'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap
+}
 
 def _get_metric_default_params(metric):
     if metric == 'nn_isolation':
