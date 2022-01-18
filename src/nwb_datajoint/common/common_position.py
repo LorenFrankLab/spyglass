@@ -21,6 +21,7 @@ from tqdm import tqdm_notebook as tqdm
 from track_linearization import (get_linearized_position, make_track_graph,
                                  plot_graph_as_1D, plot_track_graph)
 
+from .common_behav import RawPosition
 from .common_interval import IntervalList
 from .common_nwbfile import AnalysisNwbfile
 
@@ -68,7 +69,7 @@ class IntervalPositionInfo(dj.Computed):
         print(f'Computing position for: {key}')
         key['analysis_file_name'] = AnalysisNwbfile().create(
             key['nwb_file_name'])
-        raw_position = (nd.common.common_behav.RawPosition() &
+        raw_position = (RawPosition() &
                         {'nwb_file_name': key['nwb_file_name'],
                          'interval_list_name': key['interval_list_name']
                          }).fetch_nwb()[0]
