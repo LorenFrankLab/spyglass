@@ -7,7 +7,7 @@ import pynwb
 
 from .common_device import Probe  # noqa: F401
 from .common_filter import FirFilter
-from .common_interval import IntervalList, interval_list_censor, interval_list_intersect  # noqa: F401
+from .common_interval import IntervalList, interval_list_censor, interval_list_contains_ind, interval_list_intersect  # noqa: F401
 # SortInterval, interval_list_intersect, interval_list_excludes_ind
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_region import BrainRegion  # noqa: F401
@@ -15,10 +15,9 @@ from .common_session import Session  # noqa: F401
 from .dj_helper_fn import fetch_nwb  # dj_replace
 from .nwb_helper_fn import (estimate_sampling_rate, get_data_interface,
                             get_electrode_indices, get_nwb_file,
-                            get_valid_intervals)
+                            get_valid_intervals, invalid_electrode_index)
 
 schema = dj.schema('common_ephys')
-
 
 @schema
 class ElectrodeGroup(dj.Imported):
@@ -327,7 +326,7 @@ class LFP(dj.Imported):
             return None
         # get the list of selected LFP Channels from LFPElectrode
         electrode_keys = (LFPSelection.LFPElectrode & key).fetch('KEY')
-        electrode_id_list = list(k['electrode_id'] for k in electrode_keys)
+        electrode_id_list = list(k['electrode_id'] for k in electrode_keys).sort()
 
         lfp_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
 
@@ -480,26 +479,16 @@ class LFPBand(dj.Computed):
         lfp_object = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch_nwb()[
             0]['lfp']
 
-        # load all the data to speed filtering
-        lfp_data = np.asarray(
-            lfp_object.data, dtype=type(lfp_object.data[0][0]))
-        # lfp_timestamps = np.asarray(lfp_object.timestamps, dtype=type(lfp_object.timestamps[0]))
-
         # get the electrodes to be filtered and their references
-        lfp_band_elect_id, lfp_band_ref_id = (LFPBandSelection().LFPBandElectrode() & key).fetch('electrode_id',
-                                                                                                 'reference_elect_id')
-
-        # get the indices of the electrodes to be filtered and the references
-        lfp_band_elect_index = get_electrode_indices(
-            lfp_object, lfp_band_elect_id)
-        lfp_band_ref_index = get_electrode_indices(lfp_object, lfp_band_ref_id)
-
-        # subtract off the references for the selected channels
-        for index, elect_index in enumerate(lfp_band_elect_index):
-            if lfp_band_ref_id[index] != -1:
-                lfp_data[:, elect_index] = lfp_data[:, elect_index] - \
-                    lfp_data[:, lfp_band_ref_index]
-
+        lfp_band_elect_id, lfp_band_ref_id = (LFPBandSelection().LFPBandElectrode() & key).fetch('electrode_id', 'reference_elect_id')
+ 
+        # sort the electrodes to make sure they are in ascending order
+        lfp_band_elect_id = np.asarray(lfp_band_elect_id)
+        lfp_band_ref_id = np.asarray(lfp_band_ref_id)
+        lfp_sort_order = np.argsort(lfp_band_elect_id)
+        lfp_band_elect_id = lfp_band_ref_id[lfp_sort_order]
+        lfp_band_ref_id = lfp_band_ref_id[lfp_sort_order]
+        
         lfp_sampling_rate = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1(
             'lfp_sampling_rate')
         interval_list_name, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1('target_interval_list_name',
@@ -512,11 +501,39 @@ class LFPBand(dj.Computed):
                                              'interval_list_name': lfp_interval_list}).fetch1('valid_times')
         min_length = (LFPBandSelection & key).fetch1('min_interval_len')
         lfp_band_valid_times = interval_list_intersect(valid_times, lfp_valid_times, min_length=min_length)
+        
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1(
             'filter_name', 'filter_sampling_rate', 'lfp_band_sampling_rate')
 
         decimation = int(lfp_sampling_rate) // lfp_band_sampling_rate
 
+        # load in the timestamps
+        timestamps = np.asarray(lfp_object.timestamps)
+        # get the indices of the first timestamp and the last timestamp that are within the valid times
+        included_indices = interval_list_contains_ind(lfp_band_valid_times, timestamps)
+        # pad the indices by 1 on each side to avoid message in filter_data
+        if included_indices[0] > 0:
+            included_indices[0] -= 1
+        if included_indices[-1] != len(timestamps) - 1:
+            included_indices[-1] += 1
+
+        timestamps = timestamps[included_indices[0]:included_indices[-1]]
+
+        # load all the data to speed filtering
+        lfp_data = np.asarray(lfp_object.data[included_indices[0]:included_indices[-1],:], 
+                              dtype=type(lfp_object.data[0][0]))       
+
+        # get the indices of the electrodes to be filtered and the references
+        lfp_band_elect_index = get_electrode_indices(
+            lfp_object, lfp_band_elect_id)
+        lfp_band_ref_index = get_electrode_indices(lfp_object, lfp_band_ref_id)
+
+        # subtract off the references for the selected channels
+        for index, elect_index in enumerate(lfp_band_elect_index):
+            if lfp_band_ref_id[index] != -1:
+                lfp_data[:, elect_index] = lfp_data[:, elect_index] - \
+                    lfp_data[:, lfp_band_ref_index[index]]
+        
         # get the LFP filter that matches the raw data
         filter = (FirFilter() & {'filter_name': filter_name} &
                                 {'filter_sampling_rate': filter_sampling_rate}).fetch(as_dict=True)
@@ -534,10 +551,28 @@ class LFPBand(dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
         # filter the data and write to an the nwb file
-        filtered_data_object_id, timestamp_interval = FirFilter().filter_data_nwb(lfp_band_file_abspath, lfp_object, filter_coeff,
-                                                              lfp_band_valid_times, lfp_band_elect_id, decimation)
+        filtered_data, new_timestamps = FirFilter().filter_data(timestamps, lfp_data, filter_coeff,
+                                                              lfp_band_valid_times, lfp_band_elect_index, decimation)
 
-        # now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table                                             
+        # now that the LFP is filtered, we create an electrical series for it and add it to the file
+        with pynwb.NWBHDF5IO(path=lfp_band_file_abspath, mode="a", load_namespaces=True) as io:
+            nwbf = io.read()
+            # get the indices of the electrodes in the electrode table of the file to get the right values
+            elect_index = get_electrode_indices(nwbf, lfp_band_elect_id)
+            electrode_table_region = nwbf.create_electrode_table_region(
+                elect_index, 'filtered electrode table')
+            eseries_name = 'filtered data'
+            # TODO: use datatype of data
+            es = pynwb.ecephys.ElectricalSeries(name=eseries_name,
+                                                data=filtered_data,
+                                                electrodes=electrode_table_region,
+                                                timestamps=new_timestamps)
+            # Add the electrical series to the scratch area
+            nwbf.add_scratch(es)
+            io.write(nwbf)
+            filtered_data_object_id = es.object_id
+        # 
+        # add the file to the AnalysisNwbfile table                                             
         AnalysisNwbfile().add(key['nwb_file_name'], lfp_band_file_name)        
         key['analysis_file_name'] = lfp_band_file_name
         key['filtered_data_object_id'] = filtered_data_object_id
@@ -547,7 +582,7 @@ class LFPBand(dj.Computed):
         tmp_valid_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
                                                  'interval_list_name': key['interval_list_name']}).fetch('valid_times')
         if len(tmp_valid_times) == 0:
-            lfp_band_valid_times = interval_list_censor(lfp_band_valid_times, timestamp_interval)
+            lfp_band_valid_times = interval_list_censor(lfp_band_valid_times, new_timestamps)
             # add an interval list for the LFP valid times
             IntervalList.insert1({'nwb_file_name': key['nwb_file_name'],
                                 'interval_list_name': key['interval_list_name'], 

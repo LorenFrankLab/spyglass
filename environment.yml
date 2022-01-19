@@ -25,7 +25,7 @@ dependencies:
     - mountainsort4
     - ml_ms4alg
     - spikeinterface>0.90
-    - git+git://github.com/SpikeInterface/spikeextractors.git@e6f9255b0ff1a0140b313ae33b62b4676eeabfcd
+    - spikeextractors
     - spikesorters
     - spiketoolkit
     - spikemetrics
@@ -36,4 +36,4 @@ dependencies:
     - pymysql>=1.0.*
     - h5py==2.10.*
     - sortingview>=0.6.16
-    - git+git://github.com/LorenFrankLab/ndx-franklab-novela
+    - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
