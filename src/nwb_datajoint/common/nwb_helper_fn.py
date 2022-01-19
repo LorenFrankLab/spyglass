@@ -214,7 +214,7 @@ def get_electrode_indices(nwb_object, electrode_ids):
         # electrodes is a DynamicTableRegion which may contain a subset of the rows in NWBFile.electrodes
         # match against only the subset of electrodes referenced by this ElectricalSeries
         electrode_table_indices = nwb_object.electrodes.data[:]
-        selected_elect_ids = nwb_object.electrodes.table.id[electrode_table_indices]
+        selected_elect_ids = [nwb_object.electrodes.table.id[x] for x in electrode_table_indices]
     elif isinstance(nwb_object, pynwb.NWBFile):
         # electrodes is a DynamicTable that contains all electrodes
         selected_elect_ids = nwb_object.electrodes.id[:]
