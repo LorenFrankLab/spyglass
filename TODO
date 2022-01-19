@@ -1,0 +1,6 @@
+1/18/22
+* Figure out how to delete orphan tables on datajoint
+* Test the current pipeline
+* Finish artifact detection pipeline
+* Figure out how to propagate timestamps for recordings with multiple disjoint segments
+* Decide the merge and reject algorithms
