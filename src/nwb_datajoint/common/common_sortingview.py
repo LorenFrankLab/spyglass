@@ -1,5 +1,3 @@
-from typing import Dict
-
 import datajoint as dj
 import numpy as np
 import sortingview as sv
@@ -23,9 +21,9 @@ class SortingviewWorkspace(dj.Computed):
     """
     class SortingID(dj.Part):
         definition = """
-        # Information about lab member in the context of Frank lab network
         -> master
         sorting_id: varchar(30)
+        ---
         sortingview_sorting_id: varchar(30)
         """
 
@@ -84,7 +82,7 @@ class SortingviewWorkspace(dj.Computed):
         
         return sortingview_sorting_id
     
-    def add_metrics_to_sorting(self, key: dict, metrics: Dict[Dict[str]],
+    def add_metrics_to_sorting(self, key: dict, metrics: dict,
                                sortingview_sorting_id: str=None):
         """Adds a metrics to the specified sorting.
         

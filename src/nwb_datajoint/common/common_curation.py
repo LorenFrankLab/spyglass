@@ -12,6 +12,8 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.toolkit as st
 
+from nwb_datajoint.common.common_sortingview import SortingviewWorkspace
+
 from .common_lab import LabMember, LabTeam
 from .common_interval import IntervalList, SortInterval
 from .common_nwbfile import AnalysisNwbfile
@@ -40,7 +42,7 @@ class AutomaticCurationParameters(dj.Manual):
 @schema
 class AutomaticCurationSelection(dj.Manual):
     definition = """
-    -> SortingList.proj(original_sorting_id='sorting_id')
+    -> SortingList.proj(parent_sorting_id='sorting_id')
     -> AutomaticCurationParameters
     -> QualityMetrics
     """
@@ -57,14 +59,14 @@ class AutomaticCurationSorting(dj.Computed):
     """
 
     def make(self, key):
-        original_sorting_path = (SortingList & {'sorting_id': key['original_sorting_id']}).fetch1('sorting_path')
-        original_sorting = si.load_extractor(original_sorting_path)
+        parent_sorting_path = (SortingList & {'sorting_id': key['parent_sorting_id']}).fetch1('sorting_path')
+        parent_sorting = si.load_extractor(parent_sorting_path)
         
         metrics_path = (QualityMetrics & key).fetch1('quality_metrics_path')
         with open(metrics_path) as f:
             quality_metrics = json.load(f)
         
-        sorting = self._sorting_after_reject(original_sorting, key['reject_params'])
+        sorting = self._sorting_after_reject(parent_sorting, quality_metrics, key['reject_params'])
         sorting = self._sorting_after_merge(sorting, key['merge_params'])
         
         sorting_folder = Path(os.getenv('SPYGLASS_SORTING_DIR'))
@@ -85,17 +87,50 @@ class AutomaticCurationSorting(dj.Computed):
         key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
 
         # add sorting to SortingList
-        SortingList.insert1([key['recording_id'], key['sorting_id'], key['sorting_path']], skip_duplicates=True)
+        SortingList.insert1({'recording_id': key['recording_id'],
+                             'sorting_id': key['sorting_id'],
+                             'sorting_path': key['sorting_path'],
+                             'parent_sorting_id': key['parent_sorting_id']}, skip_duplicates=True)
         
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
     
+    def update_manual_curation(self, key: dict):
+        """Based on information in key, loads the curated sorting from sortingview,
+        saves it, and inserts it to SortingList
+        
+        Assumes that the workspace corresponding to the recording and (original) sorting exists
+
+        Parameters
+        ----------
+        key : dict
+            primary key of AutomaticCurationSorting
+        """
+        workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
+        workspace = sv.load_workspace(workspace_uri=workspace_uri)
+        
+        sortingview_sorting_id = (SortingviewWorkspace.SortingID & {'recording_id': key['recording_id'],
+                                                                    'sorting_id': key['sorting_id']}).fetch1('sortingview_sorting_id')
+        manually_curated_sorting = workspace.get_curated_sorting_extractor(sorting_id=sortingview_sorting_id)
+        sorting = si.create_sorting_from_old_extractor(manually_curated_sorting)
+        
+        new_sorting_id = 'S_'+str(uuid.uuid4())[:8]
+        
+        sorting_name = key['sorting_id']
+        sorting_path = str(Path(os.getenv('SPYGLASS_SORTING_DIR')) / Path(sorting_name))
+        sorting = sorting.save(folder=sorting_path)
+        
+        SortingList.insert1({'recording_id': key['recording_id'],
+                             'sorting_id': new_sorting_id,
+                             'sorting_path': sorting_path,
+                             'parent_sorting_id': key['sorting_id']}, skip_duplicates=True)
+    
     # TODO: Fix
     def _get_curated_sorting_name(key):
-        original_sorting_name = (SpikeSortingRecording & key).fetch1('recording_name')
-        sorting_name = original_sorting_name + '_' \
+        parent_sorting_name = (SpikeSortingRecording & key).fetch1('recording_name')
+        sorting_name = parent_sorting_name + '_' \
                        + key['auto_curation_params_name'] + '_' \
                        + key['spikesorter_parameter_set_name']
         return sorting_name

@@ -597,7 +597,10 @@ class SpikeSorting(dj.Computed):
         key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
 
         # add sorting to SortingList
-        SortingList.insert1([key['recording_id'], key['sorting_id'], key['sorting_path']], skip_duplicates=True)
+        SortingList.insert1({'recording_id': key['recording_id'],
+                             'sorting_id': key['sorting_id'],
+                             'sorting_path': key['sorting_path'],
+                             'parent_sorting_id': ''}, skip_duplicates=True)
         
         self.insert1(key)
     
@@ -715,8 +718,5 @@ class SortingList(dj.Manual):
     sorting_id: varchar(15)
     ---
     sorting_path: varchar(1000)
+    parent_sorting_id='': varchar(15)
     """ 
-    def insert_manually_curated_sorting():
-        
-        # 
-        return NotImplementedError
