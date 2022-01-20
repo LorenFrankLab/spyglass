@@ -19,7 +19,7 @@ class SortingviewWorkspace(dj.Computed):
     sortingview_recording_id: varchar(30)
     workspace_uri: varchar(1000)
     """
-    class SortingID(dj.Part):
+    class Sortings(dj.Part):
         definition = """
         -> master
         sorting_id: varchar(30)
@@ -78,7 +78,7 @@ class SortingviewWorkspace(dj.Computed):
                                                        label=sorting_name)
         key['sorting_id'] = sorting_id
         key['sortingview_sorting_id'] = sortingview_sorting_id
-        self.SortingID.insert1(key)
+        self.Sortings.insert1(key)
         
         return sortingview_sorting_id
     

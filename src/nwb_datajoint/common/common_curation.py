@@ -109,7 +109,7 @@ class AutomaticCurationSorting(dj.Computed):
         workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
         workspace = sv.load_workspace(workspace_uri=workspace_uri)
         
-        sortingview_sorting_id = (SortingviewWorkspace.SortingID & {'recording_id': key['recording_id'],
+        sortingview_sorting_id = (SortingviewWorkspace.Sortings & {'recording_id': key['recording_id'],
                                                                     'sorting_id': key['sorting_id']}).fetch1('sortingview_sorting_id')
         manually_curated_sorting = workspace.get_curated_sorting_extractor(sorting_id=sortingview_sorting_id)
         sorting = si.create_sorting_from_old_extractor(manually_curated_sorting)
