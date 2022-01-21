@@ -14,7 +14,6 @@ class Subject(dj.Manual):
     sex = "U": enum("M", "F", "U")
     species = NULL: varchar(200)
     """
-    # TODO increase length of description field (and maybe all fields, really)
 
     @classmethod
     def insert_from_nwbfile(cls, nwbf):
