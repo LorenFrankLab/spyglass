@@ -1,5 +1,3 @@
-from operator import pos
-
 import datajoint as dj
 import pandas as pd
 import pynwb
@@ -10,9 +8,7 @@ from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .common_task import TaskEpoch
 from .dj_helper_fn import fetch_nwb
-from .nwb_helper_fn import (estimate_sampling_rate, get_all_spatial_series,
-                            get_data_interface, get_nwb_file,
-                            get_valid_intervals)
+from .nwb_helper_fn import get_all_spatial_series, get_data_interface, get_nwb_file
 
 schema = dj.schema('common_behav')
 
@@ -27,34 +23,38 @@ class PositionSource(dj.Manual):
     import_file_name: varchar(200) # path to import file if importing position data
     """
 
-    def get_nwbf_position_source(self, nwb_file_name):
-        """Given an nwb file name, gets the spatial series and Interval lists from the file, adds the interval
-        lists to the interval list table, and populates RawPosition if possible
-
-        :param nwb_file_name: the name of the nwb_file
-        :type nwb_file_name: string
+    @classmethod
+    def insert_from_nwbfile(cls, nwb_file_name):
+        """Given an NWB file name, get the spatial series and interval lists from the file, add the interval
+        lists to the IntervalList table, and populate the RawPosition table if possible.
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file.
         """
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
         pos_dict = get_all_spatial_series(nwbf, verbose=True)
-        key = dict()
         if pos_dict is not None:
             for epoch in pos_dict:
                 pdict = pos_dict[epoch]
+                pos_interval_list_name = cls.get_pos_interval_name(epoch)
+
                 # create the interval list and insert it
-                pos_interval_list_name = self.get_pos_interval_name(epoch)
                 interval_dict = dict()
                 interval_dict['nwb_file_name'] = nwb_file_name
                 interval_dict['interval_list_name'] = pos_interval_list_name
                 interval_dict['valid_times'] = pdict['valid_times']
                 IntervalList().insert1(interval_dict, skip_duplicates=True)
+
                 # add this interval list to the table
+                key = dict()
                 key['nwb_file_name'] = nwb_file_name
                 key['interval_list_name'] = pos_interval_list_name
                 key['source'] = 'trodes'
                 key['import_file_name'] = ''
-                self.insert1(key)
+                cls.insert1(key)
 
     @staticmethod
     def get_pos_interval_name(pos_epoch_num):
@@ -201,7 +201,7 @@ class Speed(dj.Imported):
         # this is created when we populate the Task schema
         key['interval_list_name'] = 'task epochs'
         self.insert1(key)
- 
+
 
 @schema
 class LinPos(dj.Imported):
