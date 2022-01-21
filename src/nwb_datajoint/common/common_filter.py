@@ -92,7 +92,7 @@ class FirFilter(dj.Manual):
         filterdict['filter_coeff'] = np.array(gsp.firdesign(
             numtaps, band_edges, desired, fs=fs, p=p), ndmin=1)
         # add this filter to the table
-        self.insert1(filterdict, skip_duplicates="True")
+        self.insert1(filterdict, skip_duplicates=True)
 
     def plot_magnitude(self, filter_name, fs):
         filter = (self & {'filter_name': filter_name} & {
@@ -226,7 +226,7 @@ class FirFilter(dj.Manual):
 
                 print('Filtering data')
                 for ii, (start, stop) in enumerate(indices):
-                    # calculate the size of the timestamps and the data and determine whether they 
+                    # calculate the size of the timestamps and the data and determine whether they
                     # can be loaded into < 90% of available RAM
                     mem = psutil.virtual_memory()
                     interval_samples = stop-start
@@ -243,7 +243,7 @@ class FirFilter(dj.Manual):
                         ts_offset += len(extracted_ts)
                         # filter the data
                         gsp.filter_data_fir(data,
-                                            filter_coeff, 
+                                            filter_coeff,
                                             axis=time_axis,
                                             input_index_bounds=[0, interval_samples-1],
                                             output_index_bounds=[
@@ -262,7 +262,7 @@ class FirFilter(dj.Manual):
                         ts_offset += len(extracted_ts)
                         # filter the data
                         gsp.filter_data_fir(data,
-                                            filter_coeff, 
+                                            filter_coeff,
                                             axis=time_axis,
                                             input_index_bounds=[start, stop],
                                             output_index_bounds=[
@@ -275,7 +275,7 @@ class FirFilter(dj.Manual):
                 start_end = [new_timestamps[0], new_timestamps[-1]]
 
                 io.write(nwbf)
- 
+
         return es.object_id, start_end
 
     def filter_data(self, timestamps, data, filter_coeff, valid_times, electrodes, decimation):

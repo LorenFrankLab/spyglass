@@ -9,7 +9,7 @@ import pynwb
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
 
-global invalid_electrode_index 
+global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 def get_nwb_file(nwb_file_path):
@@ -225,16 +225,25 @@ def get_electrode_indices(nwb_object, electrode_ids):
     else:
         raise ValueError(
             'nwb_object must be of type ElectricalSeries or NWBFile')
-    
+
     # for each electrode_id, find its index in selected_elect_ids and return that if it's there and invalid_electrode_index if not.
     return [selected_elect_ids.index(elect_id) if elect_id in selected_elect_ids else invalid_electrode_index for elect_id in electrode_ids ]
 
 def get_all_spatial_series(nwbf, verbose=False):
-    """Given an nwb file object, gets the spatial series and Interval lists from the file and returns a dictionary by epoch
-    :param nwbf: the nwb file object
-    :type nwbf: file object
-    :param verbose: flag to cause printing of sampling rate
-    :type verbose: bool
+    """Given an NWBFile, get the spatial series and interval lists from the file and return a dictionary by epoch.
+
+    Parameters
+    ----------
+    nwbf : pynwb.NWBFile
+        The source NWB file object.
+    verbose : bool
+        Flag representing whether to print the sampling rate.
+
+    Returns
+    -------
+    pos_data_dict : dict
+        Dict mapping indices to a dict with keys 'valid_times' and 'raw_position_object_id'. Returns None if there
+        is no position data in the file. The 'raw_position_object_id' is the object ID of the SpatialSeries object.
     """
     position = get_data_interface(nwbf, 'position', pynwb.behavior.Position)
     if position is None:
@@ -243,10 +252,9 @@ def get_all_spatial_series(nwbf, verbose=False):
     pos_data_dict = dict()
     for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
         pos_data_dict[pos_epoch] = dict()
-        # get the valid intervals for the position data
-        timestamps = np.asarray(spatial_series.timestamps)
 
         # estimate the sampling rate
+        timestamps = np.asarray(spatial_series.timestamps)
         sampling_rate = estimate_sampling_rate(timestamps, 1.75)
         if sampling_rate < 0:
             raise ValueError(

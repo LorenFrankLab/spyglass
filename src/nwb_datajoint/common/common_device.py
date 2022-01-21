@@ -2,7 +2,7 @@ import re
 
 import datajoint as dj
 
-schema = dj.schema("common_device")
+schema = dj.schema('common_device')
 
 
 @schema
@@ -15,7 +15,8 @@ class DataAcquisitionDevice(dj.Manual):
     adc_circuit = NULL: varchar(80)
     """
 
-    def insert_from_nwbfile(self, nwbf):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf):
         """Insert a data acquisition device from an NWB file.
 
         Parameters
@@ -38,7 +39,7 @@ class DataAcquisitionDevice(dj.Manual):
                 device_dict['system'] = 'SpikeGadgets'
                 device_dict['amplifier'] = device.amplifier
                 device_dict['adc_circuit'] = device.adc_circuit
-                self.insert1(device_dict, skip_duplicates=True)
+                cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['device_name'])
         return device_name_list
 
@@ -60,7 +61,8 @@ class CameraDevice(dj.Manual):
         # TODO: move to initialization script so it doesn't get called every time
         self.insert1({'camera_name': 'none'}, skip_duplicates='True')
 
-    def insert_from_nwbfile(self, nwbf):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf):
         """Insert camera devices from an NWB file
 
         Parameters
@@ -88,7 +90,7 @@ class CameraDevice(dj.Manual):
                 device_dict['lens'] = device.lens
                 device_dict['meters_per_pixel'] = device.meters_per_pixel
 
-                self.insert1(device_dict, skip_duplicates=True)
+                cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['camera_name'])
         print(f'Inserted {device_name_list}')
 
@@ -127,7 +129,7 @@ class Probe(dj.Manual):
         ----------
         nwbf : pynwb.NWBFile
             The source NWB file object.
-        """ 
+        """
         probe_dict = dict()
         probe_re = re.compile("probe")
         for d in nwbf.devices:
