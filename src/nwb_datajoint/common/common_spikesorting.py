@@ -10,7 +10,6 @@ import datajoint as dj
 import numpy as np
 import pynwb
 import scipy.stats as stats
-import sortingview as sv
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
@@ -25,7 +24,6 @@ from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
-from .sortingview_helper_fn import set_workspace_permission
 
 class Timer:
     """

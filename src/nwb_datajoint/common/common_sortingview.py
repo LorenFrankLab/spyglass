@@ -3,10 +3,7 @@ import numpy as np
 import sortingview as sv
 import spikeinterface as si
 
-from .common_spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
-                                  SpikeSorting, SortingList)
-from .common_lab import LabTeam
-from .sortingview_helper_fn import set_workspace_permission
+from .common_spikesorting import SpikeSortingRecording, SpikeSorting, SortingList
 
 schema = dj.schema('common_sortingview')
 
@@ -42,11 +39,6 @@ class SortingviewWorkspace(dj.Computed):
         key['workspace_uri'] = workspace.uri
         key['sortingview_recording_id'] = workspace.add_recording(recording=h5_recording,
                                                                   label=workspace_name)
-
-        # Give permission to workspace based on Google account
-        team_name = (SpikeSortingRecordingSelection & key).fetch1('team_name')
-        team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
-        set_workspace_permission(workspace_name, team_members)    
         
         self.insert1(key)
         
