@@ -90,13 +90,14 @@ class Nwbfile(dj.Manual):
         lock_file.write(f'{nwb_file_name}\n')
         lock_file.close()
 
-    def cleanup(self, delete_files=False):
+    @staticmethod
+    def cleanup(delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
         This does not delete the files themselves unless delete_files=True is specified
         Run this after deleting the Nwbfile() entries themselves.
         """
-        self.external['raw'].delete(delete_external_files=delete_files)
+        schema.external['raw'].delete(delete_external_files=delete_files)
 
 
 # TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
@@ -379,7 +380,8 @@ class AnalysisNwbfile(dj.Manual):
         nwbf = get_nwb_file(cls.get_abs_path(analysis_file_name))
         return get_electrode_indices(nwbf.electrodes, electrode_ids)
 
-    def cleanup(self, delete_files=False):
+    @staticmethod
+    def cleanup(delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
         Does not delete the files themselves unless delete_files=True is specified.
@@ -390,19 +392,16 @@ class AnalysisNwbfile(dj.Manual):
         delete_files : bool, optional
             Whether the original files should be deleted (default False).
         """
-        self.external['analysis'].delete(delete_external_files=delete_files)
+        schema.external['analysis'].delete(delete_external_files=delete_files)
 
     @staticmethod
     def nightly_cleanup():
-        from nwb_datajoint.common import common_nwbfile
-        child_tables = get_child_tables(common_nwbfile.AnalysisNwbfile)
-
-        (common_nwbfile.AnalysisNwbfile - child_tables).delete_quick()
+        child_tables = get_child_tables(AnalysisNwbfile)
+        (AnalysisNwbfile - child_tables).delete_quick()
 
         # a separate external files clean up required - this is to be done
         # during times when no other transactions are in progress.
-        common_nwbfile.schema.external['analysis'].delete(
-            delete_external_files=True)
+        AnalysisNwbfile.cleanup(True)
 
         # also check to see whether there are directories in the spikesorting folder with this
 
