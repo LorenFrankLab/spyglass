@@ -16,18 +16,9 @@ class Subject(dj.Manual):
     """
     # TODO increase length of description field (and maybe all fields, really)
 
-    UNKNOWN = 'UNKNOWN'
-
-    @classmethod
-    def initialize(cls):
-        # initialize with an unknown subject for use when NWB file does not contain a subject
-        # TODO: move to initialization script so it doesn't get called every time
-        cls.insert1(dict(subject_id=cls.UNKNOWN), skip_duplicates=True)
-
     @classmethod
     def insert_from_nwbfile(cls, nwbf):
         """Get the subject information from the NWBFile and insert it into the Subject table."""
-        # cls.initialize()
         sub = nwbf.subject
         if sub is None:
             print('No subject metadata found.\n')

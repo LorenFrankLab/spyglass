@@ -26,7 +26,6 @@ class IntervalList(dj.Manual):
         The interval list name for each epoch is set to the first tag for the epoch.
         If the epoch has no tags, then 'interval_x' will be used as the interval list name, where x is the index
         (0-indexed) of the epoch in the epochs table.
-
         The start time and stop time of the epoch are stored in the valid_times field as a numpy array of
         [start time, stop time] for each epoch.
 
@@ -48,7 +47,8 @@ class IntervalList(dj.Manual):
                 epoch_dict['interval_list_name'] = epoch_data.tags[0]
             else:
                 epoch_dict['interval_list_name'] = 'interval_' + str(epoch_index)
-            epoch_dict['valid_times'] = np.asarray([[epoch_data.start_time, epoch_data.stop_time]])
+            epoch_dict['valid_times'] = np.asarray(
+                [[epoch_data.start_time, epoch_data.stop_time]])
             cls.insert1(epoch_dict, skip_duplicates=True)
 
 
@@ -164,7 +164,7 @@ def interval_list_intersect(interval_list1, interval_list2, min_length=0.0, max_
         first element is start time; second element is stop time
     min_length: float, minimum length of interval for inclusion in output, default 0.0
     max_length: float, max length of interval for inclusion in output, default 1e10
-    
+
 
     Returns
     -------

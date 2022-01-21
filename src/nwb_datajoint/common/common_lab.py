@@ -97,7 +97,7 @@ class LabTeam(dj.Manual):
 
         for team_member in team_members:
             LabMember.insert_from_name(team_member)
-            query = (LabMember.LabMemberInfo & {'lab_member_name': team_member}).fetch('google_user_name')
+            query = (LabMember.LabMemberInfo() & {'lab_member_name': team_member}).fetch('google_user_name')
             if not query:
                 print(f'Please add the Google user ID for {team_member} in the LabMember.LabMemberInfo table '
                       'if you want to give them permission to manually curate sortings by this team.')
@@ -114,14 +114,6 @@ class Institution(dj.Manual):
     ---
     """
 
-    UNKNOWN = 'UNKNOWN'
-
-    @classmethod
-    def initialize(cls):
-        # initialize with an unknown institution for use when NWB file does not contain an institution
-        # TODO: move to initialization script so it doesn't get called every time
-        cls.insert1(dict(institution_name=cls.UNKNOWN), skip_duplicates=True)
-
     @classmethod
     def insert_from_nwbfile(cls, nwbf):
         """Insert institution information from an NWB file.
@@ -131,7 +123,6 @@ class Institution(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with institution information.
         """
-        # cls.initialize()
         if nwbf.institution is None:
             print('No institution metadata found.\n')
             return
@@ -145,14 +136,7 @@ class Lab(dj.Manual):
     ---
     """
 
-    UNKNOWN = 'UNKNOWN'
-
     @classmethod
-    def initialize(cls):
-        # initialize with an unknown lab for use when NWB file does not contain a lab
-        # TODO: move to initialization script so it doesn't get called every time
-        cls.insert1(dict(lab_name=cls.UNKNOWN), skip_duplicates=True)
-
     def insert_from_nwbfile(cls, nwbf):
         """Insert lab name information from an NWB file.
 
@@ -161,7 +145,6 @@ class Lab(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with lab name information.
         """
-        # cls.initialize()
         if nwbf.lab is None:
             print('No lab metadata found.\n')
             return

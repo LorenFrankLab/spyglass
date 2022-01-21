@@ -31,8 +31,9 @@ class DIOEvents(dj.Imported):
             print(f'No conforming behavioral events data found in {nwb_file_name}\n')
             return
 
-        # the valid times for these events are the same as the valid times for the raw ephys data
-        key['interval_list_name'] = (Raw & {'nwb_file_name': nwb_file_name}).fetch1('interval_list_name')
+        # the times for these events correspond to the valid times for the raw data
+        key['interval_list_name'] = (
+            Raw() & {'nwb_file_name': nwb_file_name}).fetch1('interval_list_name')
         for event_series in behav_events.time_series.values():
             key['dio_event_name'] = event_series.name
             key['dio_object_id'] = event_series.object_id

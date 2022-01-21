@@ -23,12 +23,12 @@ from .common_region import BrainRegion
 from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session
 from .common_spikesorting import (SortGroup, SpikeSortingFilterParameters, SpikeSortingArtifactDetectionParameters,
-                                  SpikeSortingRecordingSelection, SpikeSortingRecording, 
-                                  SpikeSortingWorkspace, 
+                                  SpikeSortingRecordingSelection, SpikeSortingRecording,
+                                  SpikeSortingWorkspace,
                                   SpikeSorter, SpikeSorterParameters, SortingID,
-                                  SpikeSortingSelection, SpikeSorting, 
+                                  SpikeSortingSelection, SpikeSorting,
                                   SpikeSortingMetricParameters,
-                                  ModifySortingParameters, ModifySortingSelection, ModifySorting, 
+                                  ModifySortingParameters, ModifySortingSelection, ModifySorting,
                                   AutomaticCurationParameters, AutomaticCurationSelection,
                                   AutomaticCuration,
                                   CuratedSpikeSortingSelection, CuratedSpikeSorting,

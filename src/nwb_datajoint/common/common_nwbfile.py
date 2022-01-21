@@ -195,7 +195,8 @@ class AnalysisNwbfile(dj.Manual):
             # get the current number of analysis files related to this nwb file
             query = (AnalysisNwbfile & {'analysis_file_name': nwb_file_name})
             original_nwb_file_name = query.fetch('nwb_file_name')[0]
-            analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
+            analysis_file_name = cls.__get_new_file_name(
+                original_nwb_file_name)
             # write the new file
             print(f'Writing new NWB file {analysis_file_name}...')
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
@@ -398,8 +399,8 @@ class AnalysisNwbfile(dj.Manual):
 
         (common_nwbfile.AnalysisNwbfile - child_tables).delete_quick()
 
-        # a separate external files clean up required - this is to be done during times when no other transactions are
-        # in progress.
+        # a separate external files clean up required - this is to be done
+        # during times when no other transactions are in progress.
         common_nwbfile.schema.external['analysis'].delete(
             delete_external_files=True)
 

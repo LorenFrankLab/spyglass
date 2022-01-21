@@ -9,7 +9,7 @@ import pynwb
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
 
-global invalid_electrode_index 
+global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 def get_nwb_file(nwb_file_path):
@@ -225,7 +225,7 @@ def get_electrode_indices(nwb_object, electrode_ids):
     else:
         raise ValueError(
             'nwb_object must be of type ElectricalSeries or NWBFile')
-    
+
     # for each electrode_id, find its index in selected_elect_ids and return that if it's there and invalid_electrode_index if not.
     return [selected_elect_ids.index(elect_id) if elect_id in selected_elect_ids else invalid_electrode_index for elect_id in electrode_ids ]
 

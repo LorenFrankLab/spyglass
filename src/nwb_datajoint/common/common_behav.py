@@ -1,7 +1,5 @@
-
 import datajoint as dj
 import ndx_franklab_novela
-from operator import pos
 import pandas as pd
 import pynwb
 
@@ -11,7 +9,7 @@ from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .common_task import TaskEpoch
 from .dj_helper_fn import fetch_nwb
-from .nwb_helper_fn import get_data_interface, get_nwb_file, get_all_spatial_series
+from .nwb_helper_fn import get_all_spatial_series, get_data_interface, get_nwb_file
 
 schema = dj.schema('common_behav')
 
