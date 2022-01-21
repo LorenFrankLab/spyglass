@@ -56,7 +56,7 @@ class ElectrodeGroup(dj.Imported):
                 elif electrode_group.targeted_x < 0:  # if negative x coordinate
                     key["target_hemisphere"] = "Left"  # define target location as left hemisphere
             else:
-                key['probe_type'] = 'unknown-probe-type'
+                key['probe_type'] = None
             self.insert1(key, skip_duplicates=True)
 
 
