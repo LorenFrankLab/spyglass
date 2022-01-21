@@ -328,6 +328,7 @@ class LFP(dj.Imported):
         # get the list of selected LFP Channels from LFPElectrode
         electrode_keys = (LFPSelection.LFPElectrode & key).fetch('KEY')
         electrode_id_list = list(k['electrode_id'] for k in electrode_keys)
+        electrode_id_list.sort()
 
         lfp_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
 
@@ -483,6 +484,13 @@ class LFPBand(dj.Computed):
         # get the electrodes to be filtered and their references
         lfp_band_elect_id, lfp_band_ref_id = (LFPBandSelection().LFPBandElectrode() & key).fetch('electrode_id', 'reference_elect_id')
  
+        # sort the electrodes to make sure they are in ascending order
+        lfp_band_elect_id = np.asarray(lfp_band_elect_id)
+        lfp_band_ref_id = np.asarray(lfp_band_ref_id)
+        lfp_sort_order = np.argsort(lfp_band_elect_id)
+        lfp_band_elect_id = lfp_band_ref_id[lfp_sort_order]
+        lfp_band_ref_id = lfp_band_ref_id[lfp_sort_order]
+        
         lfp_sampling_rate = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1(
             'lfp_sampling_rate')
         interval_list_name, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1('target_interval_list_name',

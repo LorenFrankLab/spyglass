@@ -8,7 +8,7 @@ from .common_nwbfile import Nwbfile
 from .common_subject import Subject
 from .nwb_helper_fn import get_nwb_file
 
-schema = dj.schema("common_session")
+schema = dj.schema('common_session')
 
 # TODO: figure out what to do about ExperimenterList
 
@@ -98,27 +98,15 @@ class ExperimenterList(dj.Imported):
     def make(self, key):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        self.insert1({'nwb_file_name': nwb_file_name}, skip_duplicates=True)
+        self.insert1({'nwb_file_name': nwb_file_name}, skip_duplicates=True)  # TODO is this necessary??
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        for e in nwbf.experimenter:
-            # check to see if the experimenter is in the lab member list, and if not add her / him
-            if {'lab_member_name': e} not in LabMember():
-                names = [x.strip() for x in e.split(' ')]
-                labmember_dict = dict()
-                labmember_dict['lab_member_name'] = e
-                if len(names) == 2:
-                    labmember_dict['first_name'] = names[0]
-                    labmember_dict['last_name'] = names[1]
-                else:
-                    warnings.warn(
-                        f'Experimenter {e} does not seem to have a first and last name')
-                    labmember_dict['first_name'] = 'unknown'
-                    labmember_dict['last_name'] = 'unknown'
-                LabMember().insert1(labmember_dict)
-            # now insert the experimenter, which is a combination of the nwbfile and the name
-            key = dict(
-                nwb_file_name=nwb_file_name,
-                lab_member_name=e
-            )
-            ExperimenterList().Experimenter().insert1(key)
+        if nwbf.experimenter is None:
+            return
+
+        for name in nwbf.experimenter:
+            LabMember().insert_from_name(name)
+            key = dict()
+            key['nwb_file_name'] = nwb_file_name
+            key['lab_member_name'] = name
+            self.Experimenter().insert1(key)
