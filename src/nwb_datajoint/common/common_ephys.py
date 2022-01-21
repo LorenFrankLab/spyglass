@@ -326,7 +326,8 @@ class LFP(dj.Imported):
             return None
         # get the list of selected LFP Channels from LFPElectrode
         electrode_keys = (LFPSelection.LFPElectrode & key).fetch('KEY')
-        electrode_id_list = list(k['electrode_id'] for k in electrode_keys).sort()
+        electrode_id_list = list(k['electrode_id'] for k in electrode_keys)
+        electrode_id_list.sort()
 
         lfp_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
 
