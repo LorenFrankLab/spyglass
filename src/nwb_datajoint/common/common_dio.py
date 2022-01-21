@@ -28,7 +28,8 @@ class DIOEvents(dj.Imported):
 
         behav_events = get_data_interface(nwbf, 'behavioral_events', pynwb.behavior.BehavioralEvents)
         if behav_events is None:
-            print(f'No conforming behavioral events data found in {nwb_file_name}\n')
+            print(
+                f'No conforming behavioral events data interface found in {nwb_file_name}\n')
             return
 
         # the times for these events correspond to the valid times for the raw data
