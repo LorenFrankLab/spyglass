@@ -1,4 +1,5 @@
 import datajoint as dj
+import pynwb
 
 from .common_ephys import Raw
 from .common_interval import IntervalList  # noqa: F401
@@ -25,19 +26,18 @@ class DIOEvents(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        behav_events = get_data_interface(nwbf, 'behavioral_events')
+        behav_events = get_data_interface(nwbf, 'behavioral_events', pynwb.behavior.BehavioralEvents)
         if behav_events is None:
             print(
-                f'No behavioral events data interface found in {nwb_file_name}\n')
+                f'No conforming behavioral events data interface found in {nwb_file_name}\n')
             return
 
-        behav_events_ts = behav_events.time_series
         # the times for these events correspond to the valid times for the raw data
         key['interval_list_name'] = (
             Raw() & {'nwb_file_name': nwb_file_name}).fetch1('interval_list_name')
-        for event_series in behav_events_ts:
-            key['dio_event_name'] = event_series
-            key['dio_object_id'] = behav_events_ts[event_series].object_id
+        for event_series in behav_events.time_series.values():
+            key['dio_event_name'] = event_series.name
+            key['dio_object_id'] = event_series.object_id
             self.insert1(key, skip_duplicates=True)
 
     def fetch_nwb(self, *attrs, **kwargs):
