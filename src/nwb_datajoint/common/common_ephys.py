@@ -49,13 +49,14 @@ class ElectrodeGroup(dj.Imported):
             # the following should probably be a function that returns the probe devices from the file
             if isinstance(electrode_group.device, ndx_franklab_novela.Probe):
                 key['probe_type'] = electrode_group.device.probe_type
+
+                # Define target_hemisphere based on targeted x coordinate
+                if electrode_group.targeted_x >= 0:  # if positive or zero x coordinate
+                    key["target_hemisphere"] = "Right"  # define target location as right hemisphere
+                elif electrode_group.targeted_x < 0:  # if negative x coordinate
+                    key["target_hemisphere"] = "Left"  # define target location as left hemisphere
             else:
                 key['probe_type'] = 'unknown-probe-type'
-            # Define target_hemisphere based on targeted x coordinate
-            if electrode_group.targeted_x >= 0:  # if positive or zero x coordinate
-                key["target_hemisphere"] = "Right"  # define target location as right hemisphere
-            elif electrode_group.targeted_x < 0:  # if negative x coordinate
-                key["target_hemisphere"] = "Left"  # define target location as left hemisphere
             self.insert1(key, skip_duplicates=True)
 
 
