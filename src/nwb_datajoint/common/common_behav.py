@@ -27,6 +27,7 @@ class PositionSource(dj.Manual):
     def insert_from_nwbfile(cls, nwb_file_name):
         """Given an NWB file name, get the spatial series and interval lists from the file, add the interval
         lists to the IntervalList table, and populate the RawPosition table if possible.
+        
         Parameters
         ----------
         nwb_file_name : str
