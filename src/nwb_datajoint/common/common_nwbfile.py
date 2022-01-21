@@ -13,7 +13,7 @@ from hdmf.common import DynamicTable
 from .dj_helper_fn import get_child_tables
 from .nwb_helper_fn import get_electrode_indices, get_nwb_file
 
-schema = dj.schema("common_nwbfile")
+schema = dj.schema('common_nwbfile')
 
 # define the fields that should be kept in AnalysisNWBFiles
 NWB_KEEP_FIELDS = ('devices', 'electrode_groups', 'electrodes', 'experiment_description',

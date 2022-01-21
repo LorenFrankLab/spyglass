@@ -2,7 +2,7 @@ import re
 
 import datajoint as dj
 
-schema = dj.schema("common_device")
+schema = dj.schema('common_device')
 
 
 @schema

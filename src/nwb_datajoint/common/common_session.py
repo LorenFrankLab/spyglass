@@ -8,7 +8,7 @@ from .common_nwbfile import Nwbfile
 from .common_subject import Subject
 from .nwb_helper_fn import get_nwb_file
 
-schema = dj.schema("common_session")
+schema = dj.schema('common_session')
 
 # TODO: figure out what to do about ExperimenterList
 

@@ -1,7 +1,7 @@
 """Schema for institution name, lab name, and lab members (experimenters)."""
 import datajoint as dj
 
-schema = dj.schema("common_lab")
+schema = dj.schema('common_lab')
 
 @schema
 class LabMember(dj.Manual):
