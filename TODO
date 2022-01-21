@@ -1,5 +1,6 @@
 1/18/22
 * Figure out how to delete orphan tables on datajoint
+  * Done: try connecting and dropping via virtual module; else delete log, data, and the offending folders in docker dir
 * Test the current pipeline
 * Finish artifact detection pipeline
 * Figure out how to propagate timestamps for recordings with multiple disjoint segments
