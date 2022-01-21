@@ -2,6 +2,8 @@ import hither2 as hi
 import kachery_client as kc
 import multiprocessing
 import os
+from pymysql.err import OperationalError
+import traceback
 
 import time
 from ._config import DATAJOINT_SERVER_PORT
@@ -77,14 +79,20 @@ def kill_datajoint_server():
 def _wait_for_datajoint_server_to_start():
     time.sleep(15)  # it takes a while to start the server
     timer = time.time()
+    print('Waiting for DataJoint server to start. Time', timer)
     while True:
         try:
             from nwb_datajoint.common import Session  # noqa: F401
             return
-        except Exception as e:
-            print('DataJoint server not started yet. Connection error:', e)
-            pass
-        elapsed = time.time() - timer
+        except OperationalError as e:  # e.g. Connection Error
+            print('DataJoint server not yet started. Time', time.time())
+            print(e)
+        except Exception:
+            print('Failed to import Session. Time', time.time())
+            print(traceback.format_exc())
+        current_time = time.time()
+        elapsed = current_time - timer
         if elapsed > 300:
-            raise Exception('Timeout while waiting for datajoint server to start')
+            raise Exception('Timeout while waiting for datajoint server to start and '
+                            'import Session to succeed. Time', current_time)
         time.sleep(5)

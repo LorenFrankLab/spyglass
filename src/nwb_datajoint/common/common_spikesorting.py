@@ -12,6 +12,7 @@ import datajoint as dj
 import kachery_client as kc
 import numpy as np
 from numpy.core.records import record
+import os
 import pandas as pd
 import pynwb
 import scipy.stats as stats
@@ -33,6 +34,7 @@ from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
+
 
 class Timer:
     """
@@ -80,7 +82,7 @@ class SortGroup(dj.Manual):
         -> Electrode
         """
 
-    def set_group_by_shank(self, nwb_file_name, references=None):
+    def set_group_by_shank(self, nwb_file_name, references=None, omit_ref_electrode_group=False):
         """
         Adds sort group entries in SortGroup table based on shank
         Assigns groups to all non-bad channel electrodes based on their shank:
@@ -96,6 +98,8 @@ class SortGroup(dj.Manual):
         references : dict
             Optional. If passed, used to set references. Otherwise, references set using
             original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
+        omit_ref_electrode_group : bool
+            Optional. If True, no sort group is defined for electrode group of reference.
         """
         # delete any current groups
         (SortGroup & {'nwb_file_name': nwb_file_name}).delete()
@@ -130,14 +134,32 @@ class SortGroup(dj.Manual):
                         raise Exception(f"electrode group {e_group} not a key in references, so cannot set reference")
                     else:
                         sg_key['sort_reference_electrode_id'] = references[e_group]
-                self.insert1(sg_key)
 
-                shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                                                        electrodes['probe_shank'] == shank)]
-                for elect in shank_elect:
-                    sge_key['electrode_id'] = elect
-                    self.SortGroupElectrode().insert1(sge_key)
-                sort_group += 1
+                # If not omitting electrode group that reference electrode is a part of, or if doing this but current
+                # electrode group not same as reference electrode group, insert sort group and procceed to define sort
+                # group electrodes
+                reference_electrode_group = \
+                electrodes[electrodes["electrode_id"] == sg_key['sort_reference_electrode_id']][
+                    "electrode_group_name"]
+                # If reference electrode corresponds to a real electrode (and not for example the flag for common
+                # average referencing),
+                # check that exactly one electrode group was found for it, and take that electrode group.
+                if len(reference_electrode_group) == 1:
+                    reference_electrode_group = reference_electrode_group[0]
+                elif (int(sg_key['sort_reference_electrode_id']) > 0) and (len(reference_electrode_group) != 1):
+                    raise Exception(
+                        f"Should have found exactly one electrode group for reference electrode,"
+                        f"but found {len(reference_electrode_group)}.")
+                if not omit_ref_electrode_group or (str(e_group) != str(reference_electrode_group)):
+                    self.insert1(sg_key)
+                    shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
+                                                                            electrodes['probe_shank'] == shank)]
+                    for elect in shank_elect:
+                        sge_key['electrode_id'] = elect
+                        self.SortGroupElectrode().insert1(sge_key)
+                    sort_group += 1
+                else:
+                    print(f"Omitting electrode group {e_group} from sort groups because contains reference.")
 
     def set_group_by_electrode_group(self, nwb_file_name):
         '''
@@ -320,7 +342,6 @@ class SpikeSortingArtifactDetectionParameters(dj.Manual):
 
         half_window_points = np.round(
             recording.get_sampling_frequency() * 1000 * zero_window_len / 2)
-        nelect_above = np.round(proportion_above_thresh * data.shape[0])
         # get the data traces
         data = recording.get_traces()
 
@@ -388,14 +409,14 @@ class SpikeSortingRecording(dj.Computed):
             # update the sort interval valid times to exclude the artifacts
             sort_interval_valid_times = interval_list_intersect(
                 sort_interval_valid_times, no_artifact_valid_times)
-            # exclude the invalid times
-            mask = np.full(recording.get_num_frames(), True, dtype='bool')
-            excluded_ind = interval_list_excludes_ind(
-                sort_interval_valid_times, recording_timestamps)
-            if len(excluded_ind) > 0:
-                mask[interval_list_excludes_ind(
-                    sort_interval_valid_times, recording_timestamps)] = False
-            recording = st.preprocessing.mask(recording, mask)
+        # exclude the invalid times
+        mask = np.full(recording.get_num_frames(), True, dtype='bool')
+        excluded_ind = interval_list_excludes_ind(
+            sort_interval_valid_times, recording_timestamps)
+        if len(excluded_ind) > 0:
+            mask[interval_list_excludes_ind(
+                sort_interval_valid_times, recording_timestamps)] = False
+        recording = st.preprocessing.mask(recording, mask)
 
         #add the sort_interval_valid_times as an interval list
         tmp_key = {}
@@ -419,7 +440,8 @@ class SpikeSortingRecording(dj.Computed):
             recording = se.CacheRecordingExtractor(
                         recording, save_path=tmpfile.name, chunk_mb=1000, n_jobs=4)
             h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(recording,
-                                                                                    key["recording_extractor_path"])
+                                                 key["recording_extractor_path"], dtype='int16')
+
         key['recording_extractor_object'] = h5_recording.object()
         self.insert1(key)
 
@@ -778,6 +800,23 @@ class SpikeSortingWorkspace(dj.Computed):
         else:
             return url_list
 
+    def precalculate(self, key):
+        """For each workspace specified by the key, this will run the snipped precalculation code
+
+        Args:
+            key ([dict]): key to one or more SpikeSortingWorkspaces
+        Returns:
+            None
+        """
+        workspace_uri_list = (self & key).fetch('workspace_uri')
+        #TODO: consider running in parallel
+        for workspace_uri in workspace_uri_list:
+            try:
+                workspace = sv.load_workspace(workspace_uri)
+                workspace.precalculate()
+            except:
+                Warning(f'Error precomputing for workspace {workspace_uri}')
+
 @schema
 class SortingID(dj.Manual):
     definition = """
@@ -896,12 +935,17 @@ class SpikeSorting(dj.Computed):
         print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'spikesorter_parameter_set_name': key['spikesorter_parameter_set_name']}).fetch1()
-
-        sorting = ss.run_sorter(key['sorter_name'], recording,
-                                output_folder=os.getenv(
-                                    'SORTING_TEMP_DIR', None),
-                                **sort_parameters['parameter_dict'])
-
+        if 'NWB_DATAJOINT_TEMP_DIR' in os.environ:
+            tempfile.tempdir = os.getenv('NWB_DATAJOINT_TEMP_DIR')
+            with tempfile.TemporaryDirectory() as tmp_output_folder:
+                os.environ['MS4_TMP_OUTPUT'] = tmp_output_folder
+                sorting = ss.run_sorter(key['sorter_name'], recording,
+                                        output_folder=os.getenv('MS4_TMP_OUTPUT'),
+                                        **sort_parameters['parameter_dict'])
+        else:
+            sorting = ss.run_sorter(key['sorter_name'], recording,
+                                    output_folder=None,
+                                    **sort_parameters['parameter_dict'])
         key['time_of_sort'] = int(time.time())
 
         print('\nSaving sorting results...')       # get the sort interval valid times and the original sort interval
@@ -1336,10 +1380,12 @@ class AutomaticCuration(dj.Computed):
 
         # get the cluster metrics list name and add a name for this sorting
         cluster_metrics_list_name = (AutomaticCurationSelection & key).fetch1('cluster_metrics_list_name')
+        metric_dict = (SpikeSortingMetricParameters & {'cluster_metrics_list_name':cluster_metrics_list_name}).fetch1('metric_dict')
+        n_metrics = sum(metric_dict.values())
 
         # 2. Calculate the metrics
         #First, whiten the recording
-        with Timer(label=f'whitening and computing new quality metrics', verbose=True):
+        if n_metrics>0:
             filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
             recording = st.preprocessing.whiten(
                 recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
@@ -1347,13 +1393,14 @@ class AutomaticCuration(dj.Computed):
             metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
             metrics = SpikeSortingMetricParameters().compute_metrics(cluster_metrics_list_name, metrics_recording, sorting)
 
-        # add labels to the sorting based on metrics?
-        if 'noise_reject' in acpd:
-                if acpd['noise_reject']:
-                    # get the noise rejection parameters
-                    noise_reject_param = acpd['noise_reject_param']
-                    #TODO write noise/ rejection code
-
+            # add labels to the sorting based on metrics?
+            if 'noise_reject' in acpd:
+                    if acpd['noise_reject']:
+                        # get the noise rejection parameters
+                        noise_reject_param = acpd['noise_reject_param']
+                        #TODO write noise/ rejection code
+        else:
+            metrics = None
         # Store the sorting with metrics in the NWB file and update the metrics in the workspace
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
 
@@ -1363,8 +1410,8 @@ class AutomaticCuration(dj.Computed):
         key['analysis_file_name'], key['units_object_id'] = \
             store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name,
             sort_interval=sort_interval, metrics=metrics)
-
-        SpikeSortingWorkspace().add_metrics_to_sorting(key, sorting_id=sorting_id, metrics=metrics)
+        if n_metrics>0:
+            SpikeSortingWorkspace().add_metrics_to_sorting(key, sorting_id=sorting_id, metrics=metrics)
         self.insert1(key)
 
 
@@ -1488,7 +1535,7 @@ class CuratedSpikeSorting(dj.Computed):
         # get the original units from the Automatic curation NWB file
         orig_units = (AutomaticCuration & key).fetch_nwb()[0]['units']
         orig_units = orig_units.loc[accepted_units]
-        #TODO: fix if unit 1 doesn't exist
+        #TODO: fix if unit 0 doesn't exist
         sort_interval = orig_units.iloc[0]['sort_interval']
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
 

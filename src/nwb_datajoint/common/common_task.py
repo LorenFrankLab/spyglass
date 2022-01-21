@@ -117,6 +117,7 @@ class TaskEpoch(dj.Imported):
      -> Task
      -> [nullable] CameraDevice
      -> IntervalList
+     task_environment='' : varchar(200)  # the environment the animal was in
      """
 
     def make(self, key):
@@ -155,8 +156,14 @@ class TaskEpoch(dj.Imported):
                     key['camera_name'] = CameraDevice.UNKNOWN
 
                 # get the interval list for this task, which corresponds to the matching epoch for the raw data.
-                # users should define more restrictive intervals as required for analyses
-                session_intervals = (IntervalList() & {'nwb_file_name': nwb_file_name}).fetch('interval_list_name')
+                # Users should define more restrictive intervals as required for analyses
+                session_intervals = (IntervalList() & {'nwb_file_name': nwb_file_name}).fetch(
+                    'interval_list_name')
+                # Add task environment
+                try:
+                    key["task_environment"] = task.task_environment[0]
+                except Exception:
+                    key["task_environment"] = 'none'
                 for epoch in task.task_epochs[0]:
                     # TODO in beans file, task_epochs[0] is 1x2 dset of ints, so epoch would be an int
                     key['epoch'] = epoch

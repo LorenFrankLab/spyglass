@@ -63,6 +63,19 @@ class SortInterval(dj.Manual):
 
 
 # TODO: make all of the functions below faster if possible
+def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
+    """Returns an interval list with only the intervals whose length is > min_length and < max_length
+
+    Args:
+        interval_list ((N,2) np.array): input interval list.
+        min_length (float, optional): [minimum interval length in seconds]. Defaults to 0.0.
+        max_length ([type], optional): [maximum interval length in seconds]. Defaults to 1e10.
+    """
+    # get the length of each interval
+    lengths = np.ravel(np.diff(interval_list))
+    # return only intervals of the appropriate lengths
+    return interval_list[np.logical_and(lengths > min_length, lengths < max_length)]
+
 def interval_list_contains_ind(valid_times, timestamps):
     """Returns the indices for the timestamps that are contained within the valid_times intervals
 
@@ -139,7 +152,7 @@ def interval_list_excludes(valid_times, timestamps):
     return timestamps[ind]
 
 
-def interval_list_intersect(interval_list1, interval_list2):
+def interval_list_intersect(interval_list1, interval_list2, min_length=0.0, max_length=1e10):
     """
     Finds the intersection (overlapping times) for two interval lists
 
@@ -149,6 +162,9 @@ def interval_list_intersect(interval_list1, interval_list2):
         first element is start time; second element is stop time
     interval_list2: np.array, (N,2) where N = number of intervals
         first element is start time; second element is stop time
+    min_length: float, minimum length of interval for inclusion in output, default 0.0
+    max_length: float, max length of interval for inclusion in output, default 1e10
+    
 
     Returns
     -------
@@ -185,17 +201,22 @@ def interval_list_intersect(interval_list1, interval_list2):
     intersect = []
     for start, stop in zip(intersection_starts, intersection_stops):
         intersect.append([combined_intervals[start], combined_intervals[stop]])
-    return np.asarray(intersect)
+
+    return intervals_by_length(np.asarray(intersect), min_length=min_length, max_length=max_length)
 
 
 # TODO: test interval_list_union code
-def interval_list_union(interval_list1, interval_list2):
+def interval_list_union(interval_list1, interval_list2, min_length=0.0, max_length=1e10):
     """Finds the union (all times in one or both) for two interval lists
 
     :param interval_list1: The first interval list
     :type interval_list1: numpy array of intervals [start, stop]
     :param interval_list2: The second interval list
     :type interval_list2: numpy array of intervals [start, stop]
+    :param min_length: optional minimum length of interval for inclusion in output, default 0.0
+    :type min_length: float
+    :param max_length: optional maximum length of interval for inclusion in output, default 1e10
+    :type max_length: float
     :return: interval_list
     :rtype:  numpy array of intervals [start, stop]
     """
