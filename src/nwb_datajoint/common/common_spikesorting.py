@@ -1400,7 +1400,8 @@ class AutomaticCuration(dj.Computed):
                         # get the noise rejection parameters
                         noise_reject_param = acpd['noise_reject_param']
                         #TODO write noise/ rejection code
-        # metrics = None
+        else:
+            metrics = None
         # Store the sorting with metrics in the NWB file and update the metrics in the workspace
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
 
