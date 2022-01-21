@@ -24,7 +24,7 @@ dependencies:
     - kachery-client
     - mountainsort4
     - ml_ms4alg
-    - spikeinterface>0.90
+    - git+https://github.com/SpikeInterface/spikeinterface.git
     - spikeextractors
     - spikesorters
     - spiketoolkit
