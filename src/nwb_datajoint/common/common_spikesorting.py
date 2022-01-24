@@ -357,7 +357,7 @@ class SpikeSortingArtifactDetectionParameters(dj.Manual):
         above_z = dataz > zscore_thresh
 
         above_both = np.ravel(np.argwhere(
-            np.sum(np.logical_and(above_z, above_a), axis=0) >= nelect_above))
+            np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
         valid_timestamps = recording._timestamps
         # for each above threshold point, set the timestamps on either side of it to -1
         for a in above_both:

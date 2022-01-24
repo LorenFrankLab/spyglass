@@ -19,13 +19,23 @@ class IntervalList(dj.Manual):
     valid_times: longblob # numpy array with start and end times for each interval
     """
 
-    def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
-        '''
-        :param nwbf:
-        :param nwb_file_name:
-        :return: None
-        Adds each of the entries in the nwb epochs table to the Interval list
-        '''
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf, *, nwb_file_name):
+        """Add each entry in the NWB file epochs table to the IntervalList table.
+
+        The interval list name for each epoch is set to the first tag for the epoch.
+        If the epoch has no tags, then 'interval_x' will be used as the interval list name, where x is the index
+        (0-indexed) of the epoch in the epochs table.
+        The start time and stop time of the epoch are stored in the valid_times field as a numpy array of
+        [start time, stop time] for each epoch.
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            The source NWB file object.
+        nwb_file_name : str
+            The file name of the NWB file, used as a primary key to the Session table.
+        """
         epochs = nwbf.epochs.to_dataframe()
         epoch_dict = dict()
         epoch_dict['nwb_file_name'] = nwb_file_name
@@ -33,7 +43,7 @@ class IntervalList(dj.Manual):
             epoch_dict['interval_list_name'] = e[1].tags[0]
             epoch_dict['valid_times'] = np.asarray(
                 [[e[1].start_time, e[1].stop_time]])
-            self.insert1(epoch_dict, skip_duplicates=True)
+            cls.insert1(epoch_dict, skip_duplicates=True)
 
 
 @schema
@@ -148,7 +158,7 @@ def interval_list_intersect(interval_list1, interval_list2, min_length=0.0, max_
         first element is start time; second element is stop time
     min_length: float, minimum length of interval for inclusion in output, default 0.0
     max_length: float, max length of interval for inclusion in output, default 1e10
-    
+
 
     Returns
     -------
@@ -235,13 +245,12 @@ def interval_list_censor(interval_list, timestamps):
     Args:
         interval_list (numpy array of intervals [start, stop]): interval list from IntervalList valid times
         timestamps (numpy array or list): timestamp list
-    
-    Returns: 
+
+    Returns:
         interval_list (numpy array of intervals [start, stop])
     """
     # check that all timestamps are in the interval list
-    assert len(interval_list_contains_ind(interval_list, timestamps)) == len(timestamps), 'interval_list must contain all timestamps' 
-    
-    timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
-    return interval_list_intersect(interval_list, timestamps_interval)    
+    assert len(interval_list_contains_ind(interval_list, timestamps)) == len(timestamps), 'interval_list must contain all timestamps'
 
+    timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
+    return interval_list_intersect(interval_list, timestamps_interval)
