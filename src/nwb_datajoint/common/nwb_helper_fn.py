@@ -9,6 +9,8 @@ import pynwb
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
 
+global invalid_electrode_index
+invalid_electrode_index = 99999999
 
 def get_nwb_file(nwb_file_path):
     """Return an NWBFile object with the given file path in read mode.
@@ -196,6 +198,8 @@ def get_electrode_indices(nwb_object, electrode_ids):
     nwbfile.electrodes has ID 10, then calling get_electrode_indices(electricalseries, 10) will return 0, the
     index of the matching electrode in electricalseries.electrodes.
 
+    Indices for electrode_ids that are not in the electrical series are returned as np.nan
+
     If an NWBFile is given, then the row indices with the matching IDs in the file's electrodes table are returned.
 
     Parameters
@@ -207,30 +211,39 @@ def get_electrode_indices(nwb_object, electrode_ids):
 
     Returns
     -------
-    electrode_indices : np.ndarray
+    electrode_indices : list
         Array of indices of the specified electrode IDs.
     """
     if isinstance(nwb_object, pynwb.ecephys.ElectricalSeries):
         # electrodes is a DynamicTableRegion which may contain a subset of the rows in NWBFile.electrodes
         # match against only the subset of electrodes referenced by this ElectricalSeries
         electrode_table_indices = nwb_object.electrodes.data[:]
-        selected_elect_ids = nwb_object.electrodes.table.id[electrode_table_indices]
+        selected_elect_ids = [nwb_object.electrodes.table.id[x] for x in electrode_table_indices]
     elif isinstance(nwb_object, pynwb.NWBFile):
         # electrodes is a DynamicTable that contains all electrodes
-        selected_elect_ids = nwb_object.electrodes.id[:]
+        selected_elect_ids = list(nwb_object.electrodes.id[:])
     else:
         raise ValueError(
             'nwb_object must be of type ElectricalSeries or NWBFile')
 
-    return [elect_idx for elect_idx, elect_id in enumerate(selected_elect_ids) if elect_id in electrode_ids]
-
+    # for each electrode_id, find its index in selected_elect_ids and return that if it's there and invalid_electrode_index if not.
+    return [selected_elect_ids.index(elect_id) if elect_id in selected_elect_ids else invalid_electrode_index for elect_id in electrode_ids ]
 
 def get_all_spatial_series(nwbf, verbose=False):
-    """Given an nwb file object, gets the spatial series and Interval lists from the file and returns a dictionary by epoch
-    :param nwbf: the nwb file object
-    :type nwbf: file object
-    :param verbose: flag to cause printing of sampling rate
-    :type verbose: bool
+    """Given an NWBFile, get the spatial series and interval lists from the file and return a dictionary by epoch.
+
+    Parameters
+    ----------
+    nwbf : pynwb.NWBFile
+        The source NWB file object.
+    verbose : bool
+        Flag representing whether to print the sampling rate.
+
+    Returns
+    -------
+    pos_data_dict : dict
+        Dict mapping indices to a dict with keys 'valid_times' and 'raw_position_object_id'. Returns None if there
+        is no position data in the file. The 'raw_position_object_id' is the object ID of the SpatialSeries object.
     """
     position = get_data_interface(nwbf, 'position', pynwb.behavior.Position)
     if position is None:
@@ -239,10 +252,9 @@ def get_all_spatial_series(nwbf, verbose=False):
     pos_data_dict = dict()
     for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
         pos_data_dict[pos_epoch] = dict()
-        # get the valid intervals for the position data
-        timestamps = np.asarray(spatial_series.timestamps)
 
         # estimate the sampling rate
+        timestamps = np.asarray(spatial_series.timestamps)
         sampling_rate = estimate_sampling_rate(timestamps, 1.75)
         if sampling_rate < 0:
             raise ValueError(

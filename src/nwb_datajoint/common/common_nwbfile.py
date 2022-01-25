@@ -13,7 +13,7 @@ from hdmf.common import DynamicTable
 from .dj_helper_fn import get_child_tables
 from .nwb_helper_fn import get_electrode_indices, get_nwb_file
 
-schema = dj.schema("common_nwbfile")
+schema = dj.schema('common_nwbfile')
 
 # define the fields that should be kept in AnalysisNWBFiles
 NWB_KEEP_FIELDS = ('devices', 'electrode_groups', 'electrodes', 'experiment_description',
@@ -31,7 +31,8 @@ class Nwbfile(dj.Manual):
     nwb_file_abs_path: filepath@raw
     """
 
-    def insert_from_relative_file_name(self, nwb_file_name):
+    @classmethod
+    def insert_from_relative_file_name(cls, nwb_file_name):
         """Insert a new session from an existing NWB file.
 
         Parameters
@@ -43,10 +44,10 @@ class Nwbfile(dj.Manual):
         assert os.path.exists(
             nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
 
-        self.insert1(dict(
-            nwb_file_name=nwb_file_name,
-            nwb_file_abs_path=nwb_file_abs_path,
-        ), skip_duplicates=True)
+        key = dict()
+        key['nwb_file_name'] = nwb_file_name
+        key['nwb_file_abs_path'] = nwb_file_abs_path
+        cls.insert1(key, skip_duplicates=True)
 
     @staticmethod
     def get_abs_path(nwb_file_name):
@@ -90,13 +91,14 @@ class Nwbfile(dj.Manual):
         lock_file.write(f'{nwb_file_name}\n')
         lock_file.close()
 
-    def cleanup(self, delete_files=False):
+    @staticmethod
+    def cleanup(delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
         This does not delete the files themselves unless delete_files=True is specified
         Run this after deleting the Nwbfile() entries themselves.
         """
-        self.external['raw'].delete(delete_external_files=delete_files)
+        schema.external['raw'].delete(delete_external_files=delete_files)
 
 
 # TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
@@ -154,13 +156,13 @@ class AnalysisNwbfile(dj.Manual):
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
-        # each file ends with a random string of 10 digits, so we generate that string and redo if by some miracle it's already there
+        # each file ends with a random string of 10 digits, so we generate that string and redo if by some miracle
+        # it's already there
         file_in_table = True
-        while (file_in_table):
+        while file_in_table:
             analysis_file_name = os.path.splitext(nwb_file_name)[
                 0] + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + '.nwb'
-            file_in_table = len(
-                (AnalysisNwbfile & {'analysis_file_name': analysis_file_name}).fetch()) > 0
+            file_in_table = (AnalysisNwbfile & {'analysis_file_name': analysis_file_name})
 
         return analysis_file_name
 
@@ -193,8 +195,8 @@ class AnalysisNwbfile(dj.Manual):
         with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode='r', load_namespaces=True) as io:
             nwbf = io.read()
             # get the current number of analysis files related to this nwb file
-            original_nwb_file_name = (AnalysisNwbfile &
-                                      {'analysis_file_name': nwb_file_name}).fetch('nwb_file_name')[0]
+            query = (AnalysisNwbfile & {'analysis_file_name': nwb_file_name})
+            original_nwb_file_name = query.fetch('nwb_file_name')[0]
             analysis_file_name = cls.__get_new_file_name(
                 original_nwb_file_name)
             # write the new file
@@ -381,7 +383,8 @@ class AnalysisNwbfile(dj.Manual):
         nwbf = get_nwb_file(cls.get_abs_path(analysis_file_name))
         return get_electrode_indices(nwbf.electrodes, electrode_ids)
 
-    def cleanup(self, delete_files=False):
+    @staticmethod
+    def cleanup(delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
         Does not delete the files themselves unless delete_files=True is specified.
@@ -392,18 +395,16 @@ class AnalysisNwbfile(dj.Manual):
         delete_files : bool, optional
             Whether the original files should be deleted (default False).
         """
-        self.external['analysis'].delete(delete_external_files=delete_files)
+        schema.external['analysis'].delete(delete_external_files=delete_files)
 
     @staticmethod
     def nightly_cleanup():
-        from nwb_datajoint.common import common_nwbfile
-        child_tables = get_child_tables(common_nwbfile.AnalysisNwbfile)
+        child_tables = get_child_tables(AnalysisNwbfile)
+        (AnalysisNwbfile - child_tables).delete_quick()
 
-        (common_nwbfile.AnalysisNwbfile - child_tables).delete_quick()
-
-        # a separate external files clean up required - this is to be done during times when no other transactions are in progress.
-        common_nwbfile.schema.external['analysis'].delete(
-            delete_external_files=True)
+        # a separate external files clean up required - this is to be done
+        # during times when no other transactions are in progress.
+        AnalysisNwbfile.cleanup(True)
 
         # also check to see whether there are directories in the spikesorting folder with this
 

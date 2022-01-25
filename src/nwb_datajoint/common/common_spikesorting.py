@@ -342,7 +342,6 @@ class SpikeSortingArtifactDetectionParameters(dj.Manual):
 
         half_window_points = np.round(
             recording.get_sampling_frequency() * 1000 * zero_window_len / 2)
-        nelect_above = np.round(proportion_above_thresh * data.shape[0])
         # get the data traces
         data = recording.get_traces()
 
@@ -358,7 +357,7 @@ class SpikeSortingArtifactDetectionParameters(dj.Manual):
         above_z = dataz > zscore_thresh
 
         above_both = np.ravel(np.argwhere(
-            np.sum(np.logical_and(above_z, above_a), axis=0) >= nelect_above))
+            np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
         valid_timestamps = recording._timestamps
         # for each above threshold point, set the timestamps on either side of it to -1
         for a in above_both:
@@ -410,14 +409,14 @@ class SpikeSortingRecording(dj.Computed):
             # update the sort interval valid times to exclude the artifacts
             sort_interval_valid_times = interval_list_intersect(
                 sort_interval_valid_times, no_artifact_valid_times)
-            # exclude the invalid times
-            mask = np.full(recording.get_num_frames(), True, dtype='bool')
-            excluded_ind = interval_list_excludes_ind(
-                sort_interval_valid_times, recording_timestamps)
-            if len(excluded_ind) > 0:
-                mask[interval_list_excludes_ind(
-                    sort_interval_valid_times, recording_timestamps)] = False
-            recording = st.preprocessing.mask(recording, mask)
+        # exclude the invalid times
+        mask = np.full(recording.get_num_frames(), True, dtype='bool')
+        excluded_ind = interval_list_excludes_ind(
+            sort_interval_valid_times, recording_timestamps)
+        if len(excluded_ind) > 0:
+            mask[interval_list_excludes_ind(
+                sort_interval_valid_times, recording_timestamps)] = False
+        recording = st.preprocessing.mask(recording, mask)
 
         #add the sort_interval_valid_times as an interval list
         tmp_key = {}
@@ -1381,11 +1380,13 @@ class AutomaticCuration(dj.Computed):
         analysis_file_created = False
 
         # get the cluster metrics list name and add a name for this sorting
-        cluster_metrics_list_name = (AutomaticCurationSelection & key).fetch1('cluster_metrics_list_name')
+        cluster_metrics_list_name = (AutomaticCurationSelection & key).fetch1('cluster_metrics_list_name') 
+        metric_dict = (SpikeSortingMetricParameters & {'cluster_metrics_list_name':cluster_metrics_list_name}).fetch1('metric_dict')
+        n_metrics = sum(metric_dict.values())
 
         # 2. Calculate the metrics
         #First, whiten the recording
-        with Timer(label=f'whitening and computing new quality metrics', verbose=True):
+        if n_metrics>0:
             filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
             recording = st.preprocessing.whiten(
                 recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
@@ -1393,13 +1394,14 @@ class AutomaticCuration(dj.Computed):
             metrics_recording = se.CacheRecordingExtractor(recording, save_path=tmpfile.name, chunk_mb=10000)
             metrics = SpikeSortingMetricParameters().compute_metrics(cluster_metrics_list_name, metrics_recording, sorting)
 
-        # add labels to the sorting based on metrics?
-        if 'noise_reject' in acpd:
-                if acpd['noise_reject']:
-                    # get the noise rejection parameters
-                    noise_reject_param = acpd['noise_reject_param']
-                    #TODO write noise/ rejection code
-
+            # add labels to the sorting based on metrics?
+            if 'noise_reject' in acpd:
+                    if acpd['noise_reject']:
+                        # get the noise rejection parameters
+                        noise_reject_param = acpd['noise_reject_param']
+                        #TODO write noise/ rejection code
+        else:
+            metrics = None
         # Store the sorting with metrics in the NWB file and update the metrics in the workspace
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
 
@@ -1409,8 +1411,8 @@ class AutomaticCuration(dj.Computed):
         key['analysis_file_name'], key['units_object_id'] = \
             store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name,
             sort_interval=sort_interval, metrics=metrics)
-
-        SpikeSortingWorkspace().add_metrics_to_sorting(key, sorting_id=sorting_id, metrics=metrics)
+        if n_metrics>0:
+            SpikeSortingWorkspace().add_metrics_to_sorting(key, sorting_id=sorting_id, metrics=metrics)
         self.insert1(key)
 
 
