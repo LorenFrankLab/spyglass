@@ -1,6 +1,6 @@
 import datajoint as dj
 
-schema = dj.schema("common_subject")
+schema = dj.schema('common_subject')
 
 
 @schema
@@ -15,7 +15,8 @@ class Subject(dj.Manual):
     species: varchar(80)
     """
 
-    def insert_from_nwbfile(self, nwbf):
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf):
         """Get the subject information from the NWBFile and insert it into the Subject table."""
         sub = nwbf.subject
         subject_dict = dict()
@@ -32,4 +33,4 @@ class Subject(dj.Manual):
             sex = 'U'
         subject_dict['sex'] = sex
         subject_dict['species'] = sub.species
-        self.insert1(subject_dict, skip_duplicates=True)
+        cls.insert1(subject_dict, skip_duplicates=True)

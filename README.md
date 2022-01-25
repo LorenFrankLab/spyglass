@@ -1,5 +1,5 @@
-![example workflow](https://github.com/LorenFrankLab/nwb_datajoint/actions/workflows/nightly.yml/badge.svg)
-![example workflow](https://github.com/LorenFrankLab/nwb_datajoint/actions/workflows/workflow.yml/badge.svg)
+[![Import test](https://github.com/LorenFrankLab/nwb_datajoint/actions/workflows/workflow.yml/badge.svg)](https://github.com/LorenFrankLab/nwb_datajoint/actions/workflows/workflow.yml)
+[![Nightly Test](https://github.com/LorenFrankLab/nwb_datajoint/actions/workflows/nightly.yml/badge.svg)](https://github.com/LorenFrankLab/nwb_datajoint/actions/workflows/nightly.yml)
 
 # nwb_datajoint
 
