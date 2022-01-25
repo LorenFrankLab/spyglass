@@ -1,4 +1,5 @@
 import datajoint as dj
+import ndx_franklab_novela
 import pynwb
 
 from .common_device import CameraDevice
@@ -65,7 +66,7 @@ class Task(dj.Manual):
             print(f'No tasks processing module found in {nwbf}\n')
             return
         for task in tasks_mod.data_interfaces.values():
-            if isinstance(task, pynwb.core.DynamicTable):
+            if cls.check_task_table(task):
                 cls.insert_from_task_table(task)
 
     @classmethod
@@ -117,23 +118,22 @@ class TaskEpoch(dj.Imported):
      -> Task
      -> [nullable] CameraDevice
      -> IntervalList
-     task_environment='' : varchar(200)  # the environment the animal was in
+     task_environment = NULL: varchar(200)  # the environment the animal was in
      """
 
     def make(self, key):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        camera_name = dict()
+        camera_names = dict()
         # the tasks refer to the camera_id which is unique for the NWB file but not for CameraDevice schema, so we
         # need to look up the right camera
         # map camera ID (in camera name) to camera_name
-        for d in nwbf.devices:
-            if 'camera_device' in d:
-                device = nwbf.devices[d]
+        for device in nwbf.devices.values():
+            if isinstance(device, ndx_franklab_novela.CameraDevice):
                 # get the camera ID
-                c = str.split(d)
-                camera_name[int(c[1])] = device.camera_name
+                camera_id = int(str.split(device.name)[1])
+                camera_names[camera_id] = device.camera_name
 
         # find the task modules and for each one, add the task to the Task schema if it isn't there
         # and then add an entry for each epoch
@@ -141,29 +141,29 @@ class TaskEpoch(dj.Imported):
         if tasks_mod is None:
             print(f'No tasks processing module found in {nwbf}\n')
             return
+
         for task in tasks_mod.data_interfaces.values():
             if self.check_task_table(task):
                 # check if the task is in the Task table and if not, add it
                 Task.insert_from_task_table(task)
                 key['task_name'] = task.task_name[0]
 
-                # get the camera used for this task. Use 'none' if there was no camera
-                # TODO is there ever no camera?
-                if hasattr(task, 'camera_id'):
-                    camera_id = int(task.camera_id[0])
-                    key['camera_name'] = camera_name[camera_id]
+                # get the CameraDevice used for this task (primary key is camera name so we need
+                # to map from ID to name)
+                camera_id = int(task.camera_id[0])
+                if camera_id in camera_names:
+                    key['camera_name'] = camera_names[camera_id]
                 else:
-                    key['camera_name'] = CameraDevice.UNKNOWN
+                    print(f"No camera device found with ID {camera_id} in NWB file {nwbf}\n")
+
+                # Add task environment
+                if hasattr(task, 'task_environment'):
+                    key["task_environment"] = task.task_environment[0]
 
                 # get the interval list for this task, which corresponds to the matching epoch for the raw data.
                 # Users should define more restrictive intervals as required for analyses
                 session_intervals = (IntervalList() & {'nwb_file_name': nwb_file_name}).fetch(
                     'interval_list_name')
-                # Add task environment
-                try:
-                    key["task_environment"] = task.task_environment[0]
-                except Exception:
-                    key["task_environment"] = 'none'
                 for epoch in task.task_epochs[0]:
                     # TODO in beans file, task_epochs[0] is 1x2 dset of ints, so epoch would be an int
                     key['epoch'] = epoch
