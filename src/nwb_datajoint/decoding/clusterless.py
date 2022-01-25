@@ -8,21 +8,23 @@ import pynwb
 import xarray as xr
 from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
+from nwb_datajoint.common.common_position import TrackGraph
 from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
                                                       SpikeSorting,
                                                       UnitInclusionParameters)
-from nwb_datajoint.common.common_position import TrackGraph
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
-
 from replay_trajectory_classification.classifier import (
-    _DEFAULT_ENVIRONMENT, _DEFAULT_CONTINUOUS_TRANSITIONS, _DEFAULT_CLUSTERLESS_MODEL_KWARGS, ClusterlessClassifier)
-from replay_trajectory_classification.continuous_state_transitions import RandomWalk, RandomWalkDirection1, RandomWalkDirection2, Uniform, Identity
-from replay_trajectory_classification.discrete_state_transitions import DiagonalDiscrete, UniformDiscrete, RandomDiscrete, UserDefinedDiscrete
+    _DEFAULT_CLUSTERLESS_MODEL_KWARGS, _DEFAULT_CONTINUOUS_TRANSITIONS,
+    _DEFAULT_ENVIRONMENT)
+from replay_trajectory_classification.continuous_state_transitions import (
+    Identity, RandomWalk, RandomWalkDirection1, RandomWalkDirection2, Uniform)
+from replay_trajectory_classification.discrete_state_transitions import (
+    DiagonalDiscrete, RandomDiscrete, UniformDiscrete, UserDefinedDiscrete)
 from replay_trajectory_classification.environments import Environment
-from replay_trajectory_classification.initial_conditions import UniformInitialConditions, UniformOneEnvironmentInitialConditions
-from replay_trajectory_classification.observation_model import ObservationModel
+from replay_trajectory_classification.initial_conditions import (
+    UniformInitialConditions, UniformOneEnvironmentInitialConditions)
 from replay_trajectory_classification.misc import NumbaKDE
-
+from replay_trajectory_classification.observation_model import ObservationModel
 
 schema = dj.schema('decoding_clusterless')
 
@@ -265,15 +267,18 @@ class UnitMarksIndicator(dj.Computed):
         return (xr.concat([df.to_xarray().to_array('marks') for df in self.fetch_dataframe()], dim='electrodes')
                 .transpose('time', 'marks', 'electrodes'))
 
+
 def _to_dict(transition):
     parameters = vars(transition)
     parameters['class_name'] = type(transition).__name__
 
     return parameters
 
+
 def _convert_transitions_to_dict(transitions):
     return [[_to_dict(transition) for transition in transition_rows]
             for transition_rows in transitions]
+
 
 def _convert_algorithm_params(algo_params):
     try:
@@ -281,18 +286,22 @@ def _convert_algorithm_params(algo_params):
         algo_params['model'] = algo_params['model'].__name__
     except KeyError:
         pass
-    
+
     return algo_params
+
 
 def _convert_dict_to_class(d: dict, class_conversion: dict):
     class_name = d.pop('class_name')
     return class_conversion[class_name](**d)
 
+
 def _convert_env(env_params):
     if env_params['track_graph'] is not None:
-        env_params['track_graph'] = (TrackGraph & {'track_graph_name': env_params['track_graph']}).get_networkx_track_graph()
-        
+        env_params['track_graph'] = (TrackGraph & {
+                                     'track_graph_name': env_params['track_graph']}).get_networkx_track_graph()
+
     return env_params
+
 
 def _restore_classes(params):
     continuous_state_transition_types = {
@@ -307,7 +316,7 @@ def _restore_classes(params):
         'DiagonalDiscrete': DiagonalDiscrete,
         'UniformDiscrete': UniformDiscrete,
         'RandomDiscrete': RandomDiscrete,
-        'UserDefinedDiscrete': UserDefinedDiscrete, 
+        'UserDefinedDiscrete': UserDefinedDiscrete,
     }
 
     initial_conditions_types = {
@@ -318,22 +327,28 @@ def _restore_classes(params):
     model_types = {
         'NumbaKDE': NumbaKDE,
     }
-    
+
     params['classifier_params']['continuous_transition_types'] = [
-        [_convert_dict_to_class(st, continuous_state_transition_types) for st in sts]
+        [_convert_dict_to_class(
+            st, continuous_state_transition_types) for st in sts]
         for sts in params['classifier_params']['continuous_transition_types']]
-    params['classifier_params']['environments'] = [Environment(**_convert_env(env_params)) for env_params in params['classifier_params']['environments']]
-    params['classifier_params']['discrete_transition_type'] = _convert_dict_to_class(params['classifier_params']['discrete_transition_type'], discrete_state_transition_types)
-    params['classifier_params']['initial_conditions_type'] = _convert_dict_to_class(params['classifier_params']['initial_conditions_type'], initial_conditions_types)
+    params['classifier_params']['environments'] = [Environment(
+        **_convert_env(env_params)) for env_params in params['classifier_params']['environments']]
+    params['classifier_params']['discrete_transition_type'] = _convert_dict_to_class(
+        params['classifier_params']['discrete_transition_type'], discrete_state_transition_types)
+    params['classifier_params']['initial_conditions_type'] = _convert_dict_to_class(
+        params['classifier_params']['initial_conditions_type'], initial_conditions_types)
 
     if params['classifier_params']['observation_models'] is not None:
-        params['classifier_params']['observation_models'] = [ObservationModel(obs) for obs in params['classifier_params']['observation_models']]
+        params['classifier_params']['observation_models'] = [ObservationModel(
+            obs) for obs in params['classifier_params']['observation_models']]
 
     try:
-        params['classifier_params']['clusterless_algorithm_params']['model'] = model_types[params['classifier_params']['clusterless_algorithm_params']['model']]
+        params['classifier_params']['clusterless_algorithm_params']['model'] = (
+            model_types[params['classifier_params']['clusterless_algorithm_params']['model']])
     except KeyError:
         pass
-    
+
     return params
 
 
@@ -342,12 +357,14 @@ def make_default_decoding_parameters_cpu():
     classifier_parameters = dict(
         environments=[vars(_DEFAULT_ENVIRONMENT)],
         observation_models=None,
-        continuous_transition_types=_convert_transitions_to_dict(_DEFAULT_CONTINUOUS_TRANSITIONS),
+        continuous_transition_types=_convert_transitions_to_dict(
+            _DEFAULT_CONTINUOUS_TRANSITIONS),
         discrete_transition_type=_to_dict(DiagonalDiscrete(0.98)),
         initial_conditions_type=_to_dict(UniformInitialConditions()),
         infer_track_interior=True,
         clusterless_algorithm='multiunit_likelihood',
-        clusterless_algorithm_params=_convert_algorithm_params(_DEFAULT_CLUSTERLESS_MODEL_KWARGS)
+        clusterless_algorithm_params=_convert_algorithm_params(
+            _DEFAULT_CLUSTERLESS_MODEL_KWARGS)
     )
 
     predict_parameters = {
@@ -362,11 +379,15 @@ def make_default_decoding_parameters_cpu():
 
 def convert_classes(classifier_parameters):
     classifier_parameters = dict(
-        environments=[vars(env) for env in classifier_parameters['environments']],
+        environments=[vars(env)
+                      for env in classifier_parameters['environments']],
         observation_models=None,
-        continuous_transition_types=_convert_transitions_to_dict(classifier_parameters['continuous_transition_types']),
-        discrete_transition_type=_to_dict(classifier_parameters['discrete_transition_type']),
-        initial_conditions_type=_to_dict(classifier_parameters['initial_conditions_type']),
+        continuous_transition_types=_convert_transitions_to_dict(
+            classifier_parameters['continuous_transition_types']),
+        discrete_transition_type=_to_dict(
+            classifier_parameters['discrete_transition_type']),
+        initial_conditions_type=_to_dict(
+            classifier_parameters['initial_conditions_type']),
         infer_track_interior=True,
         clusterless_algorithm='multiunit_likelihood_gpu',
         clusterless_algorithm_params={
@@ -375,11 +396,13 @@ def convert_classes(classifier_parameters):
         }
     )
 
+
 def make_default_decoding_parameters_gpu():
     classifier_parameters = dict(
         environments=[vars(_DEFAULT_ENVIRONMENT)],
         observation_models=None,
-        continuous_transition_types=_convert_transitions_to_dict(_DEFAULT_CONTINUOUS_TRANSITIONS),
+        continuous_transition_types=_convert_transitions_to_dict(
+            _DEFAULT_CONTINUOUS_TRANSITIONS),
         discrete_transition_type=_to_dict(DiagonalDiscrete(0.98)),
         initial_conditions_type=_to_dict(UniformInitialConditions()),
         infer_track_interior=True,
@@ -395,7 +418,7 @@ def make_default_decoding_parameters_gpu():
         'use_gpu':  True,
         'state_names':  ['Continuous', 'Uniform']
     }
-    
+
     fit_parameters = dict()
 
     return classifier_parameters, fit_parameters, predict_parameters
