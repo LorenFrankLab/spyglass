@@ -427,7 +427,7 @@ def make_default_decoding_parameters_gpu():
 
 
 @schema
-class ClassifierParameters(dj.Manual):
+class ClusterlessClassifierParameters(dj.Manual):
     definition = """
     classifier_param_name : varchar(80) # a name for this set of parameters
     ---
