@@ -9,6 +9,14 @@ from nwb_datajoint.common.common_position import TrackGraph
 from nwb_datajoint.common.common_spikesorting import CuratedSpikeSorting
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
 
+from replay_trajectory_classification.environments import Environment
+from replay_trajectory_classification.discrete_state_transitions import \
+    DiagonalDiscrete
+from replay_trajectory_classification.initial_conditions import \
+    UniformInitialConditions
+from replay_trajectory_classification.classifier import _DEFAULT_ENVIRONMENT, _DEFAULT_CONTINUOUS_TRANSITIONS
+from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
+
 schema = dj.schema('decoding_clusterless')
 
 
@@ -108,3 +116,80 @@ class SortedSpikesIndicator(dj.Computed):
 
     def fetch_dataframe(self):
         return pd.concat([data['spike_indicator'].set_index('time') for data in self.fetch_nwb()], axis=1)
+
+
+def make_default_decoding_parameters_cpu():
+
+    classifier_parameters = dict(
+        environments=[vars(_DEFAULT_ENVIRONMENT)],
+        observation_models=None,
+        continuous_transition_types=_convert_transitions_to_dict(
+            _DEFAULT_CONTINUOUS_TRANSITIONS),
+        discrete_transition_type=_to_dict(DiagonalDiscrete(0.98)),
+        initial_conditions_type=_to_dict(UniformInitialConditions()),
+        infer_track_interior=True,
+        knot_spacing=10,
+        spike_model_penalty=1E1
+    )
+
+    predict_parameters = {
+        'is_compute_acausal': True,
+        'use_gpu':  False,
+        'state_names':  ['Continuous', 'Uniform']
+    }
+    fit_parameters = dict()
+
+    return classifier_parameters, fit_parameters, predict_parameters
+
+def make_default_decoding_parameters_gpu():
+    classifier_parameters = dict(
+        environments=[vars(_DEFAULT_ENVIRONMENT)],
+        observation_models=None,
+        continuous_transition_types=_convert_transitions_to_dict(
+            _DEFAULT_CONTINUOUS_TRANSITIONS),
+        discrete_transition_type=_to_dict(DiagonalDiscrete(0.98)),
+        initial_conditions_type=_to_dict(UniformInitialConditions()),
+        infer_track_interior=True,
+        knot_spacing=10,
+        spike_model_penalty=1E1
+    )
+
+    predict_parameters = {
+        'is_compute_acausal': True,
+        'use_gpu':  True,
+        'state_names':  ['Continuous', 'Fragmented']
+    }
+
+    fit_parameters = dict()
+
+    return classifier_parameters, fit_parameters, predict_parameters
+
+
+@schema
+class SortedSpikesClassifierParameters(dj.Manual):
+    definition = """
+    classifier_param_name : varchar(80) # a name for this set of parameters
+    ---
+    classifier_params :   BLOB    # initialization parameters
+    fit_params :          BLOB    # fit parameters
+    predict_params :      BLOB    # prediction parameters
+    """
+
+    def insert_default_param(self):
+        (classifier_parameters, fit_parameters,
+         predict_parameters) = make_default_decoding_parameters_cpu()
+        self.insert1(
+            {'classifier_param_name': 'default_decoding_cpu',
+             'classifier_params': classifier_parameters,
+             'fit_params': fit_parameters,
+             'predict_params': predict_parameters},
+            skip_duplicates=True)
+
+        (classifier_parameters, fit_parameters,
+         predict_parameters) = make_default_decoding_parameters_gpu()
+        self.insert1(
+            {'classifier_param_name': 'default_decoding_gpu',
+             'classifier_params': classifier_parameters,
+             'fit_params': fit_parameters,
+             'predict_params': predict_parameters},
+            skip_duplicates=True)
