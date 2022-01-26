@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Lee"
+  given-names: "Kyu Hyun"
+- family-names: "Denovellis"
+  given-names: "Eric"
+- family-names: "Ly"
+  given-names: "Ryan"
+- family-names: "Frank"
+  given-names: "Loren"
+title: "nwb_datajoint"
+version: 0.2.9
+date-released: 2020-12-18
+url: "https://github.com/LorenFrankLab/nwb_datajoint"
