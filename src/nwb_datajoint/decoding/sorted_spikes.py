@@ -3,16 +3,14 @@ import pprint
 import datajoint as dj
 import numpy as np
 import pandas as pd
-import pynwb
-
 from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
 from nwb_datajoint.common.common_position import TrackGraph
-from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
-                                                      SpikeSorting)
+from nwb_datajoint.common.common_spikesorting import CuratedSpikeSorting
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
 
 schema = dj.schema('decoding_clusterless')
+
 
 @schema
 class SortedSpikesIndicatorSelection(dj.Lookup):
@@ -39,8 +37,8 @@ class SortedSpikesIndicator(dj.Computed):
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList &
                           {
-                            'nwb_file_name': key['nwb_file_name'],
-                            'interval_list_name': key['interval_list_name']
+                              'nwb_file_name': key['nwb_file_name'],
+                              'interval_list_name': key['interval_list_name']
                           }
                           ).fetch1('valid_times')
 
@@ -51,31 +49,33 @@ class SortedSpikesIndicator(dj.Computed):
             'sorting_id': key['sorting_id'],
             'interval_list_name': key['interval_list_name']
         }).fetch('sampling_rate')
-        
+
         time = self.get_time_bins_from_interval(interval_times, sampling_rate)
-        
+
         spikes_nwb = (CuratedSpikeSorting & {
             'nwb_file_name': key['nwb_file_name'],
             'sort_interval_name': key['sort_interval_name'],
             'filter_parameter_set_name': key['filter_parameter_set_name'],
             'sorting_id': key['sorting_id'],
         }).fetch_nwb()
-        
+
         spikes = np.concatenate(
             [np.asarray(n_trode['units']['spike_times']) for n_trode in spikes_nwb])
 
         # Bin spikes into time bins
         spike_indicator = []
         for spike_times in spikes:
-            spike_times = spike_times[(spike_times > time[0]) & (spike_times <= time[-1])]
-            spike_indicator.append(np.bincount(np.digitize(spike_times, time[1:-1]), minlength=time.shape[0]))
-        
+            spike_times = spike_times[(spike_times > time[0]) & (
+                spike_times <= time[-1])]
+            spike_indicator.append(np.bincount(np.digitize(
+                spike_times, time[1:-1]), minlength=time.shape[0]))
+
         column_names = np.concatenate(
             [[f'{n_trode["sort_group_id"]:04d}_{unit_number:04d}'for unit_number in n_trode['units'].index]
              for n_trode in spikes_nwb])
         spike_indicator = pd.DataFrame(np.stack(spike_indicator, axis=1),
-            index=pd.Index(time, name='time'),
-            columns=column_names)
+                                       index=pd.Index(time, name='time'),
+                                       columns=column_names)
 
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
