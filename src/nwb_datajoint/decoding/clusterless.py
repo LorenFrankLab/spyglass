@@ -13,6 +13,7 @@ from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
                                                       SpikeSorting,
                                                       UnitInclusionParameters)
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
+from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
 from replay_trajectory_classification.classifier import (
     _DEFAULT_CLUSTERLESS_MODEL_KWARGS, _DEFAULT_CONTINUOUS_TRANSITIONS,
     _DEFAULT_ENVIRONMENT)
@@ -25,8 +26,6 @@ from replay_trajectory_classification.initial_conditions import (
     UniformInitialConditions, UniformOneEnvironmentInitialConditions)
 from replay_trajectory_classification.misc import NumbaKDE
 from replay_trajectory_classification.observation_model import ObservationModel
-
-from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
 
 schema = dj.schema('decoding_clusterless')
 
@@ -344,7 +343,7 @@ class ClusterlessClassifierParameters(dj.Manual):
     predict_params :      BLOB    # prediction parameters
     """
 
-    def insert_default_param(self):
+    def insert_default_params(self):
         (classifier_parameters, fit_parameters,
          predict_parameters) = make_default_decoding_parameters_cpu()
         self.insert1(
