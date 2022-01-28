@@ -13,7 +13,7 @@ Here are a set of notes on how the repo / database is organized, intended for a 
     * This is a `dj.Manual` table that holds a set of parameters for the particular analysis.
     * The primary key should be `list_name` (str; the name of the parameter set). The other (non-primary) key is usually a python dictionary (use `blob` in the definition) that holds the parameters as key-value pairs. 
     * Example: `MetricParameters`
-    * Must contain a method called `insert_default_params` that inserts a reasonable default parameter into the table.
+    * Must contain a method called `insert_default` that inserts a reasonable default parameter into the table.
   * __Selection__ table
     * This is a `dj.Manual` table that associates a set of parameters to the data to be applied. For example, in the case of computing quality metrics, one might put the results of a spike sorting run and a set of metrics parameters as a single entry in this table.
     * The primary key should be inherited from the data table and the Parameters table. In other words, it is downstream of these two tables. 
