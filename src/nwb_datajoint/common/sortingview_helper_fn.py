@@ -97,8 +97,8 @@ def add_metrics_to_workspace_nocuration(workspace_uri: str, sorting_id: str=None
     
     if user_ids is not None:
         workspace.set_sorting_curation_authorized_users(sorting_id=sorting_id, user_ids=user_ids)
-    url = workspace.experimental_spikesortingview(recording_id=recording_id, sorting_id=sorting_id,
-                                                  label=workspace.label, include_curation=True)
+    url = workspace.spikesortingview(recording_id=recording_id, sorting_id=sorting_id,
+                                     label=workspace.label, include_curation=True)
 
     print(f'URL for sortingview: {url}')
     

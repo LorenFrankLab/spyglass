@@ -142,10 +142,10 @@ class SortingviewWorkspace(dj.Computed):
         recording_id = workspace.recording_ids[0]
         if sortingview_sorting_id is None:
             sortingview_sorting_id = workspace.sorting_ids[0]
-        url = workspace.experimental_spikesortingview(recording_id=recording_id, 
-                                                      sorting_id=sortingview_sorting_id,
-                                                      label=workspace.label,
-                                                      include_curation=True)
+        url = workspace.spikesortingview(recording_id=recording_id, 
+                                         sorting_id=sortingview_sorting_id,
+                                         label=workspace.label,
+                                         include_curation=True)
         return url
     
     # TODO: check
