@@ -53,7 +53,7 @@ class Nwbfile(dj.Manual):
     def get_abs_path(nwb_file_name):
         """Return the absolute path for a stored raw NWB file given just the file name.
 
-        The NWB_DATAJOINT_BASE_DIR environment variable must be set.
+        The SPYGLASS_BASE_DIR environment variable must be set.
 
         Parameters
         ----------
@@ -65,8 +65,8 @@ class Nwbfile(dj.Manual):
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
-        assert base_dir is not None, 'You must set NWB_DATAJOINT_BASE_DIR or provide the base_dir argument'
+        base_dir = pathlib.Path(os.getenv('SPYGLASS_BASE_DIR', None))
+        assert base_dir is not None, 'You must set SPYGLASS_BASE_DIR or provide the base_dir argument'
 
         nwb_file_abspath = base_dir / 'raw' / nwb_file_name
         return str(nwb_file_abspath)

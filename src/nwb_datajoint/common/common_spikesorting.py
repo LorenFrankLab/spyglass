@@ -445,7 +445,6 @@ class SpikeSortingRecording(dj.Computed):
             valid_sort_times_indices = np.expand_dims(valid_sort_times_indices, 0)
             
         # concatenate if there is more than one disjoint sort interval
-        # TODO: this doens't work; fix
         if len(valid_sort_times_indices)>1:
             recordings_list = []
             for interval_indices in valid_sort_times_indices:
