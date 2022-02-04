@@ -22,6 +22,7 @@ from .common_interval import (IntervalList, SortInterval,
                               interval_list_intersect, union_adjacent_index)
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
+from .common_artifact import ArtifactRemovedIntervalList
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
 
@@ -258,82 +259,7 @@ class SpikeSortingPreprocessingParameters(dj.Manual):
                                  'margin_ms': margin_ms,
                                  'seed': seed}
         self.insert1(key, skip_duplicates=True)
-    
-@schema
-class SpikeSortingArtifactDetectionParameters(dj.Manual):
-    definition = """
-    artifact_params_name: varchar(200)
-    ---
-    artifact_params: blob  # dictionary of parameters for get_no_artifact_times() function
-    """
-    def insert_default(self):
-        """Insert the default artifact parameters with a appropriate parameter dict.
-        """
-        artifact_params = {}
-        artifact_params['skip'] = True
-        artifact_params['zscore_thresh'] = -1.0 
-        artifact_params['amplitude_thresh'] = -1.0
-        artifact_params['proportion_above_thresh'] = -1.0
-        artifact_params['zero_window_len'] = 30 # 1 ms at 30 KHz, but this is of course skipped
-        self.insert1(['none', artifact_params], skip_duplicates=True)
-
-    # TODO: fix
-    def get_artifact_times(self, recording, zscore_thresh=-1.0, amplitude_thresh=-1.0,
-                           proportion_above_thresh=1.0, zero_window_len=1.0, skip=True):
-        """Detects times during which artifacts occur.
-        Artifacts are defined as periods where the absolute amplitude of the signal exceeds one
-        or both specified thresholds on the proportion of channels specified, with the period 
-        extended by the zero_window/2 samples on each side.
-        Threshold values <0 are ignored.
-
-        Parameters
-        ----------
-        recording: si.Recording
-        zscore_thresh: float, optional
-            Stdev threshold for exclusion, defaults to -1.0
-        amplitude_thresh: float, optional
-            Amplitude threshold for exclusion, defaults to -1.0
-        proportion_above_thresh: float, optional
-        zero_window_len: int, optional
-            the width of the window in milliseconds to zero out (window/2 on each side of threshold crossing)
         
-        Return
-        ------
-        List, timestamps for artifacts
-        """
-
-        # if no thresholds were specified, we return an array with the timestamps of the first and last samples
-        if zscore_thresh <= 0 and amplitude_thresh <= 0:
-            return np.asarray([[recording._timestamps[0], recording._timestamps[recording.get_num_frames()-1]]])
-
-        half_window_points = np.round(
-            recording.get_sampling_frequency() * 1000 * zero_window_len / 2)
-        nelect_above = np.round(proportion_above_thresh * data.shape[0])
-        # get the data traces
-        data = recording.get_traces()
-
-        # compute the number of electrodes that have to be above threshold based on the number of rows of data
-        nelect_above = np.round(
-            proportion_above_thresh * len(recording.get_channel_ids()))
-
-        # apply the amplitude threshold
-        above_a = np.abs(data) > amplitude_thresh
-
-        # zscore the data and get the absolute value for thresholding
-        dataz = np.abs(stats.zscore(data, axis=1))
-        above_z = dataz > zscore_thresh
-
-        above_both = np.ravel(np.argwhere(
-            np.sum(np.logical_and(above_z, above_a), axis=0) >= nelect_above))
-        valid_timestamps = recording._timestamps
-        # for each above threshold point, set the timestamps on either side of it to -1
-        for a in above_both:
-            valid_timestamps[a - half_window_points:a +
-                             half_window_points] = -1
-
-        # use get_valid_intervals to find all of the resulting valid times.
-        return get_valid_intervals(valid_timestamps[valid_timestamps != -1], recording.get_sampling_frequency(), 1.5, 0.001)
-
 @schema
 class SpikeSortingRecordingSelection(dj.Manual):
     definition = """
@@ -359,14 +285,6 @@ class SpikeSortingRecording(dj.Computed):
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         recording = self._get_filtered_recording_extractor(key)
 
-        # get the artifact detection parameters and apply artifact detection to zero out artifacts
-        artifact_params = (SpikeSortingArtifactDetectionParameters & key).fetch1('artifact_params')
-        list_triggers = SpikeSortingArtifactDetectionParameters.get_artifact_times(recording, **artifact_params)
-        
-        if not artifact_params['skip']:
-            recording = st.remove_artifacts(recording, list_triggers, **artifact_params)
-        
-        # find valid time for the sort interval and add to IntervalList
         recording_name = self._get_recording_name(key)
 
         tmp_key = {}
@@ -535,6 +453,7 @@ class SpikeSortingSelection(dj.Manual):
     # Table for holding selection of recording and parameters for each spike sorting run
     -> SpikeSortingRecording
     -> SpikeSorterParameters
+    -> ArtifactRemovedIntervalList
     ---
     import_path = '': varchar(200) # optional path to previous curated sorting output
     """
@@ -564,6 +483,13 @@ class SpikeSorting(dj.Computed):
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
         
+        # get the artifact detection parameters and apply artifact detection to zero out artifacts
+        # artifact_params = (self & key).fetch1('artifact_params')
+        # list_triggers = SpikeSortingArtifactDetectionParameters.get_artifact_times(recording, **artifact_params)
+        
+        # if not artifact_params['skip']:
+        #     recording = st.remove_artifacts(recording, list_triggers, **artifact_params)
+                
         preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
         recording = st.preprocessing.whiten(recording=recording, seed=preproc_params['seed'])
         

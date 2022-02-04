@@ -65,12 +65,12 @@ class ArtifactDetection(dj.Computed):
         # set up a name for no-artifact times using recording id
         key['artifact_removed_interval_list_name'] = key['recording_id'] + '_' + key['artifact_params_name'] + '_artifact_removed_valid_times'
         
-        # insert artifact times and valid times into ArtifactRemovedIntervalList() (the manual table) with an appropriate name
+        # insert artifact times and valid times into ArtifactRemovedIntervalList with an appropriate name
         tmp_key = {}
-        tmp_key['recording_id'] = key['recording_id']
-        tmp_key['artifact_params_name'] = key['artifact_params_name']
         tmp_key['artifact_removed_interval_list_name'] = key['artifact_removed_interval_list_name']
+        tmp_key['artifact_params_name'] = key['artifact_params_name']
         tmp_key['artifact_removed_valid_times'] = key['artifact_removed_valid_times']
+        tmp_key['recording_id'] = key['recording_id']
         ArtifactRemovedIntervalList.insert1(tmp_key) #better to overwrite or to skip repeats? not sure?
         
         # also insert into IntervalList
@@ -87,11 +87,11 @@ class ArtifactDetection(dj.Computed):
 class ArtifactRemovedIntervalList(dj.Manual):
     definition = """
     # Stores intervals without detected artifacts.
-    recording_id
-    -> ArtifactDetectionParameters
     artifact_removed_interval_list_name: varchar(200)
     ---
+    -> ArtifactDetectionParameters
     artifact_removed_valid_times: longblob # np array of valid no-artifact start and end times
+    recording_id: varchar(12)
     """
     
 def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
@@ -130,7 +130,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     # if both thresholds are None, we essentially skip artifract detection and
     # return an array with the times of the first and last samples of the recording
     if (amplitude_thresh is None) and (zscore_thresh is None):
-        recording_interval = np.asarray([[recording._timestamps[0], recording._timestamps[recording.get_num_frames()-1]]])
+        recording_interval = np.asarray([recording.get_times()[0], recording.get_times()[-1]])
         artifact_times_empty = np.asarray([])
         return recording_interval, artifact_times_empty
     
@@ -173,7 +173,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         above_thresh = np.ravel(np.argwhere(
             np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
     
-    valid_timestamps = recording._timestamps
+    valid_timestamps = recording.get_times()
     
     # keep track of artifact detected timestamps - this could be saved if we wanted?
     # artifact_detected_times = valid_timestamps[above_thresh] # the specific artifact times, NOT including the window around them
