@@ -27,142 +27,190 @@ from .nwb_helper_fn import get_valid_intervals
 
 schema = dj.schema('common_artifact')
 
-# TODO: need to change in common_spikesorting:
-#(1) always remove artifacts rather than interpolating or zeroing
-#then concatenate across the gaps, just as you would between any other
-#discontinuous intervals - this also does not require any parameters
-#(2) note that artifact removal also occurs in finding valid times
-#before concatenation and whitening in SpikeSorting def make
-#(3) remove placeholder SpikeSortingArtifactDetectionParameters schema
-#(4) add ArtifactRemovedIntervalList somehow as primary key in 
-#SpikeSortingSelection, add as a primary dependency or the int name at least
-
 @schema
-class SpikeSortingArtifactParameters(dj.Manual):
+class SpikeSortingArtifactDetectionParameters(dj.Manual):
     definition = """
-    # Parameters for detecting artifact times within a sort group
+    # Parameters for detecting artifact times within a sort group.
     artifact_params_name: varchar(200)
     ---
-    artifact_params: blob  # dictionary of parameters for get_no_artifact_times() function
+    artifact_params: blob  # dictionary of parameters
     """
     def insert_default(self):
         """Insert the default artifact parameters with an appropriate parameter dict.
         """
         artifact_params = {}
-        artifact_params['skip'] = True
-        artifact_params['zscore_thresh'] = -1.0 
-        artifact_params['amplitude_thresh'] = -1.0
-        artifact_params['proportion_above_thresh'] = -1.0
-        artifact_params['zero_window_len'] = 30 # 1 ms at 30 KHz, but this is of course skipped
-        self.insert1(['none', artifact_params], skip_duplicates=True)
-
-    # TODO: check whether window is in samples or time, clarify naming to make units obvious
-    #understand spike interface recording
-    #make this return both artifact and artifact free intervals rather than just one (==-1 and !=-1 times)
-    #check - returns list or np array?
-    #rename zero window len to specify that these times are being removed (not zero'd)
-
-    def get_artifact_times(self, recording, zscore_thresh=-1.0, amplitude_thresh=-1.0,
-                           proportion_above_thresh=1.0, zero_window_len=1.0, skip=True):
-        """Detects times during which artifacts occur.
-        Artifacts are defined as periods where the absolute amplitude of the signal exceeds one
+        artifact_params['zscore_thresh'] = None # must be None or >= 0
+        artifact_params['amplitude_thresh'] = 3000 # must be None or >= 0
+        artifact_params['proportion_above_thresh'] = 1.0 # all electrodes of sort group
+        artifact_params['removal_window_len'] = 1.0 # in milliseconds
+        self.insert1(['default', artifact_params], skip_duplicates=True)
+    
+    def get_artifact_times(self, recording, zscore_thresh=None, amplitude_thresh=None,
+                           proportion_above_thresh=1.0, removal_window_len=1.0):
+        """Detects times during which artifacts do and do not occur.
+        Artifacts are defined as periods where the absolute value of the recording signal exceeds one
         OR both specified amplitude or zscore thresholds on the proportion of channels specified,
-        with the period extended by the zero_window/2 samples on each side. Z-score and amplitude
-        threshold values <0 are ignored.
+        with the period extended by the removal_window_len/2 ms on each side. Z-score and amplitude
+        threshold values of None are ignored.
 
         Parameters
         ----------
         recording: si.Recording
         zscore_thresh: float, optional
-            Stdev threshold for exclusion, defaults to -1.0
+            Stdev threshold for exclusion, should be >=0, defaults to None
         amplitude_thresh: float, optional
-            Amplitude threshold for exclusion, defaults to -1.0
+            Amplitude threshold for exclusion, should be >=0, defaults to None
         proportion_above_thresh: float, optional
-        zero_window_len: int, optional
-            the width of the window in milliseconds to zero out (window/2 on each side of threshold crossing)
+            Proportion of electrodes that need to have threshold crossings, defaults to 1 
+        removal_window_len: float, optional
+            Width of the window in milliseconds to mask out per artifact (window/2 removed on each side of threshold crossing), defaults to 1 ms
         
         Return
         ------
-        artifact_interval: np.ndarray
-            timestamps for detected artifacts
-        valid_artifact_removed_interval: np.ndarray
-            timestamps for valid times where artifacts were not detected
+        artifact_times: np.ndarray
+            The timestamps contained in each of the detected artifact windows
+        artifact_removed_valid_times: np.ndarray
+            Intervals of valid times where artifacts were not detected
+            
+        Raises
+        ------
+        ValueError
+            when amplitude or zscore thresholds are negative
         """
+        
+        # if both thresholds are None, we essentially skip artifract detection and
+        # return an array with the times of the first and last samples of the recording
+        if (amplitude_thresh is None) and (zscore_thresh is None):
+            recording_interval = np.asarray([[recording._timestamps[0], recording._timestamps[recording.get_num_frames()-1]]])
+            artifact_times_empty = np.asarray([])
+            return recording_interval, artifact_times_empty
+        
+        # otherwise if amplitude or zscore thresholds are negative, raise a value error
+        # doesn't make sense to use a negative threshold on an absolute signal - might be nice to tell the user?
+        thresholds = [t for t in [amplitude_thresh, zscore_thresh] if t is not None]
+        for t in thresholds:
+            if t < 0:
+                raise ValueError("Amplitude and Z-Score thresholds must be >= 0, or None")
+        # also verify that proportion above makes sense/is in [0:1] inclusive?
+        # if ((proportion_above_thresh < 0) or (proportion_above_thresh > 1)):
+        #     raise ValueError("proportion_above_thresh must be >= 0 and <= 1")
+        
+        # related to ^^, if we want to verify inputs values, then i might vote for breaking that out into its own method on this class
+        # and calling the input vertification method before calling this current method in the downstream computed table's make fxn
 
-        # if no thresholds were specified, we return an array with the timestamps of the first and last samples
-        if zscore_thresh <= 0 and amplitude_thresh <= 0:
-            return np.asarray([[recording._timestamps[0], recording._timestamps[recording.get_num_frames()-1]]])
-
+        # turn milliseconds to remove total into # samples to remove from either side of each detected artifact
+        # sampling freq is in samp/sec. 1000 ms per sec. 1/2 to be removed from either side of artifact sample. 
         half_window_points = np.round(
-            recording.get_sampling_frequency() * 1000 * zero_window_len / 2)
-        nelect_above = np.round(proportion_above_thresh * data.shape[0])
+            recording.get_sampling_frequency() * (1/1000) * removal_window_len * (1/2) )
+        
         # get the data traces
         data = recording.get_traces()
 
-        # compute the number of electrodes that have to be above threshold based on the number of rows of data
-        nelect_above = np.round(
-            proportion_above_thresh * len(recording.get_channel_ids()))
+        # compute the number of electrodes that have to be above threshold
+        nelect_above = np.round(proportion_above_thresh * len(recording.get_channel_ids()))
 
-        # apply the amplitude threshold
-        above_a = np.abs(data) > amplitude_thresh
-
-        # zscore the data and get the absolute value for thresholding
-        dataz = np.abs(stats.zscore(data, axis=1))
-        above_z = dataz > zscore_thresh
-
-        above_both = np.ravel(np.argwhere(
-            np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
+        # find the artifact occurrences using one or both thresholds, across channels
+        if ((amplitude_thresh is not None) and (zscore_thresh is None)):
+            above_a = np.abs(data) > amplitude_thresh
+            above_thresh = np.ravel(np.argwhere(np.sum(above_a, axis=0) >= nelect_above))
+        elif ((amplitude_thresh is None) and (zscore_thresh is not None)):
+            dataz = np.abs(stats.zscore(data, axis=1))
+            above_z = dataz > zscore_thresh
+            above_thresh = np.ravel(np.argwhere(np.sum(above_z, axis=0) >= nelect_above))
+        else:
+            above_a = np.abs(data) > amplitude_thresh
+            dataz = np.abs(stats.zscore(data, axis=1))
+            above_z = dataz > zscore_thresh
+            above_thresh = np.ravel(np.argwhere(
+                np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
+        
         valid_timestamps = recording._timestamps
-        # for each above threshold point, set the timestamps on either side of it to -1
-        for a in above_both:
-            valid_timestamps[a - half_window_points:a +
-                             half_window_points] = -1
+        
+        # keep track of artifact detected timestamps - this could be saved if we wanted?
+        # artifact_detected_times = valid_timestamps[above_thresh] # the specific artifact times, NOT including the window around them
 
-        # use get_valid_intervals to find all of the resulting valid times.
-        return get_valid_intervals(valid_timestamps[valid_timestamps != -1], recording.get_sampling_frequency(), 1.5, 0.001)
+        # keep track of all the artifact times within each artifact removal window
+        artifact_times = []
+        for a in above_thresh:
+            if (a - half_window_points) < 0: # make sure indices are valid for the slice
+                a_times = np.copy(valid_timestamps[0:int(a + half_window_points)])
+                artifact_times.append(a_times)
+            else:
+                a_times = np.copy(valid_timestamps[int(a - half_window_points):int(a + half_window_points)])
+                artifact_times.append(a_times)
+        artifact_times = np.asarray(artifact_times)
+        # alternatively, we could store these as intervals instead of arrays of all the times? (using interval_list_union many times or something?)
+        
+        # turn all artifact detected times into -1 so valid non-artifact intervals can be easily found
+        for a in above_thresh:
+            if (a - half_window_points) < 0: # make sure indices are valid for the slice
+                valid_timestamps[0:int(a + half_window_points)] = -1
+            else:
+                valid_timestamps[int(a - half_window_points):int(a + half_window_points)] = -1
+        artifact_removed_valid_times = get_valid_intervals(valid_timestamps[valid_timestamps != -1], recording.get_sampling_frequency(), 1.5, 0.001)        
+        
+        return artifact_removed_valid_times, artifact_times
 
 @schema
-class SpikeSortingArtifactParametersSelection(dj.Manual):
+class SpikeSortingArtifactDetectionSelection(dj.Manual):
     definition = """
-    # Specifies artifact detection parameters to apply to a sort group's recording
-    -> SpikeSortingArtifactParameters
+    # Specifies artifact detection parameters to apply to a sort group's recording.
     -> SpikeSortingRecording
+    -> SpikeSortingArtifactDetectionParameters
     ---
     """
 
 @schema
-class SpikeSortingArtifactInterval(dj.Computed):
+class SpikeSortingArtifactDetection(dj.Computed):
     definition = """
-    # Stores artifact times and valid no-artifact times as intervals
-    -> SpikeSortingArtifactParametersSelection
+    # Stores artifact times and valid no-artifact times as intervals.
+    -> SpikeSortingArtifactDetectionSelection
     ---
-    artifact_detected_times: longblob # np array of artifact start and end times
-    artifact_removed_valid_times: longblob # np array of valid no-artifact start and end times
-    artifact_removed_interval_list_name: varchar(200) # name array of detected artifact-free times
+    artifact_times: longblob # np array of artifact times for each detected artifact
+    artifact_removed_valid_times: longblob # np array of valid no-artifact start and end times (an array of intervals)
+    artifact_removed_interval_list_name: varchar(200) # name of the array of detected artifact-free times
     """
 
     def make(self, key):
-        #fetches the parameters and the recording
-        #uses get_artifact_times fxn to return the artifact and no-artifact time intervals
-        #insert intervals into table - insert art times and no art times?
-        #auto name based on primary keys? so it will be unique and informative
-        #autoinserts subset of info (nwb file name, artifact list name, valid times)
-        #into both artifact removed manual interval list (for spikesorting),
-        #as well as insert into general IntervalList() for any other analyses where these times are relevant?
+         # get the dict of artifact params associated with this artifact_params_name
+        artifact_params = (SpikeSortingArtifactDetectionParameters & key).fetch1("artifact_params")
+        
+        # need to ensure this syntax is up to date to work with new spikeinterface
+        recording = SpikeSortingRecording()._get_filtered_recording_extractor(key) 
+        
+        # get artifact-related timing info
+        artifact_removed_valid_times, artifact_times = SpikeSortingArtifactDetectionParameters().get_artifact_times(recording, **artifact_params) #could call an input verification method right before this line
+        key['artifact_times'] = artifact_times
+        key['artifact_removed_valid_times'] = artifact_removed_valid_times
+        
+        # not intersecting with sort interval valid times here - should be done in SpikeSorting computed table I think
+        
+        # set up a name for no-artifact times using recording id
+        key['artifact_removed_interval_list_name'] = key['recording_id'] + '_' + key['artifact_params_name'] + '_artifact_removed_valid_times'
+        
+        # insert artifact times and valid times into SpikeSortingArtifactRemovedIntervalList() (the manual table) with an appropriate name
+        tmp_key = {}
+        tmp_key['nwb_file_name'] = key['nwb_file_name']
+        tmp_key['artifact_removed_interval_list_name'] = key['artifact_removed_interval_list_name']
+        tmp_key['artifact_removed_valid_times'] = key['artifact_removed_valid_times']
+        SpikeSortingArtifactRemovedIntervalList.insert1(tmp_key) #better to overwrite or to skip repeats? not sure?
+        
+        # also insert into IntervalList() ?
+#         tmp_key = {}
+#         tmp_key['nwb_file_name'] = key['nwb_file_name']
+#         tmp_key['interval_list_name'] = key['artifact_removed_interval_list_name']
+#         tmp_key['valid_times'] = key['artifact_removed_valid_times']
+#         IntervalList.insert1(tmp_key) #either overwrite or skip duplicates?
+        
+        # insert into computed table
+        self.insert1(key)
 
 @schema
 class SpikeSortingArtifactRemovedIntervalList(dj.Manual):
     definition = """
-    # Stores intervals without detected artifacts
+    # Stores intervals without detected artifacts.
     -> Session
     artifact_removed_interval_list_name: varchar(200)
     ---
     artifact_removed_valid_times: longblob # np array of valid no-artifact start and end times
     """
-    
-    #notes to self:
-    #gets used in this way: intersection of valid times, artifactremovedtimes, and SortInterval
-    #data in that intersection are concatenated together, whitened, then sorted
-
-    #this table is NOT restricted to single-sort-group-based artifact-free times
-    #this table can also include artifact-free times determined across sort groups
