@@ -22,7 +22,6 @@ from .common_interval import (IntervalList, SortInterval,
                               interval_list_intersect, union_adjacent_index)
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
-from .common_artifact import ArtifactRemovedIntervalList
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
 
@@ -268,7 +267,6 @@ class SpikeSortingRecordingSelection(dj.Manual):
     -> SortInterval
     -> SpikeSortingPreprocessingParameters
     ---
-    -> SpikeSortingArtifactDetectionParameters
     -> IntervalList
     -> LabTeam
     """
@@ -283,7 +281,7 @@ class SpikeSortingRecording(dj.Computed):
     """
     def make(self, key):
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
-        recording = self._get_filtered_recording_extractor(key)
+        recording = self._get_filtered_recording(key)
 
         recording_name = self._get_recording_name(key)
 
@@ -333,7 +331,7 @@ class SpikeSortingRecording(dj.Computed):
         valid_sort_times = interval_list_intersect(sort_interval, valid_interval_times)
         return valid_sort_times
 
-    def _get_filtered_recording_extractor(self, key: dict):
+    def _get_filtered_recording(self, key: dict):
         """Filters and references a recording
         * Loads the NWB file created during insertion as a spikeinterface Recording
         * Slices recording in time (interval) and space (channels);
@@ -369,7 +367,7 @@ class SpikeSortingRecording(dj.Computed):
                 recording_single = recording.frame_slice(start_frame=interval_indices[0],
                                                         end_frame=interval_indices[1])
                 recordings_list.append(recording_single)
-            recording = si.concatenate_recordings(recordings_list)
+            recording = si.append_recordings(recordings_list)
         else:
             recording = recording.frame_slice(start_frame=valid_sort_times_indices[0][0],
                                               end_frame=valid_sort_times_indices[0][1])
@@ -393,7 +391,8 @@ class SpikeSortingRecording(dj.Computed):
             recording = recording.channel_slice(channel_ids=channel_ids)
             recording = st.preprocessing.common_reference(recording, reference='global',
                                                           operator='median')
-
+        else:
+            raise ValueError("Invalid reference channel ID")
         filter_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
         recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
                                                      freq_max=filter_params['frequency_max'])
@@ -447,6 +446,7 @@ class SpikeSorterParameters(dj.Manual):
             sorter_params = ss.get_default_params(sorter)
             self.insert1([sorter, sorter_params], skip_duplicates=True)
 
+from .common_artifact import ArtifactRemovedIntervalList
 @schema
 class SpikeSortingSelection(dj.Manual):
     definition = """
