@@ -7,7 +7,7 @@ from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .nwb_helper_fn import get_data_interface, get_nwb_file
 
-schema = dj.schema("common_task")
+schema = dj.schema('common_task')
 
 
 @schema
@@ -81,6 +81,7 @@ class TaskEpoch(dj.Imported):
      -> Task
      -> CameraDevice
      -> IntervalList
+     task_environment='' : varchar(200)  # the environment the animal was in
      """
 
     def make(self, key):
@@ -122,6 +123,11 @@ class TaskEpoch(dj.Imported):
                 # Users should define more restrictive intervals as required for analyses
                 session_intervals = (IntervalList() & {'nwb_file_name': nwb_file_name}).fetch(
                     'interval_list_name')
+                # Add task environment
+                try:
+                    key["task_environment"] = task.task_environment[0]
+                except Exception:
+                    key["task_environment"] = 'none'
                 for epoch in task.task_epochs[0]:
                     key['epoch'] = epoch
                     target_interval = str(epoch).zfill(2)

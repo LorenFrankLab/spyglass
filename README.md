@@ -1,3 +1,6 @@
+[![Import test](https://github.com/LorenFrankLab/nwb_datajoint/actions/workflows/workflow.yml/badge.svg)](https://github.com/LorenFrankLab/nwb_datajoint/actions/workflows/workflow.yml)
+[![Nightly Test](https://github.com/LorenFrankLab/nwb_datajoint/actions/workflows/nightly.yml/badge.svg)](https://github.com/LorenFrankLab/nwb_datajoint/actions/workflows/nightly.yml)
+
 # nwb_datajoint
 
 The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing of neuroscience data to support reproducible research. It is designed to be interoperable with the NWB format and integrates open-source tools into a coherent framework.

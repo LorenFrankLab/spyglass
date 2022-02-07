@@ -8,12 +8,13 @@ from .common_ephys import (LFP, Electrode, ElectrodeGroup, LFPBand,
                            LFPBandSelection, LFPSelection, Raw, SampleCount)
 from .common_filter import FirFilter
 from .common_interval import (IntervalList, SortInterval,
+                              intervals_by_length,
                               interval_list_contains,
                               interval_list_contains_ind,
                               interval_list_excludes,
                               interval_list_excludes_ind,
                               interval_list_intersect,
-                              interval_list_censor, 
+                              interval_list_censor,
                               interval_list_union)
 from .common_lab import Institution, Lab, LabMember, LabTeam
 from .common_nwbfile import (AnalysisNwbfile, AnalysisNwbfileKachery, Nwbfile,
