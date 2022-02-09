@@ -30,7 +30,7 @@ class ElectrodeGroup(dj.Imported):
     -> BrainRegion
     -> [nullable] Probe
     description: varchar(2000)  # description of electrode group
-    target_hemisphere = "Unknown": enum("Right","Left","Unknown")
+    target_hemisphere = "Unknown": enum("Right", "Left", "Unknown")
     """
 
     def make(self, key):
@@ -67,8 +67,8 @@ class Electrode(dj.Imported):
     y = NULL: float                         # the y coordinate of the electrode position in the brain
     z = NULL: float                         # the z coordinate of the electrode position in the brain
     filtering: varchar(2000)                # description of the signal filtering
-    impedance = null: float                 # electrode impedance
-    bad_channel = "False": enum("True","False")       # if electrode is "good" or "bad" as observed during recording
+    impedance = NULL: float                 # electrode impedance
+    bad_channel = "False": enum("True", "False")  # if electrode is "good" or "bad" as observed during recording
     x_warped = NULL: float                  # x coordinate of electrode position warped to common template brain
     y_warped = NULL: float                  # y coordinate of electrode position warped to common template brain
     z_warped = NULL: float                  # z coordinate of electrode position warped to common template brain
@@ -248,11 +248,11 @@ class LFP(dj.Imported):
     definition = """
     -> LFPSelection
     ---
-    -> IntervalList         # the valid intervals for the data
-    -> FirFilter                 # the filter used for the data
-    -> AnalysisNwbfile      # the name of the nwb file with the lfp data
+    -> IntervalList             # the valid intervals for the data
+    -> FirFilter                # the filter used for the data
+    -> AnalysisNwbfile          # the name of the nwb file with the lfp data
     lfp_object_id: varchar(40)  # the NWB object ID for loading this object from the file
-    lfp_sampling_rate: float # the sampling rate, in HZ
+    lfp_sampling_rate: float    # the sampling rate, in HZ
     """
 
     def make(self, key):
@@ -324,7 +324,8 @@ class LFP(dj.Imported):
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         lfp_nwbf = get_nwb_file(lfp_file_abspath)
         # get the object id
-        nwb_object_id = (self & {'analysis_file_name': lfp_file_name}).fetch1('lfp_object_id')
+        nwb_object_id = (self & {'analysis_file_name': lfp_file_name}).fetch1(
+            'lfp_object_id')
         return lfp_nwbf.objects[nwb_object_id]
 
     def fetch_nwb(self, *attrs, **kwargs):
@@ -335,18 +336,18 @@ class LFP(dj.Imported):
 class LFPBandSelection(dj.Manual):
     definition = """
     -> LFP
-    -> FirFilter                 # the filter to use for the data
-    -> IntervalList.proj(target_interval_list_name='interval_list_name') # the original set of times to be filtered
-    lfp_band_sampling_rate: int # the sampling rate for this band
+    -> FirFilter                   # the filter to use for the data
+    -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
+    lfp_band_sampling_rate: int    # the sampling rate for this band
     ---
-    min_interval_len=1.0 : float #the minimum length of a valid interval to filter
+    min_interval_len = 1.0: float  # the minimum length of a valid interval to filter
     """
 
     class LFPBandElectrode(dj.Part):
         definition = """
         -> master
-        -> LFPSelection.LFPElectrode # the LFP electrode to be filtered LFP
-        reference_elect_id = -1: int # the reference electrode to use; -1 for no reference
+        -> LFPSelection.LFPElectrode  # the LFP electrode to be filtered LFP
+        reference_elect_id = -1: int  # the reference electrode to use; -1 for no reference
         ---
         """
 

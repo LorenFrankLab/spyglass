@@ -20,13 +20,13 @@ class FirFilter(dj.Manual):
     filter_sampling_rate: int        # sampling rate for this filter
     ---
     filter_type: enum("lowpass", "highpass", "bandpass")
-    filter_low_stop=0: float         # lowest frequency for stop band for low frequency side of filter
-    filter_low_pass=0: float         # lowest frequency for pass band of low frequency side of filter
-    filter_high_pass=0: float        # highest frequency for pass band for high frequency side of filter
-    filter_high_stop=0: float        # highest frequency for stop band of high frequency side of filter
-    filter_comments: varchar(2000)   # comments about the filter
-    filter_band_edges: blob          # numpy array containing the filter bands (redundant with individual parameters)
-    filter_coeff: blob               # numpy array containing the filter coefficients
+    filter_low_stop = 0: float         # lowest frequency for stop band for low frequency side of filter
+    filter_low_pass = 0: float         # lowest frequency for pass band of low frequency side of filter
+    filter_high_pass = 0: float        # highest frequency for pass band for high frequency side of filter
+    filter_high_stop = 0: float        # highest frequency for stop band of high frequency side of filter
+    filter_comments: varchar(2000)     # comments about the filter
+    filter_band_edges: blob            # numpy array containing the filter bands (redundant with individual parameters)
+    filter_coeff: blob                 # numpy array containing the filter coefficients
     """
 
     def add_filter(self, filter_name, fs, filter_type, band_edges, comments=''):
