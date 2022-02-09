@@ -129,7 +129,6 @@ class StateScriptFile(dj.Imported):
             if str(key['epoch']) in epoch_list:
                 key['file_object_id'] = associated_file_obj.object_id
                 self.insert1(key)
-                break
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
