@@ -78,7 +78,7 @@ class SortGroup(dj.Manual):
 
     class SortGroupElectrode(dj.Part):
         definition = """
-        -> master
+        -> SortGroup
         -> Electrode
         """
 
@@ -1473,7 +1473,7 @@ class CuratedSpikeSorting(dj.Computed):
     class Unit(dj.Part):
         definition = """
         # Table for holding sorted units
-        -> master
+        -> CuratedSpikeSorting
         unit_id: int                    # ID for each unit
         ---
         label='':              varchar(80)      # optional label for each unit
