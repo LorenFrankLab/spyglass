@@ -654,7 +654,7 @@ class SpikeSortingWorkspace(dj.Computed):
     definition = """
     ->SpikeSortingRecording
     ---
-    channel = 'franklab2' : varchar(80) # the name of the kachery channel for data sharing
+    channel = "franklab2": varchar(80)  # the name of the kachery channel for data sharing
     workspace_uri: varchar(1000)
     """
 
@@ -822,9 +822,9 @@ class SortingID(dj.Manual):
     definition = """
     # Table for holding the a sorting ID and and the sorting extractor object associated with a recording
     -> SpikeSortingRecording
-    sorting_id: varchar(20) # the sorting id of the sorting that was added
+    sorting_id: varchar(20)         # the sorting id of the sorting that was added
     ---
-    sorting_extractor_object: BLOB         # the sorting extractor dictionary to get the extract from kachery
+    sorting_extractor_object: blob  # the sorting extractor dictionary to get the extract from kachery
     """
 
 # this needs to be here because it depends on functions above
@@ -883,7 +883,7 @@ class SpikeSortingSelection(dj.Manual):
     -> SpikeSortingRecording
     -> SpikeSorterParameters
     ---
-    import_path = '': varchar(200) # optional path to previous curated sorting output
+    import_path = "": varchar(200)  # optional path to previous curated sorting output
     """
 
 
@@ -1095,9 +1095,9 @@ class SpikeSorting(dj.Computed):
 class ModifySortingParameters(dj.Manual):
     definition = """
     # Table for holding parameters for modifying the sorting (e.g. merging clusters, )
-    modify_sorting_parameter_set_name: varchar(200)   #name of this parameter set
+    modify_sorting_parameter_set_name: varchar(200)  # name of this parameter set
     ---
-    modify_sorting_parameter_dict: BLOB         #dictionary of variables and values for cluster merging
+    modify_sorting_parameter_dict: blob              # dictionary of variables and values for cluster merging
     """
 
 @schema

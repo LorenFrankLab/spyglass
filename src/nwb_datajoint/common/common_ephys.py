@@ -340,7 +340,7 @@ class LFPBandSelection(dj.Manual):
     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
     lfp_band_sampling_rate: int    # the sampling rate for this band
     ---
-    min_interval_len = 1.0: float  # the minimum length of a valid interval to filter
+    min_interval_len = 1: float  # the minimum length of a valid interval to filter
     """
 
     class LFPBandElectrode(dj.Part):
