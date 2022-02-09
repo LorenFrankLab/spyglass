@@ -41,7 +41,8 @@ class Nwbfile(dj.Manual):
             The relative path to the NWB file.
         """
         nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
-        assert os.path.exists(nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
+        assert os.path.exists(
+            nwb_file_abs_path), f'File does not exist: {nwb_file_abs_path}'
 
         key = dict()
         key['nwb_file_name'] = nwb_file_name
@@ -200,7 +201,8 @@ class AnalysisNwbfile(dj.Manual):
                 original_nwb_file_name)
             # write the new file
             print(f'Writing new NWB file {analysis_file_name}...')
-            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+                analysis_file_name)
             # export the new NWB file
             with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w', manager=io.manager) as export_io:
                 export_io.export(io, nwbf)
@@ -221,7 +223,8 @@ class AnalysisNwbfile(dj.Manual):
         key['nwb_file_name'] = nwb_file_name
         key['analysis_file_name'] = analysis_file_name
         key['analysis_file_description'] = ''
-        key['analysis_file_abs_path'] = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        key['analysis_file_abs_path'] = AnalysisNwbfile.get_abs_path(
+            analysis_file_name)
         self.insert1(key)
 
     @staticmethod

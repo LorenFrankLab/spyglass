@@ -27,7 +27,8 @@ class SensorData(dj.Imported):
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        sensor = get_data_interface(nwbf, 'analog', pynwb.behavior.BehavioralEvents)
+        sensor = get_data_interface(
+            nwbf, 'analog', pynwb.behavior.BehavioralEvents)
         if sensor is None:
             print(f'No conforming sensor data found in {nwb_file_name}\n')
             return
