@@ -17,8 +17,8 @@ class DIOEvents(dj.Imported):
     -> Session
     dio_event_name: varchar(200)  # the name assigned to this DIO event
     ---
-    dio_object_id: varchar(40)   # the object id of the data in the NWB file
-    -> IntervalList              # the list of intervals for this object
+    dio_object_id: varchar(40)    # the object id of the data in the NWB file
+    -> IntervalList               # the list of intervals for this object
     """
 
     def make(self, key):
