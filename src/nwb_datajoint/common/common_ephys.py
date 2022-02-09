@@ -457,7 +457,7 @@ class LFPBand(dj.Computed):
         lfp_band_elect_id = np.asarray(lfp_band_elect_id)
         lfp_band_ref_id = np.asarray(lfp_band_ref_id)
         lfp_sort_order = np.argsort(lfp_band_elect_id)
-        lfp_band_elect_id = lfp_band_ref_id[lfp_sort_order]
+        lfp_band_elect_id = lfp_band_elect_id[lfp_sort_order]
         lfp_band_ref_id = lfp_band_ref_id[lfp_sort_order]
 
         lfp_sampling_rate = (LFP() & {'nwb_file_name': key['nwb_file_name']}).fetch1(
