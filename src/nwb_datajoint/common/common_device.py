@@ -16,7 +16,7 @@ class DataAcquisitionDevice(dj.Manual):
 
     @classmethod
     def insert_from_nwbfile(cls, nwbf):
-        """Insert a data acquisition device from an NWB file.
+        """Insert data acquisition devices from an NWB file.
 
         Parameters
         ----------
@@ -76,15 +76,14 @@ class CameraDevice(dj.Manual):
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.CameraDevice):
                 device_dict = dict()
-                # TODO ideally this is not encoded in the name
+                # TODO ideally the ID is not encoded in the name formatted in a particular way
+                # device.name must have the form "[any string without a space, usually camera] [int]"
                 device_dict['camera_id'] = int(str.split(device.name)[1])
-                # TODO: fix camera name and add fields when new extension is available
                 device_dict['camera_name'] = device.camera_name
-                # device_dict['manufacturer'] = device.manufacturer
+                device_dict['manufacturer'] = device.manufacturer
                 device_dict['model'] = device.model
                 device_dict['lens'] = device.lens
                 device_dict['meters_per_pixel'] = device.meters_per_pixel
-
                 cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['camera_name'])
         if device_name_list:
