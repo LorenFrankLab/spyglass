@@ -29,10 +29,9 @@ class Session(dj.Imported):
 
     def make(self, key):
         # These imports must go here to avoid cyclic dependencies
+        # from .common_task import Task, TaskEpoch
         from .common_interval import IntervalList
-        from .common_task import Task
         # from .common_ephys import Unit
-        # TODO add Task
 
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
@@ -63,9 +62,6 @@ class Session(dj.Imported):
 
         print('Probe...')
         Probe().insert_from_nwbfile(nwbf)
-
-        print('Task...')
-        Task().insert_from_nwbfile(nwbf)
 
         if nwbf.subject is not None:
             subject_id = nwbf.subject.subject_id
