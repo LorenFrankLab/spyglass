@@ -109,9 +109,6 @@ class Probe(dj.Manual):
         probe_shank: int            # shank number within probe
         """
 
-        # value for probe_type if ndx_franklab_novela.Probe data type is not present in the NWB file
-        UNKNOWN = -1
-
     class Electrode(dj.Part):
         definition = """
         -> master.Shank
@@ -122,31 +119,6 @@ class Probe(dj.Manual):
         rel_y = NULL: float           # (um) y coordinate of the electrode within the probe
         rel_z = NULL: float           # (um) z coordinate of the electrode within the probe
         """
-
-        # value for probe_type if ndx_franklab_novela.Probe data type is not present in the NWB file
-        UNKNOWN = -1
-
-    # value for probe_type if ndx_franklab_novela.Probe data type is not present in the NWB file
-    UNKNOWN = 'UNKNOWN'
-
-    @classmethod
-    def initialize(cls):
-        # initialize with an unknown probe type for use when NWB file does not contain a compatible probe device
-        # TODO: move to initialization script so it doesn't get called every time
-        probe_dict = dict()
-        probe_dict['probe_type'] = cls.UNKNOWN
-        cls.insert1(probe_dict, skip_duplicates=True)
-
-        shank_dict = dict()
-        shank_dict['probe_type'] = probe_dict['probe_type']
-        shank_dict['probe_shank'] = cls.Shank.UNKNOWN
-        cls.Shank.insert1(shank_dict, skip_duplicates=True)
-
-        electrode_dict = dict()
-        electrode_dict['probe_type'] = probe_dict['probe_type']
-        electrode_dict['probe_shank'] = shank_dict['probe_shank']
-        electrode_dict['probe_electrode'] = cls.Electrode.UNKNOWN
-        cls.Electrode.insert1(electrode_dict, skip_duplicates=True)
 
     @classmethod
     def insert_from_nwbfile(cls, nwbf):
@@ -162,7 +134,6 @@ class Probe(dj.Manual):
         device_name_list : list
             List of probe device types found in the NWB file.
         """
-        # cls.initialize()
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.Probe):
