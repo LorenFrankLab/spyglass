@@ -29,7 +29,10 @@ class Nwbfile(dj.Manual):
     nwb_file_name: varchar(2000)   # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
+    INDEX (nwb_file_abs_path)
     """
+    # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
+    # so that alter() can work
 
     @classmethod
     def insert_from_relative_file_name(cls, nwb_file_name):
@@ -114,7 +117,10 @@ class AnalysisNwbfile(dj.Manual):
     analysis_file_description = "": varchar(2000)  # an optional description of this analysis
     analysis_parameters = NULL: blob               # additional relevant parmeters. Currently used only for analyses
                                                    # that span multiple NWB files
+    INDEX (analysis_file_abs_path)
     """
+    # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
+    # so that alter() can work
 
     def create(self, nwb_file_name):
         """Open the NWB file, create a copy, write the copy to disk and return the name of the new file.
