@@ -240,7 +240,7 @@ class CuratedSpikeSorting(dj.Computed):
         if clusters_merged:
             recording = workspace.get_recording_extractor(
                 workspace.recording_ids[0])
-            tmpfile = tempfile.NamedTemporaryFile(dir=os.environ['NWB_DATAJOINT_TEMP_DIR'])
+            tmpfile = tempfile.NamedTemporaryFile(dir=os.environ['SPYGLASS_TEMP_DIR'])
             recording = se.CacheRecordingExtractor(
                                 recording, save_path=tmpfile.name, chunk_mb=10000)
             # whiten the recording

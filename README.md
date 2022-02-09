@@ -51,7 +51,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
      export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
      ```
 
-     Note that a local NWB_DATAJOINT_TEMP_DIR (e.g. one on your machine) will speed up spike sorting, but make sure it has enough free space (ideally at least 500GB)
+     Note that a local SPYGLASS_TEMP_DIR (e.g. one on your machine) will speed up spike sorting, but make sure it has enough free space (ideally at least 500GB)
 
 3. Check if you have access to the `kachery` daemon. Open up a terminal, activate the conda environment, and type
 

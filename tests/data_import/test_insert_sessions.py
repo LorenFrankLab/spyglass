@@ -33,8 +33,8 @@ def new_nwbfile_raw_file_name(tmp_path):
     nwbfile.add_acquisition(es)
 
     nwb_datajoint_base_dir = tmp_path / 'nwb-data'
-    os.environ['NWB_DATAJOINT_BASE_DIR'] = str(nwb_datajoint_base_dir)
-    os.mkdir(os.environ['NWB_DATAJOINT_BASE_DIR'])
+    os.environ['SPYGLASS_BASE_DIR'] = str(nwb_datajoint_base_dir)
+    os.mkdir(os.environ['SPYGLASS_BASE_DIR'])
 
     raw_dir = nwb_datajoint_base_dir / 'raw'
     os.mkdir(raw_dir)
@@ -69,7 +69,7 @@ def test_copy_nwb(new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name, mov
     copy_nwb_link_raw_ephys(new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name)
 
     # new file should not have ephys data
-    base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
+    base_dir = pathlib.Path(os.getenv('SPYGLASS_BASE_DIR', None))
     new_nwbfile_raw_file_name_abspath = base_dir / 'raw' / new_nwbfile_raw_file_name
     out_nwb_file_abspath = base_dir / 'raw' / new_nwbfile_no_ephys_file_name
     with pynwb.NWBHDF5IO(path=str(out_nwb_file_abspath), mode='r') as io:
