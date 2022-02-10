@@ -9,7 +9,7 @@ authors:
   given-names: "Ryan"
 - family-names: "Frank"
   given-names: "Loren"
-title: "nwb_datajoint"
-version: 0.2.9
+title: "spyglass"
+version: 0.3.0
 date-released: 2020-12-18
-url: "https://github.com/LorenFrankLab/nwb_datajoint"
+url: "https://github.com/LorenFrankLab/spyglass"

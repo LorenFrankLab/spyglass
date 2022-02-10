@@ -6,7 +6,7 @@ import sortingview as sv
 import spikeinterface as si
 
 from .common_nwbfile import AnalysisNwbfile
-from .common_spikesorting import SpikeSortingRecording, SpikeSorting, SortingList
+from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sorting
 
 schema = dj.schema('common_waveforms')
 
@@ -26,7 +26,7 @@ class WaveformParameters(dj.Manual):
 @schema
 class WaveformSelection(dj.Manual):
     definition = """
-    -> SortingList
+    -> Sorting
     -> WaveformParameters
     ---
     """
@@ -44,7 +44,7 @@ class Waveforms(dj.Computed):
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
         
-        sorting_path = (SortingList & key).fetch1('sorting_path')
+        sorting_path = (Sorting & key).fetch1('sorting_path')
         sorting = si.load_extractor(sorting_path)
         
         print('Extracting waveforms...')

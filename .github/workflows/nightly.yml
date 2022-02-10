@@ -1,4 +1,4 @@
-name: Nightly import test
+name: Nightly Test
 
 on:
   schedule:
@@ -13,7 +13,7 @@ jobs:
     env:
       OS: ${{ matrix.os }}
       PYTHON: '3.8'
-    #   NWB_DATAJOINT_BASE_DIR: ./data
+    #   SPYGLASS_BASE_DIR: ./data
     #   KACHERY_STORAGE_DIR: ./data/kachery-storage
     #   DJ_SUPPORT_FILEPATH_MANAGEMENT: True
     # services:
@@ -46,20 +46,7 @@ jobs:
     - name: Install nwb_datajoint
       shell: bash -l {0}
       run: |
-        conda activate nwb_datajoint
         pip install -e .
-    # - name: Set up data directories
-    #   run: |
-    #     mkdir ${NWB_DATAJOINT_BASE_DIR}
-    #     mkdir ${KACHERY_STORAGE_DIR}
-    #     mkdir "${NWB_DATAJOINT_BASE_DIR}/raw"
-    #     mkdir "${NWB_DATAJOINT_BASE_DIR}/analysis"
-    - name: Configure datajoint and test importing nwb_datajoint
-      shell: bash -l {0}
-      run: |
-        conda activate nwb_datajoint
-        # python tests/ci_config.py  # configure datajoint
-        # python -c "import nwb_datajoint; import nwb_datajoint.common"  # test import
     - name: Run tests
       shell: bash -l {0}
       run: |

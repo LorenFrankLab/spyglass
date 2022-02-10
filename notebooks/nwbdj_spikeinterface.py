@@ -3,7 +3,7 @@
 import os
 data_dir = '/Users/loren/data/nwb_builder_test_data'  # CHANGE ME
 
-os.environ['NWB_DATAJOINT_BASE_DIR'] = data_dir
+os.environ['SPYGLASS_BASE_DIR'] = data_dir
 os.environ['KACHERY_STORAGE_DIR'] = os.path.join(data_dir, 'kachery-storage')
 os.environ['SPIKE_SORTING_STORAGE_DIR'] = os.path.join(data_dir, 'spikesorting')
 

@@ -14,7 +14,7 @@ def insert_sessions(nwb_file_names):
     Parameters
     ----------
     nwb_file_names : string or List of strings
-        nwb_file_names is a list of relative file paths, relative to $NWB_DATAJOINT_BASE_DIR, pointing to
+        nwb_file_names is a list of relative file paths, relative to $SPYGLASS_BASE_DIR, pointing to
         existing .nwb files. Each file represents a session.
     """
     check_env()
@@ -63,6 +63,11 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
         for eseries in eseries_list:
             nwbf.acquisition.pop(eseries.name)
 
+        # pop off analog processing module
+        analog_processing = nwbf.processing.get('analog')
+        if analog_processing:
+            nwbf.processing.pop('analog')
+
         # export the new NWB file
         with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='w', manager=input_io.manager) as export_io:
             export_io.export(input_io, nwbf)
@@ -72,6 +77,7 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
     with pynwb.NWBHDF5IO(path=nwb_file_abs_path, mode='r', load_namespaces=True) as input_io:
         nwbf_raw = input_io.read()
         eseries_list = get_raw_eseries(nwbf_raw)
+        analog_processing = nwbf_raw.processing.get('analog')
 
         with pynwb.NWBHDF5IO(path=out_nwb_file_abs_path, mode='a', manager=input_io.manager) as export_io:
             nwbf_export = export_io.read()
@@ -79,8 +85,12 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
             # add link to raw ephys ElectricalSeries in raw data file
             for eseries in eseries_list:
                 nwbf_export.add_acquisition(eseries)
-            nwbf_export.set_modified()  # workaround until the above sets modified=True on the file
 
+            # add link to processing module in raw data file
+            if analog_processing:
+                nwbf_export.add_processing_module(analog_processing)
+
+            nwbf_export.set_modified()
             export_io.write(nwbf_export)
 
     return out_nwb_file_abs_path

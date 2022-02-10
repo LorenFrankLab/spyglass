@@ -19,13 +19,23 @@ class IntervalList(dj.Manual):
     valid_times: longblob # numpy array with start and end times for each interval
     """
 
-    def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
-        '''
-        :param nwbf:
-        :param nwb_file_name:
-        :return: None
-        Adds each of the entries in the nwb epochs table to the Interval list
-        '''
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf, *, nwb_file_name):
+        """Add each entry in the NWB file epochs table to the IntervalList table.
+
+        The interval list name for each epoch is set to the first tag for the epoch.
+        If the epoch has no tags, then 'interval_x' will be used as the interval list name, where x is the index
+        (0-indexed) of the epoch in the epochs table.
+        The start time and stop time of the epoch are stored in the valid_times field as a numpy array of
+        [start time, stop time] for each epoch.
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            The source NWB file object.
+        nwb_file_name : str
+            The file name of the NWB file, used as a primary key to the Session table.
+        """
         epochs = nwbf.epochs.to_dataframe()
         epoch_dict = dict()
         epoch_dict['nwb_file_name'] = nwb_file_name
@@ -33,7 +43,7 @@ class IntervalList(dj.Manual):
             epoch_dict['interval_list_name'] = e[1].tags[0]
             epoch_dict['valid_times'] = np.asarray(
                 [[e[1].start_time, e[1].stop_time]])
-            self.insert1(epoch_dict, skip_duplicates=True)
+            cls.insert1(epoch_dict, skip_duplicates=True)
 
 @schema
 class SortInterval(dj.Manual):
@@ -46,6 +56,19 @@ class SortInterval(dj.Manual):
 
 
 # TODO: make all of the functions below faster if possible
+def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
+    """Returns an interval list with only the intervals whose length is > min_length and < max_length
+
+    Args:
+        interval_list ((N,2) np.array): input interval list.
+        min_length (float, optional): [minimum interval length in seconds]. Defaults to 0.0.
+        max_length ([type], optional): [maximum interval length in seconds]. Defaults to 1e10.
+    """
+    # get the length of each interval
+    lengths = np.ravel(np.diff(interval_list))
+    # return only intervals of the appropriate lengths
+    return interval_list[np.logical_and(lengths > min_length, lengths < max_length)]
+
 def interval_list_contains_ind(valid_times, timestamps):
     """Returns the indices for the timestamps that are contained within the valid_times intervals
 
@@ -181,6 +204,9 @@ def _union(interval1, interval2):
 def _union_concat(interval1, interval2):
     """Given two intervals, takes their union if overlapping;
     concatenates if not
+    
+    This is recursively called with `reduce`.
+    Interval1 is usually a list of intervals; interval2 is a single interval
     """
     if interval1.ndim==1:
         interval1 = np.expand_dims(interval1, 0)
@@ -217,13 +243,17 @@ def union_adjacent_index(interval1, interval2):
         return np.concatenate((interval1, interval2),axis=0)
 
 # TODO: test interval_list_union code
-def interval_list_union(interval_list1, interval_list2):
+def interval_list_union(interval_list1, interval_list2, min_length=0.0, max_length=1e10):
     """Finds the union (all times in one or both) for two interval lists
 
     :param interval_list1: The first interval list
     :type interval_list1: numpy array of intervals [start, stop]
     :param interval_list2: The second interval list
     :type interval_list2: numpy array of intervals [start, stop]
+    :param min_length: optional minimum length of interval for inclusion in output, default 0.0
+    :type min_length: float
+    :param max_length: optional maximum length of interval for inclusion in output, default 1e10
+    :type max_length: float
     :return: interval_list
     :rtype:  numpy array of intervals [start, stop]
     """
@@ -258,8 +288,8 @@ def interval_list_censor(interval_list, timestamps):
     Args:
         interval_list (numpy array of intervals [start, stop]): interval list from IntervalList valid times
         timestamps (numpy array or list): timestamp list
-    
-    Returns: 
+
+    Returns:
         interval_list (numpy array of intervals [start, stop])
     """
     # check that all timestamps are in the interval list
