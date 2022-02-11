@@ -3,6 +3,7 @@ from functools import reduce
 import datajoint as dj
 import numpy as np
 import scipy.stats as stats
+import warnings
 import spikeinterface as si
 
 from .common_interval import IntervalList
@@ -50,14 +51,13 @@ class ArtifactDetection(dj.Computed):
     """
 
     def make(self, key):
-         # get the dict of artifact params associated with this artifact_params_name
+        # get the dict of artifact params associated with this artifact_params_name
         artifact_params = (ArtifactDetectionParameters & key).fetch1("artifact_params")
         
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path) 
         
         # get artifact-related timing info
-        # could call an input verification method right before this line
         artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
         key['artifact_times'] = artifact_times
         key['artifact_removed_valid_times'] = artifact_removed_valid_times
@@ -129,25 +129,14 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         artifact_times_empty = np.asarray([])
         return recording_interval, artifact_times_empty
     
-    # otherwise if amplitude or zscore thresholds are negative, raise a value error
-    # doesn't make sense to use a negative threshold on an absolute signal - might be nice to tell the user?
-    thresholds = [t for t in [amplitude_thresh, zscore_thresh] if t is not None]
-    for t in thresholds:
-        if t < 0:
-            raise ValueError("Amplitude and Z-Score thresholds must be >= 0, or None")
-    # also verify that proportion above makes sense/is in [0:1] inclusive?
-    # if ((proportion_above_thresh < 0) or (proportion_above_thresh > 1)):
-    #     raise ValueError("proportion_above_thresh must be >= 0 and <= 1")
-    
-    # related to ^^, if we want to verify inputs values, then i might vote for breaking that out into its own method on this class
-    # and calling the input vertification method before calling this current method in the downstream computed table's make fxn
+    # verify threshold parameters
+    amplitude_thresh, zscore_thresh, proportion_above_thresh = _check_artifact_thresholds(amplitude_thresh, zscore_thresh, proportion_above_thresh)
 
-    # turn milliseconds to remove total into # samples to remove from either side of each detected artifact
+    # turn ms to remove total into # samples to remove from either side of each detected artifact
     # sampling freq is in samp/sec. 1000 ms per sec. 1/2 to be removed from either side of artifact sample. 
     half_window_points = np.round(
         recording.get_sampling_frequency() * (1/1000) * removal_window_len * (1/2) )
     
-    # get the data traces
     data = recording.get_traces()
 
     # compute the number of electrodes that have to be above threshold
@@ -192,3 +181,37 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     artifact_removed_valid_times = get_valid_intervals(valid_timestamps[valid_timestamps != -1], recording.get_sampling_frequency(), 1.5, 0.001)        
     
     return artifact_removed_valid_times, artifact_intervals
+
+def _check_artifact_thresholds(amplitude_thresh, zscore_thresh, proportion_above_thresh):
+    """Alerts user to likely unintended parameters. Not an exhaustive verification.
+
+    Parameters
+    ----------
+    zscore_thresh: float
+    amplitude_thresh: float
+    proportion_above_thresh: float
+
+    Return
+    ------
+    zscore_thresh: float
+    amplitude_thresh: float
+    proportion_above_thresh: float
+
+    Raise
+    ------
+    ValueError: if signal thresholds are negative 
+    """
+    # amplitude or zscore thresholds should be negative, as they are applied to an absolute signal
+    signal_thresholds = [t for t in [amplitude_thresh, zscore_thresh] if t is not None]
+    for t in signal_thresholds:
+        if t < 0:
+            raise ValueError("Amplitude and Z-Score thresholds must be >= 0, or None")
+    
+    # proportion_above_threshold should be in [0:1] inclusive
+    if proportion_above_thresh < 0:
+        warnings.warn("Warning: proportion_above_thresh must be a proportion >=0 and <=1. Using proportion_above_thresh = 0 instead of "+str(proportion_above_thresh))
+        proportion_above_thresh = 0
+    elif proportion_above_thresh > 1:
+        warnings.warn("Warning: proportion_above_thresh must be a proportion >=0 and <=1. Using proportion_above_thresh = 1 instead of "+str(proportion_above_thresh))
+        proportion_above_thresh = 1
+    return amplitude_thresh, zscore_thresh, proportion_above_thresh
