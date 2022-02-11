@@ -23,6 +23,7 @@ from spikeextractors.extractors.nwbextractors.nwbextractors import NwbSortingExt
 import spikesorters as ss
 import spiketoolkit as st
 from mountainsort4._mdaio_impl import readmda
+from spikesorters.sorterlist import sorter_full_list
 
 from .common_device import Probe
 from .common_lab import LabMember, LabTeam
@@ -34,6 +35,11 @@ from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
+from .sorting_utils import (ClusterlessThresholder, set_workspace_permission,
+                            store_sorting_nwb)
+
+if ClusterlessThresholder not in sorter_full_list:
+    sorter_full_list.append(ClusterlessThresholder)
 
 
 class Timer:
@@ -836,14 +842,18 @@ class SpikeSorter(dj.Manual):
     # Table that holds the list of spike sorters avaialbe through spikeinterface
     sorter_name: varchar(80) # the name of the spike sorting algorithm
     """
+
     def insert_from_spikeinterface(self):
         '''
         Add each of the sorters from spikeinterface.sorters
         :return: None
         '''
         sorters = ss.available_sorters()
+        if ClusterlessThresholder.sorter_name not in sorters:
+            sorters.append(ClusterlessThresholder.sorter_name)
         for sorter in sorters:
             self.insert1({'sorter_name': sorter}, skip_duplicates="True")
+
 
 @schema
 class SpikeSorterParameters(dj.Manual):
@@ -863,11 +873,17 @@ class SpikeSorterParameters(dj.Manual):
         sort_param_dict = dict()
         sort_param_dict['spikesorter_parameter_set_name'] = 'default'
         sorters = ss.available_sorters()
+        if ClusterlessThresholder.sorter_name not in sorters:
+            sorters.append(ClusterlessThresholder.sorter_name)
         for sorter in sorters:
             if len((SpikeSorter() & {'sorter_name': sorter}).fetch()):
                 sort_param_dict['sorter_name'] = sorter
-                sort_param_dict['parameter_dict'] = ss.get_default_params(
-                    sorter)
+                if sorter == ClusterlessThresholder.sorter_name:
+                    sort_param_dict['parameter_dict'] = ss.get_default_params(
+                        ClusterlessThresholder)
+                else:
+                    sort_param_dict['parameter_dict'] = ss.get_default_params(
+                        sorter)
                 self.insert1(sort_param_dict, skip_duplicates=True)
             else:
                 print(
@@ -939,13 +955,26 @@ class SpikeSorting(dj.Computed):
             tempfile.tempdir = os.getenv('NWB_DATAJOINT_TEMP_DIR')
             with tempfile.TemporaryDirectory() as tmp_output_folder:
                 os.environ['MS4_TMP_OUTPUT'] = tmp_output_folder
-                sorting = ss.run_sorter(key['sorter_name'], recording,
-                                        output_folder=os.getenv('MS4_TMP_OUTPUT'),
-                                        **sort_parameters['parameter_dict'])
+                if key['sorter_name'] == 'clusterless_thresholder':
+                    sorting = ss.run_sorter(ClusterlessThresholder, recording,
+                                            output_folder=os.getenv(
+                                                'MS4_TMP_OUTPUT'),
+                                            **sort_parameters['parameter_dict'])
+                else:
+                    sorting = ss.run_sorter(key['sorter_name'], recording,
+                                            output_folder=os.getenv(
+                                                'MS4_TMP_OUTPUT'),
+                                            **sort_parameters['parameter_dict'])
+
         else:
-            sorting = ss.run_sorter(key['sorter_name'], recording,
-                                    output_folder=None,
-                                    **sort_parameters['parameter_dict'])
+            if key['sorter_name'] == 'clusterless_thresholder':
+                sorting = ss.run_sorter(ClusterlessThresholder, recording,
+                                        output_folder=None,
+                                        **sort_parameters['parameter_dict'])
+            else:
+                sorting = ss.run_sorter(key['sorter_name'], recording,
+                                        output_folder=None,
+                                        **sort_parameters['parameter_dict'])
         key['time_of_sort'] = int(time.time())
 
         print('\nSaving sorting results...')       # get the sort interval valid times and the original sort interval

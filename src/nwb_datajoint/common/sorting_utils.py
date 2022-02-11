@@ -1,20 +1,24 @@
 "Functions that are commonly used"
 
+import os
+import tempfile
+from pathlib import Path
+from typing import List
+
 import kachery_client as kc
 import numpy as np
-import os
 import sortingview as sv
+import spikeextractors
 import spikeinterface as si
 import spikeinterface.toolkit as st
-import spikeextractors
-from typing import List
-from pathlib import Path
-import tempfile
+from spikeextractors import MdaSortingExtractor, NumpySortingExtractor
+from spikesorters.basesorter import BaseSorter
+from spikesorters.sorter_tools import recover_recording
+from spiketoolkit.sortingcomponents import detect_spikes
 
-from .common_lab import LabMember
 from .common_interval import IntervalList
+from .common_lab import LabMember
 from .common_nwbfile import AnalysisNwbfile
-from .common_spikesorting import SpikeSortingRecording, SpikeSortingWorkspace, SortingID
 
 
 def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, metrics=None, unit_ids=None):
@@ -36,6 +40,7 @@ def store_sorting_nwb(key, *, sorting, sort_interval_list_name, sort_interval, m
     :returns: analysis_file_name, units_object_id
     :rtype (str, str)
     """
+    from .common_spikesorting import SpikeSortingRecording
 
     sort_interval_valid_times = (IntervalList & \
             {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
@@ -181,4 +186,78 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
 
     print(f'URL for sortingview: {url}')
     
-    return url, external_metrics
+    return url, external_metricsclass ClusterlessThresholder(BaseSorter):
+    sorter_name = 'clusterless_thresholder'  # convenience for reporting
+    SortingExtractor_Class = NumpySortingExtractor  # convenience to get the extractor
+    compatible_with_parallel = {'loky': False,
+                                'multiprocessing': False,
+                                'threading': False}
+    _default_params = dict(
+        detect_threshold=100,
+        channel_ids=None,
+        detect_sign=-1,
+        n_shifts=2,
+        n_snippets_for_threshold=10,
+        snippet_size_sec=1,
+        start_frame=None,
+        end_frame=None,
+        n_jobs=1,
+        joblib_backend='loky',
+        chunk_size=None,
+        chunk_mb=500,
+        verbose=False,
+    )
+    _params_description = {}
+    sorter_description = ""
+    requires_locations = False
+    installation_mesg = ""  # error message when not installed
+
+    @classmethod
+    def is_installed(cls):
+        return True
+
+    @staticmethod
+    def get_sorter_version():
+        return 'unknown'
+
+    @classmethod
+    def _setup_recording(cls, recording, output_folder):
+        pass
+
+    def _run(self, recording, output_folder):
+
+        recording = recover_recording(recording)
+        params = self.params.copy()
+        threshold = params.pop('detect_threshold')  # in mV
+
+        # convert to median absolute deviation units
+        MAD_threshold = np.max(
+            threshold / np.median(np.abs(recording.get_traces()) / 0.6745, 1))
+
+        sorting = detect_spikes(
+            recording,
+            detect_threshold=MAD_threshold,
+            **params
+        )
+
+        output_folder = Path(output_folder)
+        MdaSortingExtractor.write_sorting(
+            sorting, str(output_folder / 'firings.mda'))
+
+        samplerate = recording.get_sampling_frequency()
+        samplerate_fname = str(output_folder / 'samplerate.txt')
+        with open(samplerate_fname, 'w') as file:
+            file.write('{}'.format(samplerate))
+
+    @staticmethod
+    def get_result_from_folder(output_folder):
+        output_folder = Path(output_folder)
+        tmpdir = output_folder
+
+        result_fname = str(tmpdir / 'firings.mda')
+        samplerate_fname = str(tmpdir / 'samplerate.txt')
+        with open(samplerate_fname, 'r') as file:
+            samplerate = float(file.read())
+
+        return MdaSortingExtractor(
+            file_path=result_fname, sampling_frequency=samplerate)
