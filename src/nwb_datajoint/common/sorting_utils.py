@@ -185,8 +185,8 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
     #                                               label=workspace.label, include_curation=True)
 
     print(f'URL for sortingview: {url}')
-    
-    return url, external_metricsclass ClusterlessThresholder(BaseSorter):
+
+    return url, external_metrics
 
 
 class ClusterlessThresholder(BaseSorter):
