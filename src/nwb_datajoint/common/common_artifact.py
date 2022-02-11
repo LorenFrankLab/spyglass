@@ -116,15 +116,10 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     
     Return
     ------
-    artifact_times: np.ndarray
-        The timestamps contained in each of the detected artifact windows
+    artifact_intervals: np.ndarray
+        Intervals in which artifacts are detected (including removal windows)
     artifact_removed_valid_times: np.ndarray
         Intervals of valid times where artifacts were not detected
-        
-    Raises
-    ------
-    ValueError
-        when amplitude or zscore thresholds are negative
     """
     
     # if both thresholds are None, we essentially skip artifract detection and
@@ -174,9 +169,6 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
             np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
     
     valid_timestamps = recording.get_times()
-    
-    # keep track of artifact detected timestamps - this could be saved if we wanted?
-    # artifact_detected_times = valid_timestamps[above_thresh] # the specific artifact times, NOT including the window around them
 
     # keep track of all the artifact times within each artifact removal window
     artifact_times = []
@@ -188,7 +180,8 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
             a_times = np.copy(valid_timestamps[int(a - half_window_points):int(a + half_window_points)])
             artifact_times.append(a_times)
     artifact_times = np.asarray(artifact_times)
-    # alternatively, we could store these as intervals instead of arrays of all the times? (using interval_list_union many times or something?)
+    # turn artifact detected times into intervals
+    artifact_intervals = get_valid_intervals(reduce(np.union1d, artifact_times), recording.get_sampling_frequency(), 1.5, .001)
     
     # turn all artifact detected times into -1 so valid non-artifact intervals can be easily found
     for a in above_thresh:
@@ -198,4 +191,4 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
             valid_timestamps[int(a - half_window_points):int(a + half_window_points)] = -1
     artifact_removed_valid_times = get_valid_intervals(valid_timestamps[valid_timestamps != -1], recording.get_sampling_frequency(), 1.5, 0.001)        
     
-    return artifact_removed_valid_times, artifact_times
+    return artifact_removed_valid_times, artifact_intervals
