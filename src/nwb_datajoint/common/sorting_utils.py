@@ -187,6 +187,9 @@ def add_metrics_to_workspace(workspace_uri: str, sorting_id: str=None,
     print(f'URL for sortingview: {url}')
     
     return url, external_metricsclass ClusterlessThresholder(BaseSorter):
+
+
+class ClusterlessThresholder(BaseSorter):
     sorter_name = 'clusterless_thresholder'  # convenience for reporting
     SortingExtractor_Class = NumpySortingExtractor  # convenience to get the extractor
     compatible_with_parallel = {'loky': False,
