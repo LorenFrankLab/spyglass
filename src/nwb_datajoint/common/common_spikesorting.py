@@ -582,11 +582,8 @@ class SpikeSorting(dj.Computed):
         Parameters
         ----------
         key : dict
-            [description]
-        sorting : [type]
-            [description]
+        sorting : si.Sorting
         sort_interval_list_name : str
-            [description]
         sort_interval : list
             interval for start and end of sort
         metrics : dict, optional
