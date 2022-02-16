@@ -70,7 +70,7 @@ class SortGroup(dj.Manual):
         -> Electrode
         """
 
-    def set_group_by_shank(self, nwb_file_name: str, references: dict=None):
+    def set_group_by_shank(self, nwb_file_name: str, references: dict=None, omit_ref_electrode_group=False):
         """Divides electrodes into groups based on their shank position.
         * Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
           single group
