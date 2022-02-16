@@ -92,8 +92,7 @@ class UnitMarks(dj.Computed):
         units = UnitInclusionParameters().get_included_units(key, key)
 
         # retrieve the units from the NWB file
-        nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[
-            0]['units'].to_dataframe()
+        nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
 
         # get the labbox workspace so we can get the waveforms from the recording
         workspace_uri = (SpikeSortingWorkspace & key).fetch1('workspace_uri')
