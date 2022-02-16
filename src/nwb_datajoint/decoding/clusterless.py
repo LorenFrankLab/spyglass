@@ -8,7 +8,6 @@ import pynwb
 import xarray as xr
 from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
-from nwb_datajoint.common.common_position import TrackGraph
 from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
                                                       SpikeSortingWorkspace,
                                                       UnitInclusionParameters)
@@ -17,15 +16,10 @@ from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
 from replay_trajectory_classification.classifier import (
     _DEFAULT_CLUSTERLESS_MODEL_KWARGS, _DEFAULT_CONTINUOUS_TRANSITIONS,
     _DEFAULT_ENVIRONMENT)
-from replay_trajectory_classification.continuous_state_transitions import (
-    Identity, RandomWalk, RandomWalkDirection1, RandomWalkDirection2, Uniform)
-from replay_trajectory_classification.discrete_state_transitions import (
-    DiagonalDiscrete, RandomDiscrete, UniformDiscrete, UserDefinedDiscrete)
-from replay_trajectory_classification.environments import Environment
-from replay_trajectory_classification.initial_conditions import (
-    UniformInitialConditions, UniformOneEnvironmentInitialConditions)
-from replay_trajectory_classification.misc import NumbaKDE
-from replay_trajectory_classification.observation_model import ObservationModel
+from replay_trajectory_classification.discrete_state_transitions import \
+    DiagonalDiscrete
+from replay_trajectory_classification.initial_conditions import \
+    UniformInitialConditions
 
 schema = dj.schema('decoding_clusterless')
 

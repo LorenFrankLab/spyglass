@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
-from nwb_datajoint.common.common_position import TrackGraph
 from nwb_datajoint.common.common_spikesorting import CuratedSpikeSorting
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
 from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
@@ -13,7 +12,6 @@ from replay_trajectory_classification.classifier import (
     _DEFAULT_CONTINUOUS_TRANSITIONS, _DEFAULT_ENVIRONMENT)
 from replay_trajectory_classification.discrete_state_transitions import \
     DiagonalDiscrete
-from replay_trajectory_classification.environments import Environment
 from replay_trajectory_classification.initial_conditions import \
     UniformInitialConditions
 
