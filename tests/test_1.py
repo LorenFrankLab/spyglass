@@ -8,8 +8,8 @@ import uuid
 
 
 def test_1():
-    print("In test_1, os.environ['NWB_DATAJOINT_BASE_DIR'] is", os.environ['NWB_DATAJOINT_BASE_DIR'])
-    raw_dir = pathlib.Path(os.environ['NWB_DATAJOINT_BASE_DIR']) / 'raw'
+    print("In test_1, os.environ['SPYGLASS_BASE_DIR'] is", os.environ['SPYGLASS_BASE_DIR'])
+    raw_dir = pathlib.Path(os.environ['SPYGLASS_BASE_DIR']) / 'raw'
     nwbfile_path = raw_dir / 'test.nwb'
 
     from nwb_datajoint.common import Session, DataAcquisitionDevice, CameraDevice, Probe
@@ -117,7 +117,7 @@ def _old_method_for_creating_test_file():
             filtering='none',
             group=grp
         )
-    nwb_fname = os.environ['NWB_DATAJOINT_BASE_DIR'] + '/test.nwb'
+    nwb_fname = os.environ['SPYGLASS_BASE_DIR'] + '/test.nwb'
     with pynwb.NWBHDF5IO(path=nwb_fname, mode='w') as io:
         io.write(nwb_content)
         io.close()

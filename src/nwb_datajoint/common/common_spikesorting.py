@@ -22,9 +22,9 @@ from .common_interval import (IntervalList, SortInterval,
                               interval_list_intersect, union_adjacent_index)
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_session import Session
-from .common_artifact import ArtifactRemovedIntervalList
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
+
 
 class Timer:
     """
@@ -85,6 +85,8 @@ class SortGroup(dj.Manual):
         references : dict, optional
             If passed, used to set references. Otherwise, references set using
             original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
+        omit_ref_electrode_group : bool
+            Optional. If True, no sort group is defined for electrode group of reference.
         """
         # delete any current groups
         (SortGroup & {'nwb_file_name': nwb_file_name}).delete()
@@ -119,14 +121,32 @@ class SortGroup(dj.Manual):
                         raise Exception(f"electrode group {e_group} not a key in references, so cannot set reference")
                     else:
                         sg_key['sort_reference_electrode_id'] = references[e_group]
-                self.insert1(sg_key)
 
-                shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                                                        electrodes['probe_shank'] == shank)]
-                for elect in shank_elect:
-                    sge_key['electrode_id'] = elect
-                    self.SortGroupElectrode().insert1(sge_key)
-                sort_group += 1
+                # If not omitting electrode group that reference electrode is a part of, or if doing this but current
+                # electrode group not same as reference electrode group, insert sort group and procceed to define sort
+                # group electrodes
+                reference_electrode_group = \
+                electrodes[electrodes["electrode_id"] == sg_key['sort_reference_electrode_id']][
+                    "electrode_group_name"]
+                # If reference electrode corresponds to a real electrode (and not for example the flag for common
+                # average referencing),
+                # check that exactly one electrode group was found for it, and take that electrode group.
+                if len(reference_electrode_group) == 1:
+                    reference_electrode_group = reference_electrode_group[0]
+                elif (int(sg_key['sort_reference_electrode_id']) > 0) and (len(reference_electrode_group) != 1):
+                    raise Exception(
+                        f"Should have found exactly one electrode group for reference electrode,"
+                        f"but found {len(reference_electrode_group)}.")
+                if not omit_ref_electrode_group or (str(e_group) != str(reference_electrode_group)):
+                    self.insert1(sg_key)
+                    shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
+                                                                            electrodes['probe_shank'] == shank)]
+                    for elect in shank_elect:
+                        sge_key['electrode_id'] = elect
+                        self.SortGroupElectrode().insert1(sge_key)
+                    sort_group += 1
+                else:
+                    print(f"Omitting electrode group {e_group} from sort groups because contains reference.")
 
     def set_group_by_electrode_group(self, nwb_file_name: str):
         """Assign groups to all non-bad channel electrodes based on their electrode group
@@ -268,7 +288,6 @@ class SpikeSortingRecordingSelection(dj.Manual):
     -> SortInterval
     -> SpikeSortingPreprocessingParameters
     ---
-    -> SpikeSortingArtifactDetectionParameters
     -> IntervalList
     -> LabTeam
     """
@@ -283,7 +302,7 @@ class SpikeSortingRecording(dj.Computed):
     """
     def make(self, key):
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
-        recording = self._get_filtered_recording_extractor(key)
+        recording = self._get_filtered_recording(key)
 
         recording_name = self._get_recording_name(key)
 
@@ -333,7 +352,7 @@ class SpikeSortingRecording(dj.Computed):
         valid_sort_times = interval_list_intersect(sort_interval, valid_interval_times)
         return valid_sort_times
 
-    def _get_filtered_recording_extractor(self, key: dict):
+    def _get_filtered_recording(self, key: dict):
         """Filters and references a recording
         * Loads the NWB file created during insertion as a spikeinterface Recording
         * Slices recording in time (interval) and space (channels);
@@ -369,7 +388,7 @@ class SpikeSortingRecording(dj.Computed):
                 recording_single = recording.frame_slice(start_frame=interval_indices[0],
                                                         end_frame=interval_indices[1])
                 recordings_list.append(recording_single)
-            recording = si.concatenate_recordings(recordings_list)
+            recording = si.append_recordings(recordings_list)
         else:
             recording = recording.frame_slice(start_frame=valid_sort_times_indices[0][0],
                                               end_frame=valid_sort_times_indices[0][1])
@@ -393,7 +412,8 @@ class SpikeSortingRecording(dj.Computed):
             recording = recording.channel_slice(channel_ids=channel_ids)
             recording = st.preprocessing.common_reference(recording, reference='global',
                                                           operator='median')
-
+        else:
+            raise ValueError("Invalid reference channel ID")
         filter_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
         recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
                                                      freq_max=filter_params['frequency_max'])
@@ -447,6 +467,7 @@ class SpikeSorterParameters(dj.Manual):
             sorter_params = ss.get_default_params(sorter)
             self.insert1([sorter, sorter_params], skip_duplicates=True)
 
+from .common_artifact import ArtifactRemovedIntervalList
 @schema
 class SpikeSortingSelection(dj.Manual):
     definition = """
@@ -519,8 +540,8 @@ class SpikeSorting(dj.Computed):
         
         key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
 
-        # add sorting to SortingList
-        SortingList.insert1({'recording_id': key['recording_id'],
+        # add sorting to Sorting
+        Sorting.insert1({'recording_id': key['recording_id'],
                              'sorting_id': key['sorting_id'],
                              'sorting_path': key['sorting_path'],
                              'parent_sorting_id': ''}, skip_duplicates=True)
@@ -536,7 +557,7 @@ class SpikeSorting(dj.Computed):
         entries = self.fetch()
         permission_bool = np.zeros((len(entries),))
         print(f'Attempting to delete {len(entries)} entries, checking permission...')
-    
+
         for entry_idx in range(len(entries)):
             # check the team name for the entry, then look up the members in that team, then get their datajoint user names
             team_name = (SpikeSortingRecordingSelection & (SpikeSortingRecordingSelection & entries[entry_idx]).proj()).fetch1()['team_name']
@@ -555,7 +576,7 @@ class SpikeSorting(dj.Computed):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
     
     def nightly_cleanup(self):
-        """Clean up spike sorting directories that are not in the SpikeSorting table. 
+        """Clean up spike sorting directories that are not in the SpikeSorting table.
         This should be run after AnalysisNwbFile().nightly_cleanup()
         """
         # get a list of the files in the spike sorting storage directory
@@ -631,7 +652,7 @@ class SpikeSorting(dj.Computed):
         raise NotImplementedError
                 
 @schema
-class SortingList(dj.Manual):
+class Sorting(dj.Manual):
     definition = """
     # Has records for every sorting; similar to IntervalList
     recording_id: varchar(15)

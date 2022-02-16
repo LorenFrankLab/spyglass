@@ -50,7 +50,7 @@ def main():
     # sha1_hashes_to_keep.add('6253ee04e09a5145eae0ced9c26ce73b91876de4')
     garbage_collection(
         sha1_hashes_to_keep=sha1_hashes_to_keep,
-        nwb_datajoint_base_dir=os.environ['NWB_DATAJOINT_BASE_DIR'],
+        nwb_datajoint_base_dir=os.environ['SPYGLASS_BASE_DIR'],
         kachery_storage_dir=os.environ['KACHERY_STORAGE_DIR'],
         relative_path='sha1'
     )
