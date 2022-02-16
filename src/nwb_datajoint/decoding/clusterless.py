@@ -104,8 +104,13 @@ class UnitMarks(dj.Computed):
         # assume the channels are all the same for the moment. This would need to be changed for larger probes
         channel_ids_by_unit = [channel_ids] * (max(units['unit_id']) + 1)
         # here we only get 8 points because that should be plenty to find the minimum/maximum
+        N_WAVEFORM_POINTS = 8
         waveforms = le.get_unit_waveforms(
-            recording, sorting, units['unit_id'], channel_ids_by_unit, 8)
+            recording,
+            sorting,
+            units['unit_id'],
+            channel_ids_by_unit,
+            N_WAVEFORM_POINTS)
 
         if mark_param['mark_type'] == 'amplitude':
             # get the marks and timestamps
