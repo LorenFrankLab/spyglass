@@ -10,7 +10,7 @@ from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
 from nwb_datajoint.common.common_position import TrackGraph
 from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
-                                                      SpikeSorting,
+                                                      SpikeSortingWorkspace,
                                                       UnitInclusionParameters)
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
 from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
@@ -96,8 +96,8 @@ class UnitMarks(dj.Computed):
             0]['units'].to_dataframe()
 
         # get the labbox workspace so we can get the waveforms from the recording
-        curation_feed_uri = (SpikeSorting & key).fetch('curation_feed_uri')[0]
-        workspace = le.load_workspace(curation_feed_uri)
+        workspace_uri = (SpikeSortingWorkspace & key).fetch1('workspace_uri')
+        workspace = le.load_workspace(workspace_uri)
         recording = workspace.get_recording_extractor(
             workspace.recording_ids[0])
         sorting = workspace.get_sorting_extractor(workspace.sorting_ids[0])
