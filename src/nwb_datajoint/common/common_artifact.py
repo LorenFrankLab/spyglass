@@ -27,7 +27,7 @@ class ArtifactDetectionParameters(dj.Manual):
         artifact_params['zscore_thresh'] = None # must be None or >= 0
         artifact_params['amplitude_thresh'] = 3000 # must be None or >= 0
         artifact_params['proportion_above_thresh'] = 1.0 # all electrodes of sort group
-        artifact_params['removal_window_len'] = 1.0 # in milliseconds
+        artifact_params['removal_window_ms'] = 1.0 # in milliseconds
         self.insert1(['default', artifact_params], skip_duplicates=True)  
 
 @schema
@@ -95,11 +95,11 @@ class ArtifactRemovedIntervalList(dj.Manual):
     """
     
 def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
-                        proportion_above_thresh=1.0, removal_window_len=1.0):
+                        proportion_above_thresh=1.0, removal_window_ms=1.0):
     """Detects times during which artifacts do and do not occur.
     Artifacts are defined as periods where the absolute value of the recording signal exceeds one
     OR both specified amplitude or zscore thresholds on the proportion of channels specified,
-    with the period extended by the removal_window_len/2 ms on each side. Z-score and amplitude
+    with the period extended by the removal_window_ms/2 on each side. Z-score and amplitude
     threshold values of None are ignored.
 
     Parameters
@@ -111,7 +111,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         Amplitude threshold for exclusion, should be >=0, defaults to None
     proportion_above_thresh: float, optional
         Proportion of electrodes that need to have threshold crossings, defaults to 1 
-    removal_window_len: float, optional
+    removal_window_ms: float, optional
         Width of the window in milliseconds to mask out per artifact (window/2 removed on each side of threshold crossing), defaults to 1 ms
     
     Return
@@ -132,10 +132,8 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     # verify threshold parameters
     amplitude_thresh, zscore_thresh, proportion_above_thresh = _check_artifact_thresholds(amplitude_thresh, zscore_thresh, proportion_above_thresh)
 
-    # turn ms to remove total into # samples to remove from either side of each detected artifact
-    # sampling freq is in samp/sec. 1000 ms per sec. 1/2 to be removed from either side of artifact sample. 
-    half_window_points = np.round(
-        recording.get_sampling_frequency() * (1/1000) * removal_window_len * (1/2) )
+    # turn ms to remove total into s to remove from either side of each detected artifact
+    half_removal_window_s = removal_window_ms * (1/1000) * (1/2)
     
     data = recording.get_traces()
 
@@ -158,27 +156,24 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
             np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
     
     valid_timestamps = recording.get_times()
-
-    # keep track of all the artifact times within each artifact removal window
-    artifact_times = []
-    for a in above_thresh:
-        if (a - half_window_points) < 0: # make sure indices are valid for the slice
-            a_times = np.copy(valid_timestamps[0:int(a + half_window_points)])
-            artifact_times.append(a_times)
-        else:
-            a_times = np.copy(valid_timestamps[int(a - half_window_points):int(a + half_window_points)])
-            artifact_times.append(a_times)
-    artifact_times = np.asarray(artifact_times)
-    # turn artifact detected times into intervals
-    artifact_intervals = get_valid_intervals(reduce(np.union1d, artifact_times), recording.get_sampling_frequency(), 1.5, .001)
+    above_thresh_times = valid_timestamps[above_thresh] # find timestamps of initial artifact threshold crossings
     
-    # turn all artifact detected times into -1 so valid non-artifact intervals can be easily found
-    for a in above_thresh:
-        if (a - half_window_points) < 0: # make sure indices are valid for the slice
-            valid_timestamps[0:int(a + half_window_points)] = -1
-        else:
-            valid_timestamps[int(a - half_window_points):int(a + half_window_points)] = -1
-    artifact_removed_valid_times = get_valid_intervals(valid_timestamps[valid_timestamps != -1], recording.get_sampling_frequency(), 1.5, 0.001)        
+    # keep track of all the artifact timestamps within each artifact removal window and the indices of those timestamps
+    artifact_times = []
+    artifact_indices = []
+    for a in above_thresh_times:
+        a_times = np.copy(valid_timestamps[(valid_timestamps > (a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s))])
+        a_indices = np.argwhere((valid_timestamps > (a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s)))
+        artifact_times.append(a_times)
+        artifact_indices.append(a_indices)
+    all_artifact_times = reduce(np.union1d, artifact_times)
+    all_artifact_indices = reduce(np.union1d, artifact_indices)
+    # turn artifact detected times into intervals
+    artifact_intervals = get_valid_intervals(all_artifact_times, recording.get_sampling_frequency(), 1.5, .000001)
+    
+    # turn all artifact detected times into -1 to easily find non-artifact intervals
+    valid_timestamps[all_artifact_indices] = -1
+    artifact_removed_valid_times = get_valid_intervals(valid_timestamps[valid_timestamps != -1], recording.get_sampling_frequency(), 1.5, 0.000001)           
     
     return artifact_removed_valid_times, artifact_intervals
 
