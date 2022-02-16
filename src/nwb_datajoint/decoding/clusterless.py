@@ -114,15 +114,11 @@ class UnitMarks(dj.Computed):
 
         if mark_param['mark_type'] == 'amplitude':
             # get the marks and timestamps
-            #marks = np.empty((0, 4), dtype='int16')
-            # more flexible if there are dead channels
-            marks = np.empty((0, waveforms[0][0].shape[0]), dtype='int16')
-            timestamps = np.empty((0), dtype='float64')
-            for index, unit in enumerate(waveforms):
-                marks = np.concatenate(
-                    (marks, np.amin(np.asarray(unit, dtype='int16'), axis=2)), axis=0)
-                timestamps = np.concatenate(
-                    (timestamps, nwb_units.loc[units['unit_id'][index]].spike_times), axis=0)
+            marks = np.min(np.concatenate(
+                waveforms, axis=0).astype(np.int16), axis=2)
+            timestamps = np.concatenate(np.asarray(
+                nwb_units.loc[units['unit_id']].spike_times))
+
             # sort the timestamps to order them properly
             sort_order = np.argsort(timestamps)
             timestamps = timestamps[sort_order]
@@ -133,15 +129,15 @@ class UnitMarks(dj.Computed):
                 # filter the marks by the amplitude threshold
                 if mark_param_dict['sign'] == -1:
                     include = np.where(
-                        np.amax(marks, axis=1) <= (mark_param_dict['sign'] *
-                                                   mark_param_dict['threshold'])
+                        np.max(marks, axis=1) <= (mark_param_dict['sign'] *
+                                                  mark_param_dict['threshold'])
                     )[0]
-                elif mark_param_dict['sign'] == -1:
-                    include = np.where(np.amax(marks, axis=1)
+                elif mark_param_dict['sign'] == 1:
+                    include = np.where(np.max(marks, axis=1)
                                        >= mark_param_dict['threshold'])[0]
                 else:
-                    include = np.where(
-                        np.abs(np.amax(marks, axis=1)) >= mark_param_dict['threshold'])[0]
+                    include = np.where(np.abs(np.max(marks, axis=1)) >=
+                                       mark_param_dict['threshold'])[0]
                 timestamps = timestamps[include]
                 marks = marks[include, :]
 
