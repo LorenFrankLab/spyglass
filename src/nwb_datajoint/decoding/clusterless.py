@@ -83,7 +83,9 @@ class UnitMarks(dj.Computed):
             return
 
         # get the list of units
-        units = UnitInclusionParameters().get_included_units(key, key)
+        units = UnitInclusionParameters().get_included_units(
+            curated_sorting_key=key,
+            unit_inclusion_key=key)
 
         # retrieve the units from the NWB file
         nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
