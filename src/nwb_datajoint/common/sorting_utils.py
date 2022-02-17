@@ -270,11 +270,11 @@ class ClusterlessThresholder(BaseSorter):
 def detect_spikes(recording, channel_ids=None, detect_threshold=5, detect_sign=-1,
                   n_shifts=2, n_snippets_for_threshold=10, snippet_size_sec=1,
                   start_frame=None, end_frame=None, n_jobs=1, joblib_backend='loky',
-                  chunk_size=None, chunk_mb=500, verbose=False):
+                  chunk_size=None, chunk_mb=500, verbose=False,
+                  is_multiunit=True):
     '''
-    Detects spikes per channel. Spikes are detected as threshold crossings and the threshold is in terms of the median
-    average deviation (MAD). The MAD is computed by taking 'n_snippets_for_threshold' snippets of the recordings
-    of 'snippet_size_sec' seconds uniformly distributed between 'start_frame' and 'end_frame'.
+    Detects spikes per channel. Spikes are detected as threshold crossings.
+
     Parameters
     ----------
     recording: RecordingExtractor
@@ -421,8 +421,13 @@ def detect_spikes(recording, channel_ids=None, detect_threshold=5, detect_sign=-
 
     # create sorting extractor
     sorting = se.NumpySortingExtractor()
-    labels_flat = np.array(list(itertools.chain(*labels_list)))
-    times_flat = np.array(list(itertools.chain(*times_list)))
+    if is_multiunit:
+        times_flat = np.unique(np.array(list(itertools.chain(*times_list))))
+        labels_flat = np.ones_like(times_flat) * channel_ids[0]
+    else:
+        labels_flat = np.array(list(itertools.chain(*labels_list)))
+        times_flat = np.array(list(itertools.chain(*times_list)))
+
     sorting.set_times_labels(times=times_flat, labels=labels_flat)
     sorting.set_sampling_frequency(recording.get_sampling_frequency())
 
