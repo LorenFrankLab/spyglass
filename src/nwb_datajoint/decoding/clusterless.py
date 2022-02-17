@@ -34,9 +34,9 @@ class MarkParameters(dj.Manual):
     """
 
     def insert_default_param(self):
-        """insert the default parameter set {'sign': -1, 'threshold' : 100} corresponding to negative going waveforms of at least 100 uV size
+        """insert the default parameter set {'sign': -1, 'threshold' : 0} corresponding to negative going waveforms of at least 100 uV size
         """
-        default_dict = {'sign': -1, 'threshold': 100}
+        default_dict = {'sign': -1, 'threshold': 0}
         self.insert1({'mark_param_name': 'default',
                       'mark_param_dict': default_dict}, skip_duplicates=True)
 
