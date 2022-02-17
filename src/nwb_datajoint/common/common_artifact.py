@@ -45,9 +45,9 @@ class ArtifactDetection(dj.Computed):
     # Stores artifact times and valid no-artifact times as intervals.
     -> ArtifactDetectionSelection
     ---
-    artifact_times: longblob # np array of artifact times for each detected artifact
-    artifact_removed_valid_times: longblob # np array of valid no-artifact start and end times (an array of intervals)
-    artifact_removed_interval_list_name: varchar(200) # name of the array of detected artifact-free times
+    artifact_times: longblob # np array of artifact intervals
+    artifact_removed_valid_times: longblob # np array of valid no-artifact intervals
+    artifact_removed_interval_list_name: varchar(200) # name of the array of no-artifact valid time intervals
     """
 
     def make(self, key):
@@ -67,11 +67,10 @@ class ArtifactDetection(dj.Computed):
         
         # insert artifact times and valid times into ArtifactRemovedIntervalList with an appropriate name
         tmp_key = {}
+        tmp_key['nwb_file_name'] = key['nwb_file_name']
         tmp_key['artifact_removed_interval_list_name'] = key['artifact_removed_interval_list_name']
-        tmp_key['artifact_params_name'] = key['artifact_params_name']
         tmp_key['artifact_removed_valid_times'] = key['artifact_removed_valid_times']
-        tmp_key['recording_id'] = key['recording_id']
-        ArtifactRemovedIntervalList.insert1(tmp_key) #better to overwrite or to skip repeats? not sure?
+        ArtifactRemovedIntervalList.insert1(tmp_key, skip_duplicates = True)
         
         # also insert into IntervalList
         tmp_key = {}
@@ -87,11 +86,11 @@ class ArtifactDetection(dj.Computed):
 class ArtifactRemovedIntervalList(dj.Manual):
     definition = """
     # Stores intervals without detected artifacts.
+    # Note that entries can come from either ArtifactDetection() or alternative artifact removal analyses.
+    -> Session
     artifact_removed_interval_list_name: varchar(200)
     ---
-    -> ArtifactDetectionParameters
-    artifact_removed_valid_times: longblob # np array of valid no-artifact start and end times
-    recording_id: varchar(12)
+    artifact_removed_valid_times: longblob # np array of valid no-artifact intervals
     """
     
 def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
