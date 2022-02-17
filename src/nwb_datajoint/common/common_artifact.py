@@ -8,6 +8,7 @@ import spikeinterface as si
 
 from .common_interval import IntervalList
 from .common_spikesorting import SpikeSortingRecording
+from .common_session import Session
 from .nwb_helper_fn import get_valid_intervals
 
 schema = dj.schema('common_artifact')
