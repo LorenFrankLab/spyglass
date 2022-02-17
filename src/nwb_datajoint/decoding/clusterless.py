@@ -97,8 +97,8 @@ class UnitMarks(dj.Computed):
         channel_ids = recording.get_channel_ids()
         # assume the channels are all the same for the moment. This would need to be changed for larger probes
         channel_ids_by_unit = [channel_ids] * (max(units['unit_id']) + 1)
-        # here we only get 8 points because that should be plenty to find the minimum/maximum
-        N_WAVEFORM_POINTS = 8
+
+        N_WAVEFORM_POINTS = 2
         waveforms = le.get_unit_waveforms(
             recording,
             sorting,
@@ -107,9 +107,10 @@ class UnitMarks(dj.Computed):
             N_WAVEFORM_POINTS)
 
         if mark_param['mark_type'] == 'amplitude':
-            # get the marks and timestamps
-            marks = np.min(np.concatenate(
-                waveforms, axis=0).astype(np.int16), axis=2)
+            # peak is stored in the middle of the waveform
+            peak_ind = N_WAVEFORM_POINTS // 2
+            marks = np.concatenate(waveforms, axis=0)[
+                :, :, peak_ind].astype(np.int16)
             timestamps = np.concatenate(np.asarray(
                 nwb_units.loc[units['unit_id']].spike_times))
 
