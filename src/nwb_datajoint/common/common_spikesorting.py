@@ -881,15 +881,16 @@ class SpikeSorterParameters(dj.Manual):
                 if sorter == ClusterlessThresholder.sorter_name:
                     sort_param_dict['parameter_dict'] = ss.get_default_params(
                         ClusterlessThresholder)
+                    sort_param_dict['parameter_dict']['run_whitening'] = False
                 else:
                     sort_param_dict['parameter_dict'] = ss.get_default_params(
                         sorter)
+                    sort_param_dict['parameter_dict']['run_whitening'] = True
                 self.insert1(sort_param_dict, skip_duplicates=True)
             else:
                 print(
                     f'Error in SpikeSorterParameter: sorter {sorter} not in SpikeSorter schema')
                 continue
-
 
 
 @schema
@@ -901,7 +902,6 @@ class SpikeSortingSelection(dj.Manual):
     ---
     import_path = '': varchar(200) # optional path to previous curated sorting output
     """
-
 
 
 @schema
@@ -936,21 +936,24 @@ class SpikeSorting(dj.Computed):
         """
 
         # GET the recording extractor from the workspace
-        recording_object = (SpikeSortingRecording & key).fetch1('recording_extractor_object')
+        recording_object = (SpikeSortingRecording & key).fetch1(
+            'recording_extractor_object')
         # get the uri for that file, assuming h5_v1 format for the moment.
         recording = sv.LabboxEphysRecordingExtractor(recording_object)
-
-
-        # whiten the extractor for sorting and metric calculations
-        print('\nWhitening recording...')
-        with Timer(label=f'whitening', verbose=True):
-            filter_params = (SpikeSortingFilterParameters & key).fetch1('filter_parameter_dict')
-            recording = st.preprocessing.whiten(
-                recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
-
-        print(f'\nRunning spike sorting on {key}...')
         sort_parameters = (SpikeSorterParameters & {'sorter_name': key['sorter_name'],
                                                     'spikesorter_parameter_set_name': key['spikesorter_parameter_set_name']}).fetch1()
+
+        # whiten the extractor for sorting and metric calculations
+        if sort_parameters['run_whitening']:
+            print('\nWhitening recording...')
+            with Timer(label=f'whitening', verbose=True):
+                filter_params = (SpikeSortingFilterParameters &
+                                 key).fetch1('filter_parameter_dict')
+                recording = st.preprocessing.whiten(
+                    recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
+
+        print(f'\nRunning spike sorting on {key}...')
+
         if 'NWB_DATAJOINT_TEMP_DIR' in os.environ:
             tempfile.tempdir = os.getenv('NWB_DATAJOINT_TEMP_DIR')
             with tempfile.TemporaryDirectory() as tmp_output_folder:
