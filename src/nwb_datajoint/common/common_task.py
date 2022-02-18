@@ -12,37 +12,6 @@ schema = dj.schema('common_task')
 
 
 @schema
-class Apparatus(dj.Manual):
-    definition = """
-     apparatus_name: varchar(200)
-     ---
-     #-> AnalysisNWBFile
-     nwb_object_id='': varchar(40)  # the NWB object identifier for a class that describes this apparatus
-     """
-
-    # def insert_from_nwbfile(self, nwbf):
-    #     # If we're going to use we will need to add specific apparatus information (cad files?)
-    #     apparatus_dict = dict()
-    #     apparatus_mod = []
-    #     try:
-    #         apparatus_mod = nwbf.get_abs_path("Apparatus")
-    #     except:
-    #         print('No Apparatus module found in NWB file')
-    #         return
-    #     if apparatus_mod != []:
-    #         for d in apparatus_mod.data_interfaces:
-    #             pass
-    #             # TODO: restore this functionality
-    #             if type(apparatus_mod[d]) == franklabnwb.fl_extension.Apparatus:
-    #                 # see this Apparaus if is already in the database
-    #                 if {'apparatus_name': d} not in common_task.ApparatusInfo():
-    #                     apparatus_dict['apparatus_name'] = d
-    #                     common_task.ApparatusInfo.insert1(apparatus_dict)
-    #                 else:
-    #                     print('Skipping apparatus {}; already in schema\n'.format(d))
-
-
-@schema
 class Task(dj.Manual):
     definition = """
      task_name: varchar(200)
