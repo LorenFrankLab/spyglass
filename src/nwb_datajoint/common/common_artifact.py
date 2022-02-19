@@ -5,6 +5,7 @@ import numpy as np
 import scipy.stats as stats
 import warnings
 import spikeinterface as si
+from spikeinterface.core.segmentutils import AppendSegmentRecording
 
 from .common_interval import IntervalList
 from .common_spikesorting import SpikeSortingRecording
@@ -155,7 +156,20 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         above_thresh = np.ravel(np.argwhere(
             np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
     
-    valid_timestamps = recording.get_times()
+    if isinstance(recording, AppendSegmentRecording):
+        n_frames = [0]
+        for i in range(len(recording.recording_list)):
+            n_frames.append(recording.get_num_frames(segment_index=i))
+
+        cumsum_frames = np.cumsum(n_frames)
+        total_frames = np.sum(n_frames)
+
+        valid_timestamps = np.zeros((total_frames,))
+        for i in range(len(recording.recording_list)):
+            valid_timestamps[cumsum_frames[i],cumsum_frames[i+1]] = recording.get_times(segment_index=i)
+    else:
+        valid_timestamps = recording.get_times()
+    
     above_thresh_times = valid_timestamps[above_thresh] # find timestamps of initial artifact threshold crossings
     
     # keep track of all the artifact timestamps within each artifact removal window and the indices of those timestamps
