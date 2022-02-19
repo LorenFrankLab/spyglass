@@ -166,7 +166,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
 
         valid_timestamps = np.zeros((total_frames,))
         for i in range(len(recording.recording_list)):
-            valid_timestamps[cumsum_frames[i],cumsum_frames[i+1]] = recording.get_times(segment_index=i)
+            valid_timestamps[cumsum_frames[i]:cumsum_frames[i+1]] = recording.get_times(segment_index=i)
     else:
         valid_timestamps = recording.get_times()
     
