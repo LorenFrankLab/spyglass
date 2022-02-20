@@ -200,7 +200,9 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         warnings.warn("Warning: sorting artifact timestamps; all_artifact_times was not strictly increasing")
         all_artifact_times = np.sort(all_artifact_times)
     artifact_intervals = get_valid_intervals(all_artifact_times, recording.get_sampling_frequency(), 1.5, .000001)
-    print(len(artifact_intervals), " artifact intervals detected")
+
+    artifact_percent_of_times = 100 * len(all_artifact_times) / len(valid_timestamps)
+    print(f"{len(artifact_intervals)} artifact intervals detected; {artifact_percent_of_times} % of the recording's valid_timestamps removed as artifact")
     
     # turn all artifact detected times into -1 to easily find non-artifact intervals
     valid_timestamps[all_artifact_indices] = -1
