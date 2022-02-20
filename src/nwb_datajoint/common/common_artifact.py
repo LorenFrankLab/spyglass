@@ -115,7 +115,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         Stdev threshold for exclusion, should be >=0, defaults to None
     amplitude_thresh: float, optional
         Amplitude threshold for exclusion, should be >=0, defaults to None
-    proportion_above_thresh: float, optional
+    proportion_above_thresh: float, optional, should be>0 and <=1
         Proportion of electrodes that need to have threshold crossings, defaults to 1 
     removal_window_ms: float, optional
         Width of the window in milliseconds to mask out per artifact (window/2 removed on each side of threshold crossing), defaults to 1 ms
@@ -145,7 +145,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     data = recording.get_traces()
 
     # compute the number of electrodes that have to be above threshold
-    nelect_above = np.round(proportion_above_thresh * len(recording.get_channel_ids()))
+    nelect_above = np.ceil(proportion_above_thresh * len(recording.get_channel_ids()))
 
     # find the artifact occurrences using one or both thresholds, across channels
     if ((amplitude_thresh is not None) and (zscore_thresh is None)):
@@ -237,9 +237,9 @@ def _check_artifact_thresholds(amplitude_thresh, zscore_thresh, proportion_above
     
     # proportion_above_threshold should be in [0:1] inclusive
     if proportion_above_thresh < 0:
-        warnings.warn("Warning: proportion_above_thresh must be a proportion >=0 and <=1. Using proportion_above_thresh = 0 instead of "+str(proportion_above_thresh))
-        proportion_above_thresh = 0
+        warnings.warn("Warning: proportion_above_thresh must be a proportion >0 and <=1. Using proportion_above_thresh = 0.01 instead of "+str(proportion_above_thresh))
+        proportion_above_thresh = 0.01
     elif proportion_above_thresh > 1:
-        warnings.warn("Warning: proportion_above_thresh must be a proportion >=0 and <=1. Using proportion_above_thresh = 1 instead of "+str(proportion_above_thresh))
+        warnings.warn("Warning: proportion_above_thresh must be a proportion >0 and <=1. Using proportion_above_thresh = 1 instead of "+str(proportion_above_thresh))
         proportion_above_thresh = 1
     return amplitude_thresh, zscore_thresh, proportion_above_thresh
