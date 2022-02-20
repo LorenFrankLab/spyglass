@@ -2,8 +2,9 @@ import datajoint as dj
 import numpy as np
 import sortingview as sv
 import spikeinterface as si
+from pathlib import Path
 
-from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sorting
+from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sortings
 
 schema = dj.schema('common_sortingview')
 
@@ -31,7 +32,7 @@ class SortingviewWorkspace(dj.Computed):
         recording = si.load_extractor(recording_path)
         old_recording = si.create_extractor_from_new_recording(recording)
         h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
-                                                                                recording_path,
+                                                                                str(Path(recording_path) / 'recording.h5'),
                                                                                 dtype='int16')
 
         workspace_name = SpikeSortingRecording()._get_recording_name(key)

@@ -1,12 +1,13 @@
 import os
 from pathlib import Path
+import shutil
 
 import datajoint as dj
 import sortingview as sv
 import spikeinterface as si
 
 from .common_nwbfile import AnalysisNwbfile
-from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sorting
+from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sortings
 
 schema = dj.schema('common_waveforms')
 
@@ -26,7 +27,7 @@ class WaveformParameters(dj.Manual):
 @schema
 class WaveformSelection(dj.Manual):
     definition = """
-    -> Sorting
+    -> Sortings
     -> WaveformParameters
     ---
     """
@@ -51,6 +52,8 @@ class Waveforms(dj.Computed):
         waveform_params = (WaveformParameters & key).fetch1('waveform_params')
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key['waveform_extractor_path'] = str(Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) / Path(waveform_extractor_name))
+        if os.path.exists(key['waveform_extractor_path']):
+            shutil.rmtree(key['waveform_extractor_path'])
         waveforms = si.extract_waveforms(recording=recording, 
                                          sorting=sorting, 
                                          folder=key['waveform_extractor_path'],
