@@ -31,7 +31,7 @@ class ArtifactDetectionParameters(dj.Manual):
         artifact_params['proportion_above_thresh'] = 1.0 # all electrodes of sort group
         artifact_params['removal_window_ms'] = 1.0 # in milliseconds
         self.insert1(['default', artifact_params], skip_duplicates=True)  
-        
+
         artifact_params_none = {}
         artifact_params_none['zscore_thresh'] = None 
         artifact_params_none['amplitude_thresh'] = None 
@@ -196,6 +196,9 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     all_artifact_times = reduce(np.union1d, artifact_times)
     all_artifact_indices = reduce(np.union1d, artifact_indices)
     # turn artifact detected times into intervals
+    if not np.all(all_artifact_times[:-1] <= all_artifact_times[1:]): #should be faster than diffing and comparing to zero
+        warnings.warn("Warning: sorting artifact timestamps; all_artifact_times was not strictly increasing")
+        all_artifact_times = np.sort(all_artifact_times)
     artifact_intervals = get_valid_intervals(all_artifact_times, recording.get_sampling_frequency(), 1.5, .000001)
     print(len(artifact_intervals), " artifact intervals detected")
     
