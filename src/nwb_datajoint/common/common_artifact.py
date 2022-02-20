@@ -128,6 +128,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     if (amplitude_thresh is None) and (zscore_thresh is None):
         recording_interval = np.asarray([recording.get_times()[0], recording.get_times()[-1]])
         artifact_times_empty = np.asarray([])
+        print("Amplitude and zscore thresholds are both None, skipping artifact detection")
         return recording_interval, artifact_times_empty
     
     # verify threshold parameters
@@ -156,6 +157,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         above_thresh = np.ravel(np.argwhere(
             np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
     
+    # load valid timestamps in segments or all at once
     if isinstance(recording, AppendSegmentRecording):
         n_frames = [0]
         for i in range(len(recording.recording_list)):
@@ -170,6 +172,12 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     else:
         valid_timestamps = recording.get_times()
     
+    if len(above_thresh) == 0:
+        recording_interval = np.asarray([[valid_timestamps[0], valid_timestamps[recording.get_num_frames()-1]]])
+        artifact_times_empty = np.asarray([])
+        print("No artifacts detected")
+        return recording_interval, artifact_times_empty
+
     above_thresh_times = valid_timestamps[above_thresh] # find timestamps of initial artifact threshold crossings
     
     # keep track of all the artifact timestamps within each artifact removal window and the indices of those timestamps
@@ -184,6 +192,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     all_artifact_indices = reduce(np.union1d, artifact_indices)
     # turn artifact detected times into intervals
     artifact_intervals = get_valid_intervals(all_artifact_times, recording.get_sampling_frequency(), 1.5, .000001)
+    print(len(artifact_intervals), " artifact intervals detected")
     
     # turn all artifact detected times into -1 to easily find non-artifact intervals
     valid_timestamps[all_artifact_indices] = -1
