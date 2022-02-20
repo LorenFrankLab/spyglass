@@ -31,6 +31,11 @@ class ArtifactDetectionParameters(dj.Manual):
         artifact_params['proportion_above_thresh'] = 1.0 # all electrodes of sort group
         artifact_params['removal_window_ms'] = 1.0 # in milliseconds
         self.insert1(['default', artifact_params], skip_duplicates=True)  
+        
+        artifact_params_none = {}
+        artifact_params_none['zscore_thresh'] = None 
+        artifact_params_none['amplitude_thresh'] = None 
+        self.insert1(['none', artifact_params_none], skip_duplicates=True) 
 
 @schema
 class ArtifactDetectionSelection(dj.Manual):
