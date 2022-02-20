@@ -299,6 +299,7 @@ class SpikeSortingRecording(dj.Computed):
     recording_id: varchar(15)
     ---
     recording_path: varchar(1000)
+    -> IntervalList.proj(sort_interval_list_name='interval_list_name')
     """
     def make(self, key):
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
@@ -318,7 +319,10 @@ class SpikeSortingRecording(dj.Computed):
         # Path to files that will hold the recording extractors
         recording_folder = Path(os.getenv('SPYGLASS_RECORDING_DIR'))
         key['recording_path'] = str(recording_folder / Path(recording_name))
-        recording = recording.save(folder=key['recording_extractor_path'])
+        if os.path.exists(key['recording_path']):
+            shutil.rmtree(key['recording_path'])
+        recording = recording.save(folder=key['recording_path'], n_jobs=4,
+                                   total_memory='5G')
         
         key['recording_id'] = 'R_'+str(uuid.uuid4())[:8]
         
@@ -372,7 +376,7 @@ class SpikeSortingRecording(dj.Computed):
         nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])   
         recording = se.read_nwb_recording(nwb_file_abs_path, load_time_vector=True)
         
-        valid_sort_times = self.get_sort_interval_valid_times(key)
+        valid_sort_times = self._get_sort_interval_valid_times(key)
         # shape is (N, 2)
         valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval) \
                                              for interval in valid_sort_times])
@@ -381,12 +385,12 @@ class SpikeSortingRecording(dj.Computed):
         if valid_sort_times_indices.ndim==1:
             valid_sort_times_indices = np.expand_dims(valid_sort_times_indices, 0)
             
-        # concatenate if there is more than one disjoint sort interval
+        # create an AppendRecording if there is more than one disjoint sort interval
         if len(valid_sort_times_indices)>1:
             recordings_list = []
             for interval_indices in valid_sort_times_indices:
                 recording_single = recording.frame_slice(start_frame=interval_indices[0],
-                                                        end_frame=interval_indices[1])
+                                                         end_frame=interval_indices[1])
                 recordings_list.append(recording_single)
             recording = si.append_recordings(recordings_list)
         else:
@@ -449,23 +453,18 @@ class SpikeSortingRecording(dj.Computed):
 @schema
 class SpikeSorterParameters(dj.Manual):
     definition = """
-    sorter: varchar(80)
+    sorter: varchar(200)
+    sorter_params_name: varchar(200)
     ---
     sorter_params: blob
     """
-    def available_sorters(self):
-        return ss.available_sorters()
-    
-    def get_default_params(self, sorter):
-        return ss.get_default_params(sorter)
-    
     def insert_default(self):
         """Default params from spike sorters available via spikeinterface
         """
         sorters = ss.available_sorters()
         for sorter in sorters:
             sorter_params = ss.get_default_params(sorter)
-            self.insert1([sorter, sorter_params], skip_duplicates=True)
+            self.insert1([sorter, 'default', sorter_params], skip_duplicates=True)
 
 from .common_artifact import ArtifactRemovedIntervalList
 @schema
@@ -505,11 +504,10 @@ class SpikeSorting(dj.Computed):
         recording = si.load_extractor(recording_path)
         
         # get the artifact detection parameters and apply artifact detection to zero out artifacts
-        # artifact_params = (self & key).fetch1('artifact_params')
         # list_triggers = SpikeSortingArtifactDetectionParameters.get_artifact_times(recording, **artifact_params)
         
         # if not artifact_params['skip']:
-        #     recording = st.remove_artifacts(recording, list_triggers, **artifact_params)
+        # recording = st.remove_artifacts(recording, list_triggers, **artifact_params)
                 
         preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
         recording = st.preprocessing.whiten(recording=recording, seed=preproc_params['seed'])
@@ -541,7 +539,7 @@ class SpikeSorting(dj.Computed):
         key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
 
         # add sorting to Sorting
-        Sorting.insert1({'recording_id': key['recording_id'],
+        Sortings.insert1({'recording_id': key['recording_id'],
                              'sorting_id': key['sorting_id'],
                              'sorting_path': key['sorting_path'],
                              'parent_sorting_id': ''}, skip_duplicates=True)
@@ -655,7 +653,7 @@ class SpikeSorting(dj.Computed):
         raise NotImplementedError
                 
 @schema
-class Sorting(dj.Manual):
+class Sortings(dj.Manual):
     definition = """
     # Has records for every sorting; similar to IntervalList
     recording_id: varchar(15)

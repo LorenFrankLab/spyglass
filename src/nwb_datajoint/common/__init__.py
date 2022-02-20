@@ -24,7 +24,7 @@ from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session
 from .common_spikesorting import (SortGroup, SpikeSortingPreprocessingParameters,
                                   SpikeSortingRecordingSelection, SpikeSortingRecording,SpikeSorterParameters,
-                                  SpikeSortingSelection, SpikeSorting, Sorting)
+                                  SpikeSortingSelection, SpikeSorting, Sortings)
 from .common_artifact import ArtifactDetectionParameters, ArtifactDetectionSelection, ArtifactDetection, ArtifactRemovedIntervalList
 from .common_waveforms import WaveformParameters, WaveformSelection, Waveforms
 from .common_metrics import MetricParameters, MetricSelection, QualityMetrics

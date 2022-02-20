@@ -19,7 +19,7 @@ from .common_interval import SortInterval
 from .common_nwbfile import AnalysisNwbfile
 from .common_metrics import QualityMetrics
 from .common_spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
-                                  SpikeSorting, Sorting)
+                                  SpikeSorting, Sortings)
 
 from .dj_helper_fn import fetch_nwb
 
@@ -42,9 +42,8 @@ class AutomaticCurationParameters(dj.Manual):
 @schema
 class AutomaticCurationSelection(dj.Manual):
     definition = """
-    -> Sorting.proj(parent_sorting_id='sorting_id')
+    -> QualityMetrics.proj(parent_sorting_id='sorting_id')
     -> AutomaticCurationParameters
-    -> QualityMetrics
     """
  
 @schema
@@ -61,7 +60,7 @@ class AutomaticCurationSorting(dj.Computed):
     def make(self, key):
         key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
 
-        parent_sorting_path = (Sorting & {'sorting_id': key['parent_sorting_id']}).fetch1('sorting_path')
+        parent_sorting_path = (Sortings & {'sorting_id': key['parent_sorting_id']}).fetch1('sorting_path')
         parent_sorting = si.load_extractor(parent_sorting_path)
         
         metrics_path = (QualityMetrics & key).fetch1('quality_metrics_path')
@@ -73,6 +72,8 @@ class AutomaticCurationSorting(dj.Computed):
         
         curated_sorting_name = self._get_curated_sorting_name(key)
         key['sorting_path'] = str(Path(os.getenv('SPYGLASS_SORTING_DIR')) / Path(curated_sorting_name))
+        if os.path.exists(key['sorting_path']):
+            shutil.rmtree(key['sorting_path'])
         sorting = sorting.save(folder=key['sorting_path'])
         
         # NWB stuff
@@ -87,8 +88,8 @@ class AutomaticCurationSorting(dj.Computed):
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
 
 
-        # add sorting to Sorting
-        Sorting.insert1({'recording_id': key['recording_id'],
+        # add sorting to Sortings
+        Sortings.insert1({'recording_id': key['recording_id'],
                              'sorting_id': key['sorting_id'],
                              'sorting_path': key['sorting_path'],
                              'parent_sorting_id': key['parent_sorting_id']}, skip_duplicates=True)
@@ -97,7 +98,7 @@ class AutomaticCurationSorting(dj.Computed):
    
     def update_manual_curation(self, key: dict):
         """Based on information in key, loads the curated sorting from sortingview,
-        saves it, and inserts it to Sorting
+        saves it, and inserts it to Sortings
         
         Assumes that the workspace corresponding to the recording and (original) sorting exists
 
@@ -120,7 +121,7 @@ class AutomaticCurationSorting(dj.Computed):
         sorting_path = str(Path(os.getenv('SPYGLASS_SORTING_DIR')) / Path(sorting_name))
         sorting = sorting.save(folder=sorting_path)
         
-        Sorting.insert1({'recording_id': key['recording_id'],
+        Sortings.insert1({'recording_id': key['recording_id'],
                              'sorting_id': new_sorting_id,
                              'sorting_path': sorting_path,
                              'parent_sorting_id': key['sorting_id']}, skip_duplicates=True)
@@ -147,7 +148,7 @@ class AutomaticCurationSorting(dj.Computed):
 @schema 
 class CuratedSpikeSortingSelection(dj.Manual):
     definition = """
-    -> Sorting
+    -> Sortings
     """
 
 @schema
