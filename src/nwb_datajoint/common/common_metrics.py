@@ -3,6 +3,7 @@ import os
 import json
 import datajoint as dj
 import spikeinterface.toolkit as st
+import numpy as np
     
 from .common_waveforms import Waveforms
 from .common_nwbfile import AnalysisNwbfile
@@ -74,12 +75,10 @@ class QualityMetrics(dj.Computed):
         key['quality_metrics_path'] = str(Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) / Path(qm_name+'.json'))
         # save metrics dict as json
         print(f'Computed all metrics: {qm}')
-        with open(key['quality_metrics_path'], 'w', encoding='utf-8') as f:
-            json.dump(qm, f, ensure_ascii=False, indent=4)
-        # TODO: implement AnalysisNwbfile().add_metrics
+        self._dump_to_json(qm, key['quality_metrics_path'])
+
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
-        AnalysisNwbfile().add_metrics(key['analysis_file_name'],
-                                      waveform_extractor.sorting, metrics=qm)
+        key['object_id'] = AnalysisNwbfile().add_units_metrics(key['analysis_file_name'], metrics=qm)
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
         
         self.insert1(key)
@@ -92,20 +91,24 @@ class QualityMetrics(dj.Computed):
     def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
         print(f'Computing metric: {metric_name}...')
         metric_func = _metric_name_to_func[metric_name]
-        if metric_name == 'isi_violation' or metric_name == 'snr':
+        if metric_name == 'snr' or metric_name == 'isi_violation':
             metric = metric_func(waveform_extractor, **metric_params)
         else:
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():
                 metric[str(unit_id)] = metric_func(waveform_extractor, this_unit_id=unit_id, **metric_params)
         return metric
-
-_metric_name_to_func = {
-    "snr": st.qualitymetrics.compute_snrs,
-    "isi_violation": st.qualitymetrics.compute_isi_violations,
-    'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
-    'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap
-}
+    
+    def _dump_to_json(self, qm_dict, save_path):
+        new_qm = {}
+        for key, value in qm_dict.items():
+            m = {}
+            for unit_id, metric_val in value.items():
+                m[str(unit_id)] = metric_val
+            new_qm[str(key)] = m
+        print(new_qm)
+        with open(save_path, 'w', encoding='utf-8') as f:
+            json.dump(new_qm, f, ensure_ascii=False, indent=4)
 
 def _get_metric_default_params(metric):
     if metric == 'nn_isolation':
@@ -121,8 +124,7 @@ def _get_metric_default_params(metric):
                 'radius_um': 100,
                 'seed': 0}
     elif metric == 'isi_violation':
-        return {'isi_threshold_ms': 1.5,
-                'min_isi_ms': 0}
+        return {'isi_threshold_ms': 1.5}
     elif metric == 'snr':
         return {'peak_sign': 'neg',
                 'num_chunks_per_segment':20,
@@ -130,3 +132,53 @@ def _get_metric_default_params(metric):
                 'seed':0}
     else:
         raise NameError('That metric is not supported yet.')
+
+def _compute_isi_violations(waveform_extractor, isi_threshold_ms=1.5):
+    """Modification of spikeinterface.qualitymetrics.misc_metrics.compute_isi_violations
+
+    Parameters
+    ----------
+    waveform_extractor : WaveformExtractor
+        The waveform extractor object
+    isi_threshold_ms : float, optional, default: 1.5
+        Threshold for classifying adjacent spikes as an ISI violation, in ms.
+        This is the biophysical refractory period (default=1.5).
+
+    Returns
+    -------
+    isi_violation_fraction : float
+        Number of violations / (number of spikes-1)
+    """
+
+    recording = waveform_extractor.recording
+    sorting = waveform_extractor.sorting
+    unit_ids = sorting.unit_ids
+    num_segs = sorting.get_num_segments()
+    fs = recording.get_sampling_frequency()
+
+    isi_threshold_s = isi_threshold_ms / 1000
+
+    isi_threshold_samples = int(isi_threshold_s * fs)
+
+    isi_violations_fraction = {}
+
+    # all units converted to seconds
+    for unit_id in unit_ids:
+        num_violations = 0
+        num_spikes = 0
+        for segment_index in range(num_segs):
+            spike_train = sorting.get_unit_spike_train(unit_id=unit_id, segment_index=segment_index)
+            isis = np.diff(spike_train)
+            num_spikes += len(spike_train)
+            num_violations += np.sum(isis < isi_threshold_samples)
+
+        isi_violations_fraction[unit_id] = num_violations / (num_spikes-1)
+
+    return isi_violations_fraction
+
+_metric_name_to_func = {
+    "snr": st.qualitymetrics.compute_snrs,
+    "isi_violation": _compute_isi_violations,
+    'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
+    'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap
+}

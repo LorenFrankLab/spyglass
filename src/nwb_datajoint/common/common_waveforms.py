@@ -61,7 +61,7 @@ class Waveforms(dj.Computed):
         
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
         object_id = AnalysisNwbfile().add_units_waveforms(key['analysis_file_name'],
-                                                          waveforms)
+                                                          waveform_extractor=waveforms)
         key['object_id'] = object_id       
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
              
