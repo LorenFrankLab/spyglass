@@ -21,6 +21,11 @@ from replay_trajectory_classification.discrete_state_transitions import \
 from replay_trajectory_classification.initial_conditions import \
     UniformInitialConditions
 
+from scipy.ndimage.filters import gaussian_filter1d
+from nwb_datajoint.common.common_position import IntervalPositionInfo
+from ripple_detection import multiunit_HSE_detector
+import matplotlib.pyplot as plt
+
 schema = dj.schema('decoding_clusterless')
 
 
@@ -253,6 +258,22 @@ class UnitMarksIndicator(dj.Computed):
         n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
 
         return np.linspace(start_time, end_time, n_samples)
+    
+    @staticmethod
+    def plot_all_marks(marks_indicators):
+        for electrode_ind in marks_indicators.electrodes:
+            marks = marks_indicators.sel(electrodes=electrode_ind).dropna('time', how='all').dropna('marks')
+            n_features = len(marks.marks)
+            fig, axes = plt.subplots(n_features, n_features,
+                                     constrained_layout=True, sharex=True, sharey=True,
+                                     figsize=(5 * n_features, 5 * n_features))
+            for ax_ind1, feature1 in enumerate(marks.marks):
+                for ax_ind2, feature2 in enumerate(marks.marks):
+                    try:
+                        axes[ax_ind1, ax_ind2].scatter(
+                            marks.sel(marks=feature1), marks.sel(marks=feature2), s=10)
+                    except TypeError:
+                        axes.scatter(marks.sel(marks=feature1), marks.sel(marks=feature2), s=10)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
@@ -314,7 +335,7 @@ def make_default_decoding_parameters_gpu():
         infer_track_interior=True,
         clusterless_algorithm='multiunit_likelihood_integer_cupy',
         clusterless_algorithm_params={
-            'mark_std': 20.0,
+            'mark_std': 24.0,
             'position_std': 6.0
         }
     )
@@ -358,3 +379,145 @@ class ClusterlessClassifierParameters(dj.Manual):
              'fit_params': fit_parameters,
              'predict_params': predict_parameters},
             skip_duplicates=True)
+
+
+@schema
+class MultiunitFiringRate(dj.Computed):
+    definition = """
+    -> UnitMarksIndicator
+    ---
+    -> AnalysisNwbfile
+    multiunit_firing_rate_object_id: varchar(40)
+    """
+    def make(key):
+        
+        marks = (UnitMarksIndicator & key).fetch_xarray()
+        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
+                            ).astype(float)
+        multiunit_firing_rate = pd.DataFrame(
+            self.get_multiunit_population_firing_rate(
+                multiunit_spikes, key['sampling_rate']), index=marks.time,
+            columns=['firing_rate'])
+        
+        # Insert into analysis nwb file
+        nwb_analysis_file = AnalysisNwbfile()
+        key['analysis_file_name'] = nwb_analysis_file.create(
+            key['nwb_file_name'])
+
+        key['multiunit_firing_rate_object_id'] = nwb_analysis_file.add_nwb_object(
+            analysis_file_name=key['analysis_file_name'],
+            nwb_object=multiunit_firing_rate.reset_index(),
+        )
+
+        nwb_analysis_file.add(
+            nwb_file_name=key['nwb_file_name'],
+            analysis_file_name=key['analysis_file_name'])
+
+        self.insert1(key)
+        
+        @staticmethod
+        def _gaussian_smooth(data, sigma, sampling_frequency, axis=0, truncate=8):
+            '''1D convolution of the data with a Gaussian.
+            The standard deviation of the gaussian is in the units of the sampling
+            frequency. The function is just a wrapper around scipy's
+            `gaussian_filter1d`, The support is truncated at 8 by default, instead
+            of 4 in `gaussian_filter1d`
+            Parameters
+            ----------
+            data : array_like
+            sigma : float
+            sampling_frequency : int
+            axis : int, optional
+            truncate : int, optional
+            Returns
+            -------
+            smoothed_data : array_like
+            '''
+            return gaussian_filter1d(
+                data, sigma * sampling_frequency, truncate=truncate, axis=axis,
+                mode='constant')
+
+        @staticmethod
+        def get_multiunit_population_firing_rate(multiunit, sampling_frequency,
+                                                 smoothing_sigma=0.015):
+            '''Calculates the multiunit population firing rate.
+            Parameters
+            ----------
+            multiunit : ndarray, shape (n_time, n_signals)
+                Binary array of multiunit spike times.
+            sampling_frequency : float
+                Number of samples per second.
+            smoothing_sigma : float or np.timedelta
+                Amount to smooth the firing rate over time. The default is
+                given assuming time is in units of seconds.
+            Returns
+            -------
+            multiunit_population_firing_rate : ndarray, shape (n_time,)
+            '''
+            return self._gaussian_smooth(
+                multiunit.mean(axis=1) * sampling_frequency,
+                smoothing_sigma, sampling_frequency)
+        
+        def fetch_nwb(self, *attrs, **kwargs):
+            return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+
+        def fetch1_dataframe(self):
+            return self.fetch_dataframe()[0]
+
+        def fetch_dataframe(self):
+            return [data['multiunit_firing_rate'].set_index('time') for data in self.fetch_nwb()]
+        
+
+@schema
+class MultiunitHighSynchronyEventsParameters(dj.Manual):
+    definition = """
+    param_name : varchar(80) # a name for this set of parameters
+    ---
+    minimum_duration = 0.015 :  float # minimum duration of event (in seconds)
+    zscore_threshold = 2.0 : float    # threshold event must cross to be considered (in std. dev.)
+    close_event_threshold = 0.0 :  float # events closer than this will be excluded (in seconds)
+    """
+
+
+@schema
+class MultiunitHighSynchronyEvents(dj.Computed):
+    definition = """
+    -> MultiunitHighSynchronyEventsParameters
+    -> UnitMarksIndicator
+    -> IntervalPositionInfo
+    ---
+    -> AnalysisNwbfile
+    multiunit_hse_times_object_id: varchar(40)
+    """
+    def make(key):
+        
+        marks = (UnitMarksIndicator & key).fetch_xarray()
+        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
+                            ).astype(float)
+        position_info = (IntervalPositionInfo() & key).fetch1_dataframe()
+        
+        
+        params = (MultiunitHighSynchronyEventsParameters & key).fetch1()
+
+        multiunit_high_synchrony_times = multiunit_HSE_detector(
+            marks.time.values,
+            multiunit_spikes,
+            position_info.head_speed.values,
+            sampling_frequency=key['sampling_rate'],
+            **params)
+        
+        # Insert into analysis nwb file
+        nwb_analysis_file = AnalysisNwbfile()
+        key['analysis_file_name'] = nwb_analysis_file.create(
+            key['nwb_file_name'])
+
+        key['multiunit_hse_times_object_id'] = nwb_analysis_file.add_nwb_object(
+            analysis_file_name=key['analysis_file_name'],
+            nwb_object=multiunit_high_synchrony_times.reset_index(),
+        )
+
+        nwb_analysis_file.add(
+            nwb_file_name=key['nwb_file_name'],
+            analysis_file_name=key['analysis_file_name'])
+
+        self.insert1(key)
