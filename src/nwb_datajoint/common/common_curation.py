@@ -138,8 +138,11 @@ class AutomaticCurationSorting(dj.Computed):
         return curated_sorting_name
 
     @staticmethod
-    def _sorting_after_reject(sorting, reject_params):
-        return NotImplementedError
+    def _sorting_after_reject(parent_sorting, quality_metrics, key['reject_params']):
+        
+        isi_reject = reject_params['isi_violation']
+        
+        return 
     
     @staticmethod
     def _sorting_after_merge(sorting, merge_params):

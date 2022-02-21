@@ -100,8 +100,8 @@ class QualityMetrics(dj.Computed):
 _metric_name_to_func = {
     "snr": st.qualitymetrics.compute_snrs,
     "isi_violation": st.qualitymetrics.compute_isi_violations,
-    'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
-    'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap
+    #'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
+    #'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap
 }
 
 def _get_metric_default_params(metric):
