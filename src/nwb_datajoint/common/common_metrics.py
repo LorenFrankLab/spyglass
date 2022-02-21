@@ -31,8 +31,8 @@ class MetricParameters(dj.Manual):
 
     def insert_default(self):
         list_name = 'franklab_default'
-        params = {'isi': _get_metric_default_params('isi'),
-                  'snr': _get_metric_default_params('snr'),
+        params = {'snr': _get_metric_default_params('snr'),
+                  'isi_violation': _get_metric_default_params('isi_violation'),
                   'nn_isolation': _get_metric_default_params('nn_isolation'),
                   'nn_noise_overlap': _get_metric_default_params('nn_noise_overlap')}
         self.insert1([list_name, params], skip_duplicates=True)
@@ -66,12 +66,14 @@ class QualityMetrics(dj.Computed):
     def make(self, key):
         waveform_extractor = Waveforms().load_waveforms(key)
         qm = {}
-        for metric_name, metric_params in key['params']:
+        params = (MetricParameters & key).fetch1('metric_params')
+        for metric_name, metric_params in params.items():
             metric = self._compute_metric(waveform_extractor, metric_name, **metric_params)
             qm[metric_name] = metric
         qm_name = self._get_quality_metrics_name(key)
         key['quality_metrics_path'] = str(Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) / Path(qm_name+'.json'))
         # save metrics dict as json
+        print(f'Computed all metrics: {qm}')
         with open(key['quality_metrics_path'], 'w', encoding='utf-8') as f:
             json.dump(qm, f, ensure_ascii=False, indent=4)
         # TODO: implement AnalysisNwbfile().add_metrics
@@ -88,8 +90,9 @@ class QualityMetrics(dj.Computed):
         return qm_name
     
     def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
+        print(f'Computing metric: {metric_name}...')
         metric_func = _metric_name_to_func[metric_name]
-        if metric_name == 'isi_violation' or 'snr':
+        if metric_name == 'isi_violation' or metric_name == 'snr':
             metric = metric_func(waveform_extractor, **metric_params)
         else:
             metric = {}

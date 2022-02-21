@@ -79,7 +79,7 @@ class ArtifactDetection(dj.Computed):
             artifact_times = np.asarray(artifact_times)
         else:
             artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
-        # artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
+
         key['artifact_times'] = artifact_times
         key['artifact_removed_valid_times'] = artifact_removed_valid_times
         
@@ -137,9 +137,9 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     Return
     ------
     artifact_intervals: np.ndarray
-        Intervals in which artifacts are detected (including removal windows)
+        Intervals in which artifacts are detected (including removal windows), unit: seconds
     artifact_removed_valid_times: np.ndarray
-        Intervals of valid times where artifacts were not detected
+        Intervals of valid times where artifacts were not detected, unit: seconds
     """
     
     # load valid timestamps in segments or all at once
@@ -205,11 +205,13 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     artifact_intervals = get_valid_intervals(all_artifact_times, recording.get_sampling_frequency(), 1.5, .000001)
 
     artifact_percent_of_times = 100 * len(all_artifact_times) / len(valid_timestamps)
-    print(f"{len(artifact_intervals)} artifact intervals detected; {artifact_percent_of_times} % of the recording's valid_timestamps removed as artifact")
+    print(f"{len(artifact_intervals)} artifact intervals detected;\
+          {artifact_percent_of_times} % of the recording's valid_timestamps removed as artifact")
     
     # turn all artifact detected times into -1 to easily find non-artifact intervals
     valid_timestamps[all_artifact_indices] = -1
-    artifact_removed_valid_times = get_valid_intervals(valid_timestamps[valid_timestamps != -1], recording.get_sampling_frequency(), 1.5, 0.000001)           
+    artifact_removed_valid_times = get_valid_intervals(valid_timestamps[valid_timestamps != -1], 
+                                                       recording.get_sampling_frequency(), 1.5, 0.000001)           
     
     return artifact_removed_valid_times, artifact_intervals
 

@@ -15,11 +15,10 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
-from spikeinterface.core.segmentutils import AppendSegmentRecording
 
 from .common_device import Probe
 from .common_lab import LabMember, LabTeam
-from .common_ephys import Electrode, ElectrodeGroup, Raw
+from .common_ephys import Electrode, ElectrodeGroup
 from .common_interval import (IntervalList, SortInterval,
                               interval_list_intersect, union_adjacent_index)
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
@@ -507,9 +506,11 @@ class SpikeSorting(dj.Computed):
         
         # load valid times
         artifact_removed_valid_times = (ArtifactRemovedIntervalList & key).fetch1('artifact_removed_valid_times')
-        
+        if artifact_removed_valid_times.ndim==1:
+            artifact_removed_valid_times = np.expand_dims(artifact_removed_valid_times,0)
+            
         # load timestamps
-        if isinstance(recording, AppendSegmentRecording):
+        if recording.get_num_segments()>1:
             frames_per_segment = [0]
             for i in range(len(recording.recording_list)):
                 frames_per_segment.append(recording.get_num_frames(segment_index=i))
@@ -517,26 +518,30 @@ class SpikeSorting(dj.Computed):
             cumsum_frames = np.cumsum(frames_per_segment)
             total_frames = np.sum(frames_per_segment)
 
-            valid_timestamps = np.zeros((total_frames,))
+            timestamps = np.zeros((total_frames,))
             for i in range(len(recording.recording_list)):
-                valid_timestamps[cumsum_frames[i]:cumsum_frames[i+1]] = recording.get_times(segment_index=i)
-            recording = si.concatenate_recordings(recording.recording_list)
+                timestamps[cumsum_frames[i]:cumsum_frames[i+1]] = recording.get_times(segment_index=i)
         else:
-            valid_timestamps = recording.get_times()
-        
-        # find valid intervals in index
-        if artifact_removed_valid_times.ndim==1:
-            artifact_removed_valid_times = np.expand_dims(artifact_removed_valid_times,0)
+            timestamps = recording.get_times()
+            
+        # convert valid intervals to index
         artifact_removed_valid_times_idx_list = []
         for interval in artifact_removed_valid_times:
-            artifact_removed_valid_times_idx_list.append([np.searchsorted(valid_timestamps, interval[0]),
-                                                          np.searchsorted(valid_timestamps, interval[1])])
-        # slice them and create concat recording
-        # for each element in artifact_removed_valid_times_idx_list,
-        # identify which segment they go
-        # then for each segment,
-        # frame slice the recording for each element in artifact_removed_valid_times_idx_list
-        # then append
+            artifact_removed_valid_times_idx_list.append([np.searchsorted(timestamps, interval[0]),
+                                                          np.searchsorted(timestamps, interval[1])])
+        
+        # slice valid times and append them
+        rec_list = []
+        for idx_interval in artifact_removed_valid_times_idx_list:
+            if recording.get_num_segments()>1:
+                segment_ind = np.ravel(np.argwhere(cumsum_frames <= idx_interval[0]))[-1]
+                rec = recording.recording_list[segment_ind]
+                sliced_rec = rec.frame_slice(start_frame=idx_interval[0]-cumsum_frames[segment_ind],
+                                             end_frame=idx_interval[1]-cumsum_frames[segment_ind])
+            else:
+                sliced_rec = recording.frame_slice(start_frame=idx_interval[0], end_frame=idx_interval[1])
+            rec_list.append(sliced_rec)
+        recording = si.append_recordings(rec_list)
                 
         preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
         recording = st.preprocessing.whiten(recording=recording, seed=preproc_params['seed'])
@@ -553,22 +558,23 @@ class SpikeSorting(dj.Computed):
         sorting_folder = Path(os.getenv('SPYGLASS_SORTING_DIR'))
         sorting_name = self._get_sorting_name(key)
         key['sorting_path'] = str(sorting_folder / Path(sorting_name))
+        if os.path.exists(key['sorting_path']):
+            shutil.rmtree(key['sorting_path'])
         sorting = sorting.save(folder=key['sorting_path'])
-        
         # NWB stuff
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')        
-        key['analysis_file_name'], key['units_object_id'] = \
-            self._save_sorting_nwb(key, sorting=sorting, timestamps=valid_timestamps,
-                                   sort_interval_list_name=sort_interval_list_name, 
-                                   sort_interval=sort_interval)
+        key['analysis_file_name'], key['units_object_id'] = self._save_sorting_nwb(key, sorting, timestamps,
+                                                                                   sort_interval_list_name, 
+                                                                                   sort_interval)
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
         
         key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
 
         # add sorting to Sorting
-        Sortings.insert1({'recording_id': key['recording_id'],
+        Sortings.insert1({'nwb_file_name': key['nwb_file_name'],
+                          'recording_id': key['recording_id'],
                           'sorting_id': key['sorting_id'],
                           'sorting_path': key['sorting_path'],
                           'parent_sorting_id': ''}, skip_duplicates=True)
@@ -617,33 +623,34 @@ class SpikeSorting(dj.Computed):
                 shutil.rmtree(str(pathlib.Path(os.environ['SPYGLASS_SORTING_DIR']) / dir))
                 
     def _get_sorting_name(self, key):
-        recording_name = (SpikeSortingRecording & key).fetch1('recording_name')
+        recording_name = SpikeSortingRecording()._get_recording_name(key)
         sorting_name = recording_name + '_' \
-                       + key['sorter_name'] + '_' \
-                       + key['spikesorter_parameter_set_name']
+                       + key['sorter'] + '_' \
+                       + key['sorter_params_name'] + '_' \
+                       + key['artifact_removed_interval_list_name']
         return sorting_name
     
-    def _save_sorting_nwb(key, sorting, timestamps, sort_interval_list_name,
+    def _save_sorting_nwb(self, key, sorting, timestamps, sort_interval_list_name,
                           sort_interval, metrics=None, unit_ids=None):
         """Store a sorting in a new AnalysisNwbfile
 
         Parameters
         ----------
         key : dict
-            [description]
-        sorting : [type]
-            [description]
+            key to SpikeSorting table
+        sorting : si.Sorting
+            sorting
         timestamps : array_like
             Time stamps of the sorted recoridng;
             used to convert the spike timings from index to real time
         sort_interval_list_name : str
-            [description]
+            name of sort interval
         sort_interval : list
             interval for start and end of sort
         metrics : dict, optional
             quality metrics, by default None
         unit_ids : list, optional
-            [description], by default None
+            IDs of units whose spiketrains to save, by default None
 
         Returns
         -------
@@ -675,7 +682,6 @@ class SpikeSorting(dj.Computed):
             units_object_id = ''
         else:
             units_object_id = u[0]
-        AnalysisNwbfile().add(key['nwb_file_name'], analysis_file_name)
         return analysis_file_name,  units_object_id
     
     # TODO: write a function to import sortings done outside of dj
@@ -686,6 +692,7 @@ class SpikeSorting(dj.Computed):
 class Sortings(dj.Manual):
     definition = """
     # Has records for every sorting; similar to IntervalList
+    -> Session
     recording_id: varchar(15)
     sorting_id: varchar(15)
     ---

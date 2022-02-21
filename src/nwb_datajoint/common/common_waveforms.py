@@ -45,7 +45,7 @@ class Waveforms(dj.Computed):
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
         
-        sorting_path = (Sorting & key).fetch1('sorting_path')
+        sorting_path = (Sortings & key).fetch1('sorting_path')
         sorting = si.load_extractor(sorting_path)
         
         print('Extracting waveforms...')
