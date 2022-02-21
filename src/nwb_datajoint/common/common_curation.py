@@ -87,12 +87,11 @@ class AutomaticCurationSorting(dj.Computed):
                                    sort_interval=sort_interval)
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
 
-
         # add sorting to Sortings
         Sortings.insert1({'recording_id': key['recording_id'],
-                             'sorting_id': key['sorting_id'],
-                             'sorting_path': key['sorting_path'],
-                             'parent_sorting_id': key['parent_sorting_id']}, skip_duplicates=True)
+                          'sorting_id': key['sorting_id'],
+                          'sorting_path': key['sorting_path'],
+                          'parent_sorting_id': key['parent_sorting_id']}, skip_duplicates=True)
         
         self.insert1(key)
    

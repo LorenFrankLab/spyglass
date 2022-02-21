@@ -1,3 +1,4 @@
+from csv import list_dialects
 import os
 import pathlib
 import time
@@ -14,6 +15,7 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
+from spikeinterface.core.segmentutils import AppendSegmentRecording
 
 from .common_device import Probe
 from .common_lab import LabMember, LabTeam
@@ -360,7 +362,7 @@ class SpikeSortingRecording(dj.Computed):
         """Filters and references a recording
         * Loads the NWB file created during insertion as a spikeinterface Recording
         * Slices recording in time (interval) and space (channels);
-          recording chunks fromdisjoint intervals are concatenated
+          recording chunks from disjoint intervals are concatenated
         * Applies referencing and bandpass filtering
 
         Parameters
@@ -503,11 +505,38 @@ class SpikeSorting(dj.Computed):
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
         
-        # get the artifact detection parameters and apply artifact detection to zero out artifacts
-        # list_triggers = SpikeSortingArtifactDetectionParameters.get_artifact_times(recording, **artifact_params)
+        # load valid times
+        artifact_removed_valid_times = (ArtifactRemovedIntervalList & key).fetch1('artifact_removed_valid_times')
         
-        # if not artifact_params['skip']:
-        # recording = st.remove_artifacts(recording, list_triggers, **artifact_params)
+        # load timestamps
+        if isinstance(recording, AppendSegmentRecording):
+            frames_per_segment = [0]
+            for i in range(len(recording.recording_list)):
+                frames_per_segment.append(recording.get_num_frames(segment_index=i))
+
+            cumsum_frames = np.cumsum(frames_per_segment)
+            total_frames = np.sum(frames_per_segment)
+
+            valid_timestamps = np.zeros((total_frames,))
+            for i in range(len(recording.recording_list)):
+                valid_timestamps[cumsum_frames[i]:cumsum_frames[i+1]] = recording.get_times(segment_index=i)
+            recording = si.concatenate_recordings(recording.recording_list)
+        else:
+            valid_timestamps = recording.get_times()
+        
+        # find valid intervals in index
+        if artifact_removed_valid_times.ndim==1:
+            artifact_removed_valid_times = np.expand_dims(artifact_removed_valid_times,0)
+        artifact_removed_valid_times_idx_list = []
+        for interval in artifact_removed_valid_times:
+            artifact_removed_valid_times_idx_list.append([np.searchsorted(valid_timestamps, interval[0]),
+                                                          np.searchsorted(valid_timestamps, interval[1])])
+        # slice them and create concat recording
+        # for each element in artifact_removed_valid_times_idx_list,
+        # identify which segment they go
+        # then for each segment,
+        # frame slice the recording for each element in artifact_removed_valid_times_idx_list
+        # then append
                 
         preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
         recording = st.preprocessing.whiten(recording=recording, seed=preproc_params['seed'])
@@ -531,7 +560,7 @@ class SpikeSorting(dj.Computed):
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')        
         key['analysis_file_name'], key['units_object_id'] = \
-            self._save_sorting_nwb(key, sorting=sorting,
+            self._save_sorting_nwb(key, sorting=sorting, timestamps=valid_timestamps,
                                    sort_interval_list_name=sort_interval_list_name, 
                                    sort_interval=sort_interval)
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
@@ -540,9 +569,9 @@ class SpikeSorting(dj.Computed):
 
         # add sorting to Sorting
         Sortings.insert1({'recording_id': key['recording_id'],
-                             'sorting_id': key['sorting_id'],
-                             'sorting_path': key['sorting_path'],
-                             'parent_sorting_id': ''}, skip_duplicates=True)
+                          'sorting_id': key['sorting_id'],
+                          'sorting_path': key['sorting_path'],
+                          'parent_sorting_id': ''}, skip_duplicates=True)
         
         self.insert1(key)
     
@@ -594,7 +623,7 @@ class SpikeSorting(dj.Computed):
                        + key['spikesorter_parameter_set_name']
         return sorting_name
     
-    def _save_sorting_nwb(key, sorting, sort_interval_list_name,
+    def _save_sorting_nwb(key, sorting, timestamps, sort_interval_list_name,
                           sort_interval, metrics=None, unit_ids=None):
         """Store a sorting in a new AnalysisNwbfile
 
@@ -604,6 +633,9 @@ class SpikeSorting(dj.Computed):
             [description]
         sorting : [type]
             [description]
+        timestamps : array_like
+            Time stamps of the sorted recoridng;
+            used to convert the spike timings from index to real time
         sort_interval_list_name : str
             [description]
         sort_interval : list
@@ -622,8 +654,6 @@ class SpikeSorting(dj.Computed):
         sort_interval_valid_times = (IntervalList & \
                 {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
 
-        times = SpikeSortingRecording._get_recording_timestamps(key)
-        # times = sorting.recording.get_times()
         units = dict()
         units_valid_times = dict()
         units_sort_interval = dict()
@@ -631,7 +661,7 @@ class SpikeSorting(dj.Computed):
             unit_ids = sorting.get_unit_ids()
         for unit_id in unit_ids:
             spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
-            units[unit_id] = times[spike_times_in_samples]
+            units[unit_id] = timestamps[spike_times_in_samples]
             units_valid_times[unit_id] = sort_interval_valid_times
             units_sort_interval[unit_id] = [sort_interval]
 

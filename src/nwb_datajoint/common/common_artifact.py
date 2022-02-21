@@ -64,8 +64,22 @@ class ArtifactDetection(dj.Computed):
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path) 
         
-        # get artifact-related timing info
-        artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
+        # get artifact times
+        # if AppendSegmentRecording, get artifact times for each segment
+        if isinstance(recording, AppendSegmentRecording):
+            artifact_removed_valid_times = []
+            artifact_times = []
+            for rec in recording.recording_list:
+                rec_valid_times, rec_artifact_times = _get_artifact_times(rec, **artifact_params)
+                for valid_times in rec_valid_times:
+                    artifact_removed_valid_times.append(valid_times)
+                for artifact_times in rec_artifact_times:
+                    artifact_times.append(artifact_times)
+            artifact_removed_valid_times = np.asarray(artifact_removed_valid_times)
+            artifact_times = np.asarray(artifact_times)
+        else:
+            artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
+        # artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
         key['artifact_times'] = artifact_times
         key['artifact_removed_valid_times'] = artifact_removed_valid_times
         
@@ -128,10 +142,13 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         Intervals of valid times where artifacts were not detected
     """
     
+    # load valid timestamps in segments or all at once
+    valid_timestamps = recording.get_times()
+    
     # if both thresholds are None, we essentially skip artifract detection and
     # return an array with the times of the first and last samples of the recording
     if (amplitude_thresh is None) and (zscore_thresh is None):
-        recording_interval = np.asarray([recording.get_times()[0], recording.get_times()[-1]])
+        recording_interval = np.asarray([valid_timestamps[0], valid_timestamps[-1]])
         artifact_times_empty = np.asarray([])
         print("Amplitude and zscore thresholds are both None, skipping artifact detection")
         return recording_interval, artifact_times_empty
@@ -142,6 +159,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     # turn ms to remove total into s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms * (1/1000) * (1/2)
     
+    # TODO: load by chunk to avoid memory problems
     data = recording.get_traces()
 
     # compute the number of electrodes that have to be above threshold
@@ -162,25 +180,10 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         above_thresh = np.ravel(np.argwhere(
             np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
     
-    # load valid timestamps in segments or all at once
-    if isinstance(recording, AppendSegmentRecording):
-        n_frames = [0]
-        for i in range(len(recording.recording_list)):
-            n_frames.append(recording.get_num_frames(segment_index=i))
-
-        cumsum_frames = np.cumsum(n_frames)
-        total_frames = np.sum(n_frames)
-
-        valid_timestamps = np.zeros((total_frames,))
-        for i in range(len(recording.recording_list)):
-            valid_timestamps[cumsum_frames[i]:cumsum_frames[i+1]] = recording.get_times(segment_index=i)
-    else:
-        valid_timestamps = recording.get_times()
-    
     if len(above_thresh) == 0:
-        recording_interval = np.asarray([[valid_timestamps[0], valid_timestamps[recording.get_num_frames()-1]]])
+        recording_interval = np.asarray([[valid_timestamps[0], valid_timestamps[-1]]])
         artifact_times_empty = np.asarray([])
-        print("No artifacts detected")
+        print("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
     above_thresh_times = valid_timestamps[above_thresh] # find timestamps of initial artifact threshold crossings
