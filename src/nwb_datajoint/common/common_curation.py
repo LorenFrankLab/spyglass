@@ -71,7 +71,7 @@ class AutomaticCurationSorting(dj.Computed):
         sorting = self._sorting_after_merge(sorting, quality_metrics, key['merge_params'])        
         
         curated_sorting_name = self._get_curated_sorting_name(key)
-        key['sorting_path'] = str(Path(os.getenv('SPYGLASS_SORTING_DIR')) / Path(curated_sorting_name))
+        key['sorting_path'] = str(Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(curated_sorting_name))
         if os.path.exists(key['sorting_path']):
             shutil.rmtree(key['sorting_path'])
         sorting = sorting.save(folder=key['sorting_path'])
@@ -117,7 +117,7 @@ class AutomaticCurationSorting(dj.Computed):
         new_sorting_id = 'S_'+str(uuid.uuid4())[:8]
         
         sorting_name = key['sorting_id']
-        sorting_path = str(Path(os.getenv('SPYGLASS_SORTING_DIR')) / Path(sorting_name))
+        sorting_path = str(Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(sorting_name))
         sorting = sorting.save(folder=sorting_path)
         
         Sortings.insert1({'recording_id': key['recording_id'],
@@ -240,7 +240,7 @@ class CuratedSpikeSorting(dj.Computed):
         if clusters_merged:
             recording = workspace.get_recording_extractor(
                 workspace.recording_ids[0])
-            tmpfile = tempfile.NamedTemporaryFile(dir=os.environ['SPYGLASS_TEMP_DIR'])
+            tmpfile = tempfile.NamedTemporaryFile(dir=os.environ['NWB_DATAJOINT_TEMP_DIR'])
             recording = se.CacheRecordingExtractor(
                                 recording, save_path=tmpfile.name, chunk_mb=10000)
             # whiten the recording

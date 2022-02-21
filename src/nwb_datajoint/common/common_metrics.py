@@ -71,7 +71,7 @@ class QualityMetrics(dj.Computed):
             metric = self._compute_metric(waveform_extractor, metric_name, **metric_params)
             qm[metric_name] = metric
         qm_name = self._get_quality_metrics_name(key)
-        key['quality_metrics_path'] = str(Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) / Path(qm_name+'.json'))
+        key['quality_metrics_path'] = str(Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) / Path(qm_name+'.json'))
         # save metrics dict as json
         print(f'Computed all metrics: {qm}')
         with open(key['quality_metrics_path'], 'w', encoding='utf-8') as f:

@@ -318,7 +318,7 @@ class SpikeSortingRecording(dj.Computed):
         key['sort_interval_list_name'] = tmp_key['interval_list_name']
 
         # Path to files that will hold the recording extractors
-        recording_folder = Path(os.getenv('SPYGLASS_RECORDING_DIR'))
+        recording_folder = Path(os.getenv('NWB_DATAJOINT_RECORDING_DIR'))
         key['recording_path'] = str(recording_folder / Path(recording_name))
         if os.path.exists(key['recording_path']):
             shutil.rmtree(key['recording_path'])
@@ -555,7 +555,7 @@ class SpikeSorting(dj.Computed):
         key['time_of_sort'] = int(time.time())
 
         print('Saving sorting results...')
-        sorting_folder = Path(os.getenv('SPYGLASS_SORTING_DIR'))
+        sorting_folder = Path(os.getenv('NWB_DATAJOINT_SORTING_DIR'))
         sorting_name = self._get_sorting_name(key)
         key['sorting_path'] = str(sorting_folder / Path(sorting_name))
         if os.path.exists(key['sorting_path']):
@@ -613,14 +613,14 @@ class SpikeSorting(dj.Computed):
         This should be run after AnalysisNwbFile().nightly_cleanup()
         """
         # get a list of the files in the spike sorting storage directory
-        dir_names = next(os.walk(os.environ['SPYGLASS_SORTING_DIR']))[1]
+        dir_names = next(os.walk(os.environ['NWB_DATAJOINT_SORTING_DIR']))[1]
         # now retrieve a list of the currently used analysis nwb files
         analysis_file_names = self.fetch('analysis_file_name')
         for dir in dir_names:
             if not dir in analysis_file_names:
-                full_path = str(pathlib.Path(os.environ['SPYGLASS_SORTING_DIR']) / dir)
+                full_path = str(pathlib.Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir)
                 print(f'removing {full_path}')
-                shutil.rmtree(str(pathlib.Path(os.environ['SPYGLASS_SORTING_DIR']) / dir))
+                shutil.rmtree(str(pathlib.Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir))
                 
     def _get_sorting_name(self, key):
         recording_name = SpikeSortingRecording()._get_recording_name(key)

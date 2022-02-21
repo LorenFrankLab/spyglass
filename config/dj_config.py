@@ -21,9 +21,9 @@ def set_configuration(user_name):
     # next, set up external stores
     # (read about them here: https://docs.datajoint.io/python/admin/5-blob-config.html)
 
-    assert os.getenv('SPYGLASS_BASE_DIR') is not None, 'environment variable SPYGLASS_BASE_DIR must be set'
+    assert os.getenv('NWB_DATAJOINT_BASE_DIR') is not None, 'environment variable NWB_DATAJOINT_BASE_DIR must be set'
 
-    data_dir = pathlib.Path(os.environ['SPYGLASS_BASE_DIR'])
+    data_dir = pathlib.Path(os.environ['NWB_DATAJOINT_BASE_DIR'])
     raw_dir = data_dir / 'raw'
     analysis_dir = data_dir / 'analysis'
 

@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 # NOTE this env var is set in the GitHub Action directly
-data_dir = Path(os.environ['SPYGLASS_BASE_DIR'])
+data_dir = Path(os.environ['NWB_DATAJOINT_BASE_DIR'])
 
 raw_dir = data_dir / 'raw'
 analysis_dir = data_dir / 'analysis'

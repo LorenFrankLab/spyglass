@@ -51,7 +51,7 @@ class Waveforms(dj.Computed):
         print('Extracting waveforms...')
         waveform_params = (WaveformParameters & key).fetch1('waveform_params')
         waveform_extractor_name = self._get_waveform_extractor_name(key)
-        key['waveform_extractor_path'] = str(Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) / Path(waveform_extractor_name))
+        key['waveform_extractor_path'] = str(Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) / Path(waveform_extractor_name))
         if os.path.exists(key['waveform_extractor_path']):
             shutil.rmtree(key['waveform_extractor_path'])
         waveforms = si.extract_waveforms(recording=recording, 

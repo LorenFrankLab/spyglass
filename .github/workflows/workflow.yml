@@ -11,7 +11,7 @@ jobs:
     env:
       OS: ${{ matrix.os }}
       PYTHON: '3.8'
-    #   SPYGLASS_BASE_DIR: ./data
+    #   NWB_DATAJOINT_BASE_DIR: ./data
     #   KACHERY_STORAGE_DIR: ./data/kachery-storage
     #   DJ_SUPPORT_FILEPATH_MANAGEMENT: True
     # services:
