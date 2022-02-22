@@ -45,7 +45,7 @@ class AutomaticCurationSelection(dj.Manual):
     -> QualityMetrics.proj(parent_sorting_id='sorting_id')
     -> AutomaticCurationParameters
     """
- 
+
 @schema
 class AutomaticCurationSorting(dj.Computed):
     definition = """
@@ -68,7 +68,9 @@ class AutomaticCurationSorting(dj.Computed):
             quality_metrics = json.load(f)
         
         sorting = self._sorting_after_reject(parent_sorting, quality_metrics, key['reject_params'])
-        sorting = self._sorting_after_merge(sorting, quality_metrics, key['merge_params'])        
+        
+        # TODO: implement merging in AutomaticCurationSorting._sorting_after_merge
+        # sorting = self._sorting_after_merge(sorting, quality_metrics, key['merge_params'])           
         
         curated_sorting_name = self._get_curated_sorting_name(key)
         key['sorting_path'] = str(Path(os.getenv('SPYGLASS_SORTING_DIR')) / Path(curated_sorting_name))
@@ -138,11 +140,21 @@ class AutomaticCurationSorting(dj.Computed):
         return curated_sorting_name
 
     @staticmethod
-    def _sorting_after_reject(parent_sorting, quality_metrics, key['reject_params']):
+    def _sorting_after_reject(sorting, quality_metrics, reject_params):
         
-        isi_reject = reject_params['isi_violation']
+        # A dict where each key is a unit_id and its value is a fraction
+        # of spikes that violate the isi [0, 1]
+        isi_violation_fractions = quality_metrics['isi_violation']
         
-        return 
+        # Not sure what this name ('isi_violation_frac_threshold') should be
+        isi_violation_frac_threshold = reject_params['isi_violation_frac_threshold']
+        
+        # Remove units that had too many isi violations. Keep the rest
+        passed_units_ids = [unit_id for unit_id in sorting.get_unit_ids() if isi_violation_fractions[unit_id] < isi_violation_rate_threshold]
+        
+        isi_passed_sorting = sorting.select_units(passed_units_ids)
+        
+        return isi_passed_sorting
     
     @staticmethod
     def _sorting_after_merge(sorting, merge_params):

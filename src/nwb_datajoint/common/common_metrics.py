@@ -97,11 +97,25 @@ class QualityMetrics(dj.Computed):
                 metric[str(unit_id)] = metric_func(waveform_extractor, this_unit_id=unit_id, **metric_params)
         return metric
 
+    def _compute_isi_violation_fractions(self, waveform_extractor, **metric_params):
+        isi_threshold_ms = metric_params[isi_threshold_ms]
+        min_isi_ms = metric_params[min_isi_ms]
+        
+        # Extract the total number of spikes that violated the isi_threshold for each unit
+        isi_violation_counts = st.qualitymetrics.compute_isi_violations(waveform_extractor, isi_threshold_ms=isi_threshold_ms, min_isi_ms=min_isi_ms).isi_violations_count
+        
+        # Extract the total number of spikes from each unit
+        num_spikes = st.qualitymetrics.compute_num_spikes(waveform_extractor)
+        isi_viol_frac_metric = {}
+        for unit_id in waveform_extractor.sorting.get_unit_ids():
+            isi_viol_frac_metric[str(unit_id)] = isi_violation_counts[unit_id] / num_spikes[unit_id]
+        return isi_viol_frac_metric
+        
 _metric_name_to_func = {
     "snr": st.qualitymetrics.compute_snrs,
-    "isi_violation": st.qualitymetrics.compute_isi_violations,
-    #'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
-    #'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap
+    "isi_violation": _compute_isi_violation_fractions,
+    'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
+    'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap
 }
 
 def _get_metric_default_params(metric):
