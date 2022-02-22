@@ -89,7 +89,6 @@ class QualityMetrics(dj.Computed):
         return qm_name
     
     def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
-        print(f'Computing metric: {metric_name}...')
         metric_func = _metric_name_to_func[metric_name]
         if metric_name == 'snr' or metric_name == 'isi_violation':
             metric = metric_func(waveform_extractor, **metric_params)
@@ -106,7 +105,6 @@ class QualityMetrics(dj.Computed):
             for unit_id, metric_val in value.items():
                 m[str(unit_id)] = metric_val
             new_qm[str(key)] = m
-        print(new_qm)
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(new_qm, f, ensure_ascii=False, indent=4)
 

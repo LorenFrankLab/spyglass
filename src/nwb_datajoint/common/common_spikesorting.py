@@ -424,33 +424,6 @@ class SpikeSortingRecording(dj.Computed):
                                                      freq_max=filter_params['frequency_max'])
        
         return recording
-
-    @staticmethod
-    # NOTE: once get_times works reliably, delete this method
-    def _get_recording_timestamps(key: dict):
-        """Returns the timestamps for the specified SpikeSortingRecording entry
-
-        Parameters
-        ---------
-        key: dict
-        
-        Returns
-        -------
-        timestamps: np.array, (N, )
-        """
-        nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
-        # TODO fix to work with any electrical series object
-        with pynwb.NWBHDF5IO(nwb_file_abs_path, 'r', load_namespaces=True) as io:
-            nwbfile = io.read()
-            timestamps = nwbfile.acquisition['e-series'].timestamps[:]
-
-        sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
-                                         'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
-
-        sort_indices = np.searchsorted(timestamps, np.ravel(sort_interval))
-        timestamps = timestamps[sort_indices[0]:sort_indices[1]]
-        return timestamps
-
 @schema
 class SpikeSorterParameters(dj.Manual):
     definition = """
@@ -503,11 +476,6 @@ class SpikeSorting(dj.Computed):
         
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
-        
-        # load valid times
-        artifact_removed_valid_times = (ArtifactRemovedIntervalList & key).fetch1('artifact_removed_valid_times')
-        if artifact_removed_valid_times.ndim==1:
-            artifact_removed_valid_times = np.expand_dims(artifact_removed_valid_times,0)
             
         # load timestamps
         if recording.get_num_segments()>1:
@@ -523,6 +491,11 @@ class SpikeSorting(dj.Computed):
                 timestamps[cumsum_frames[i]:cumsum_frames[i+1]] = recording.get_times(segment_index=i)
         else:
             timestamps = recording.get_times()
+        
+        # load valid times
+        artifact_removed_valid_times = (ArtifactRemovedIntervalList & key).fetch1('artifact_removed_valid_times')
+        if artifact_removed_valid_times.ndim==1:
+            artifact_removed_valid_times = np.expand_dims(artifact_removed_valid_times,0)
             
         # convert valid intervals to index
         artifact_removed_valid_times_idx_list = []
@@ -561,6 +534,7 @@ class SpikeSorting(dj.Computed):
         if os.path.exists(key['sorting_path']):
             shutil.rmtree(key['sorting_path'])
         sorting = sorting.save(folder=key['sorting_path'])
+        
         # NWB stuff
         sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],

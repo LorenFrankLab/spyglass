@@ -57,7 +57,7 @@ class SortingviewWorkspace(dj.Computed):
         sortingview_sorting_id : str
             unique id given to each sorting by sortingview
         """
-        sorting_path = (Sorting & {'sorting_id': sorting_id}).fetch1('sorting_path')
+        sorting_path = (Sortings & {'sorting_id': sorting_id}).fetch1('sorting_path')
         sorting = si.load_extractor(sorting_path)
         # convert to old sorting extractor
         sorting = si.create_extractor_from_new_sorting(sorting)
@@ -148,16 +148,3 @@ class SortingviewWorkspace(dj.Computed):
                                          label=workspace.label,
                                          include_curation=True)
         return url
-    
-    # TODO: check
-    def precalculate(self, key):
-        """For each workspace specified by the key, this will run the snipped precalculation code
-        """
-        workspace_uri_list = (self & key).fetch('workspace_uri')
-        #TODO: consider running in parallel
-        for workspace_uri in workspace_uri_list:
-            try:
-                workspace = sv.load_workspace(workspace_uri)
-                workspace.precalculate()
-            except:
-                Warning(f'Error precomputing for workspace {workspace_uri}')

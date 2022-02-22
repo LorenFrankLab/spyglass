@@ -29,6 +29,8 @@ from .common_artifact import ArtifactDetectionParameters, ArtifactDetectionSelec
 from .common_waveforms import WaveformParameters, WaveformSelection, Waveforms
 from .common_metrics import MetricParameters, MetricSelection, QualityMetrics
 from .common_sortingview import SortingviewWorkspace
+from .common_curation import (AutomaticCurationParameters,AutomaticCurationSelection,AutomaticCurationSorting,
+                              CuratedSpikeSortingSelection,CuratedSpikeSorting)
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
 from .nwb_helper_fn import (close_nwb_files, estimate_sampling_rate,

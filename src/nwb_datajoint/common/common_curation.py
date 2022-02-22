@@ -34,10 +34,10 @@ class AutomaticCurationParameters(dj.Manual):
     reject_params: blob   # params to reject units
     """
     def insert_default(self):
-        automatic_curation_params_name = 'default'
+        auto_curation_params_name = 'default'
         merge_params = {}
         reject_params = {}
-        self.insert1([automatic_curation_params_name, merge_params, reject_params], skip_duplicates=True)
+        self.insert1([auto_curation_params_name, merge_params, reject_params], skip_duplicates=True)
 
 @schema
 class AutomaticCurationSelection(dj.Manual):
@@ -63,12 +63,17 @@ class AutomaticCurationSorting(dj.Computed):
         parent_sorting_path = (Sortings & {'sorting_id': key['parent_sorting_id']}).fetch1('sorting_path')
         parent_sorting = si.load_extractor(parent_sorting_path)
         
+        metric_key = key
+        metric_key['sorting_id'] = key['parent_sorting_id']
         metrics_path = (QualityMetrics & key).fetch1('quality_metrics_path')
         with open(metrics_path) as f:
             quality_metrics = json.load(f)
         
-        sorting = self._sorting_after_reject(parent_sorting, quality_metrics, key['reject_params'])
-        sorting = self._sorting_after_merge(sorting, quality_metrics, key['merge_params'])        
+        reject_params = (AutomaticCurationParameters & metric_key).fetch1('reject_params')
+        merge_params = (AutomaticCurationParameters & metric_key).fetch1('merge_params')
+
+        sorting = self._sorting_after_reject(parent_sorting, quality_metrics, reject_params)
+        sorting = self._sorting_after_merge(sorting, quality_metrics, merge_params)        
         
         curated_sorting_name = self._get_curated_sorting_name(key)
         key['sorting_path'] = str(Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(curated_sorting_name))
@@ -82,13 +87,14 @@ class AutomaticCurationSorting(dj.Computed):
         sort_interval = (SortInterval & {'nwb_file_name': recording_key['nwb_file_name'],
                                          'sort_interval_name': recording_key['sort_interval_name']}).fetch1('sort_interval')
         key['analysis_file_name'], key['units_object_id'] = \
-            self._save_sorting_nwb(key, sorting=sorting,
-                                   sort_interval_list_name=sort_interval_list_name, 
-                                   sort_interval=sort_interval)
+            SpikeSorting()._save_sorting_nwb(key, sorting=sorting,
+                                             sort_interval_list_name=sort_interval_list_name, 
+                                             sort_interval=sort_interval)
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
 
         # add sorting to Sortings
-        Sortings.insert1({'recording_id': key['recording_id'],
+        Sortings.insert1({'nwb_file_name': key['nwb_file_name'],
+                          'recording_id': key['recording_id'],
                           'sorting_id': key['sorting_id'],
                           'sorting_path': key['sorting_path'],
                           'parent_sorting_id': key['parent_sorting_id']}, skip_duplicates=True)
@@ -121,28 +127,33 @@ class AutomaticCurationSorting(dj.Computed):
         sorting = sorting.save(folder=sorting_path)
         
         Sortings.insert1({'recording_id': key['recording_id'],
-                             'sorting_id': new_sorting_id,
-                             'sorting_path': sorting_path,
-                             'parent_sorting_id': key['sorting_id']}, skip_duplicates=True)
+                          'sorting_id': new_sorting_id,
+                          'sorting_path': sorting_path,
+                          'parent_sorting_id': key['sorting_id']}, skip_duplicates=True)
     
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
     
-    def _get_curated_sorting_name(key):
+    def _get_curated_sorting_name(self, key):
         parent_sorting_key = (SpikeSorting & {'sorting_id': key['parent_sorting_id']}).fetch1()
         parent_sorting_name =SpikeSorting()._get_sorting_name(parent_sorting_key)
         curated_sorting_name = parent_sorting_name + '_' \
-                               + key['auto_curation_params_name'] + '_' \
-                               + key['spikesorter_parameter_set_name'] + '_' + key['sorting_id']
+                               + key['auto_curation_params_name'] + '_' + key['sorting_id']
         return curated_sorting_name
 
     @staticmethod
-    def _sorting_after_reject(sorting, reject_params):
-        return NotImplementedError
+    def _sorting_after_reject(sorting, quality_metrics, reject_params):
+        if not reject_params:
+            return sorting
+        else:
+            return NotImplementedError
     
     @staticmethod
-    def _sorting_after_merge(sorting, merge_params):
-        return NotImplementedError
+    def _sorting_after_merge(sorting, quality_metrics, merge_params):
+        if not merge_params:
+            return sorting
+        else:
+            return NotImplementedError
 
 @schema 
 class CuratedSpikeSortingSelection(dj.Manual):
