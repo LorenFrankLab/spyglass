@@ -23,7 +23,7 @@ from replay_trajectory_classification.initial_conditions import \
 
 from scipy.ndimage.filters import gaussian_filter1d
 from nwb_datajoint.common.common_position import IntervalPositionInfo
-from ripple_detection import multiunit_HSE_detector
+from ripple_detection import multiunit_HSE_detector, get_multiunit_population_firing_rate
 import matplotlib.pyplot as plt
 
 schema = dj.schema('decoding_clusterless')
@@ -38,7 +38,7 @@ class MarkParameters(dj.Manual):
     mark_param_dict:    BLOB    # dictionary of parameters for the mark extraction function
     """
 
-    def insert_default_param(self):
+    def insert_default(self):
         """insert the default parameter set {'sign': -1, 'threshold' : 0} corresponding to negative going waveforms of at least 100 uV size
         """
         default_dict = {'sign': -1, 'threshold': 0}
@@ -361,7 +361,7 @@ class ClusterlessClassifierParameters(dj.Manual):
     predict_params :      BLOB    # prediction parameters
     """
 
-    def insert_default_params(self):
+    def insert_default(self):
         (classifier_parameters, fit_parameters,
          predict_parameters) = make_default_decoding_parameters_cpu()
         self.insert1(
@@ -395,7 +395,7 @@ class MultiunitFiringRate(dj.Computed):
         multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
                             ).astype(float)
         multiunit_firing_rate = pd.DataFrame(
-            self.get_multiunit_population_firing_rate(
+            get_multiunit_population_firing_rate(
                 multiunit_spikes, key['sampling_rate']), index=marks.time,
             columns=['firing_rate'])
         
@@ -414,49 +414,6 @@ class MultiunitFiringRate(dj.Computed):
             analysis_file_name=key['analysis_file_name'])
 
         self.insert1(key)
-        
-        @staticmethod
-        def _gaussian_smooth(data, sigma, sampling_frequency, axis=0, truncate=8):
-            '''1D convolution of the data with a Gaussian.
-            The standard deviation of the gaussian is in the units of the sampling
-            frequency. The function is just a wrapper around scipy's
-            `gaussian_filter1d`, The support is truncated at 8 by default, instead
-            of 4 in `gaussian_filter1d`
-            Parameters
-            ----------
-            data : array_like
-            sigma : float
-            sampling_frequency : int
-            axis : int, optional
-            truncate : int, optional
-            Returns
-            -------
-            smoothed_data : array_like
-            '''
-            return gaussian_filter1d(
-                data, sigma * sampling_frequency, truncate=truncate, axis=axis,
-                mode='constant')
-
-        @staticmethod
-        def get_multiunit_population_firing_rate(multiunit, sampling_frequency,
-                                                 smoothing_sigma=0.015):
-            '''Calculates the multiunit population firing rate.
-            Parameters
-            ----------
-            multiunit : ndarray, shape (n_time, n_signals)
-                Binary array of multiunit spike times.
-            sampling_frequency : float
-                Number of samples per second.
-            smoothing_sigma : float or np.timedelta
-                Amount to smooth the firing rate over time. The default is
-                given assuming time is in units of seconds.
-            Returns
-            -------
-            multiunit_population_firing_rate : ndarray, shape (n_time,)
-            '''
-            return self._gaussian_smooth(
-                multiunit.mean(axis=1) * sampling_frequency,
-                smoothing_sigma, sampling_frequency)
         
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
