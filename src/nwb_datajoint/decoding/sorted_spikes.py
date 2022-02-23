@@ -174,7 +174,7 @@ class SortedSpikesClassifierParameters(dj.Manual):
     predict_params :      BLOB    # prediction parameters
     """
 
-    def insert_default_params(self):
+    def insert_default(self):
         (classifier_parameters, fit_parameters,
          predict_parameters) = make_default_decoding_parameters_cpu()
         self.insert1(
