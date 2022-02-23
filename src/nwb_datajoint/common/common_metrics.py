@@ -109,27 +109,24 @@ class QualityMetrics(dj.Computed):
             json.dump(new_qm, f, ensure_ascii=False, indent=4)
         
 def _get_metric_default_params(metric):
-    if metric == 'nn_isolation':
-        return {'max_spikes_for_nn': 1000,
-                'n_neighbors': 5, 
-                'n_components': 7,
-                'radius_um': 100,
-                'seed': 0}
-    elif metric == 'nn_noise_overlap':
-        return {'max_spikes_for_nn': 1000,
-                'n_neighbors': 5, 
-                'n_components': 7,
-                'radius_um': 100,
-                'seed': 0}
-    elif metric == 'isi_violation':
-        return {'isi_threshold_ms': 1.5}
-    elif metric == 'snr':
-        return {'peak_sign': 'neg',
+    metric_default_params = {
+        'snr': {'peak_sign': 'neg',
                 'num_chunks_per_segment':20,
                 'chunk_size':10000,
-                'seed':0}
-    else:
-        raise NameError('That metric is not supported yet.')
+                'seed':0},
+        'isi_violation': {'isi_threshold_ms': 1.5},
+        'nn_isolation': {'max_spikes_for_nn': 1000,
+                         'n_neighbors': 5, 
+                         'n_components': 7,
+                         'radius_um': 100,
+                         'seed': 0},
+        'nn_noise_overlap': {'max_spikes_for_nn': 1000,
+                             'n_neighbors': 5, 
+                             'n_components': 7,
+                             'radius_um': 100,
+                             'seed': 0}
+    }
+    return metric_default_params['metric']
 
 def _compute_isi_violation_fractions(self, waveform_extractor, **metric_params):
     isi_threshold_ms = metric_params[isi_threshold_ms]
