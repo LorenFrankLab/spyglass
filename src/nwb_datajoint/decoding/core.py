@@ -22,6 +22,7 @@ def _convert_env(env_params):
 
     return env_params
 
+
 def _to_dict(transition):
     parameters = vars(transition)
     parameters['class_name'] = type(transition).__name__

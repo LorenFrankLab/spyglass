@@ -2,12 +2,14 @@ import pprint
 
 import datajoint as dj
 import labbox_ephys as le
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pynwb
 import xarray as xr
 from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
+from nwb_datajoint.common.common_position import IntervalPositionInfo
 from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
                                                       SpikeSortingWorkspace,
                                                       UnitInclusionParameters)
@@ -20,11 +22,8 @@ from replay_trajectory_classification.discrete_state_transitions import \
     DiagonalDiscrete
 from replay_trajectory_classification.initial_conditions import \
     UniformInitialConditions
-
-from scipy.ndimage.filters import gaussian_filter1d
-from nwb_datajoint.common.common_position import IntervalPositionInfo
-from ripple_detection import multiunit_HSE_detector, get_multiunit_population_firing_rate
-import matplotlib.pyplot as plt
+from ripple_detection import (get_multiunit_population_firing_rate,
+                              multiunit_HSE_detector)
 
 schema = dj.schema('decoding_clusterless')
 
@@ -258,11 +257,12 @@ class UnitMarksIndicator(dj.Computed):
         n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
 
         return np.linspace(start_time, end_time, n_samples)
-    
+
     @staticmethod
     def plot_all_marks(marks_indicators):
         for electrode_ind in marks_indicators.electrodes:
-            marks = marks_indicators.sel(electrodes=electrode_ind).dropna('time', how='all').dropna('marks')
+            marks = marks_indicators.sel(electrodes=electrode_ind).dropna(
+                'time', how='all').dropna('marks')
             n_features = len(marks.marks)
             fig, axes = plt.subplots(n_features, n_features,
                                      constrained_layout=True, sharex=True, sharey=True,
@@ -273,7 +273,8 @@ class UnitMarksIndicator(dj.Computed):
                         axes[ax_ind1, ax_ind2].scatter(
                             marks.sel(marks=feature1), marks.sel(marks=feature2), s=10)
                     except TypeError:
-                        axes.scatter(marks.sel(marks=feature1), marks.sel(marks=feature2), s=10)
+                        axes.scatter(marks.sel(marks=feature1),
+                                     marks.sel(marks=feature2), s=10)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
@@ -389,8 +390,9 @@ class MultiunitFiringRate(dj.Computed):
     -> AnalysisNwbfile
     multiunit_firing_rate_object_id: varchar(40)
     """
-    def make(key):
-        
+
+    def make(self, key):
+
         marks = (UnitMarksIndicator & key).fetch_xarray()
         multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
                             ).astype(float)
@@ -398,7 +400,7 @@ class MultiunitFiringRate(dj.Computed):
             get_multiunit_population_firing_rate(
                 multiunit_spikes, key['sampling_rate']), index=marks.time,
             columns=['firing_rate'])
-        
+
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
         key['analysis_file_name'] = nwb_analysis_file.create(
@@ -414,7 +416,7 @@ class MultiunitFiringRate(dj.Computed):
             analysis_file_name=key['analysis_file_name'])
 
         self.insert1(key)
-        
+
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
@@ -423,7 +425,7 @@ class MultiunitFiringRate(dj.Computed):
 
         def fetch_dataframe(self):
             return [data['multiunit_firing_rate'].set_index('time') for data in self.fetch_nwb()]
-        
+
 
 @schema
 class MultiunitHighSynchronyEventsParameters(dj.Manual):
@@ -446,14 +448,14 @@ class MultiunitHighSynchronyEvents(dj.Computed):
     -> AnalysisNwbfile
     multiunit_hse_times_object_id: varchar(40)
     """
-    def make(key):
-        
+
+    def make(self, key):
+
         marks = (UnitMarksIndicator & key).fetch_xarray()
         multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
                             ).astype(float)
         position_info = (IntervalPositionInfo() & key).fetch1_dataframe()
-        
-        
+
         params = (MultiunitHighSynchronyEventsParameters & key).fetch1()
 
         multiunit_high_synchrony_times = multiunit_HSE_detector(
@@ -462,7 +464,7 @@ class MultiunitHighSynchronyEvents(dj.Computed):
             position_info.head_speed.values,
             sampling_frequency=key['sampling_rate'],
             **params)
-        
+
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
         key['analysis_file_name'] = nwb_analysis_file.create(
