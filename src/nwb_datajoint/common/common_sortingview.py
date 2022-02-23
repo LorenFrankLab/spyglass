@@ -19,7 +19,7 @@ class SortingviewWorkspace(dj.Computed):
     """
     class Sortings(dj.Part):
         definition = """
-        -> master
+        -> SortingviewWorkspace
         sorting_id: varchar(30)
         ---
         sortingview_sorting_id: varchar(30)
