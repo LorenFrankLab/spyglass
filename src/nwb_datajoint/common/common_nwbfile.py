@@ -207,6 +207,9 @@ class AnalysisNwbfile(dj.Manual):
             with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w', manager=io.manager) as export_io:
                 export_io.export(io, nwbf)
 
+        # change the permissions to only allow owner to write
+        os.fchmod(analysis_file_abs_path, 644)
+
         return analysis_file_name
 
     def add(self, nwb_file_name, analysis_file_name):
