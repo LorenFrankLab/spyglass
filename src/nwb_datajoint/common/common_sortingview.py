@@ -61,7 +61,7 @@ class SortingviewWorkspace(dj.Computed):
         sorting = si.load_extractor(sorting_path)
         # convert to old sorting extractor
         sorting = si.create_extractor_from_new_sorting(sorting)
-        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_path+'_sorting.h5')
+        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, str(Path(sorting_path) / 'sorting.h5'))
         workspace_uri = (self & key).fetch1('workspace_uri') 
         workspace = sv.load_workspace(workspace_uri)
         sortingview_sorting_id = workspace.add_sorting(recording_id=workspace.recording_ids[0], 
