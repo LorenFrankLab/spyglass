@@ -20,8 +20,8 @@ class WaveformParameters(dj.Manual):
     """
     def insert_default(self):
         waveform_params_name = 'default'
-        waveform_params = {'ms_before':1, 'ms_after':1, 'max_spikes_per_unit': 5000,
-                           'n_jobs':5, 'total_memory': '5G'}
+        waveform_params = {'ms_before': 0.5, 'ms_after': 0.5, 'max_spikes_per_unit': 5000,
+                           'n_jobs': 5, 'total_memory': '5G'}
         self.insert1([waveform_params_name, waveform_params], skip_duplicates=True) 
 
 @schema
@@ -80,9 +80,8 @@ class Waveforms(dj.Computed):
         -------
         we : spikeinterface.WaveformExtractor
         """
-        # TODO: check if multiple entries are passed
-        key = (self & key).fetch1()
-        we = si.WaveformExtractor.load_from_folder(key['waveform_extractor_path'])
+        we_path = (self & key).fetch1('waveform_extractor_path')
+        we = si.WaveformExtractor.load_from_folder(we_path)
         return we
     
     def fetch_nwb(self, key):

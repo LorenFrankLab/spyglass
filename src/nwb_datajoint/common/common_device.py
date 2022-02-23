@@ -107,13 +107,13 @@ class Probe(dj.Manual):
 
     class Shank(dj.Part):
         definition = """
-        -> master
+        -> Probe
         probe_shank: int            # shank number within probe
         """
 
     class Electrode(dj.Part):
         definition = """
-        -> master.Shank
+        -> Probe.Shank
         probe_electrode: int        # electrode
         ---
         contact_size=NULL: float    # (um) contact size

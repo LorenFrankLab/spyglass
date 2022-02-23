@@ -67,7 +67,7 @@ class SortGroup(dj.Manual):
 
     class SortGroupElectrode(dj.Part):
         definition = """
-        -> master
+        -> SortGroup
         -> Electrode
         """
 
