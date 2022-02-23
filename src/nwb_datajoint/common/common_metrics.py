@@ -18,25 +18,31 @@ class MetricParameters(dj.Manual):
     ---
     metric_params: blob
     """
-
-    def get_metrics_list(self):
-        "Returns a list of quality metrics available in spikeinterface"
-        # not all metrics in spikeinterface are supported yet
-        # metric_list = st.qualitymetrics.get_quality_metric_list()
-        metric_list = ['snr','isi_violation','nn_isolation','nn_noise_overlap']
-        return metric_list
+    metric_default_params = {
+        'snr': {'peak_sign': 'neg',
+                'num_chunks_per_segment':20,
+                'chunk_size':10000,
+                'seed':0},
+        'isi_violation': {'isi_threshold_ms': 1.5},
+        'nn_isolation': {'max_spikes_for_nn': 1000,
+                         'n_neighbors': 5, 
+                         'n_components': 7,
+                         'radius_um': 100,
+                         'seed': 0},
+        'nn_noise_overlap': {'max_spikes_for_nn': 1000,
+                             'n_neighbors': 5, 
+                             'n_components': 7,
+                             'radius_um': 100,
+                             'seed': 0}
+        }
+    available_metrics = list(metric_default_params.keys())
 
     def get_metric_default_params(self, metric: str):
         "Returns default params for the given metric"
-        return _get_metric_default_params(metric)
+        return self.metric_default_params(metric)
 
     def insert_default(self):
-        list_name = 'franklab_default'
-        params = {'snr': _get_metric_default_params('snr'),
-                  'isi_violation': _get_metric_default_params('isi_violation'),
-                  'nn_isolation': _get_metric_default_params('nn_isolation'),
-                  'nn_noise_overlap': _get_metric_default_params('nn_noise_overlap')}
-        self.insert1([list_name, params], skip_duplicates=True)
+        self.insert1(['franklab_default', self.metric_default_params], skip_duplicates=True)
     
     # TODO
     def _validate_metrics_list(self, key):
