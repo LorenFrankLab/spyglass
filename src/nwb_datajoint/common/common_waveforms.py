@@ -90,8 +90,6 @@ class Waveforms(dj.Computed):
         return NotImplementedError
     
     def _get_waveform_extractor_name(self, key):
-        key = (SpikeSorting & key).fetch1()
-        sorting_name = SpikeSorting()._get_sorting_name(key)
-        we_name = sorting_name + '_waveform'
+        we_name = key['recording_id'] + '_' + key['sorting_id'] + '_waveform'
         return we_name
     

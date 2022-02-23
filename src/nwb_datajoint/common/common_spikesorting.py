@@ -335,6 +335,23 @@ class SpikeSortingRecording(dj.Computed):
         + str(key['sort_group_id']) + '_' \
         + key['preproc_params_name']
         return recording_name
+    
+    @staticmethod
+    def _get_recording_timestamps(recording):
+        if recording.get_num_segments()>1:
+            frames_per_segment = [0]
+            for i in range(len(recording.recording_list)):
+                frames_per_segment.append(recording.get_num_frames(segment_index=i))
+
+            cumsum_frames = np.cumsum(frames_per_segment)
+            total_frames = np.sum(frames_per_segment)
+
+            timestamps = np.zeros((total_frames,))
+            for i in range(len(recording.recording_list)):
+                timestamps[cumsum_frames[i]:cumsum_frames[i+1]] = recording.get_times(segment_index=i)
+        else:
+            timestamps = recording.get_times()
+        return timestamps
 
     def _get_sort_interval_valid_times(self, key):
         """Identifies the intersection between sort interval specified by the user
@@ -476,45 +493,40 @@ class SpikeSorting(dj.Computed):
         
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
-            
-        # load timestamps
-        if recording.get_num_segments()>1:
-            frames_per_segment = [0]
-            for i in range(len(recording.recording_list)):
-                frames_per_segment.append(recording.get_num_frames(segment_index=i))
-
-            cumsum_frames = np.cumsum(frames_per_segment)
-            total_frames = np.sum(frames_per_segment)
-
-            timestamps = np.zeros((total_frames,))
-            for i in range(len(recording.recording_list)):
-                timestamps[cumsum_frames[i]:cumsum_frames[i+1]] = recording.get_times(segment_index=i)
-        else:
-            timestamps = recording.get_times()
         
+        timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
+
         # load valid times
-        artifact_removed_valid_times = (ArtifactRemovedIntervalList & key).fetch1('artifact_removed_valid_times')
-        if artifact_removed_valid_times.ndim==1:
-            artifact_removed_valid_times = np.expand_dims(artifact_removed_valid_times,0)
-            
-        # convert valid intervals to index
-        artifact_removed_valid_times_idx_list = []
-        for interval in artifact_removed_valid_times:
-            artifact_removed_valid_times_idx_list.append([np.searchsorted(timestamps, interval[0]),
-                                                          np.searchsorted(timestamps, interval[1])])
+        artifact_times = (ArtifactRemovedIntervalList & key).fetch1('artifact_times')
+        if artifact_times.ndim==1:
+            artifact_times = np.expand_dims(artifact_times,0)
         
-        # slice valid times and append them
-        rec_list = []
-        for idx_interval in artifact_removed_valid_times_idx_list:
+        if artifact_times:
+            # convert valid intervals to indices
+            list_triggers = []
+            for interval in artifact_times:
+                list_triggers.append(np.arange(np.searchsorted(timestamps, interval[0]),
+                                            np.searchsorted(timestamps, interval[1])))
+            list_triggers = np.asarray(list_triggers).flatten().tolist()
+            
             if recording.get_num_segments()>1:
-                segment_ind = np.ravel(np.argwhere(cumsum_frames <= idx_interval[0]))[-1]
-                rec = recording.recording_list[segment_ind]
-                sliced_rec = rec.frame_slice(start_frame=idx_interval[0]-cumsum_frames[segment_ind],
-                                             end_frame=idx_interval[1]-cumsum_frames[segment_ind])
-            else:
-                sliced_rec = recording.frame_slice(start_frame=idx_interval[0], end_frame=idx_interval[1])
-            rec_list.append(sliced_rec)
-        recording = si.append_recordings(rec_list)
+                recording = si.concatenate_recordings(recording.recording_list)
+            recording = st.remove_artifacts(recording=recording, list_triggers=list_triggers,
+                                            ms_before=0, ms_after=0, mode='zeros')
+        
+        # NOTE: decided not to do this and instead just use remove_artifacts; keep for now
+        # slice valid times and append them
+        # rec_list = []
+        # for idx_interval in artifact_removed_valid_times_idx_list:
+        #     if recording.get_num_segments()>1:
+        #         segment_ind = np.ravel(np.argwhere(cumsum_frames <= idx_interval[0]))[-1]
+        #         rec = recording.recording_list[segment_ind]
+        #         sliced_rec = rec.frame_slice(start_frame=idx_interval[0]-cumsum_frames[segment_ind],
+        #                                      end_frame=idx_interval[1]-cumsum_frames[segment_ind])
+        #     else:
+        #         sliced_rec = recording.frame_slice(start_frame=idx_interval[0], end_frame=idx_interval[1])
+        #     rec_list.append(sliced_rec)
+        # recording = si.append_recordings(rec_list)
                 
         preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
         recording = st.preprocessing.whiten(recording=recording, seed=preproc_params['seed'])

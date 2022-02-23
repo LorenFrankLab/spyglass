@@ -58,19 +58,24 @@ class AutomaticCurationSorting(dj.Computed):
     """
 
     def make(self, key):
-        key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
+        recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
+        recording = si.load_extractor(recording_path)
+        timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
+        key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
         parent_sorting_path = (Sortings & {'sorting_id': key['parent_sorting_id']}).fetch1('sorting_path')
         parent_sorting = si.load_extractor(parent_sorting_path)
         
-        metric_key = key
-        metric_key['sorting_id'] = key['parent_sorting_id']
-        metrics_path = (QualityMetrics & key).fetch1('quality_metrics_path')
+        metrics_path = (QualityMetrics & {'nwb_file_name': key['nwb_file_name'],
+                                          'recording_id': key['recording_id'],
+                                          'waveform_params_name':key['waveform_params_name'],
+                                          'metric_params_name':key['metric_params_name'],
+                                          'sorting_id': key['parent_sorting_id']}).fetch1('quality_metrics_path')
         with open(metrics_path) as f:
             quality_metrics = json.load(f)
         
-        reject_params = (AutomaticCurationParameters & metric_key).fetch1('reject_params')
-        merge_params = (AutomaticCurationParameters & metric_key).fetch1('merge_params')
+        reject_params = (AutomaticCurationParameters & key).fetch1('reject_params')
+        merge_params = (AutomaticCurationParameters & key).fetch1('merge_params')
 
         sorting = self._sorting_after_reject(parent_sorting, quality_metrics, reject_params)
         sorting = self._sorting_after_merge(sorting, quality_metrics, merge_params)        
@@ -87,7 +92,7 @@ class AutomaticCurationSorting(dj.Computed):
         sort_interval = (SortInterval & {'nwb_file_name': recording_key['nwb_file_name'],
                                          'sort_interval_name': recording_key['sort_interval_name']}).fetch1('sort_interval')
         key['analysis_file_name'], key['units_object_id'] = \
-            SpikeSorting()._save_sorting_nwb(key, sorting=sorting,
+            SpikeSorting()._save_sorting_nwb(key, sorting=sorting, timestamps=timestamps,
                                              sort_interval_list_name=sort_interval_list_name, 
                                              sort_interval=sort_interval)
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       

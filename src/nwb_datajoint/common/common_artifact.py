@@ -63,22 +63,25 @@ class ArtifactDetection(dj.Computed):
         
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path) 
+    
+        artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
         
-        # get artifact times
+        # NOTE: decided not to do this but to just create a single long segment; keep for now
+        # get artifact times by segment
         # if AppendSegmentRecording, get artifact times for each segment
-        if isinstance(recording, AppendSegmentRecording):
-            artifact_removed_valid_times = []
-            artifact_times = []
-            for rec in recording.recording_list:
-                rec_valid_times, rec_artifact_times = _get_artifact_times(rec, **artifact_params)
-                for valid_times in rec_valid_times:
-                    artifact_removed_valid_times.append(valid_times)
-                for artifact_times in rec_artifact_times:
-                    artifact_times.append(artifact_times)
-            artifact_removed_valid_times = np.asarray(artifact_removed_valid_times)
-            artifact_times = np.asarray(artifact_times)
-        else:
-            artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
+        # if isinstance(recording, AppendSegmentRecording):
+        #     artifact_removed_valid_times = []
+        #     artifact_times = []
+        #     for rec in recording.recording_list:
+        #         rec_valid_times, rec_artifact_times = _get_artifact_times(rec, **artifact_params)
+        #         for valid_times in rec_valid_times:
+        #             artifact_removed_valid_times.append(valid_times)
+        #         for artifact_times in rec_artifact_times:
+        #             artifact_times.append(artifact_times)
+        #     artifact_removed_valid_times = np.asarray(artifact_removed_valid_times)
+        #     artifact_times = np.asarray(artifact_times)
+        # else:
+        #     artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
 
         key['artifact_times'] = artifact_times
         key['artifact_removed_valid_times'] = artifact_removed_valid_times
@@ -91,6 +94,7 @@ class ArtifactDetection(dj.Computed):
         tmp_key['nwb_file_name'] = key['nwb_file_name']
         tmp_key['artifact_removed_interval_list_name'] = key['artifact_removed_interval_list_name']
         tmp_key['artifact_removed_valid_times'] = key['artifact_removed_valid_times']
+        tmp_key['artifact_times'] = key['artifact_times']
         ArtifactRemovedIntervalList.insert1(tmp_key, skip_duplicates = True)
         
         # also insert into IntervalList
@@ -111,7 +115,8 @@ class ArtifactRemovedIntervalList(dj.Manual):
     -> Session
     artifact_removed_interval_list_name: varchar(200)
     ---
-    artifact_removed_valid_times: longblob # np array of valid no-artifact intervals
+    artifact_removed_valid_times: longblob
+    artifact_times: longblob # np array of artifact intervals
     """
     
 def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
@@ -124,26 +129,27 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
 
     Parameters
     ----------
-    recording: si.Recording
-    zscore_thresh: float, optional
+    recording : si.Recording
+    zscore_thresh : float, optional
         Stdev threshold for exclusion, should be >=0, defaults to None
-    amplitude_thresh: float, optional
+    amplitude_thresh : float, optional
         Amplitude threshold for exclusion, should be >=0, defaults to None
-    proportion_above_thresh: float, optional, should be>0 and <=1
+    proportion_above_thresh : float, optional, should be>0 and <=1
         Proportion of electrodes that need to have threshold crossings, defaults to 1 
-    removal_window_ms: float, optional
+    removal_window_ms : float, optional
         Width of the window in milliseconds to mask out per artifact (window/2 removed on each side of threshold crossing), defaults to 1 ms
     
-    Return
-    ------
-    artifact_intervals: np.ndarray
+    Returns
+    ------_
+    artifact_intervals : np.ndarray
         Intervals in which artifacts are detected (including removal windows), unit: seconds
-    artifact_removed_valid_times: np.ndarray
+    artifact_removed_valid_times : np.ndarray
         Intervals of valid times where artifacts were not detected, unit: seconds
     """
     
-    # load valid timestamps in segments or all at once
-    valid_timestamps = recording.get_times()
+    valid_timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
+    if recording.get_num_segments()>1:
+        recording = si.concatenate_recordings(recording.recording_list)
     
     # if both thresholds are None, we essentially skip artifract detection and
     # return an array with the times of the first and last samples of the recording
