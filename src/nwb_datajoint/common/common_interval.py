@@ -183,8 +183,7 @@ def interval_list_intersect(interval_list1, interval_list2):
     return intersecting_intervals
 
 def _intersection(interval1, interval2):
-    """Takes (set-theoretic) intersection of two intervals
-    """
+    "Takes the (set-theoretic) intersection of two intervals"
     intersection = np.array([max([interval1[0],interval2[0]]),
                              min([interval1[1],interval2[1]])])
     if intersection[1]>intersection[0]:
@@ -193,30 +192,29 @@ def _intersection(interval1, interval2):
         return None
     
 def _union(interval1, interval2):
-    """Take (set-theoretic) union of two intervals
-    """
+    "Takes the (set-theoretic) union of two intervals"
     if _intersection(interval1, interval2) is None:
         return np.array([interval1, interval2])
     else:
         return np.array([min([interval1[0],interval2[0]]),
                          max([interval1[1],interval2[1]])])
 
-def _union_concat(interval1, interval2):
-    """Given two intervals, takes their union if overlapping;
-    concatenates if not
+def _union_concat(interval_list, interval):
+    """Compares the last interval of the interval list to the given interval and
+    * takes their union if overlapping
+    * concatenates the interval to the interval list if not
     
-    This is recursively called with `reduce`.
-    Interval1 is usually a list of intervals; interval2 is a single interval
+    Recursively called with `reduce`.
     """
-    if interval1.ndim==1:
-        interval1 = np.expand_dims(interval1, 0)
-    if interval2.ndim==1:
-        interval2 = np.expand_dims(interval2, 0)
+    if interval_list.ndim==1:
+        interval_list = np.expand_dims(interval_list, 0)
+    if interval.ndim==1:
+        interval = np.expand_dims(interval, 0)
 
-    x = _union(interval1[-1], interval2[0])
+    x = _union(interval_list[-1], interval[0])
     if x.ndim==1:
         x = np.expand_dims(x, 0)
-    return np.concatenate((interval1[:-1], x), axis=0)
+    return np.concatenate((interval_list[:-1], x), axis=0)
 
 def union_adjacent_index(interval1, interval2):
     """unions two intervals that are adjacent in index

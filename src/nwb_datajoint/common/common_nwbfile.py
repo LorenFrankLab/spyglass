@@ -54,7 +54,7 @@ class Nwbfile(dj.Manual):
     def get_abs_path(nwb_file_name):
         """Return the absolute path for a stored raw NWB file given just the file name.
 
-        The SPYGLASS_BASE_DIR environment variable must be set.
+        The NWB_DATAJOINT_BASE_DIR environment variable must be set.
 
         Parameters
         ----------
@@ -66,8 +66,8 @@ class Nwbfile(dj.Manual):
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv('SPYGLASS_BASE_DIR', None))
-        assert base_dir is not None, 'You must set SPYGLASS_BASE_DIR or provide the base_dir argument'
+        base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
+        assert base_dir is not None, 'You must set NWB_DATAJOINT_BASE_DIR or provide the base_dir argument'
 
         nwb_file_abspath = base_dir / 'raw' / nwb_file_name
         return str(nwb_file_abspath)
@@ -232,7 +232,7 @@ class AnalysisNwbfile(dj.Manual):
     def get_abs_path(analysis_nwb_file_name):
         """Return the absolute path for a stored analysis NWB file given just the file name.
 
-        The SPYGLASS_BASE_DIR environment variable must be set.
+        The NWB_DATAJOINT_BASE_DIR environment variable must be set.
 
         Parameters
         ----------
@@ -244,8 +244,8 @@ class AnalysisNwbfile(dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv('SPYGLASS_BASE_DIR', None))
-        assert base_dir is not None, 'You must set SPYGLASS_BASE_DIR environment variable.'
+        base_dir = pathlib.Path(os.getenv('NWB_DATAJOINT_BASE_DIR', None))
+        assert base_dir is not None, 'You must set NWB_DATAJOINT_BASE_DIR environment variable.'
 
         analysis_nwb_file_abspath = str(
             base_dir / 'analysis' / analysis_nwb_file_name)
@@ -393,8 +393,8 @@ class AnalysisNwbfile(dj.Manual):
                 # (channels, spikes, samples)
                 waveforms = np.moveaxis(waveforms, source=2, destination=0)
                 nwbf.add_unit(spike_times=waveform_extractor.sorting.get_unit_spike_train(unit_id=id),
-                              id=id, electrodes=waveform_extractor.recording.get_channel_ids(),
-                              waveforms=waveforms)
+                                id=id, electrodes=waveform_extractor.recording.get_channel_ids(),
+                                waveforms=waveforms)
                 
             # The following is a rough sketch of AnalysisNwbfile().add_waveforms
             # analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
@@ -424,19 +424,54 @@ class AnalysisNwbfile(dj.Manual):
     
             # If metrics were specified, add one column per metric
             if metrics is not None:
-                for metric in list(metrics):
-                    metric_data = metrics[metric].to_list()
-                    print(f'Adding metric {metric} : {metric_data}')
-                    nwbf.add_unit_column(name=metric,
-                                         description=f'{metric} metric',
-                                         data=metric_data)
+                for metric_name, metric_dict in metrics.items():
+                    print(f'Adding metric {metric_name} : {metric_dict}')
+                    metric_data = metric_dict.values().to_list()
+                    nwbf.add_unit_column(name=metric_name,
+                                        description=metric_name,
+                                        data=metric_data)
             if labels is not None:
                 nwbf.add_unit_column(
                     name='label', description='label given during curation', data=labels)
 
             io.write(nwbf)
             return nwbf.units.object_id
+        
+    def add_units_metrics(self, analysis_file_name, metrics):
+        """Add units to analysis NWB file along with the waveforms
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        waveform_extractor : si.WaveformExtractor object
+        metrics : dict, optional
+            Cluster metrics.
+        labels : dict, optional
+            Curation labels for clusters
+
+        Returns
+        -------
+        units_object_id : str
+            The NWB object id of the Units object
+        """
+        metric_names = list(metrics.keys())
+        unit_ids = list(metrics[metric_names[0]].keys())
+        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode='a', load_namespaces=True) as io:
+            nwbf = io.read()
+            for id in unit_ids:
+                nwbf.add_unit(id=id)   
             
+            for metric_name, metric_dict in metrics.items():
+                print(f'Adding metric {metric_name} : {metric_dict}')
+                metric_data = list(metric_dict.values())
+                nwbf.add_unit_column(name=metric_name,
+                                     description=metric_name,
+                                     data=metric_data)
+
+            io.write(nwbf)
+            return nwbf.units.object_id
+        
     @classmethod
     def get_electrode_indices(cls, analysis_file_name, electrode_ids):
         """Given an analysis NWB file name, returns the indices of the specified electrode_ids.

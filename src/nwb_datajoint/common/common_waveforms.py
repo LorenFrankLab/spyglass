@@ -1,12 +1,13 @@
 import os
 from pathlib import Path
+import shutil
 
 import datajoint as dj
 import sortingview as sv
 import spikeinterface as si
 
 from .common_nwbfile import AnalysisNwbfile
-from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sorting
+from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sortings
 
 schema = dj.schema('common_waveforms')
 
@@ -26,7 +27,7 @@ class WaveformParameters(dj.Manual):
 @schema
 class WaveformSelection(dj.Manual):
     definition = """
-    -> Sorting
+    -> Sortings
     -> WaveformParameters
     ---
     """
@@ -44,13 +45,15 @@ class Waveforms(dj.Computed):
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
         
-        sorting_path = (Sorting & key).fetch1('sorting_path')
+        sorting_path = (Sortings & key).fetch1('sorting_path')
         sorting = si.load_extractor(sorting_path)
         
         print('Extracting waveforms...')
         waveform_params = (WaveformParameters & key).fetch1('waveform_params')
         waveform_extractor_name = self._get_waveform_extractor_name(key)
-        key['waveform_extractor_path'] = str(Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) / Path(waveform_extractor_name))
+        key['waveform_extractor_path'] = str(Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) / Path(waveform_extractor_name))
+        if os.path.exists(key['waveform_extractor_path']):
+            shutil.rmtree(key['waveform_extractor_path'])
         waveforms = si.extract_waveforms(recording=recording, 
                                          sorting=sorting, 
                                          folder=key['waveform_extractor_path'],
@@ -58,7 +61,7 @@ class Waveforms(dj.Computed):
         
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
         object_id = AnalysisNwbfile().add_units_waveforms(key['analysis_file_name'],
-                                                          waveforms)
+                                                          waveform_extractor=waveforms)
         key['object_id'] = object_id       
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
              
@@ -87,8 +90,6 @@ class Waveforms(dj.Computed):
         return NotImplementedError
     
     def _get_waveform_extractor_name(self, key):
-        key = (SpikeSorting & key).fetch1()
-        sorting_name = SpikeSorting()._get_sorting_name(key)
-        we_name = sorting_name + '_waveform'
+        we_name = key['recording_id'] + '_' + key['sorting_id'] + '_waveform'
         return we_name
     

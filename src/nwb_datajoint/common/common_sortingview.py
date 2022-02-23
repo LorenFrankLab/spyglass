@@ -2,8 +2,9 @@ import datajoint as dj
 import numpy as np
 import sortingview as sv
 import spikeinterface as si
+from pathlib import Path
 
-from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sorting
+from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sortings
 
 schema = dj.schema('common_sortingview')
 
@@ -31,7 +32,7 @@ class SortingviewWorkspace(dj.Computed):
         recording = si.load_extractor(recording_path)
         old_recording = si.create_extractor_from_new_recording(recording)
         h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
-                                                                                recording_path,
+                                                                                str(Path(recording_path) / 'recording.h5'),
                                                                                 dtype='int16')
 
         workspace_name = SpikeSortingRecording()._get_recording_name(key)
@@ -56,21 +57,26 @@ class SortingviewWorkspace(dj.Computed):
         sortingview_sorting_id : str
             unique id given to each sorting by sortingview
         """
-        sorting_path = (Sorting & {'sorting_id': sorting_id}).fetch1('sorting_path')
+        sorting_path = (Sortings & {'sorting_id': sorting_id}).fetch1('sorting_path')
         sorting = si.load_extractor(sorting_path)
         # convert to old sorting extractor
         sorting = si.create_extractor_from_new_sorting(sorting)
-        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, sorting_path)
+        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(sorting, str(Path(sorting_path) / 'sorting.h5'))
         workspace_uri = (self & key).fetch1('workspace_uri') 
         workspace = sv.load_workspace(workspace_uri)
-        sorting_key = (SpikeSorting & {'sorting_id':sorting_id}).fetch1()
-        sorting_name = SpikeSorting()._get_sorting_name(sorting_key)
         sortingview_sorting_id = workspace.add_sorting(recording_id=workspace.recording_ids[0], 
                                                        sorting=h5_sorting,
-                                                       label=sorting_name)
+                                                       label=sorting_id)
         key['sorting_id'] = sorting_id
         key['sortingview_sorting_id'] = sortingview_sorting_id
-        self.Sortings.insert1(key)
+        
+        self.Sortings.insert1({'nwb_file_name': key['nwb_file_name'],
+                               'sort_group_id': key['sort_group_id'],
+                               'sort_interval_name': key['sort_interval_name'],
+                               'preproc_params_name': key['preproc_params_name'],
+                               'recording_id': key['recording_id'],
+                               'sorting_id': key['sorting_id'],
+                               'sortingview_sorting_id': key['sortingview_sorting_id']}, skip_duplicates=True)
         
         return sortingview_sorting_id
     
@@ -147,16 +153,3 @@ class SortingviewWorkspace(dj.Computed):
                                          label=workspace.label,
                                          include_curation=True)
         return url
-    
-    # TODO: check
-    def precalculate(self, key):
-        """For each workspace specified by the key, this will run the snipped precalculation code
-        """
-        workspace_uri_list = (self & key).fetch('workspace_uri')
-        #TODO: consider running in parallel
-        for workspace_uri in workspace_uri_list:
-            try:
-                workspace = sv.load_workspace(workspace_uri)
-                workspace.precalculate()
-            except:
-                Warning(f'Error precomputing for workspace {workspace_uri}')
