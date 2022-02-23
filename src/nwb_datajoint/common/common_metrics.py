@@ -107,7 +107,7 @@ class QualityMetrics(dj.Computed):
             new_qm[str(key)] = m
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(new_qm, f, ensure_ascii=False, indent=4)
-
+        
 def _get_metric_default_params(metric):
     if metric == 'nn_isolation':
         return {'max_spikes_for_nn': 1000,
@@ -131,52 +131,23 @@ def _get_metric_default_params(metric):
     else:
         raise NameError('That metric is not supported yet.')
 
-def _compute_isi_violations(waveform_extractor, isi_threshold_ms=1.5):
-    """Modification of spikeinterface.qualitymetrics.misc_metrics.compute_isi_violations
-
-    Parameters
-    ----------
-    waveform_extractor : WaveformExtractor
-        The waveform extractor object
-    isi_threshold_ms : float, optional, default: 1.5
-        Threshold for classifying adjacent spikes as an ISI violation, in ms.
-        This is the biophysical refractory period (default=1.5).
-
-    Returns
-    -------
-    isi_violation_fraction : float
-        Number of violations / (number of spikes-1)
-    """
-
-    recording = waveform_extractor.recording
-    sorting = waveform_extractor.sorting
-    unit_ids = sorting.unit_ids
-    num_segs = sorting.get_num_segments()
-    fs = recording.get_sampling_frequency()
-
-    isi_threshold_s = isi_threshold_ms / 1000
-
-    isi_threshold_samples = int(isi_threshold_s * fs)
-
-    isi_violations_fraction = {}
-
-    # all units converted to seconds
-    for unit_id in unit_ids:
-        num_violations = 0
-        num_spikes = 0
-        for segment_index in range(num_segs):
-            spike_train = sorting.get_unit_spike_train(unit_id=unit_id, segment_index=segment_index)
-            isis = np.diff(spike_train)
-            num_spikes += len(spike_train)
-            num_violations += np.sum(isis < isi_threshold_samples)
-
-        isi_violations_fraction[unit_id] = num_violations / (num_spikes-1)
-
-    return isi_violations_fraction
+def _compute_isi_violation_fractions(self, waveform_extractor, **metric_params):
+    isi_threshold_ms = metric_params[isi_threshold_ms]
+    min_isi_ms = metric_params[min_isi_ms]
+    
+    # Extract the total number of spikes that violated the isi_threshold for each unit
+    isi_violation_counts = st.qualitymetrics.compute_isi_violations(waveform_extractor, isi_threshold_ms=isi_threshold_ms, min_isi_ms=min_isi_ms).isi_violations_count
+    
+    # Extract the total number of spikes from each unit
+    num_spikes = st.qualitymetrics.compute_num_spikes(waveform_extractor)
+    isi_viol_frac_metric = {}
+    for unit_id in waveform_extractor.sorting.get_unit_ids():
+        isi_viol_frac_metric[str(unit_id)] = isi_violation_counts[unit_id] / num_spikes[unit_id]
+    return isi_viol_frac_metric
 
 _metric_name_to_func = {
     "snr": st.qualitymetrics.compute_snrs,
-    "isi_violation": _compute_isi_violations,
+    "isi_violation": _compute_isi_violation_fractions,
     'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
     'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap
 }
