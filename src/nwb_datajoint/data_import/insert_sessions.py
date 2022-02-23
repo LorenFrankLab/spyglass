@@ -93,4 +93,7 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
             nwbf_export.set_modified()
             export_io.write(nwbf_export)
 
+    # change the permissions to only allow owner to write
+    os.fchmod(out_nwb_file_abs_path, 644)
+
     return out_nwb_file_abs_path
