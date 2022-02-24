@@ -154,7 +154,7 @@ class AnalysisNwbfile(dj.Manual):
                 export_io.export(io, nwbf)
 
         # change the permissions to only allow owner to write
-        permissions = stat.S_IRUSR | stat.IWUSER | stat.S_IRGRP | stat.IROTH
+        permissions = stat.S_IRUSR | stat.IWUSR | stat.S_IRGRP | stat.IROTH
         os.chmod(analysis_file_abs_path, permissions)
 
         return analysis_file_name
