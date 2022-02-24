@@ -1476,7 +1476,7 @@ class CuratedSpikeSorting(dj.Computed):
         -> CuratedSpikeSorting
         unit_id: int                    # ID for each unit
         ---
-        label='':              varchar(80)      # optional label for each unit
+        label="":              varchar(80)      # optional label for each unit
         noise_overlap=-1:      float   # noise overlap metric for each unit
         nn_isolation=-1:       float   # isolation score metric for each unit
         isi_violation=-1:      float   # ISI violation score for each unit
@@ -1653,7 +1653,7 @@ class UnitInclusionParameters(dj.Manual):
     min_nn_isolation=-1:        float   # isolation score threshold (include above)
     max_isi_violation=100:      float   # ISI violation threshold
     min_firing_rate=0:          float   # minimum firing rate threshold
-    max_firing_rate=100000:     float   # maximum fring rate thershold
+    max_firing_rate=100000:     float   # maximum firing rate thershold
     min_num_spikes=0:           int     # minimum total number of spikes
     exclude_label_list=NULL:    blob    # list of labels to EXCLUDE
     """
