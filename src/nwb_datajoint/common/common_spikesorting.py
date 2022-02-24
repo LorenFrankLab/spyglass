@@ -1647,7 +1647,7 @@ class CuratedSpikeSorting(dj.Computed):
 @schema
 class UnitInclusionParameters(dj.Manual):
     definition = """
-    unit_inclusion_param_name: varchar(200) # the name of the list of thresholds for unit inclusion
+    unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
     ---
     max_noise_overlap=1:        float   # noise overlap threshold (include below)
     min_nn_isolation=-1:        float   # isolation score threshold (include above)
