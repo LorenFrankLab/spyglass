@@ -1,4 +1,5 @@
 import os
+import stat
 import pathlib
 import random
 import string
@@ -153,7 +154,8 @@ class AnalysisNwbfile(dj.Manual):
                 export_io.export(io, nwbf)
 
         # change the permissions to only allow owner to write
-        os.fchmod(analysis_file_abs_path, 644)
+        permissions = stat.S_IRWXU or stat.S_IRGRP or stat.IROTH
+        os.chmod(analysis_file_abs_path, permissions)
 
         return analysis_file_name
 

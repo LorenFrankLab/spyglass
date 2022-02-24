@@ -1,4 +1,5 @@
 import os
+import stat
 import warnings
 
 import pynwb
@@ -93,7 +94,8 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
             nwbf_export.set_modified()
             export_io.write(nwbf_export)
 
-    # change the permissions to only allow owner to write
-    os.fchmod(out_nwb_file_abs_path, 644)
+     # change the permissions to only allow owner to write
+    permissions = stat.S_IRWXU or stat.S_IRGRP or stat.IROTH
+    os.chmod(out_nwb_file_abs_path, permissions)
 
     return out_nwb_file_abs_path
