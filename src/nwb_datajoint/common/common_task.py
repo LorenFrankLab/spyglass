@@ -82,7 +82,7 @@ class TaskEpoch(dj.Imported):
     # Tasks, session and time intervals
     definition = """
      -> Session
-     epoch: int  # the session epoch for this task and apparatus (1-based)
+     epoch: int  # the session epoch for this task and apparatus(1 based)
      ---
      -> Task
      -> [nullable] CameraDevice
