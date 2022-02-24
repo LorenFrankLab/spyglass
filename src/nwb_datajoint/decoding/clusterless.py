@@ -310,7 +310,7 @@ def make_default_decoding_parameters_cpu():
         discrete_transition_type=_to_dict(DiagonalDiscrete(0.98)),
         initial_conditions_type=_to_dict(UniformInitialConditions()),
         infer_track_interior=True,
-        clusterless_algorithm='multiunit_likelihood',
+        clusterless_algorithm='multiunit_likelihood_integer',
         clusterless_algorithm_params=_convert_algorithm_params(
             _DEFAULT_CLUSTERLESS_MODEL_KWARGS)
     )
@@ -334,7 +334,7 @@ def make_default_decoding_parameters_gpu():
         discrete_transition_type=_to_dict(DiagonalDiscrete(0.98)),
         initial_conditions_type=_to_dict(UniformInitialConditions()),
         infer_track_interior=True,
-        clusterless_algorithm='multiunit_likelihood_integer_cupy',
+        clusterless_algorithm='multiunit_likelihood_integer_gpu',
         clusterless_algorithm_params={
             'mark_std': 24.0,
             'position_std': 6.0
