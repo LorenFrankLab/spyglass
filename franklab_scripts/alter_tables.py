@@ -32,6 +32,9 @@ def update_cls(cls):
             # so part tables cannot be updated yet
             # NOTE: until https://github.com/datajoint/datajoint-python/issues/943 is resolved,
             # some enum definitions will prompt alter() even when there has not been a change
+            # NOTE: datajoint does not allow primary keys to be altered yet
+            # this includes changing the length of a varchar primary key
+            # (other tables use this primary key, so constraints would probably have to be removed and readded)
             cls.alter()
         except Exception as e:
             print('ERROR:', e)

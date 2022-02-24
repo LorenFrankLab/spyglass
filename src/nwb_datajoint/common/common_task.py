@@ -14,7 +14,7 @@ schema = dj.schema('common_task')
 @schema
 class Task(dj.Manual):
     definition = """
-     task_name: varchar(200)
+     task_name: varchar(80)
      ---
      task_description = NULL: varchar(2000)    # description of this task
      task_type = NULL: varchar(2000)           # type of task

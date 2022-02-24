@@ -6,7 +6,7 @@ schema = dj.schema('common_subject')
 @schema
 class Subject(dj.Manual):
     definition = """
-    subject_id: varchar(200)
+    subject_id: varchar(80)
     ---
     age = NULL: varchar(200)
     description = NULL: varchar(2000)

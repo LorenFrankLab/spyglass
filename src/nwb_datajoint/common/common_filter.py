@@ -16,8 +16,8 @@ schema = dj.schema('common_filter')
 @schema
 class FirFilter(dj.Manual):
     definition = """
-    filter_name: varchar(200)        # descriptive name of this filter
-    filter_sampling_rate: int        # sampling rate for this filter
+    filter_name: varchar(80)           # descriptive name of this filter
+    filter_sampling_rate: int          # sampling rate for this filter
     ---
     filter_type: enum("lowpass", "highpass", "bandpass")
     filter_low_stop = 0: float         # lowest frequency for stop band for low frequency side of filter

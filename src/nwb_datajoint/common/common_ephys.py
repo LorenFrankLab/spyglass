@@ -25,7 +25,7 @@ class ElectrodeGroup(dj.Imported):
     definition = """
     # Grouping of electrodes corresponding to a physical probe.
     -> Session
-    electrode_group_name: varchar(200)  # electrode group name from NWBFile
+    electrode_group_name: varchar(80)  # electrode group name from NWBFile
     ---
     -> BrainRegion
     -> [nullable] Probe

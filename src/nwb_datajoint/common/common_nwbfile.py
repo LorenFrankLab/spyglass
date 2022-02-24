@@ -26,7 +26,7 @@ NWB_KEEP_FIELDS = ('devices', 'electrode_groups', 'electrodes', 'experiment_desc
 class Nwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files.
-    nwb_file_name: varchar(2000)   # name of the NWB file
+    nwb_file_name: varchar(255)   # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
     INDEX (nwb_file_abs_path)
@@ -110,7 +110,7 @@ class Nwbfile(dj.Manual):
 class AnalysisNwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting.
-    analysis_file_name: varchar(2000)              # name of the file
+    analysis_file_name: varchar(255)               # name of the file
     ---
     -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
     analysis_file_abs_path: filepath@analysis      # the full path to the file

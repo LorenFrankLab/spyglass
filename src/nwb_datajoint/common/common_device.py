@@ -7,7 +7,7 @@ schema = dj.schema('common_device')
 @schema
 class DataAcquisitionDevice(dj.Manual):
     definition = """
-    device_name: varchar(200)
+    device_name: varchar(80)
     ---
     system = "Other": enum("SpikeGadgets","TDT_Rig1","TDT_Rig2","PCS","RCS","RNS","NeuroOmega","Other")
     amplifier = "Other": enum("Intan","PZ5_Amp1","PZ5_Amp2","Other")
@@ -49,7 +49,7 @@ class DataAcquisitionDevice(dj.Manual):
 @schema
 class CameraDevice(dj.Manual):
     definition = """
-    camera_name: varchar(200)
+    camera_name: varchar(80)
     ---
     meters_per_pixel = 0: float  # height / width of pixel in meters
     manufacturer = "": varchar(2000)
@@ -96,7 +96,7 @@ class CameraDevice(dj.Manual):
 @schema
 class Probe(dj.Manual):
     definition = """
-    probe_type: varchar(200)
+    probe_type: varchar(80)
     ---
     probe_description: varchar(2000)               # description of this probe
     num_shanks: int                                # number of shanks on this device

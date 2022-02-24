@@ -7,7 +7,7 @@ schema = dj.schema('common_lab')
 @schema
 class LabMember(dj.Manual):
     definition = """
-    lab_member_name: varchar(200)
+    lab_member_name: varchar(80)
     ---
     first_name: varchar(200)
     last_name: varchar(200)
@@ -64,7 +64,7 @@ class LabMember(dj.Manual):
 @schema
 class LabTeam(dj.Manual):
     definition = """
-    team_name: varchar(200)
+    team_name: varchar(80)
     ---
     team_description = "": varchar(2000)
     """
@@ -110,7 +110,7 @@ class LabTeam(dj.Manual):
 @schema
 class Institution(dj.Manual):
     definition = """
-    institution_name: varchar(200)
+    institution_name: varchar(80)
     ---
     """
 
@@ -132,7 +132,7 @@ class Institution(dj.Manual):
 @schema
 class Lab(dj.Manual):
     definition = """
-    lab_name: varchar(200)
+    lab_name: varchar(80)
     ---
     """
 
