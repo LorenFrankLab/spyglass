@@ -33,6 +33,7 @@ from .common_curation import (AutomaticCurationParameters,AutomaticCurationSelec
                               CuratedSpikeSortingSelection,CuratedSpikeSorting)
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
+from .common_backup import SpikeSortingBackUp, CuratedSpikeSortingBackUp
 from .nwb_helper_fn import (close_nwb_files, estimate_sampling_rate,
                             get_data_interface, get_electrode_indices,
                             get_nwb_file, get_raw_eseries, get_valid_intervals)
