@@ -19,16 +19,12 @@ dependencies:
   - nb_conda
   - pip:
     - labbox-ephys>=0.7
-    - labbox-ephys-widgets-jp>=0.1
     - kachery
     - kachery-client
+    - kachery-daemon
     - mountainsort4
-    - ml_ms4alg
-    - git+https://github.com/SpikeInterface/spikeinterface.git
     - spikeextractors
-    - spikesorters
-    - spiketoolkit
-    - spikemetrics
+    - git+https://github.com/SpikeInterface/spikeinterface.git
     - pynwb>=2.0.0,<3
     - hdmf>=3.1.1,<4
     - datajoint>=0.13.*

@@ -144,8 +144,9 @@ def estimate_sampling_rate(timestamps, multiplier):
 
 
 def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len):
-    """Given a list of timestamps from sampled data, and the sampling rate of the data, find all gaps >
-    gap_proportion * sampling rate and return a set of valid times excluding these gaps.
+    """Finds the set of all valid intervals in a list of timestamps.
+    Valid interval: (start time, stop time) during which there are
+    no gaps (i.e. missing samples). 
 
     Parameters
     ----------
@@ -153,8 +154,11 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
         1D numpy array of timestamp values.
     sampling_rate : float
         Sampling rate of the data.
-    gap_proportion : float
-        Multiple of inferred sampling rate for gap detection.
+    gap_proportion : float, greater than 1; unit: samples
+        Threshold for detecting a gap;
+        i.e. if the difference (in samples) between 
+        consecutive timestamps exceeds gap_proportion, 
+        it is considered a gap
     min_valid_len : float
         Length of smallest valid interval.
 
@@ -165,9 +169,10 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
     """
 
     eps = 0.0000001
+    
     # get rid of NaN elements
     timestamps = timestamps[~np.isnan(timestamps)]
-
+    # find gaps
     gap = np.diff(timestamps) > 1.0 / sampling_rate * gap_proportion
 
     # all true entries of gap represent gaps. Get the times bounding these intervals.

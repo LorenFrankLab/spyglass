@@ -15,7 +15,7 @@ class LabMember(dj.Manual):
     class LabMemberInfo(dj.Part):
         definition = """
         # Information about lab member in the context of Frank lab network
-        -> master
+        -> LabMember
         ---
         google_user_name: varchar(80)              # used for permission to curate
         datajoint_user_name = '': varchar(80)      # used for permission to delete entries
@@ -61,7 +61,7 @@ class LabTeam(dj.Manual):
 
     class LabTeamMember(dj.Part):
         definition = """
-        -> master
+        -> LabTeam
         -> LabMember
         """
 
