@@ -278,6 +278,7 @@ class SpikeSortingPreprocessingParameters(dj.Manual):
         key['preproc_params'] = {'frequency_min': freq_min,
                                  'frequency_max': freq_max,
                                  'margin_ms': margin_ms,
+                                 'whiten': True,
                                  'seed': seed}
         self.insert1(key, skip_duplicates=True)
         
@@ -529,7 +530,8 @@ class SpikeSorting(dj.Computed):
         # recording = si.append_recordings(rec_list)
                 
         preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
-        recording = st.preprocessing.whiten(recording=recording, seed=preproc_params['seed'])
+        if preproc_params['whiten']:
+            recording = st.preprocessing.whiten(recording=recording, seed=preproc_params['seed'])
         
         print(f'Running spike sorting on {key}...')
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1('sorter','sorter_params')
