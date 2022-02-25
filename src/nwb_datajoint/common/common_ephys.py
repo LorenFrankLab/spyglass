@@ -346,7 +346,7 @@ class LFPBandSelection(dj.Manual):
     class LFPBandElectrode(dj.Part):
         definition = """
         -> LFPBandSelection
-        -> LFPSelection.LFPElectrode  # the LFP electrode to be filtered LFP
+        -> LFPSelection.LFPElectrode  # the LFP electrode to be filtered
         reference_elect_id = -1: int  # the reference electrode to use; -1 for no reference
         ---
         """

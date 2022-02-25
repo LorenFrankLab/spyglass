@@ -60,6 +60,7 @@ class Task(dj.Manual):
     def check_task_table(cls, task_table):
         """Check whether the pynwb DynamicTable containing task metadata conforms to the expected format.
 
+
         The table should be an instance of pynwb.core.DynamicTable and contain the columns 'task_name' and
         'task_description'.
 
