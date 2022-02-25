@@ -27,10 +27,13 @@ NWB_KEEP_FIELDS = ('devices', 'electrode_groups', 'electrodes', 'experiment_desc
 class Nwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files.
-    nwb_file_name: varchar(255) # name of the NWB file
+    nwb_file_name: varchar(255)   # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
+    INDEX (nwb_file_abs_path)
     """
+    # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
+    # so that alter() can work
 
     @classmethod
     def insert_from_relative_file_name(cls, nwb_file_name):
@@ -108,14 +111,17 @@ class Nwbfile(dj.Manual):
 class AnalysisNwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting.
-    analysis_file_name : varchar(255)             # name of the file
+    analysis_file_name: varchar(255)               # name of the file
     ---
-    -> Nwbfile                                    # name of the parent NWB file. Used for naming and metadata copy
-    analysis_file_abs_path: filepath@analysis     # the full path to the file
-    analysis_file_description = '': varchar(255)  # an optional description of this analysis
-    analysis_parameters = NULL: blob              # additional relevant parmeters. Currently used only for analyses
-                                                  # that span multiple NWB files
+    -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
+    analysis_file_abs_path: filepath@analysis      # the full path to the file
+    analysis_file_description = "": varchar(2000)  # an optional description of this analysis
+    analysis_parameters = NULL: blob               # additional relevant parmeters. Currently used only for analyses
+                                                   # that span multiple NWB files
+    INDEX (analysis_file_abs_path)
     """
+    # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
+    # so that alter() can work
 
     def create(self, nwb_file_name):
         """Open the NWB file, create a copy, write the copy to disk and return the name of the new file.

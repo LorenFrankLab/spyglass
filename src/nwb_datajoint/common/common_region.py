@@ -8,9 +8,9 @@ class BrainRegion(dj.Lookup):
     definition = """
     region_id: smallint auto_increment
     ---
-    region_name='': varchar(80)        # the name of the brain region
-    subregion_name='': varchar(80)     # subregion name
-    subsubregion_name='': varchar(80)  # subregion within subregion
+    region_name: varchar(200)             # the name of the brain region
+    subregion_name=NULL: varchar(200)     # subregion name
+    subsubregion_name=NULL: varchar(200)  # subregion within subregion
     """
 
     # TODO consider making (region_name, subregion_name, subsubregion_name) a primary key

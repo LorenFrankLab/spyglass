@@ -3,22 +3,26 @@ import datajoint as dj
 
 schema = dj.schema('common_lab')
 
+
 @schema
 class LabMember(dj.Manual):
     definition = """
     lab_member_name: varchar(80)
     ---
-    first_name: varchar(80)
-    last_name: varchar(80)
+    first_name: varchar(200)
+    last_name: varchar(200)
     """
+
+    # NOTE that names must be unique here. If there are two neuroscientists named Jack Black that have data in this
+    # database, this will create an incorrect linkage. NWB does not yet provide unique IDs for names.
 
     class LabMemberInfo(dj.Part):
         definition = """
         # Information about lab member in the context of Frank lab network
         -> LabMember
         ---
-        google_user_name: varchar(80)              # used for permission to curate
-        datajoint_user_name = '': varchar(80)      # used for permission to delete entries
+        google_user_name: varchar(200)              # used for permission to curate
+        datajoint_user_name = "": varchar(200)      # used for permission to delete entries
         """
 
     @classmethod
@@ -30,6 +34,9 @@ class LabMember(dj.Manual):
         nwbf: pynwb.NWBFile
             The NWB file with experimenter information.
         """
+        if nwbf.experimenter is None:
+            print('No experimenter metadata found.\n')
+            return
         for experimenter in nwbf.experimenter:
             cls.insert_from_name(experimenter)
             # each person is by default the member of their own LabTeam (same as their name)
@@ -38,8 +45,10 @@ class LabMember(dj.Manual):
     @classmethod
     def insert_from_name(cls, full_name):
         """Insert a lab member by name.
+
         The first name is the part of the name that precedes the last space, and the last name is the part of the
         name that follows the last space.
+
         Parameters
         ----------
         full_name : str
@@ -51,12 +60,13 @@ class LabMember(dj.Manual):
         labmember_dict['last_name'] = str.split(full_name)[-1]
         cls.insert1(labmember_dict, skip_duplicates=True)
 
+
 @schema
 class LabTeam(dj.Manual):
     definition = """
     team_name: varchar(80)
     ---
-    team_description='': varchar(200)
+    team_description = "": varchar(2000)
     """
 
     class LabTeamMember(dj.Part):
@@ -113,6 +123,9 @@ class Institution(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with institution information.
         """
+        if nwbf.institution is None:
+            print('No institution metadata found.\n')
+            return
         cls.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
 
 
@@ -132,4 +145,7 @@ class Lab(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with lab name information.
         """
+        if nwbf.lab is None:
+            print('No lab metadata found.\n')
+            return
         cls.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)

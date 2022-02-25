@@ -14,9 +14,9 @@ class IntervalList(dj.Manual):
     definition = """
     # Time intervals used for analysis
     -> Session
-    interval_list_name: varchar(200) # descriptive name of this interval list
+    interval_list_name: varchar(200)  # descriptive name of this interval list
     ---
-    valid_times: longblob # numpy array with start and end times for each interval
+    valid_times: longblob  # numpy array with start and end times for each interval
     """
 
     @classmethod
@@ -36,13 +36,19 @@ class IntervalList(dj.Manual):
         nwb_file_name : str
             The file name of the NWB file, used as a primary key to the Session table.
         """
+        if nwbf.epochs is None:
+            print('No epochs found in NWB file.')
+            return
         epochs = nwbf.epochs.to_dataframe()
-        epoch_dict = dict()
-        epoch_dict['nwb_file_name'] = nwb_file_name
-        for e in epochs.iterrows():
-            epoch_dict['interval_list_name'] = e[1].tags[0]
+        for epoch_index, epoch_data in epochs.iterrows():
+            epoch_dict = dict()
+            epoch_dict['nwb_file_name'] = nwb_file_name
+            if epoch_data.tags[0]:
+                epoch_dict['interval_list_name'] = epoch_data.tags[0]
+            else:
+                epoch_dict['interval_list_name'] = 'interval_' + str(epoch_index)
             epoch_dict['valid_times'] = np.asarray(
-                [[e[1].start_time, e[1].stop_time]])
+                [[epoch_data.start_time, epoch_data.stop_time]])
             cls.insert1(epoch_dict, skip_duplicates=True)
 
 @schema
