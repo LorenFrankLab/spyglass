@@ -13,7 +13,6 @@ import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
-from .common_artifact import ArtifactRemovedIntervalList
 from .common_device import Probe
 from .common_ephys import Electrode, ElectrodeGroup
 from .common_interval import (IntervalList, SortInterval,
@@ -473,6 +472,9 @@ class SpikeSorterParameters(dj.Manual):
             sorter_params = ss.get_default_params(sorter)
             self.insert1([sorter, 'default', sorter_params],
                          skip_duplicates=True)
+
+
+from .common_artifact import ArtifactRemovedIntervalList  # noqa
 
 
 @schema
