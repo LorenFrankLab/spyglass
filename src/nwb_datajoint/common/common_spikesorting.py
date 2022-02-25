@@ -661,15 +661,15 @@ class SpikeSorting(dj.Computed):
             units_sort_interval[unit_id] = [sort_interval]
 
         analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
-        u = AnalysisNwbfile().add_units(analysis_file_name,
+        object_ids = AnalysisNwbfile().add_units(analysis_file_name,
                                         units, units_valid_times,
                                         units_sort_interval,
                                         metrics=metrics)
-        if u=='':
+        if object_ids=='':
             print('Sorting contains no units. Created an empty analysis nwb file anyway.')
             units_object_id = ''
         else:
-            units_object_id = u[0]
+            units_object_id = object_ids[0]
         return analysis_file_name,  units_object_id
     
     # TODO: write a function to import sortings done outside of dj
