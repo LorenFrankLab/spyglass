@@ -442,6 +442,7 @@ class SpikeSortingRecording(dj.Computed):
                                                      freq_max=filter_params['frequency_max'])
        
         return recording
+
 @schema
 class SpikeSorterParameters(dj.Manual):
     definition = """
@@ -467,7 +468,7 @@ class SpikeSortingSelection(dj.Manual):
     -> SpikeSorterParameters
     -> ArtifactRemovedIntervalList
     ---
-    import_path = '': varchar(200) # optional path to previous curated sorting output
+    import_path = "": varchar(200)  # optional path to previous curated sorting output
     """
 
 @schema
@@ -566,7 +567,6 @@ class SpikeSorting(dj.Computed):
                           'sorting_id': key['sorting_id'],
                           'sorting_path': key['sorting_path'],
                           'parent_sorting_id': ''}, skip_duplicates=True)
-        
         self.insert1(key)
     
     def delete(self):
@@ -621,7 +621,6 @@ class SpikeSorting(dj.Computed):
     def _save_sorting_nwb(self, key, sorting, timestamps, sort_interval_list_name,
                           sort_interval, metrics=None, unit_ids=None):
         """Store a sorting in a new AnalysisNwbfile
-
         Parameters
         ----------
         key : dict
