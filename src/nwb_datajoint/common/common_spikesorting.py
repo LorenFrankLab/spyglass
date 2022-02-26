@@ -474,6 +474,7 @@ class SpikeSorterParameters(dj.Manual):
                          skip_duplicates=True)
 
 
+# Avoid circular import
 from .common_artifact import ArtifactRemovedIntervalList  # noqa
 
 
