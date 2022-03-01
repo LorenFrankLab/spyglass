@@ -42,4 +42,6 @@ from .populate_all_common import populate_all_common
 import spikeinterface as si
 import os
 
-si.set_global_tmp_folder(os.environ['KACHERY_TEMP_DIR'])
+from ._kachery_temp_dir import kachery_temp_dir
+
+si.set_global_tmp_folder(kachery_temp_dir)

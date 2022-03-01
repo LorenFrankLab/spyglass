@@ -26,6 +26,7 @@ from .common_session import Session
 from .dj_helper_fn import dj_replace, fetch_nwb
 from .nwb_helper_fn import get_valid_intervals
 
+from ._kachery_temp_dir import kachery_temp_dir
 
 class Timer:
     """
@@ -537,7 +538,7 @@ class SpikeSorting(dj.Computed):
         print(f'Running spike sorting on {key}...')
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1('sorter','sorter_params')
         sorting = ss.run_sorter(sorter, recording,
-                                output_folder=os.getenv('KACHERY_TEMP_DIR'),
+                                output_folder=kachery_temp_dir,
                                 delete_output_folder=True,
                                 **sorter_params)
         key['time_of_sort'] = int(time.time())
