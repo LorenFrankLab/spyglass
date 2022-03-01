@@ -1,6 +1,5 @@
 import datajoint as dj
 import sortingview as sv
-import labbox_ephys as le
 import numpy as np
 import pandas as pd
 import pynwb
