@@ -291,9 +291,9 @@ class SpikeSortingRecordingSelection(dj.Manual):
     -> SortGroup
     -> SortInterval
     -> SpikeSortingPreprocessingParameters
+    -> LabTeam
     ---
     -> IntervalList
-    -> LabTeam
     """
 
 
