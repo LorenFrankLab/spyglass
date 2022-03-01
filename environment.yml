@@ -18,8 +18,6 @@ dependencies:
   - tqdm
   - nb_conda
   - pip:
-    - labbox-ephys>=0.7
-    - kachery
     - kachery-client
     - kachery-daemon
     - mountainsort4
@@ -31,5 +29,5 @@ dependencies:
     - ghostipy
     - pymysql>=1.0.*
     - h5py==2.10.*
-    - sortingview>=0.6.16
+    - sortingview>=0.7.3
     - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
