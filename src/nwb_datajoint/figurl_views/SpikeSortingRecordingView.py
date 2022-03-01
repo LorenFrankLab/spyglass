@@ -22,7 +22,7 @@ class SpikeSortingRecordingView(dj.Computed):
     """
     def make(self, key):
         # Get the SpikeSortingRecording row
-        a = (SpikeSortingRecording & {'nwb_file_name': 'RN2_20191110_.nwb'}).fetch1()
+        a = (SpikeSortingRecording & key).fetch1()
         sort_group_id = a['sort_group_id']
         sort_interval_name = a['sort_interval_name']
         recording_id = a['recording_id']
