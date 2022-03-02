@@ -70,6 +70,17 @@ spyglass insert-spike-sorting-preprocessing-parameters parameters.yaml
 spyglass list-spike-sorting-preprocessing-parameters
 ```
 
+### Create spike sorting recording
+
+Create a spike sorting recording.
+
+```bash
+# To see the format of the .yaml file, run without the .yaml argument
+spyglass create-spike-sorting-recording recording.yaml
+
+spyglass list-spike-sorting-recordings RN2_20191110_.nwb
+```
+
 ### Insert artifact detection parameters
 
 Define artifact detection parameters.
@@ -79,22 +90,6 @@ Define artifact detection parameters.
 spyglass insert-artifact-detection-parameters parameters.yaml
 
 spyglass list-artifact-detection-parameters
-```
-
-### Insert spike sorting recording
-
-Insert a spike sorting recording.
-
-```bash
-# To see the format of the .yaml file, run without the .yaml argument
-spyglass insert-spike-sorting-recording-selection recordingselection.yaml
-
-spyglass list-spike-sorting-recording-selections RN2_20191110_.nwb
-
-# Now populate the SpikeSortingRecording table
-spyglass create-spike-sorting-recording recordingselection.yaml
-
-spyglass list-spike-sorting-recordings RN2_20191110_.nwb
 ```
 
 ### Insert spike sorter parameters
