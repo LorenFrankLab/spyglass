@@ -16,8 +16,8 @@ def insert_session(nwb_file_name: str):
 @click.command(help="List all sessions")
 def list_sessions():
     import nwb_datajoint.common as ndc
-    a = ndc.Session & {}
-    print(a)
+    results = ndc.Session & {}
+    print(results)
 
 sample_lab_team_key = {
     'team_name': 'your_team_name',
@@ -30,8 +30,9 @@ def insert_lab_team(yaml_file_name: Union[str, None]):
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
-        a = yaml.safe_dump(sample_lab_team_key, sort_keys=False)
-        print(a)
+        print(
+            yaml.safe_dump(sample_lab_team_key, sort_keys=False)
+        )
         return
 
     import nwb_datajoint.common as ndc
@@ -44,8 +45,8 @@ def insert_lab_team(yaml_file_name: Union[str, None]):
 @click.command(help="List all lab teams")
 def list_lab_teams():
     import nwb_datajoint.common as ndc
-    a = ndc.LabTeam & {}
-    print(a)
+    results = ndc.LabTeam & {}
+    print(results)
 
 sample_lab_member_key = {
     'lab_member_name': 'first last',
@@ -60,8 +61,9 @@ def insert_lab_member(yaml_file_name: Union[str, None]):
         print('You must specify a yaml file. Sample content:')
         print('Note that lab_member_name is the primary key')
         print('==========================================')
-        a = yaml.safe_dump(sample_lab_member_key, sort_keys=False)
-        print(a)
+        print(
+            yaml.safe_dump(sample_lab_member_key, sort_keys=False)
+        )
         return
 
     import nwb_datajoint.common as ndc
@@ -74,8 +76,8 @@ def insert_lab_member(yaml_file_name: Union[str, None]):
 @click.command(help="List all lab members")
 def list_lab_members():
     import nwb_datajoint.common as ndc
-    a = ndc.LabMember & {}
-    print(a)
+    results = ndc.LabMember & {}
+    print(results)
 
 sample_lab_team_member_key = {
     'team_name': 'TeamName',
@@ -88,8 +90,9 @@ def insert_lab_team_member(yaml_file_name: Union[str, None]):
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
-        a = yaml.safe_dump(sample_lab_team_member_key, sort_keys=False)
-        print(a)
+        print(
+            yaml.safe_dump(sample_lab_team_member_key, sort_keys=False)
+        )
         return
 
     import nwb_datajoint.common as ndc
@@ -103,36 +106,36 @@ def insert_lab_team_member(yaml_file_name: Union[str, None]):
 @click.argument('team_name')
 def list_lab_team_members(team_name: str):
     import nwb_datajoint.common as ndc
-    a = ndc.LabTeam.LabTeamMember & {'team_name': team_name}
-    print(a)
+    results = ndc.LabTeam.LabTeamMember & {'team_name': team_name}
+    print(results)
 
 @click.command(help="List sort groups for a session. Note that nwb_file_name should include the trailing underscore.")
 @click.argument('nwb_file_name')
 def list_sort_groups(nwb_file_name: str):
     import nwb_datajoint.common as ndc
-    a = ndc.SortGroup & {'nwb_file_name': nwb_file_name}
-    print(a)
+    results = ndc.SortGroup & {'nwb_file_name': nwb_file_name}
+    print(results)
 
 @click.command(help="List sort group electrodes for a session. Note that nwb_file_name should include the trailing underscore.")
 @click.argument('nwb_file_name')
 def list_sort_group_electrodes(nwb_file_name: str):
     import nwb_datajoint.common as ndc
-    a = ndc.SortGroup.SortGroupElectrode & {'nwb_file_name': nwb_file_name}
-    print(a)
+    results = ndc.SortGroup.SortGroupElectrode & {'nwb_file_name': nwb_file_name}
+    print(results)
 
 @click.command(help="List interval lists for a session.")
 @click.argument('nwb_file_name')
 def list_interval_lists(nwb_file_name: str):
     import nwb_datajoint.common as ndc
-    a = ndc.IntervalList & {'nwb_file_name': nwb_file_name}
-    print(a)
+    results = ndc.IntervalList & {'nwb_file_name': nwb_file_name}
+    print(results)
 
 @click.command(help="List sort intervals for a session.")
 @click.argument('nwb_file_name')
 def list_sort_intervals(nwb_file_name: str):
     import nwb_datajoint.common as ndc
-    a = ndc.SortInterval & {'nwb_file_name': nwb_file_name}
-    print(a)
+    results = ndc.SortInterval & {'nwb_file_name': nwb_file_name}
+    print(results)
 
 sample_spike_sorting_preprocessing_parameters = {
     'preproc_params_name': 'default',
@@ -151,8 +154,9 @@ def insert_spike_sorting_preprocessing_parameters(yaml_file_name: Union[str, Non
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
-        a = yaml.safe_dump(sample_spike_sorting_preprocessing_parameters, sort_keys=False)
-        print(a)
+        print(
+            yaml.safe_dump(sample_spike_sorting_preprocessing_parameters, sort_keys=False)
+        )
         return
 
     import nwb_datajoint.common as ndc
@@ -165,8 +169,8 @@ def insert_spike_sorting_preprocessing_parameters(yaml_file_name: Union[str, Non
 @click.command(help="List spike sorting preprocessing parameters.")
 def list_spike_sorting_preprocessing_parameters():
     import nwb_datajoint.common as ndc
-    a = ndc.SpikeSortingPreprocessingParameters & {}
-    print(a)
+    results = ndc.SpikeSortingPreprocessingParameters & {}
+    print(results)
 
 sample_artifact_detection_parameters = {
     'artifact_params_name': 'example',
@@ -184,8 +188,9 @@ def insert_artifact_detection_parameters(yaml_file_name: Union[str, None]):
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
-        a = yaml.safe_dump(sample_artifact_detection_parameters, sort_keys=False)
-        print(a)
+        print(
+            yaml.safe_dump(sample_artifact_detection_parameters, sort_keys=False)
+        )
         return
 
     import nwb_datajoint.common as ndc
@@ -198,8 +203,8 @@ def insert_artifact_detection_parameters(yaml_file_name: Union[str, None]):
 @click.command(help="List artifact detection parameters.")
 def list_artifact_detection_parameters():
     import nwb_datajoint.common as ndc
-    a = ndc.ArtifactDetectionParameters & {}
-    print(a)
+    results = ndc.ArtifactDetectionParameters & {}
+    print(results)
 
 sample_spike_sorting_recording_selection_key = {
     'nwb_file_name': 'FileName_.nwb',
@@ -216,8 +221,9 @@ def create_spike_sorting_recording(yaml_file_name: Union[str, None]):
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
-        a = yaml.safe_dump(sample_spike_sorting_recording_selection_key, sort_keys=False)
-        print(a)
+        print(
+            yaml.safe_dump(sample_spike_sorting_recording_selection_key, sort_keys=False)
+        )
         return
 
     import nwb_datajoint.common as ndc
@@ -232,8 +238,8 @@ def create_spike_sorting_recording(yaml_file_name: Union[str, None]):
 @click.argument('nwb_file_name')
 def list_spike_sorting_recordings(nwb_file_name):
     import nwb_datajoint.common as ndc
-    a = ndc.SpikeSortingRecording & {'nwb_file_name': nwb_file_name}
-    print(a)
+    results = ndc.SpikeSortingRecording & {'nwb_file_name': nwb_file_name}
+    print(results)
 
 @click.command(help="Create a spike sorting recording view")
 @click.argument('yaml_file_name', required=False)
@@ -241,8 +247,9 @@ def create_spike_sorting_recording_view(yaml_file_name: Union[str, None]):
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
-        a = yaml.safe_dump(sample_spike_sorting_recording_selection_key, sort_keys=False)
-        print(a)
+        print(
+            yaml.safe_dump(sample_spike_sorting_recording_selection_key, sort_keys=False)
+        )
         return
 
     raise Exception('Not implemented. Waiting for figurl views PR to be merged.')
@@ -251,7 +258,7 @@ def create_spike_sorting_recording_view(yaml_file_name: Union[str, None]):
     # with open(yaml_file_name, 'r') as f:
     #     x = yaml.safe_load(f)
     # x = { k: x[k] for k in sample_spike_sorting_recording_key.keys() }
-    # a = ndf.SpikeSortingRecordingView.populate([(ndc.SpikeSortingRecording & x).proj()])
+    # ndf.SpikeSortingRecordingView.populate([(ndc.SpikeSortingRecording & x).proj()])
 
 sample_spike_sorter_params_key = {
     'sorter_params_name': 'example',
@@ -273,8 +280,9 @@ def insert_spike_sorter_parameters(yaml_file_name: Union[str, None]):
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
-        a = yaml.safe_dump(sample_spike_sorter_params_key, sort_keys=False)
-        print(a)
+        print(
+            yaml.safe_dump(sample_spike_sorter_params_key, sort_keys=False)
+        )
         return
 
     import nwb_datajoint.common as ndc
@@ -286,8 +294,8 @@ def insert_spike_sorter_parameters(yaml_file_name: Union[str, None]):
 @click.command(help="List spike sorter parameters.")
 def list_spike_sorter_parameters():
     import nwb_datajoint.common as ndc
-    a = ndc.SpikeSorterParameters & {}
-    print(a)
+    results = ndc.SpikeSorterParameters & {}
+    print(results)
 
 sample_spike_sorting_key = dict(sample_spike_sorting_recording_selection_key, **{
     'artifact_params_name': 'default',
@@ -300,8 +308,9 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
-        a = yaml.safe_dump(sample_spike_sorting_key, sort_keys=False)
-        print(a)
+        print(
+            yaml.safe_dump(sample_spike_sorting_key, sort_keys=False)
+        )
         return
 
     import nwb_datajoint.common as ndc
@@ -335,8 +344,8 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
 @click.argument('nwb_file_name')
 def list_spike_sortings(nwb_file_name):
     import nwb_datajoint.common as ndc
-    a = ndc.SpikeSorting & {'nwb_file_name': nwb_file_name}
-    print(a)
+    results = ndc.SpikeSorting & {'nwb_file_name': nwb_file_name}
+    print(results)
 
 cli.add_command(insert_session)
 cli.add_command(list_sessions)
