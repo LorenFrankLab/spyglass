@@ -236,7 +236,7 @@ def create_spike_sorting_recording(yaml_file_name: Union[str, None]):
 
 @click.command(help="List spike sorting recordings for a session.")
 @click.argument('nwb_file_name')
-def list_spike_sorting_recordings(nwb_file_name):
+def list_spike_sorting_recordings(nwb_file_name: str):
     import nwb_datajoint.common as ndc
     results = ndc.SpikeSortingRecording & {'nwb_file_name': nwb_file_name}
     print(results)
@@ -342,7 +342,7 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
 
 @click.command(help="List spike sortings for a session.")
 @click.argument('nwb_file_name')
-def list_spike_sortings(nwb_file_name):
+def list_spike_sortings(nwb_file_name: str):
     import nwb_datajoint.common as ndc
     results = ndc.SpikeSorting & {'nwb_file_name': nwb_file_name}
     print(results)
