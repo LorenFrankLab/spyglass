@@ -52,7 +52,7 @@ class IntervalList(dj.Manual):
             cls.insert1(epoch_dict, skip_duplicates=True)
 
 @schema
-class SortInterval(dj.Manual)
+class SortInterval(dj.Manual):
     definition = """
     -> Session
     sort_interval_name: varchar(200) # name for this interval
