@@ -22,11 +22,11 @@ class SpikeSortingRecordingView(dj.Computed):
     """
     def make(self, key):
         # Get the SpikeSortingRecording row
-        a = (SpikeSortingRecording & key).fetch1()
-        sort_group_id = a['sort_group_id']
-        sort_interval_name = a['sort_interval_name']
-        recording_id = a['recording_id']
-        recording_path = a['recording_path']
+        rec = (SpikeSortingRecording & key).fetch1()
+        sort_group_id = rec['sort_group_id']
+        sort_interval_name = rec['sort_interval_name']
+        recording_id = rec['recording_id']
+        recording_path = rec['recording_path']
 
         # Load the SI recording extractor
         recording: si.BaseRecording = si.load_extractor(recording_path)
@@ -54,15 +54,19 @@ class SpikeSortingRecordingView(dj.Computed):
         )
 
         # Insert row into table
-        key2 = key
-        key2['figurl'] = F.url()
+        key2 = dict(key, **{
+            'figurl': F.url()
+        })
         self.insert1(key2)
 
 def create_electrode_geometry(recording: si.BaseRecording):
-    channel_locations = {}
-    channel_locations0 = recording.get_channel_locations()
-    for ii, channel_id in enumerate(recording.get_channel_ids()):
-        channel_locations[str(channel_id)] = channel_locations0[ii, :].astype(np.float32)
+    channel_locations = {
+        str(channel_id): location.astype(np.float32)
+        for location, channel_id in zip(
+            recording.get_channel_locations(),
+            recording.get_channel_ids()
+        )
+    }
     data = {
         'type': 'ElectrodeGeometry',
         'channelLocations': channel_locations
