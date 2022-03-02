@@ -312,7 +312,7 @@ class SpikeSortingRecording(dj.Computed):
         tmp_key = {}
         tmp_key['nwb_file_name'] = key['nwb_file_name']
         tmp_key['interval_list_name'] = recording_name
-        tmp_key['valid_times'] = sort_interval_valid_times;
+        tmp_key['valid_times'] = sort_interval_valid_times
         IntervalList.insert1(tmp_key, replace=True)
 
         # store the list of valid times for the sort
