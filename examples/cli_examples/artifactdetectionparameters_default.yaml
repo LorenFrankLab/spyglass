@@ -1,0 +1,6 @@
+artifact_params_name: "default"
+artifact_params:
+  zscore_thresh: null
+  amplitude_thresh: 3000
+  proportion_above_thresh: 1.0
+  removal_window_ms: 1.0
