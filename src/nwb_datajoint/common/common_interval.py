@@ -170,12 +170,18 @@ def interval_list_intersect(interval_list1, interval_list2):
     else:
         interval_list1 = interval_list1[np.argsort(interval_list1[:,0])]
         interval_list1 = reduce(_union_concat, interval_list1)
+        # the following check is needed in the case where the interval list is a single element (behavior of reduce)
+        if interval_list1.ndim==1:
+            interval_list1 = np.expand_dims(interval_list1,0)
         
     if interval_list2.ndim==1:
         interval_list2 = np.expand_dims(interval_list2,0)
     else:
         interval_list2 = interval_list2[np.argsort(interval_list2[:,0])]
         interval_list2 = reduce(_union_concat, interval_list2)
+        # the following check is needed in the case where the interval list is a single element (behavior of reduce)
+        if interval_list2.ndim==1:
+            interval_list2 = np.expand_dims(interval_list2,0)
 
     intersecting_intervals = []
     for interval2 in interval_list2:

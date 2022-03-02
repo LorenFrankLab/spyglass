@@ -1,0 +1,4 @@
+artifact_params_name: "none"
+artifact_params:
+  zscore_thresh: null
+  amplitude_thresh: null

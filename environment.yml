@@ -33,3 +33,5 @@ dependencies:
     - h5py==2.10.*
     - sortingview>=0.6.16
     - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
+    - pyyaml
+    - click

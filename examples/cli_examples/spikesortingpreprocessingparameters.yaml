@@ -1,0 +1,7 @@
+preproc_params_name: default
+preproc_params:
+  frequency_min: 300
+  frequency_max: 6000
+  margin_ms: 5
+  seed: 0
+  whiten: True
