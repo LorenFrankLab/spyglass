@@ -252,13 +252,14 @@ def create_spike_sorting_recording_view(yaml_file_name: Union[str, None]):
         )
         return
 
-    raise Exception('Not implemented. Waiting for figurl views PR to be merged.')
-    # import nwb_datajoint.common as ndc
-    # import nwb_datajoint.figurl_views as ndf
-    # with open(yaml_file_name, 'r') as f:
-    #     x = yaml.safe_load(f)
-    # x = { k: x[k] for k in sample_spike_sorting_recording_key.keys() }
-    # ndf.SpikeSortingRecordingView.populate([(ndc.SpikeSortingRecording & x).proj()])
+    import nwb_datajoint.common as ndc
+    import nwb_datajoint.figurl_views as ndf
+    with open(yaml_file_name, 'r') as f:
+        x = yaml.safe_load(f)
+    x = { k: x[k] for k in sample_spike_sorting_recording_selection_key.keys() }
+    ndf.SpikeSortingRecordingView.populate([(ndc.SpikeSortingRecording & x).proj()])
+    figurl = (ndf.SpikeSortingRecordingView & x).fetch1('figurl')
+    print(figurl)
 
 sample_spike_sorter_params_key = {
     'sorter_params_name': 'example',
@@ -347,6 +348,26 @@ def list_spike_sortings(nwb_file_name: str):
     results = ndc.SpikeSorting & {'nwb_file_name': nwb_file_name}
     print(results)
 
+@click.command(help="Create a spike sorting view")
+@click.argument('yaml_file_name', required=False)
+def create_spike_sorting_view(yaml_file_name: Union[str, None]):
+    if yaml_file_name is None:
+        print('You must specify a yaml file. Sample content:')
+        print('==========================================')
+        print(
+            yaml.safe_dump(sample_spike_sorting_key, sort_keys=False)
+        )
+        return
+
+    import nwb_datajoint.common as ndc
+    import nwb_datajoint.figurl_views as ndf
+    with open(yaml_file_name, 'r') as f:
+        x = yaml.safe_load(f)
+    x = { k: x[k] for k in sample_spike_sorting_key.keys() }
+    ndf.SpikeSortingView.populate([(ndc.SpikeSorting & x).proj()])
+    figurl = (ndf.SpikeSortingView & x).fetch1('figurl')
+    print(figurl)
+
 cli.add_command(insert_session)
 cli.add_command(list_sessions)
 cli.add_command(insert_lab_team)
@@ -370,3 +391,4 @@ cli.add_command(insert_spike_sorter_parameters)
 cli.add_command(list_spike_sorter_parameters)
 cli.add_command(run_spike_sorting)
 cli.add_command(list_spike_sortings)
+cli.add_command(create_spike_sorting_view)
