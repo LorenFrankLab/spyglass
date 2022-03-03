@@ -23,16 +23,18 @@ class SpikeSortingRecordingView(dj.Computed):
     def make(self, key):
         # Get the SpikeSortingRecording row
         rec = (SpikeSortingRecording & key).fetch1()
+        nwb_file_name = rec['nwb_file_name']
         sort_group_id = rec['sort_group_id']
         sort_interval_name = rec['sort_interval_name']
-        recording_id = rec['recording_id']
         recording_path = rec['recording_path']
 
         # Load the SI recording extractor
+        print('Loading recording')
         recording: si.BaseRecording = si.load_extractor(recording_path)
         
         # Raw traces (sample)
         # Extract the first 1 second of traces
+        print('Extracting traces')
         traces: np.array = recording.get_traces(
             start_frame=0,
             end_frame=int(recording.get_sampling_frequency() * 1)
@@ -45,12 +47,16 @@ class SpikeSortingRecordingView(dj.Computed):
         )
 
         # Electrode geometry
+        print('Electrode geometry')
         f2 = create_electrode_geometry(recording)
+
+        label = f'{nwb_file_name}:{sort_group_id}:{sort_interval_name}'
+        print(label)
 
         # Mountain layout
         F = create_mountain_layout(
             figures=[f1, f2],
-            label=f'{recording_id}:{sort_group_id}:{sort_interval_name}'
+            label=label
         )
 
         # Insert row into table

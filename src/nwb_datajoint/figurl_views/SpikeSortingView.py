@@ -28,7 +28,6 @@ class SpikeSortingView(dj.Computed):
         recording: si.BaseRecording = si.load_extractor(recording_path)
         sorting: si.BaseSorting = si.load_extractor(sorting_path)
 
-        
         with kc.TemporaryDirectory() as tmpdir:
             fname = f'{tmpdir}/spikesortingview.h5'
             print('Preparing spikesortingview data')
@@ -62,7 +61,13 @@ class SpikeSortingView(dj.Computed):
 
             sorting_curation_uri = None
 
-            label = 'SpikeSorting'
+            nwb_file_name = recording_record['nwb_file_name']
+            sort_group_id = sorting_record['sort_group_id']
+            sort_interval_name = sorting_record['sort_interval_name']
+            sorter = sorting_record['sorter']
+            sorter_params_name = sorting_record['sorter_params_name']
+            label = f'{nwb_file_name}:{sort_group_id}:{sort_interval_name}:{sorter}:{sorter_params_name}'
+            print(label)
 
             print('Creating mountain layout')
             mountain_layout = X.create_mountain_layout(figures=[f1, f3, f4, f5, f6, f7], label=label, sorting_curation_uri=sorting_curation_uri)

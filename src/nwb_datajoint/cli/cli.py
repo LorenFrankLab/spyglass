@@ -243,7 +243,8 @@ def list_spike_sorting_recordings(nwb_file_name: str):
 
 @click.command(help="Create a spike sorting recording view")
 @click.argument('yaml_file_name', required=False)
-def create_spike_sorting_recording_view(yaml_file_name: Union[str, None]):
+@click.option('--replace', is_flag=True)
+def create_spike_sorting_recording_view(yaml_file_name: Union[str, None], replace: bool):
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
@@ -257,6 +258,8 @@ def create_spike_sorting_recording_view(yaml_file_name: Union[str, None]):
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     x = { k: x[k] for k in sample_spike_sorting_recording_selection_key.keys() }
+    if replace:
+        (ndf.SpikeSortingRecordingView & x).delete()
     ndf.SpikeSortingRecordingView.populate([(ndc.SpikeSortingRecording & x).proj()])
     figurl = (ndf.SpikeSortingRecordingView & x).fetch1('figurl')
     print(figurl)
@@ -350,7 +353,8 @@ def list_spike_sortings(nwb_file_name: str):
 
 @click.command(help="Create a spike sorting view")
 @click.argument('yaml_file_name', required=False)
-def create_spike_sorting_view(yaml_file_name: Union[str, None]):
+@click.option('--replace', is_flag=True)
+def create_spike_sorting_view(yaml_file_name: Union[str, None], replace: bool):
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
@@ -364,6 +368,8 @@ def create_spike_sorting_view(yaml_file_name: Union[str, None]):
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     x = { k: x[k] for k in sample_spike_sorting_key.keys() }
+    if replace:
+        (ndf.SpikeSortingView & x).delete()
     ndf.SpikeSortingView.populate([(ndc.SpikeSorting & x).proj()])
     figurl = (ndf.SpikeSortingView & x).fetch1('figurl')
     print(figurl)
