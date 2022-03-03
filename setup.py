@@ -11,6 +11,8 @@ setup(
         'ghostipy',
         'pymysql>=1.0.*',
         'h5py==2.10.*',
-        'sortingview>=0.7.3'
+        'sortingview>=0.7.3',
+        'pyyaml',
+        'click'
     ]
 )
