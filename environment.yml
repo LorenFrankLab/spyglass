@@ -6,7 +6,6 @@ channels:
 dependencies:
   - python=3.8
   - jupyterlab>=3.*
-  - nodejs=12.4.*
   - pydotplus>=2.0.*
   - dask>=2.30
   - pip>=20.2.*
@@ -18,16 +17,5 @@ dependencies:
   - tqdm
   - nb_conda
   - pip:
-    - kachery-client
-    - kachery-daemon
-    - mountainsort4
-    - spikeextractors
     - git+https://github.com/SpikeInterface/spikeinterface.git
-    - pynwb>=2.0.0,<3
-    - hdmf>=3.1.1,<4
-    - datajoint>=0.13.*
-    - ghostipy
-    - pymysql>=1.0.*
-    - h5py==2.10.*
-    - sortingview>=0.7.3
     - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
