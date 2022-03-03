@@ -11,6 +11,7 @@ import numpy as np
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
+import spikeinterface.sortingcomponents as scp
 import spikeinterface.toolkit as st
 
 from .common_device import Probe
@@ -473,6 +474,24 @@ class SpikeSorterParameters(dj.Manual):
             self.insert1([sorter, 'default', sorter_params],
                          skip_duplicates=True)
 
+        # clusterless defaults
+        sorter = 'clusterless_thresholder'
+        sorter_params = dict(
+            detect_threshold=100.0,  # uV
+            # Locally exclusive means one unit per spike detected
+            method='locally_exclusive',
+            peak_sign='neg',
+            n_shifts=2,
+            local_radius_um=100,
+            # noise levels needsto be 1.0 so the units are in uV and not MAD.
+            noise_levels=np.asarray([1.0]),
+            random_chunk_kwargs={},
+            outputs='sorting',
+            localization_dict=None,
+        )
+        self.insert1([sorter, 'default', sorter_params],
+                     skip_duplicates=True)
+
 
 # Avoid circular import
 from .common_artifact import ArtifactRemovedIntervalList  # noqa
@@ -557,12 +576,17 @@ class SpikeSorting(dj.Computed):
                 recording=recording, seed=preproc_params['seed'])
 
         print(f'Running spike sorting on {key}...')
-        sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
+        sorter_name, sorter_params = (SpikeSorterParameters & key).fetch1(
             'sorter', 'sorter_params')
-        sorting = ss.run_sorter(sorter, recording,
-                                output_folder=os.getenv('KACHERY_TEMP_DIR'),
-                                delete_output_folder=True,
-                                **sorter_params)
+
+        if sorter_name == 'clusterless_thresholder':
+            sorting = scp.detect_peaks(recording, **sorter_params)
+        else:
+            sorting = ss.run_sorter(sorter_name, recording,
+                                    output_folder=os.getenv(
+                                        'KACHERY_TEMP_DIR'),
+                                    delete_output_folder=True,
+                                    **sorter_params)
         key['time_of_sort'] = int(time.time())
 
         print('Saving sorting results...')
