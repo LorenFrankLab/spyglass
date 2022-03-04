@@ -498,11 +498,12 @@ class SpikeSorterParameters(dj.Manual):
                      skip_duplicates=True)
 
 
+# Avoid circular import
+from .common_artifact import ArtifactRemovedIntervalList  # noqa
+
+
 @schema
 class SpikeSortingSelection(dj.Manual):
-    # Avoid circular import
-    from .common_artifact import ArtifactRemovedIntervalList  # noqa
-
     definition = """
     # Table for holding selection of recording and parameters for each spike sorting run
     -> SpikeSortingRecording
