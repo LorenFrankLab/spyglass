@@ -4,9 +4,6 @@ import os
 
 import spikeinterface as si
 
-from .common_artifact import (ArtifactDetection, ArtifactDetectionParameters,
-                              ArtifactDetectionSelection,
-                              ArtifactRemovedIntervalList)
 from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import (HeadDir, LinPos, PositionSource, RawPosition, Speed,
                            StateScriptFile, VideoFile)
@@ -41,6 +38,9 @@ from .common_spikesorting import (SortGroup, Sortings, SpikeSorterParameters,
                                   SpikeSortingRecording,
                                   SpikeSortingRecordingSelection,
                                   SpikeSortingSelection)
+from .common_artifact import (ArtifactDetection, ArtifactDetectionParameters,
+                              ArtifactDetectionSelection,
+                              ArtifactRemovedIntervalList)
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
 from .common_waveforms import WaveformParameters, Waveforms, WaveformSelection
