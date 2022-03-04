@@ -269,19 +269,24 @@ class SpikeSortingPreprocessingParameters(dj.Manual):
     """
 
     def insert_default(self):
-        # set up the default filter parameters
-        freq_min = 300  # high pass filter value
-        freq_max = 6000  # low pass filter value
-        margin_ms = 5  # margin in ms on border to avoid border effect
-        seed = 0  # random seed for whitening
+        key = dict(preproc_params_name='default')
+        key['preproc_params'] = {
+            'frequency_min': 300,  # high pass filter value
+            'frequency_max': 6000,  # low pass filter value
+            'margin_ms': 5,  # margin in ms on border to avoid border effect
+            'whiten': True,  # random seed for whitening
+            'seed': 0  # random seed for whitening
+        }
+        self.insert1(key, skip_duplicates=True)
 
-        key = dict()
-        key['preproc_params_name'] = 'default'
-        key['preproc_params'] = {'frequency_min': freq_min,
-                                 'frequency_max': freq_max,
-                                 'margin_ms': margin_ms,
-                                 'whiten': True,
-                                 'seed': seed}
+        key = dict(preproc_params_name='default_clusterless')
+        key['preproc_params'] = {
+            'frequency_min': 300,  # high pass filter value
+            'frequency_max': 6000,  # low pass filter value
+            'margin_ms': 5,  # margin in ms on border to avoid border effect
+            'whiten': False,  # random seed for whitening
+            'seed': 0  # random seed for whitening
+        }
         self.insert1(key, skip_duplicates=True)
 
 
@@ -538,8 +543,7 @@ class SpikeSorting(dj.Computed):
         # load valid times
         artifact_times = (ArtifactRemovedIntervalList &
                           key).fetch1('artifact_times')
-        if artifact_times.ndim == 1:
-            artifact_times = np.expand_dims(artifact_times, 0)
+        artifact_times = np.atleast_2d(artifact_times)
 
         if artifact_times:
             # convert valid intervals to indices
