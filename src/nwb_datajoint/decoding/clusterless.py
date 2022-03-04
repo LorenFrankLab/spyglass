@@ -7,12 +7,12 @@ import numpy as np
 import pandas as pd
 import pynwb
 import xarray as xr
+from nwb_datajoint.common.common_curation import (CuratedSpikeSorting,
+                                                  SelectedUnitsParameters)
 from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
 from nwb_datajoint.common.common_position import IntervalPositionInfo
-from nwb_datajoint.common.common_spikesorting import (CuratedSpikeSorting,
-                                                      SpikeSortingWorkspace,
-                                                      UnitInclusionParameters)
+from nwb_datajoint.common.common_sortingview import SortingviewWorkspace
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
 from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
 from replay_trajectory_classification.classifier import (
@@ -87,7 +87,7 @@ class UnitMarks(dj.Computed):
             return
 
         # get the list of units
-        units = UnitInclusionParameters().get_included_units(
+        units = SelectedUnitsParameters().get_included_units(
             curated_sorting_key=key,
             unit_inclusion_key=key)
 
@@ -95,7 +95,7 @@ class UnitMarks(dj.Computed):
         nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
 
         # get the labbox workspace so we can get the waveforms from the recording
-        workspace_uri = (SpikeSortingWorkspace & key).fetch1('workspace_uri')
+        workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
         workspace = le.load_workspace(workspace_uri)
         recording = workspace.get_recording_extractor(
             workspace.recording_ids[0])
