@@ -294,10 +294,11 @@ class CuratedSpikeSorting(dj.Computed):
             recording = se.CacheRecordingExtractor(
                 recording, save_path=tmpfile.name, chunk_mb=10000)
             # whiten the recording
-            filter_params = (SpikeSortingPreprocessingParameters &
-                             key).fetch1('filter_parameter_dict')
-            recording = st.preprocessing.whiten(
-                recording, seed=0, chunk_size=filter_params['filter_chunk_size'])
+            preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1(
+                'preproc_params')
+            if preproc_params['whiten']:
+                recording = st.preprocessing.whiten(
+                    recording=recording, seed=preproc_params['seed'])
             cluster_metrics_list_name = (CuratedSpikeSortingSelection & key).fetch1(
                 'final_cluster_metrics_list_name')
             # metrics = QualityMetrics().compute_metrics(cluster_metrics_list_name, recording, sorting)
@@ -313,9 +314,8 @@ class CuratedSpikeSorting(dj.Computed):
 
         # 3. Save the accepted, merged units and their metrics
         # load the AnalysisNWBFile from the original sort to get the sort_interval_valid times and the sort_interval
-        key['analysis_file_name'], key['units_object_id'] = \
-            SortingID.store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name,
-                                        sort_interval=sort_interval, metrics=metrics, unit_ids=accepted_units)
+        key['analysis_file_name'], key['units_object_id'] = SpikeSorting._save_sorting_nwb(
+            key, sorting, timestamps, sort_interval_list_name,  sort_interval)
 
         # Insert entry to CuratedSpikeSorting table
         self.insert1(key)
