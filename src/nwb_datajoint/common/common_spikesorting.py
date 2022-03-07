@@ -1,4 +1,3 @@
-from csv import list_dialects
 import os
 import pathlib
 import time
@@ -9,7 +8,6 @@ from functools import reduce
 
 import datajoint as dj
 import numpy as np
-import pynwb
 import scipy.stats as stats
 import spikeinterface as si
 import spikeinterface.extractors as se
@@ -536,9 +534,12 @@ class SpikeSorting(dj.Computed):
         
         print(f'Running spike sorting on {key}...')
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1('sorter','sorter_params')
+        if os.path.exists(os.getenv('NWB_DATAJOINT_TEMP_DIR')):
+            output_folder = os.getenv('NWB_DATAJOINT_TEMP_DIR')
+        else:
+            output_folder = None
         sorting = ss.run_sorter(sorter, recording,
-                                output_folder=os.getenv('KACHERY_TEMP_DIR'),
-                                delete_output_folder=True,
+                                output_folder=output_folder,
                                 **sorter_params)
         key['time_of_sort'] = int(time.time())
 
