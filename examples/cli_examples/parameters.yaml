@@ -1,0 +1,11 @@
+# spike sorting recording
+nwb_file_name: RN2_20191110_.nwb
+sort_group_id: 1
+sort_interval_name: 01_r1_first180
+preproc_params_name: default
+interval_list_name: 01_r1
+team_name: LorenLab
+
+# spike sorting
+artifact_params_name: default
+sorter_params_name: default

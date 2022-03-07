@@ -150,13 +150,14 @@ def interval_list_excludes(valid_times, timestamps):
                                                    timestamps < invalid_time[1]))).tolist()
     return timestamps[ind]
 
-def interval_list_intersect(interval_list1, interval_list2):
+def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     """Finds the intersections between two interval lists
 
     Parameters
     ----------
     interval_list1 : np.array, (N,2) where N = number of intervals
     interval_list2 : np.array, (N,2) where N = number of intervals
+    min_length: float, optional. Minimum length of intervals to include, default 0
 
     Each interval is (start time, stop time)
     
@@ -170,12 +171,18 @@ def interval_list_intersect(interval_list1, interval_list2):
     else:
         interval_list1 = interval_list1[np.argsort(interval_list1[:,0])]
         interval_list1 = reduce(_union_concat, interval_list1)
+        # the following check is needed in the case where the interval list is a single element (behavior of reduce)
+        if interval_list1.ndim==1:
+            interval_list1 = np.expand_dims(interval_list1,0)
         
     if interval_list2.ndim==1:
         interval_list2 = np.expand_dims(interval_list2,0)
     else:
         interval_list2 = interval_list2[np.argsort(interval_list2[:,0])]
         interval_list2 = reduce(_union_concat, interval_list2)
+        # the following check is needed in the case where the interval list is a single element (behavior of reduce)
+        if interval_list2.ndim==1:
+            interval_list2 = np.expand_dims(interval_list2,0)
 
     intersecting_intervals = []
     for interval2 in interval_list2:
@@ -186,7 +193,7 @@ def interval_list_intersect(interval_list1, interval_list2):
     intersecting_intervals = np.asarray(intersecting_intervals)
     intersecting_intervals = intersecting_intervals[np.argsort(intersecting_intervals[:,0])]
     
-    return intersecting_intervals
+    return intervals_by_length(intersecting_intervals, min_length=min_length)
 
 def _intersection(interval1, interval2):
     "Takes the (set-theoretic) intersection of two intervals"
