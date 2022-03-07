@@ -42,7 +42,7 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
      export NWB_DATAJOINT_RECORDING_DIR="/stelmo/nwb/recording"
      export NWB_DATAJOINT_SORTING_DIR="/stelmo/nwb/sorting"
      export NWB_DATAJOINT_WAVEFORMS_DIR="/stelmo/nwb/waveforms"
-     export NWB_DATAJOINT_TEMP_DIR="/stelmo/nwb/tmp"
+     export NWB_DATAJOINT_TEMP_DIR="/stelmo/nwb/tmp/spyglass"
      export KACHERY_DAEMON_HOST="typhoon"
      export KACHERY_DAEMON_PORT="14747"
      export KACHERY_STORAGE_DIR="/stelmo/nwb/kachery-storage"
