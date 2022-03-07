@@ -1,0 +1,10 @@
+sorter_params_name: default
+sorter: mountainsort4
+sorter_params:
+  detect_sign: -1
+  adjacency_radius: 100
+  filter: false
+  whiten: false
+  clip_size: 50
+  detect_threshold: 3
+  detect_interval: 10

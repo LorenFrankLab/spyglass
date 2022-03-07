@@ -1,4 +1,5 @@
 import os
+import stat
 import pathlib
 import random
 import string
@@ -158,6 +159,10 @@ class AnalysisNwbfile(dj.Manual):
             # export the new NWB file
             with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w', manager=io.manager) as export_io:
                 export_io.export(io, nwbf)
+
+        # change the permissions to only allow owner to write
+        permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+        os.chmod(analysis_file_abs_path, permissions)
 
         return analysis_file_name
 
