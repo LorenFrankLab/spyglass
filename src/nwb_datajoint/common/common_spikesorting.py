@@ -560,8 +560,8 @@ class SpikeSorting(dj.Computed):
         sorting_key['sorting_path'] = key['sorting_path']
         sorting_key['parent_sorting_id'] = ''
         
-        # add sorting to Sorting
-        Sorting.insert1(sorting_key, skip_duplicates=True)
+        # add sorting to SortingID
+        SortingID.insert1(sorting_key, skip_duplicates=True)
         self.insert1(key)
     
     def delete(self):
@@ -671,7 +671,7 @@ class SpikeSorting(dj.Computed):
         raise NotImplementedError
                 
 @schema
-class Sorting(dj.Manual):
+class SortingID(dj.Manual):
     definition = """
     # Has records for every sorting; similar to IntervalList
     sorting_id: varchar(10)

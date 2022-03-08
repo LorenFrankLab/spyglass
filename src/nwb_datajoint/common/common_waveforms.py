@@ -27,7 +27,7 @@ class WaveformParameters(dj.Manual):
 @schema
 class WaveformSelection(dj.Manual):
     definition = """
-    -> Sorting
+    -> SortingID
     -> WaveformParameters
     ---
     """

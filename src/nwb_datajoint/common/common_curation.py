@@ -19,7 +19,7 @@ from .common_interval import SortInterval
 from .common_nwbfile import AnalysisNwbfile
 from .common_metrics import QualityMetrics
 from .common_spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
-                                  SpikeSorting, Sorting)
+                                  SpikeSorting, SortingID)
 
 from .dj_helper_fn import fetch_nwb
 
@@ -61,7 +61,7 @@ class AutomaticCuration(dj.Computed):
         recording = si.load_extractor(recording_path)
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
-        parent_sorting_path = (Sorting & {'sorting_id': key['parent_sorting_id']}).fetch1('sorting_path')
+        parent_sorting_path = (SortingID & {'sorting_id': key['parent_sorting_id']}).fetch1('sorting_path')
         parent_sorting = si.load_extractor(parent_sorting_path)
         
         metrics_path = (QualityMetrics & {'nwb_file_name': key['nwb_file_name'],
@@ -101,7 +101,7 @@ class AutomaticCuration(dj.Computed):
         sorting_key['sorting_path'] = key['sorting_path']
         sorting_key['parent_sorting_id'] = key['sorting_id']
 
-        Sorting.insert1(sorting_key, skip_duplicates=True)
+        SortingID.insert1(sorting_key, skip_duplicates=True)
         
         self.insert1(key)
    
@@ -133,7 +133,7 @@ class AutomaticCuration(dj.Computed):
         sorting_key['sorting_path'] = sorting_path
         sorting_key['parent_sorting_id'] = key['sorting_id']
         
-        Sorting.insert1(sorting_key, skip_duplicates=True)
+        SortingID.insert1(sorting_key, skip_duplicates=True)
     
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
@@ -172,7 +172,7 @@ class AutomaticCuration(dj.Computed):
 @schema 
 class CuratedSpikeSortingSelection(dj.Manual):
     definition = """
-    -> Sorting
+    -> SortingID
     """
     
 # TODO: fix everything below
