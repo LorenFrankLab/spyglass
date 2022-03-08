@@ -674,9 +674,9 @@ class SpikeSorting(dj.Computed):
 class Sorting(dj.Manual):
     definition = """
     # Has records for every sorting; similar to IntervalList
-    sorting_id: varchar(15)
+    sorting_id: varchar(10)
     ---
     -> SpikeSorting
     sorting_path: varchar(1000)
-    parent_sorting_id='': varchar(15)
+    parent_sorting_id='': varchar(10)
     """ 
