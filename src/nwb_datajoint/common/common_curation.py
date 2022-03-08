@@ -12,14 +12,14 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.toolkit as st
 
-from nwb_datajoint.common.common_sortingview import SortingviewWorkspace
+from nwb_datajoint.common.common_sortingview import SortingviewWorkspace, SortingviewWorkspaceSorting
 
 from .common_lab import LabMember, LabTeam
 from .common_interval import SortInterval
 from .common_nwbfile import AnalysisNwbfile
 from .common_metrics import QualityMetrics
 from .common_spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
-                                  SpikeSorting, Sortings)
+                                  SpikeSorting, Sorting)
 
 from .dj_helper_fn import fetch_nwb
 
@@ -42,15 +42,14 @@ class AutomaticCurationParameters(dj.Manual):
 @schema
 class AutomaticCurationSelection(dj.Manual):
     definition = """
-    -> QualityMetrics.proj(parent_sorting_id='sorting_id')
+    -> QualityMetrics
     -> AutomaticCurationParameters
     """
 
 @schema
-class AutomaticCurationSorting(dj.Computed):
+class AutomaticCuration(dj.Computed):
     definition = """
     -> AutomaticCurationSelection
-    sorting_id: varchar(15)
     ---
     sorting_path: varchar(1000)
     -> AnalysisNwbfile
@@ -62,8 +61,7 @@ class AutomaticCurationSorting(dj.Computed):
         recording = si.load_extractor(recording_path)
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
-        key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
-        parent_sorting_path = (Sortings & {'sorting_id': key['parent_sorting_id']}).fetch1('sorting_path')
+        parent_sorting_path = (Sorting & {'sorting_id': key['parent_sorting_id']}).fetch1('sorting_path')
         parent_sorting = si.load_extractor(parent_sorting_path)
         
         metrics_path = (QualityMetrics & {'nwb_file_name': key['nwb_file_name'],
@@ -79,9 +77,6 @@ class AutomaticCurationSorting(dj.Computed):
 
         sorting = self._sorting_after_reject(parent_sorting, quality_metrics, reject_params)
         sorting = self._sorting_after_merge(sorting, quality_metrics, merge_params)        
-        
-        # TODO: implement merging in AutomaticCurationSorting._sorting_after_merge
-        # sorting = self._sorting_after_merge(sorting, quality_metrics, key['merge_params'])           
         
         curated_sorting_name = self._get_curated_sorting_name(key)
         key['sorting_path'] = str(Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(curated_sorting_name))
@@ -100,50 +95,51 @@ class AutomaticCurationSorting(dj.Computed):
                                              sort_interval=sort_interval)
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
 
-        # add sorting to Sortings
-        Sortings.insert1({'nwb_file_name': key['nwb_file_name'],
-                          'recording_id': key['recording_id'],
-                          'sorting_id': key['sorting_id'],
-                          'sorting_path': key['sorting_path'],
-                          'parent_sorting_id': key['parent_sorting_id']}, skip_duplicates=True)
+        # add sorting to Sorting
+        sorting_key = (SpikeSorting & key).proj().fetch1()
+        sorting_key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
+        sorting_key['sorting_path'] = key['sorting_path']
+        sorting_key['parent_sorting_id'] = key['sorting_id']
+
+        Sorting.insert1(sorting_key, skip_duplicates=True)
         
         self.insert1(key)
    
     def update_manual_curation(self, key: dict):
         """Based on information in key, loads the curated sorting from sortingview,
-        saves it, and inserts it to Sortings
+        saves it, and inserts it to Sorting
         
         Assumes that the workspace corresponding to the recording and (original) sorting exists
 
         Parameters
         ----------
         key : dict
-            primary key of AutomaticCurationSorting
+            primary key of AutomaticCuration
         """
         workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
         workspace = sv.load_workspace(workspace_uri=workspace_uri)
         
-        sortingview_sorting_id = (SortingviewWorkspace.Sortings & {'recording_id': key['recording_id'],
-                                                                    'sorting_id': key['sorting_id']}).fetch1('sortingview_sorting_id')
+        sortingview_sorting_id = (SortingviewWorkspaceSorting & key).fetch1('sortingview_sorting_id')
         manually_curated_sorting = workspace.get_curated_sorting_extractor(sorting_id=sortingview_sorting_id)
         sorting = si.create_sorting_from_old_extractor(manually_curated_sorting)
-        
-        new_sorting_id = 'S_'+str(uuid.uuid4())[:8]
         
         sorting_name = key['sorting_id']
         sorting_path = str(Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(sorting_name))
         sorting = sorting.save(folder=sorting_path)
         
-        Sortings.insert1({'recording_id': key['recording_id'],
-                          'sorting_id': new_sorting_id,
-                          'sorting_path': sorting_path,
-                          'parent_sorting_id': key['sorting_id']}, skip_duplicates=True)
+        # add sorting to Sortings
+        sorting_key = (SpikeSorting & key).proj().fetch1()
+        sorting_key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
+        sorting_key['sorting_path'] = sorting_path
+        sorting_key['parent_sorting_id'] = key['sorting_id']
+        
+        Sorting.insert1(sorting_key, skip_duplicates=True)
     
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
     
     def _get_curated_sorting_name(self, key):
-        parent_sorting_key = (SpikeSorting & {'sorting_id': key['parent_sorting_id']}).fetch1()
+        parent_sorting_key = (SpikeSorting & key).fetch1()
         parent_sorting_name =SpikeSorting()._get_sorting_name(parent_sorting_key)
         curated_sorting_name = parent_sorting_name + '_' \
                                + key['auto_curation_params_name'] + '_' + key['sorting_id']
@@ -176,9 +172,10 @@ class AutomaticCurationSorting(dj.Computed):
 @schema 
 class CuratedSpikeSortingSelection(dj.Manual):
     definition = """
-    -> Sortings
+    -> Sorting
     """
-
+    
+# TODO: fix everything below
 @schema
 class CuratedSpikeSorting(dj.Computed):
     definition = """

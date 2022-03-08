@@ -4,7 +4,7 @@ import sortingview as sv
 import spikeinterface as si
 from pathlib import Path
 
-from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sortings
+from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sorting
 
 schema = dj.schema('common_sortingview')
 
@@ -13,17 +13,10 @@ class SortingviewWorkspace(dj.Computed):
     definition = """
     -> SpikeSortingRecording
     ---
-    channel = 'franklab2' : varchar(80) # the name of the kachery channel for data sharing
-    sortingview_recording_id: varchar(30)
     workspace_uri: varchar(1000)
+    sortingview_recording_id: varchar(30)
+    channel = 'franklab2' : varchar(80) # the name of the kachery channel for data sharing
     """
-    class Sortings(dj.Part):
-        definition = """
-        -> SortingviewWorkspace
-        sorting_id: varchar(30)
-        ---
-        sortingview_sorting_id: varchar(30)
-        """
 
     def make(self, key: dict):
         # Load recording, wrap it as old spikeextractors recording extractor, 
@@ -34,8 +27,8 @@ class SortingviewWorkspace(dj.Computed):
         h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(old_recording, 
                                                                                 str(Path(recording_path) / 'recording.h5'),
                                                                                 dtype='int16')
-
-        workspace_name = SpikeSortingRecording()._get_recording_name(key)
+        
+        workspace_name = SpikeSortingRecording._get_recording_name(key)
         workspace = sv.create_workspace(label=workspace_name)
         key['workspace_uri'] = workspace.uri
         key['sortingview_recording_id'] = workspace.add_recording(recording=h5_recording,
@@ -44,20 +37,20 @@ class SortingviewWorkspace(dj.Computed):
         self.insert1(key)
         
     def add_sorting_to_workspace(self, key: dict, sorting_id: str):
-        """Add a sorting (defined by sorting_id) to the sortingview workspace (defined by key).
+        """Add a sorting (defined by `sorting_id`) to the sortingview workspace (defined by key).
         
         Parameters
         ----------
         key : dict
         sorting_id : str
-            sorting id given during spike sorting, NOT the same as sortingview sorting_id
+            primary key of Sorting table, NOT the same as sortingview sorting_id
         
         Returns
         -------
         sortingview_sorting_id : str
             unique id given to each sorting by sortingview
         """
-        sorting_path = (Sortings & {'sorting_id': sorting_id}).fetch1('sorting_path')
+        sorting_path = (Sorting & {'sorting_id': sorting_id}).fetch1('sorting_path')
         sorting = si.load_extractor(sorting_path)
         # convert to old sorting extractor
         sorting = si.create_extractor_from_new_sorting(sorting)
@@ -70,15 +63,12 @@ class SortingviewWorkspace(dj.Computed):
         key['sorting_id'] = sorting_id
         key['sortingview_sorting_id'] = sortingview_sorting_id
         
-        self.Sortings.insert1({'nwb_file_name': key['nwb_file_name'],
-                               'sort_group_id': key['sort_group_id'],
-                               'sort_interval_name': key['sort_interval_name'],
-                               'preproc_params_name': key['preproc_params_name'],
-                               'recording_id': key['recording_id'],
-                               'sorting_id': key['sorting_id'],
-                               'sortingview_sorting_id': key['sortingview_sorting_id']}, skip_duplicates=True)
+        SortingviewWorkspaceSorting.insert1(key, skip_duplicates=True)
         
         return sortingview_sorting_id
+    
+    def remove_sorting_from_workspace(self, key):
+        return NotImplementedError
     
     def add_metrics_to_sorting(self, key: dict, metrics: dict,
                                sortingview_sorting_id: str=None):
@@ -153,3 +143,11 @@ class SortingviewWorkspace(dj.Computed):
                                          label=workspace.label,
                                          include_curation=True)
         return url
+
+class SortingviewWorkspaceSorting(dj.Manual):
+    definition = """
+    -> SortingviewWorkspace
+    sorting_id: varchar(30)
+    ---
+    sortingview_sorting_id: varchar(30)
+    """

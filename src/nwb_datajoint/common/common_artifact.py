@@ -90,8 +90,7 @@ class ArtifactDetection(dj.Computed):
         key['artifact_removed_interval_list_name'] = key['recording_id'] + '_' + key['artifact_params_name'] + '_artifact_removed_valid_times'
         
         # insert artifact times and valid times into ArtifactRemovedIntervalList with an appropriate name
-        tmp_key = {}
-        tmp_key['nwb_file_name'] = key['nwb_file_name']
+        tmp_key = (ArtifactDetectionSelection & key).proj().fetch1()
         tmp_key['artifact_removed_interval_list_name'] = key['artifact_removed_interval_list_name']
         tmp_key['artifact_removed_valid_times'] = key['artifact_removed_valid_times']
         tmp_key['artifact_times'] = key['artifact_times']
@@ -112,9 +111,9 @@ class ArtifactRemovedIntervalList(dj.Manual):
     definition = """
     # Stores intervals without detected artifacts.
     # Note that entries can come from either ArtifactDetection() or alternative artifact removal analyses.
-    -> Session
     artifact_removed_interval_list_name: varchar(200)
     ---
+    -> ArtifactDetection
     artifact_removed_valid_times: longblob
     artifact_times: longblob # np array of artifact intervals
     """

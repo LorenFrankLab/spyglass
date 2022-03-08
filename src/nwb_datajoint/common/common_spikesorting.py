@@ -326,6 +326,7 @@ class SpikeSortingRecording(dj.Computed):
                                    total_memory='5G')        
         self.insert1(key)
     
+    @staticmethod
     def _get_recording_name(self, key):
         recording_name = key['nwb_file_name'] + '_' \
         + key['sort_interval_name'] + '_' \
@@ -554,13 +555,13 @@ class SpikeSorting(dj.Computed):
                                                                                    sort_interval)
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
         
-        sorting_id = 'S_'+str(uuid.uuid4())[:8]
-
+        sorting_key = (self & key).proj().fetch1()
+        sorting_key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
+        sorting_key['sorting_path'] = key['sorting_path']
+        sorting_key['parent_sorting_id'] = ''
+        
         # add sorting to Sorting
-        Sorting.insert1({'sorting_id': key['sorting_id'],
-                         'nwb_file_name': key['nwb_file_name'],
-                         'sorting_path': key['sorting_path'],
-                         'parent_sorting_id': ''}, skip_duplicates=True)
+        Sorting.insert1(sorting_key, skip_duplicates=True)
         self.insert1(key)
     
     def delete(self):
@@ -605,7 +606,7 @@ class SpikeSorting(dj.Computed):
                 shutil.rmtree(str(pathlib.Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir))
                 
     def _get_sorting_name(self, key):
-        recording_name = SpikeSortingRecording()._get_recording_name(key)
+        recording_name = SpikeSortingRecording._get_recording_name(key)
         sorting_name = recording_name + '_' \
                        + key['sorter'] + '_' \
                        + key['sorter_params_name'] + '_' \
