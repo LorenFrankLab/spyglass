@@ -17,6 +17,7 @@ dependencies:
   - tqdm
   - nb_conda
   - pip:
+    - kachery
     - kachery-client>=1.1.7
     - mountainsort4
     - spikeextractors
