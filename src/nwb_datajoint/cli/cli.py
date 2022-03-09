@@ -347,6 +347,14 @@ def list_spike_sortings(nwb_file_name: str):
     results = ndc.SpikeSorting & {'nwb_file_name': nwb_file_name}
     print(results)
 
+@click.command(help="Create spyglass view of a session group.")
+@click.argument('session_group_name')
+def create_spyglass_view(session_group_name: str):
+    import nwb_datajoint.common as ndc
+    F = ndc.SessionGroup.create_spyglass_view(session_group_name)
+    url = F.url(label=session_group_name)
+    print(url)
+
 cli.add_command(insert_session)
 cli.add_command(list_sessions)
 cli.add_command(insert_lab_team)
@@ -370,3 +378,4 @@ cli.add_command(insert_spike_sorter_parameters)
 cli.add_command(list_spike_sorter_parameters)
 cli.add_command(run_spike_sorting)
 cli.add_command(list_spike_sortings)
+cli.add_command(create_spyglass_view)

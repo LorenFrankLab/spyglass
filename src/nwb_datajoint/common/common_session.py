@@ -1,3 +1,4 @@
+import os
 import datajoint as dj
 
 from .common_device import CameraDevice, DataAcquisitionDevice, Probe
@@ -160,6 +161,17 @@ class SessionGroup(dj.Manual):
             {'nwb_file_name': result['nwb_file_name']}
             for result in results
         ]
+    @staticmethod
+    def create_spyglass_view(session_group_name: str):
+        import figurl as fig
+        FIGURL_CHANNEL = os.getenv('FIGURL_CHANNEL')
+        assert FIGURL_CHANNEL, 'Environment variable not set: FIGURL_CHANNEL'
+        data = {
+            'type': 'spyglassview',
+            'sessionGroupName': session_group_name
+        }
+        F = fig.Figure(view_url='gs://figurl/spyglassview-1', data=data)
+        return F
 
 # The reason this is not implemented as a dj.Part is that
 # datajoint prohibits deleting from a subtable without
