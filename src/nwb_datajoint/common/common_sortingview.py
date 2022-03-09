@@ -4,7 +4,7 @@ import sortingview as sv
 import spikeinterface as si
 from pathlib import Path
 
-from .common_spikesorting import SpikeSortingRecording, SpikeSorting, SortingID
+from .common_spikesorting import SpikeSortingRecording, SpikeSorting, CuratedSpikeSorting
 
 schema = dj.schema('common_sortingview')
 
@@ -43,14 +43,14 @@ class SortingviewWorkspace(dj.Computed):
         ----------
         key : dict
         sorting_id : str
-            primary key of SortingID table, NOT the same as sortingview sorting_id
+            primary key of CuratedSpikeSorting table, NOT the same as sortingview sorting_id
         
         Returns
         -------
         sortingview_sorting_id : str
             unique id given to each sorting by sortingview
         """
-        sorting_path = (SortingID & {'sorting_id': sorting_id}).fetch1('sorting_path')
+        sorting_path = (CuratedSpikeSorting & {'sorting_id': sorting_id}).fetch1('sorting_path')
         sorting = si.load_extractor(sorting_path)
         # convert to old sorting extractor
         sorting = si.create_extractor_from_new_sorting(sorting)
