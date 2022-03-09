@@ -128,11 +128,11 @@ class SessionGroup(dj.Manual):
     session_group_description: varchar(2000)
     """
     @staticmethod
-    def add_group(session_group_name: str, session_group_description):
+    def add_group(session_group_name: str, session_group_description: str, *, skip_duplicates: bool=False):
         SessionGroup.insert1({
             'session_group_name': session_group_name,
             'session_group_description': session_group_description
-        })
+        }, skip_duplicates=skip_duplicates)
     @staticmethod
     def update_session_group_description(session_group_name: str, session_group_description):
         SessionGroup.update1({
@@ -140,11 +140,11 @@ class SessionGroup(dj.Manual):
             'session_group_description': session_group_description
         })
     @staticmethod
-    def add_session_to_group(nwb_file_name: str, session_group_name: str):
+    def add_session_to_group(nwb_file_name: str, session_group_name: str, *, skip_duplicates: bool=False):
         SessionGroupSession.insert1({
             'session_group_name': session_group_name,
             'nwb_file_name': nwb_file_name
-        })
+        }, skip_duplicates=skip_duplicates)
     @staticmethod
     def remove_session_from_group(nwb_file_name: str, session_group_name: str):
         query = {'session_group_name': session_group_name, 'nwb_file_name': nwb_file_name}
