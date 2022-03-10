@@ -114,7 +114,7 @@ class QualityMetrics(dj.Computed):
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(new_qm, f, ensure_ascii=False, indent=4)
         
-def _compute_isi_violation_fractions(self, waveform_extractor, **metric_params):
+def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
     isi_threshold_ms = metric_params[isi_threshold_ms]
     min_isi_ms = metric_params[min_isi_ms]
     
