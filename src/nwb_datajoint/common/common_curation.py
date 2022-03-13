@@ -151,20 +151,22 @@ class AutomaticCurationSorting(dj.Computed):
 
     @staticmethod
     def _sorting_after_reject(sorting, quality_metrics, reject_params):
-        
-        # A dict where each key is a unit_id and its value is a fraction
-        # of spikes that violate the isi [0, 1]
+       
+        # reject units based off of noise_overlap and isi_violation
+        # dicts where each key is a unit_id and values are metrics for that unit
+        nn_noise_overlaps = quality_metrics['nn_noise_overlap']
         isi_violation_fractions = quality_metrics['isi_violation']
-        
-        # Not sure what this name ('isi_violation_frac_threshold') should be
+
+        # user-specified tolerances for noise overlap and isi violations
+        nn_noise_overlap_threshold = reject_params['nn_noise_overlap_threshold']
         isi_violation_frac_threshold = reject_params['isi_violation_frac_threshold']
+                
+        # remove units that had high noise_overlap or isi_violation_fracs. Keep the rest
+        noise_passed_units_ids = [unit_id for unit_id in sorting.get_unit_ids() if (nn_noise_overlaps[unit_id] < nn_noise_overlap_threshold) and (isi_violation_fractions[unit_id] < isi_violation_frac_threshold)]
         
-        # Remove units that had too many isi violations. Keep the rest
-        passed_units_ids = [unit_id for unit_id in sorting.get_unit_ids() if isi_violation_fractions[unit_id] < isi_violation_rate_threshold]
+        noise_passed_sorting = sorting.select_units(noise_passed_units_ids)
         
-        isi_passed_sorting = sorting.select_units(passed_units_ids)
-        
-        return isi_passed_sorting
+        return noise_passed_sorting
     
     @staticmethod
     def _sorting_after_merge(sorting, quality_metrics, merge_params):
