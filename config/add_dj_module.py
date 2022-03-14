@@ -15,7 +15,7 @@ def add_module(module_name):
     # find the kachery-users group 
     groups = grp.getgrall()
     for group in groups:
-        if grouop.gr_name == target_group:
+        if group.gr_name == target_group:
             break
 
     # get a list of usernames 

@@ -9,8 +9,9 @@ import pynwb
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
 
-global invalid_electrode_index 
+global invalid_electrode_index
 invalid_electrode_index = 99999999
+
 
 def get_nwb_file(nwb_file_path):
     """Return an NWBFile object with the given file path in read mode.
@@ -144,8 +145,9 @@ def estimate_sampling_rate(timestamps, multiplier):
 
 
 def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len):
-    """Given a list of timestamps from sampled data, and the sampling rate of the data, find all gaps >
-    gap_proportion * sampling rate and return a set of valid times excluding these gaps.
+    """Finds the set of all valid intervals in a list of timestamps.
+    Valid interval: (start time, stop time) during which there are
+    no gaps (i.e. missing samples).
 
     Parameters
     ----------
@@ -153,8 +155,11 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
         1D numpy array of timestamp values.
     sampling_rate : float
         Sampling rate of the data.
-    gap_proportion : float
-        Multiple of inferred sampling rate for gap detection.
+    gap_proportion : float, greater than 1; unit: samples
+        Threshold for detecting a gap;
+        i.e. if the difference (in samples) between
+        consecutive timestamps exceeds gap_proportion,
+        it is considered a gap
     min_valid_len : float
         Length of smallest valid interval.
 
@@ -165,9 +170,10 @@ def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len
     """
 
     eps = 0.0000001
+
     # get rid of NaN elements
     timestamps = timestamps[~np.isnan(timestamps)]
-
+    # find gaps
     gap = np.diff(timestamps) > 1.0 / sampling_rate * gap_proportion
 
     # all true entries of gap represent gaps. Get the times bounding these intervals.
@@ -218,23 +224,34 @@ def get_electrode_indices(nwb_object, electrode_ids):
         # electrodes is a DynamicTableRegion which may contain a subset of the rows in NWBFile.electrodes
         # match against only the subset of electrodes referenced by this ElectricalSeries
         electrode_table_indices = nwb_object.electrodes.data[:]
-        selected_elect_ids = list(nwb_object.electrodes.table.id[electrode_table_indices])
+        selected_elect_ids = [nwb_object.electrodes.table.id[x]
+                              for x in electrode_table_indices]
     elif isinstance(nwb_object, pynwb.NWBFile):
         # electrodes is a DynamicTable that contains all electrodes
         selected_elect_ids = list(nwb_object.electrodes.id[:])
     else:
         raise ValueError(
             'nwb_object must be of type ElectricalSeries or NWBFile')
-    
+
     # for each electrode_id, find its index in selected_elect_ids and return that if it's there and invalid_electrode_index if not.
-    return [selected_elect_ids.index(elect_id) if elect_id in selected_elect_ids else invalid_electrode_index for elect_id in electrode_ids ]
+    return [selected_elect_ids.index(elect_id) if elect_id in selected_elect_ids else invalid_electrode_index for elect_id in electrode_ids]
+
 
 def get_all_spatial_series(nwbf, verbose=False):
-    """Given an nwb file object, gets the spatial series and Interval lists from the file and returns a dictionary by epoch
-    :param nwbf: the nwb file object
-    :type nwbf: file object
-    :param verbose: flag to cause printing of sampling rate
-    :type verbose: bool
+    """Given an NWBFile, get the spatial series and interval lists from the file and return a dictionary by epoch.
+
+    Parameters
+    ----------
+    nwbf : pynwb.NWBFile
+        The source NWB file object.
+    verbose : bool
+        Flag representing whether to print the sampling rate.
+
+    Returns
+    -------
+    pos_data_dict : dict
+        Dict mapping indices to a dict with keys 'valid_times' and 'raw_position_object_id'. Returns None if there
+        is no position data in the file. The 'raw_position_object_id' is the object ID of the SpatialSeries object.
     """
     position = get_data_interface(nwbf, 'position', pynwb.behavior.Position)
     if position is None:
@@ -247,7 +264,7 @@ def get_all_spatial_series(nwbf, verbose=False):
 
     sorted_order = np.argsort(epoch_start_time)
     pos_data_dict = dict()
-    #for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
+
     for index, orig_epoch in enumerate(sorted_order):
         spatial_series = position.spatial_series.values()[orig_epoch]
         pos_data_dict[index] = dict()
@@ -255,6 +272,7 @@ def get_all_spatial_series(nwbf, verbose=False):
         timestamps = np.asarray(spatial_series.timestamps)
 
         # estimate the sampling rate
+        timestamps = np.asarray(spatial_series.timestamps)
         sampling_rate = estimate_sampling_rate(timestamps, 1.75)
         if sampling_rate < 0:
             raise ValueError(

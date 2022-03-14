@@ -1,5 +1,4 @@
-!#/
-
+#!/usr/bin/env python
 
 import os
 import numpy as np
@@ -9,7 +8,6 @@ import nwb_datajoint as nd
 # ignore datajoint+jupyter async warnings
 import warnings
 
-from nwb_datajoint.common.common_spikesorting import AutomaticCurationSpikeSorting, UnitInclusionParameters
 from nwb_datajoint.decoding.clusterless import MarkParameters, UnitMarkParameters, UnitMarks
 warnings.simplefilter('ignore', category=DeprecationWarning)
 warnings.simplefilter('ignore', category=ResourceWarning)
@@ -23,10 +21,6 @@ from nwb_datajoint.common import (RawPosition, HeadDir, Speed, LinPos, StateScri
                                   ElectrodeGroup, Electrode, Raw, SampleCount,
                                   LFPSelection, LFP, LFPBandSelection, LFPBand,
                                   SortGroup, SpikeSorting, SpikeSorter, SpikeSorterParameters,
-                                  SpikeSortingWaveformParameters, SpikeSortingArtifactParameters,
-                                  SpikeSortingParameters,SpikeSortingMetrics, CuratedSpikeSorting,
-                                  AutomaticCurationSpikeSorting, AutomaticCurationSpikeSortingParameters, AutomaticCurationParameters,
-                                  FirFilter,
                                   IntervalList, SortInterval,
                                   Lab, LabMember, LabTeam, Institution,
                                   BrainRegion,

@@ -1,6 +1,7 @@
 import datajoint as dj
 import numpy as np
 from numpy.lib import emath
+from functools import reduce
 
 from .common_session import Session  # noqa: F401
 
@@ -8,33 +9,47 @@ schema = dj.schema('common_interval')
 
 # TODO: ADD export to NWB function to save relevant intervals in an NWB file
 
-
 @schema
 class IntervalList(dj.Manual):
     definition = """
-    # Time intervals with data
+    # Time intervals used for analysis
     -> Session
-    interval_list_name: varchar(200) # descriptive name of this interval list
+    interval_list_name: varchar(200)  # descriptive name of this interval list
     ---
-    valid_times: longblob # numpy array with start and end times for each interval
+    valid_times: longblob  # numpy array with start and end times for each interval
     """
 
-    def insert_from_nwbfile(self, nwbf, *, nwb_file_name):
-        '''
-        :param nwbf:
-        :param nwb_file_name:
-        :return: None
-        Adds each of the entries in the nwb epochs table to the Interval list
-        '''
-        epochs = nwbf.epochs.to_dataframe()
-        epoch_dict = dict()
-        epoch_dict['nwb_file_name'] = nwb_file_name
-        for e in epochs.iterrows():
-            epoch_dict['interval_list_name'] = e[1].tags[0]
-            epoch_dict['valid_times'] = np.asarray(
-                [[e[1].start_time, e[1].stop_time]])
-            self.insert1(epoch_dict, skip_duplicates=True)
+    @classmethod
+    def insert_from_nwbfile(cls, nwbf, *, nwb_file_name):
+        """Add each entry in the NWB file epochs table to the IntervalList table.
 
+        The interval list name for each epoch is set to the first tag for the epoch.
+        If the epoch has no tags, then 'interval_x' will be used as the interval list name, where x is the index
+        (0-indexed) of the epoch in the epochs table.
+        The start time and stop time of the epoch are stored in the valid_times field as a numpy array of
+        [start time, stop time] for each epoch.
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            The source NWB file object.
+        nwb_file_name : str
+            The file name of the NWB file, used as a primary key to the Session table.
+        """
+        if nwbf.epochs is None:
+            print('No epochs found in NWB file.')
+            return
+        epochs = nwbf.epochs.to_dataframe()
+        for epoch_index, epoch_data in epochs.iterrows():
+            epoch_dict = dict()
+            epoch_dict['nwb_file_name'] = nwb_file_name
+            if epoch_data.tags[0]:
+                epoch_dict['interval_list_name'] = epoch_data.tags[0]
+            else:
+                epoch_dict['interval_list_name'] = 'interval_' + str(epoch_index)
+            epoch_dict['valid_times'] = np.asarray(
+                [[epoch_data.start_time, epoch_data.stop_time]])
+            cls.insert1(epoch_dict, skip_duplicates=True)
 
 @schema
 class SortInterval(dj.Manual):
@@ -135,59 +150,108 @@ def interval_list_excludes(valid_times, timestamps):
                                                    timestamps < invalid_time[1]))).tolist()
     return timestamps[ind]
 
-
-def interval_list_intersect(interval_list1, interval_list2, min_length=0.0, max_length=1e10):
-    """
-    Finds the intersection (overlapping times) for two interval lists
+def interval_list_intersect(interval_list1, interval_list2, min_length=0):
+    """Finds the intersections between two interval lists
 
     Parameters
     ----------
-    interval_list1: np.array, (N,2) where N = number of intervals
-        first element is start time; second element is stop time
-    interval_list2: np.array, (N,2) where N = number of intervals
-        first element is start time; second element is stop time
-    min_length: float, minimum length of interval for inclusion in output, default 0.0
-    max_length: float, max length of interval for inclusion in output, default 1e10
-    
+    interval_list1 : np.array, (N,2) where N = number of intervals
+    interval_list2 : np.array, (N,2) where N = number of intervals
+    min_length: float, optional. Minimum length of intervals to include, default 0
 
+    Each interval is (start time, stop time)
+    
     Returns
     -------
-    interval_list: np.array, (2,)
+    interval_list: np.array, (N,2)
     """
-    # x = np.array([max(interval_list1[0],interval_list2[0]),
-    #               min(interval_list1[1],interval_list2[1])])
-    # if x[1]<x[0]:
-    #     x = np.array([])
-    # return x
+    
+    if interval_list1.ndim==1:
+        interval_list1 = np.expand_dims(interval_list1,0)
+    else:
+        interval_list1 = interval_list1[np.argsort(interval_list1[:,0])]
+        interval_list1 = reduce(_union_concat, interval_list1)
+        # the following check is needed in the case where the interval list is a single element (behavior of reduce)
+        if interval_list1.ndim==1:
+            interval_list1 = np.expand_dims(interval_list1,0)
+        
+    if interval_list2.ndim==1:
+        interval_list2 = np.expand_dims(interval_list2,0)
+    else:
+        interval_list2 = interval_list2[np.argsort(interval_list2[:,0])]
+        interval_list2 = reduce(_union_concat, interval_list2)
+        # the following check is needed in the case where the interval list is a single element (behavior of reduce)
+        if interval_list2.ndim==1:
+            interval_list2 = np.expand_dims(interval_list2,0)
 
-    # print(f'interval list 1 {interval_list1}')
-    # print(f'interval list 2 {interval_list2}')
+    intersecting_intervals = []
+    for interval2 in interval_list2:
+        for interval1 in interval_list1:
+            if _intersection(interval2, interval1) is not None:
+                intersecting_intervals.append(_intersection(interval1, interval2))   
+                
+    intersecting_intervals = np.asarray(intersecting_intervals)
+    intersecting_intervals = intersecting_intervals[np.argsort(intersecting_intervals[:,0])]
+    
+    return intervals_by_length(intersecting_intervals, min_length=min_length)
 
-    interval_list1 = np.ravel(interval_list1)
-    # create a parallel list where 1 indicates the start and -1 the end of an interval
-    interval_list1_start_end = np.ones(interval_list1.shape)
-    interval_list1_start_end[1::2] = -1
+def _intersection(interval1, interval2):
+    "Takes the (set-theoretic) intersection of two intervals"
+    intersection = np.array([max([interval1[0],interval2[0]]),
+                             min([interval1[1],interval2[1]])])
+    if intersection[1]>intersection[0]:
+        return intersection
+    else:
+        return None
+    
+def _union(interval1, interval2):
+    "Takes the (set-theoretic) union of two intervals"
+    if _intersection(interval1, interval2) is None:
+        return np.array([interval1, interval2])
+    else:
+        return np.array([min([interval1[0],interval2[0]]),
+                         max([interval1[1],interval2[1]])])
 
-    interval_list2 = np.ravel(interval_list2)
-    # create a parallel list for the second interval where 2 indicates the start and -2 the end of an interval
-    interval_list2_start_end = np.ones(interval_list2.shape) * 2
-    interval_list2_start_end[1::2] = -2
+def _union_concat(interval_list, interval):
+    """Compares the last interval of the interval list to the given interval and
+    * takes their union if overlapping
+    * concatenates the interval to the interval list if not
+    
+    Recursively called with `reduce`.
+    """
+    if interval_list.ndim==1:
+        interval_list = np.expand_dims(interval_list, 0)
+    if interval.ndim==1:
+        interval = np.expand_dims(interval, 0)
 
-    # concatenate the two lists so we can resort the intervals and apply the same sorting to the start-stop arrays
-    combined_intervals = np.concatenate((interval_list1, interval_list2))
-    ss = np.concatenate((interval_list1_start_end, interval_list2_start_end))
-    sort_ind = np.argsort(combined_intervals)
-    combined_intervals = combined_intervals[sort_ind]
-    # a cumulative sum of 3 indicates the beginning of a joint interval, and the following element is the end
-    intersection_starts = np.ravel(
-        np.array(np.where(np.cumsum(ss[sort_ind]) == 3)))
-    intersection_stops = intersection_starts + 1
-    intersect = []
-    for start, stop in zip(intersection_starts, intersection_stops):
-        intersect.append([combined_intervals[start], combined_intervals[stop]])
+    x = _union(interval_list[-1], interval[0])
+    if x.ndim==1:
+        x = np.expand_dims(x, 0)
+    return np.concatenate((interval_list[:-1], x), axis=0)
 
-    return intervals_by_length(np.asarray(intersect), min_length=min_length, max_length=max_length)
+def union_adjacent_index(interval1, interval2):
+    """unions two intervals that are adjacent in index
+    e.g. [a,b] and [b+1, c] is converted to [a,c]
+    if not adjacent, just concatenates interval2 at the end of interval1
 
+    Parameters
+    ----------
+    interval1 : np.array
+        [description]
+    interval2 : np.array
+        [description]
+    """
+    if interval1.ndim==1:
+        interval1 = np.expand_dims(interval1, 0)
+    if interval2.ndim==1:
+        interval2 = np.expand_dims(interval2, 0)
+
+    if interval1[-1][1]+1 == interval2[0][0] or interval2[0][1]+1 == interval1[-1][0]:
+        x = np.array([[np.min([interval1[-1][0],interval2[0][0]]), 
+                       np.max([interval1[-1][1],interval2[0][1]])]])
+        return np.concatenate((interval1[:-1], x), axis=0)
+    else:
+        return np.concatenate((interval1, interval2),axis=0)
 
 # TODO: test interval_list_union code
 def interval_list_union(interval_list1, interval_list2, min_length=0.0, max_length=1e10):
@@ -235,8 +299,8 @@ def interval_list_censor(interval_list, timestamps):
     Args:
         interval_list (numpy array of intervals [start, stop]): interval list from IntervalList valid times
         timestamps (numpy array or list): timestamp list
-    
-    Returns: 
+
+    Returns:
         interval_list (numpy array of intervals [start, stop])
     """
     # check that all timestamps are in the interval list
@@ -244,4 +308,3 @@ def interval_list_censor(interval_list, timestamps):
     
     timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
     return interval_list_intersect(interval_list, timestamps_interval)    
-
