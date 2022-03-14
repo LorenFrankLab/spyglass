@@ -3,11 +3,14 @@ from pathlib import Path
 import shutil
 
 import datajoint as dj
+from sklearn import preprocessing
 import sortingview as sv
 import spikeinterface as si
+from spikeinterface import toolkit as toolkit 
 
 from .common_nwbfile import AnalysisNwbfile
 from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sortings
+from .dj_helper_fn import fetch_nwb 
 
 schema = dj.schema('common_waveforms')
 
@@ -21,7 +24,7 @@ class WaveformParameters(dj.Manual):
     def insert_default(self):
         waveform_params_name = 'default'
         waveform_params = {'ms_before': 0.5, 'ms_after': 0.5, 'max_spikes_per_unit': 5000,
-                           'n_jobs': 5, 'total_memory': '5G'}
+                           'n_jobs': 5, 'total_memory': '5G', 'whiten': True}
         self.insert1([waveform_params_name, waveform_params], skip_duplicates=True) 
 
 @schema
@@ -39,7 +42,7 @@ class Waveforms(dj.Computed):
     ---
     waveform_extractor_path: varchar(220)
     -> AnalysisNwbfile
-    object_id: varchar(40)   # Object ID for the waveforms in NWB file
+    waveforms_object_id: varchar(40)   # Object ID for the waveforms in NWB file
     """
     def make(self, key):
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
@@ -54,6 +57,10 @@ class Waveforms(dj.Computed):
         key['waveform_extractor_path'] = str(Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) / Path(waveform_extractor_name))
         if os.path.exists(key['waveform_extractor_path']):
             shutil.rmtree(key['waveform_extractor_path'])
+        if waveform_params['whiten']:
+            recording = toolkit.preprocessing.whiten(recording)
+            # remove the 'whiten' dictionary entry as it is not recognized by spike interface
+            del waveform_params['whiten']
         waveforms = si.extract_waveforms(recording=recording, 
                                          sorting=sorting, 
                                          folder=key['waveform_extractor_path'],
@@ -84,9 +91,8 @@ class Waveforms(dj.Computed):
         we = si.WaveformExtractor.load_from_folder(we_path)
         return we
     
-    def fetch_nwb(self, key):
-        # TODO: implement fetching waveforms from NWB
-        return NotImplementedError
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
     
     def _get_waveform_extractor_name(self, key):
         we_name = key['recording_id'] + '_' + key['sorting_id'] + '_waveform'
