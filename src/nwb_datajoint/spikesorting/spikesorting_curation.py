@@ -76,7 +76,9 @@ class AutomaticCuration(dj.Computed):
         merge_params = (AutomaticCurationParameters & key).fetch1('merge_params')
 
         #sorting = self._sorting_after_reject(parent_sorting, quality_metrics, reject_params)
-        sorting, units_merged = self._sorting_after_merge(sorting, quality_metrics, merge_params)        
+        # automatically merge units and, if no merge occurred, keep the quality metrics
+        sorting, units_merged = self._sorting_after_merge(sorting, quality_metrics, merge_params) 
+        metrics = quality_metrics if not units_merged else None       
 
         # save the new sorting
         curated_sorting_name = self._get_curated_sorting_name(key)
@@ -88,7 +90,8 @@ class AutomaticCuration(dj.Computed):
         # insert this sorting into the CuratedSpikeSorting Table
         key['sorting_id'] = CuratedSpikeSorting.insert_sorting(key, sorting_path=key['sorting_path'], 
                                                                parent_sorting_id=key['parent_sorting_id'],
-                                                               sorting=sorting, timestamps=timestamps, description='auto curated')
+                                                               sorting=sorting, timestamps=timestamps, 
+                                                               metrics=metrics, description='auto curated')
         self.insert1(key)
    
     def fetch_nwb(self, *attrs, **kwargs):
@@ -121,8 +124,20 @@ class AutomaticCuration(dj.Computed):
     
     @staticmethod
     def _sorting_after_merge(sorting, quality_metrics, merge_params):
+        """ Identifies units to be merged based on the quality_metrics and merge parameters and returns a new sorting as well as a variable
+        indicating whether or not a merge was done
+
+        :param sorting: sorting object
+        :type sorting: spike interface sorting object
+        :param quality_metrics: dictionary of quality metrics by unit
+        :type quality_metrics: dict
+        :param merge_params: dictionary of merge parameters
+        :type merge_params: dict
+        :return: sorting, merge_occurred
+        :rtype: sorting_extractor, bool
+        """
         if not merge_params:
-            return sorting
+            return sorting, False
         else:
             return NotImplementedError
 
