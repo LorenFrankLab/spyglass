@@ -12,18 +12,19 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.toolkit as st
 
-from nwb_datajoint.common.common_sortingview import SortingviewWorkspace, SortingviewWorkspaceSorting
+from .sortingview import SortingviewWorkspace, SortingviewWorkspaceSorting
 
-from .common_lab import LabMember, LabTeam
-from .common_interval import SortInterval
-from .common_nwbfile import AnalysisNwbfile
-from .common_metrics import QualityMetrics
-from .common_spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
-                                  SpikeSorting, CuratedSpikeSorting)
+from ..common.common_lab import LabMember, LabTeam
+from ..common.common_interval import SortInterval, IntervalList
+from ..common.common_nwbfile import AnalysisNwbfile
+from .spikesorting_metrics import QualityMetrics
+from .spikesorting import (SpikeSortingRecordingSelection, SpikeSortingRecording,
+                                  SpikeSorting)
 
-from .dj_helper_fn import fetch_nwb
+from ..common.dj_helper_fn import fetch_nwb
 
 schema = dj.schema('common_curation')
+
 
 @schema
 class AutomaticCurationParameters(dj.Manual):
@@ -52,8 +53,7 @@ class AutomaticCuration(dj.Computed):
     -> AutomaticCurationSelection
     ---
     sorting_path: varchar(1000)
-    -> AnalysisNwbfile
-    units_object_id: varchar(40)   # Object ID for the units in NWB file
+    sorting_id: varchar(10) # the ID of this sorting
     """
 
     def make(self, key):
@@ -72,69 +72,25 @@ class AutomaticCuration(dj.Computed):
         with open(metrics_path) as f:
             quality_metrics = json.load(f)
         
-        reject_params = (AutomaticCurationParameters & key).fetch1('reject_params')
+        #reject_params = (AutomaticCurationParameters & key).fetch1('reject_params')
         merge_params = (AutomaticCurationParameters & key).fetch1('merge_params')
 
-        sorting = self._sorting_after_reject(parent_sorting, quality_metrics, reject_params)
-        sorting = self._sorting_after_merge(sorting, quality_metrics, merge_params)        
-        
+        #sorting = self._sorting_after_reject(parent_sorting, quality_metrics, reject_params)
+        sorting, units_merged = self._sorting_after_merge(sorting, quality_metrics, merge_params)        
+
+        # save the new sorting
         curated_sorting_name = self._get_curated_sorting_name(key)
         key['sorting_path'] = str(Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(curated_sorting_name))
         if os.path.exists(key['sorting_path']):
             shutil.rmtree(key['sorting_path'])
         sorting = sorting.save(folder=key['sorting_path'])
         
-        # NWB stuff
-        recording_key = (SpikeSortingRecording & key).fetch1()
-        sort_interval_list_name = (SpikeSortingRecording & recording_key).fetch1('sort_interval_list_name')
-        sort_interval = (SortInterval & {'nwb_file_name': recording_key['nwb_file_name'],
-                                         'sort_interval_name': recording_key['sort_interval_name']}).fetch1('sort_interval')
-        key['analysis_file_name'], key['units_object_id'] = \
-            SpikeSorting()._save_sorting_nwb(key, sorting=sorting, timestamps=timestamps,
-                                             sort_interval_list_name=sort_interval_list_name, 
-                                             sort_interval=sort_interval)
-        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
-
-        # add sorting to Sorting
-        sorting_key = (SpikeSorting & key).proj().fetch1()
-        sorting_key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
-        sorting_key['sorting_path'] = key['sorting_path']
-        sorting_key['parent_sorting_id'] = key['sorting_id']
-
-        CuratedSpikeSorting.insert1(sorting_key, skip_duplicates=True)
-            
+        # insert this sorting into the CuratedSpikeSorting Table
+        key['sorting_id'] = CuratedSpikeSorting.insert_sorting(key, sorting_path=key['sorting_path'], 
+                                                               parent_sorting_id=key['parent_sorting_id'],
+                                                               sorting=sorting, timestamps=timestamps, description='auto curated')
         self.insert1(key)
    
-    def update_manual_curation(self, key: dict):
-        """Based on information in key, loads the curated sorting from sortingview,
-        saves it, and inserts it to Sorting
-        
-        Assumes that the workspace corresponding to the recording and (original) sorting exists
-
-        Parameters
-        ----------
-        key : dict
-            primary key of AutomaticCuration
-        """
-        workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
-        workspace = sv.load_workspace(workspace_uri=workspace_uri)
-        
-        sortingview_sorting_id = (SortingviewWorkspaceSorting & key).fetch1('sortingview_sorting_id')
-        manually_curated_sorting = workspace.get_curated_sorting_extractor(sorting_id=sortingview_sorting_id)
-        sorting = si.create_sorting_from_old_extractor(manually_curated_sorting)
-        
-        sorting_name = key['sorting_id']
-        sorting_path = str(Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(sorting_name))
-        sorting = sorting.save(folder=sorting_path)
-        
-        # add sorting to Sortings
-        sorting_key = (SpikeSorting & key).proj().fetch1()
-        sorting_key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
-        sorting_key['sorting_path'] = sorting_path
-        sorting_key['parent_sorting_id'] = key['sorting_id']
-        
-        CuratedSpikeSorting.insert1(sorting_key, skip_duplicates=True)
-    
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
     
@@ -147,6 +103,7 @@ class AutomaticCuration(dj.Computed):
 
     @staticmethod
     def _sorting_after_reject(sorting, quality_metrics, reject_params):
+        # 
         
         # A dict where each key is a unit_id and its value is a fraction
         # of spikes that violate the isi [0, 1]
@@ -168,6 +125,192 @@ class AutomaticCuration(dj.Computed):
             return sorting
         else:
             return NotImplementedError
+
+@schema
+class CuratedSpikeSorting(dj.Manual):
+    definition = """
+    # Stores each spike sorting; similar to IntervalList
+    sorting_id: varchar(10)
+    ---
+    -> SpikeSorting
+    sorting_path: varchar(1000)
+    parent_sorting_id='': varchar(10)
+    labels: blob # a dictionary of labels for the units
+    metrics: blob # a list of quality metrics for the units
+    -> AnalysisNwbfile
+    units_object_id: varchar(40) # the object ID for the units in this curated sorting
+    description='': varchar(1000) #optional description for this curated sort
+    """ 
+    def insert_sorting(self, sorting_key: dict, sorting_path:str, parent_sorting_id:str, 
+                       sorting=None, timestamps=None, metrics=None, labels=None, description=''):
+        """Given a SpikeSorting key, a sorting_path and the parent_sorting_id, save the units in an NWBFile and insert an entry into CuratedSpikeSorting
+
+        :param sorting_key: the key for the original SpikeSorting
+        :type dict
+        :param sorting_path: the location where the sorting was stored
+        :type sorting_path: str
+        :param parent_sorting_id: the id of the parent sorting
+        :type parent_sorting_id: str
+        :param sorting: sorting extractor (optional)
+        :type spike interface sorting extractor
+        :param timestamps: timestamps for recording (optional)
+        :type numpy 1d array
+        :param metrics: computed metrics for sorting (optional)
+        :type numpy 1d array
+        :param description: text description of this sort (optional)
+        :type str
+        :param labels: dictionary of labels for this sort (optional)
+        :type dict
+
+        returns:
+        :param sorting_id
+        :type str
+
+        """
+       
+        if sorting is None:
+            sorting = si.load_extractor(sorting_path)
+        
+        if timestamps is None:
+            recording_path = (SpikeSortingRecording & sorting_key).fetch1('recording_path')
+            recording = si.load_extractor(recording_path)
+            timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
+
+        if labels is None:
+            labels = {}
+        if metrics is None:
+            metrics = {}
+
+        sort_interval_list_name = (SpikeSortingRecording & sorting_key).fetch1('sort_interval_list_name')
+        sort_interval = (SortInterval & {'nwb_file_name': sorting_key['nwb_file_name'],
+                                         'sort_interval_name': sorting_key['sort_interval_name']}).fetch1('sort_interval')        
+        sorting_key['analysis_file_name'], sorting_key['units_object_id'] = self._save_sorting_nwb(sorting_key, sorting, timestamps,
+                                                                                   sort_interval_list_name, 
+                                                                                   sort_interval, metrics=metrics)
+        AnalysisNwbfile().add(sorting_key['nwb_file_name'], sorting_key['analysis_file_name'])       
+    
+        sorting_key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
+        sorting_key['sorting_path'] = sorting_path
+        sorting_key['parent_sorting_id'] = parent_sorting_id
+        sorting_key['description'] = description
+        sorting_key['labels'] = labels
+        sorting_key['metrics'] = metrics
+        
+        CuratedSpikeSorting.insert1(sorting_key)
+        return sorting_key['sorting_id']
+
+    def _save_sorting_nwb(self, key, sorting, timestamps, sort_interval_list_name,
+                          sort_interval, metrics=None, unit_ids=None):
+        """Store a sorting in a new AnalysisNwbfile
+        Parameters
+        ----------
+        key : dict
+            key to SpikeSorting table
+        sorting : si.Sorting
+            sorting
+        timestamps : array_like
+            Time stamps of the sorted recoridng;
+            used to convert the spike timings from index to real time
+        sort_interval_list_name : str
+            name of sort interval
+        sort_interval : list
+            interval for start and end of sort
+        metrics : dict, optional
+            quality metrics, by default None
+        unit_ids : list, optional
+            IDs of units whose spiketrains to save, by default None
+
+        Returns
+        -------
+        analysis_file_name : str
+        units_object_id : str
+        """
+
+        sort_interval_valid_times = (IntervalList & \
+                {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
+
+        units = dict()
+        units_valid_times = dict()
+        units_sort_interval = dict()
+        if unit_ids is None:
+            unit_ids = sorting.get_unit_ids()
+        for unit_id in unit_ids:
+            spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
+            units[unit_id] = timestamps[spike_times_in_samples]
+            units_valid_times[unit_id] = sort_interval_valid_times
+            units_sort_interval[unit_id] = [sort_interval]
+
+        analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
+        object_ids = AnalysisNwbfile().add_units(analysis_file_name,
+                                        units, units_valid_times,
+                                        units_sort_interval,
+                                        metrics=metrics)
+        if object_ids=='':
+            print('Sorting contains no units. Created an empty analysis nwb file anyway.')
+            units_object_id = ''
+        else:
+            units_object_id = object_ids[0]
+        return analysis_file_name,  units_object_id
+
+    def insert_manual_curation(self, key: dict, description=''):
+        """Based on information in key for an AutoCurationSorting, loads the curated sorting from sortingview,
+        saves it (with labels and the optional description, and inserts it to CuratedSorting
+        
+        Assumes that the workspace corresponding to the recording and (original) sorting exists
+
+        Parameters
+        ----------
+        key : dict
+            primary key of AutomaticCuration
+        description: str
+            optional description of curated sort
+        """
+        workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
+        workspace = sv.load_workspace(workspace_uri=workspace_uri)
+        
+        sortingview_sorting_id = (SortingviewWorkspaceSorting & key).fetch1('sortingview_sorting_id')
+        manually_curated_sorting = workspace.get_curated_sorting_extractor(sorting_id=sortingview_sorting_id)        
+
+        # get the labels and remove the non-primary merged units
+        labels = workspace.get_sorting_curation(sorting_id=sortingview_sorting_id)
+        # turn labels to list of str, only including accepted units.
+
+        unit_labels = labels['labelsByUnit']
+        unit_ids = [unit_id for unit_id in unit_labels]
+
+        # load the metrics
+        metrics_path = (QualityMetrics & {'nwb_file_name': key['nwb_file_name'],
+                                    'recording_id': key['recording_id'],
+                                    'waveform_params_name':key['waveform_params_name'],
+                                    'metric_params_name':key['metric_params_name'],
+                                    'sorting_id': key['parent_sorting_id']}).fetch1('quality_metrics_path')
+        with open(metrics_path) as f:
+            quality_metrics = json.load(f)
+                       
+        # remove non-primary merged units
+        clusters_merged = bool(labels['mergeGroups'])
+        if clusters_merged:
+            for m in labels['mergeGroups']:
+                for merged_unit in m[1:]:
+                    unit_ids.remove(merged_unit)
+                    del labels['labelsByUnit'][merged_unit]
+            # if we've merged we have to recompute metrics
+            metrics = None
+        else:
+            metrics = quality_metrics
+
+        sorting = si.create_sorting_from_old_extractor(manually_curated_sorting)
+        sorting_name = key['sorting_id'] + '_manual_curation'
+        sorting_path = str(Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(sorting_name))
+        sorting = sorting.save(folder=sorting_path)
+        
+        # insert this sorting into the CuratedSpikeSorting Table
+        return self.insert_sorting(key, sorting_path=key['sorting_path'], 
+                                                parent_sorting_id=key['sorting_id'],
+                                                sorting=sorting, description=description, labels=labels, metrics=metrics)
+        
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
 # @schema 
 # class CuratedSpikeSortingSelection(dj.Manual):

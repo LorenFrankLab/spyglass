@@ -33,7 +33,8 @@ class MetricParameters(dj.Manual):
                              'n_neighbors': 5, 
                              'n_components': 7,
                              'radius_um': 100,
-                             'seed': 0}
+                             'seed': 0},
+        
         }
     available_metrics = list(metric_default_params.keys())
 
@@ -97,7 +98,7 @@ class QualityMetrics(dj.Computed):
     def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
         metric_func = _metric_name_to_func[metric_name]
         if metric_name == 'snr' or metric_name == 'isi_violation':
-            metric = metric_func(waveform_extractor, **metric_params)
+            metric = metric_func(waveform_extractor, metric_name, **metric_params)
         else:
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():

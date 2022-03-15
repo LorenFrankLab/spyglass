@@ -22,15 +22,10 @@ from .common_nwbfile import (AnalysisNwbfile, AnalysisNwbfileKachery, Nwbfile,
 from .common_region import BrainRegion
 from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session, SessionGroup
-from .common_spikesorting import (SortGroup, SpikeSortingPreprocessingParameters,
+from ..spikesorting.spikesorting import (SortGroup, SpikeSortingPreprocessingParameters,
                                   SpikeSortingRecordingSelection, SpikeSortingRecording,SpikeSorterParameters,
                                   SpikeSortingSelection, SpikeSorting, Sortings)
-from .common_artifact import ArtifactDetectionParameters, ArtifactDetectionSelection, ArtifactDetection, ArtifactRemovedIntervalList
-from .common_waveforms import WaveformParameters, WaveformSelection, Waveforms
-from .common_metrics import MetricParameters, MetricSelection, QualityMetrics
-from .common_sortingview import SortingviewWorkspace
-from .common_curation import (AutomaticCurationParameters,AutomaticCurationSelection,AutomaticCurationSorting,
-                              CuratedSpikeSortingSelection,CuratedSpikeSorting)
+from ..spikesorting.spikesorting_curation import (CuratedSpikeSorting)
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
 from .common_backup import SpikeSortingBackUp, CuratedSpikeSortingBackUp
@@ -42,4 +37,5 @@ from .populate_all_common import populate_all_common
 import spikeinterface as si
 import os
 
-si.set_global_tmp_folder(os.environ['KACHERY_TEMP_DIR'])
+si.set_global_tmp_folder(os.environ['NWB_DATAJOINT_TEMP_DIR'])
+

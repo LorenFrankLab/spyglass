@@ -6,7 +6,7 @@ import datajoint as dj
 import sortingview as sv
 import spikeinterface as si
 
-from .common_nwbfile import AnalysisNwbfile
+from ...common_nwbfile import AnalysisNwbfile
 from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sortings
 
 schema = dj.schema('common_waveforms')

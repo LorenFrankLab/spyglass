@@ -16,16 +16,17 @@ import spikeinterface.extractors as se
 import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
-from .common_device import Probe
-from .common_lab import LabMember, LabTeam
-from .common_ephys import Electrode, ElectrodeGroup
-from .common_interval import (IntervalList, SortInterval,
+from ..common.common_device import Probe
+from ..common.common_lab import LabMember, LabTeam
+from ..common.common_ephys import Electrode, ElectrodeGroup
+from ..common.common_interval import (IntervalList, SortInterval,
                               interval_list_intersect, union_adjacent_index)
-from .common_nwbfile import AnalysisNwbfile, Nwbfile
-from .common_session import Session
-from .dj_helper_fn import dj_replace, fetch_nwb
-from .nwb_helper_fn import get_valid_intervals
-
+from ..common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from ..common.common_session import Session
+from ..common.dj_helper_fn import dj_replace, fetch_nwb
+from ..common.nwb_helper_fn import get_valid_intervals
+#from .sortingview import SortingviewWorkspace, SortingviewWorkspaceSorting
+from .spikesorting_curation import CuratedSpikeSorting
 
 class Timer:
     """
@@ -278,7 +279,6 @@ class SpikeSortingPreprocessingParameters(dj.Manual):
         key['preproc_params'] = {'frequency_min': freq_min,
                                  'frequency_max': freq_max,
                                  'margin_ms': margin_ms,
-                                 'whiten': True,
                                  'seed': seed}
         self.insert1(key, skip_duplicates=True)
         
@@ -322,7 +322,7 @@ class SpikeSortingRecording(dj.Computed):
         key['recording_path'] = str(recording_folder / Path(recording_name))
         if os.path.exists(key['recording_path']):
             shutil.rmtree(key['recording_path'])
-        recording = recording.save(folder=key['recording_path'], n_jobs=4,
+        recording = recording.save(folder=key['recording_path'], n_jobs=1,
                                    total_memory='5G')        
         self.insert1(key)
     
@@ -456,7 +456,7 @@ class SpikeSorterParameters(dj.Manual):
             sorter_params = ss.get_default_params(sorter)
             self.insert1([sorter, 'default', sorter_params], skip_duplicates=True)
 
-from .common_artifact import ArtifactRemovedIntervalList
+from .spikesorting_artifact import ArtifactRemovedIntervalList
 @schema
 class SpikeSortingSelection(dj.Manual):
     definition = """
@@ -475,8 +475,6 @@ class SpikeSorting(dj.Computed):
     ---
     sorting_path: varchar(1000)
     time_of_sort: int   # in Unix time, to the nearest second
-    -> AnalysisNwbfile
-    units_object_id: varchar(40)   # Object ID for the units in NWB file
     """
 
     def make(self, key: dict):
@@ -527,8 +525,6 @@ class SpikeSorting(dj.Computed):
         # recording = si.append_recordings(rec_list)
                 
         preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
-        if preproc_params['whiten']:
-            recording = st.preprocessing.whiten(recording=recording, seed=preproc_params['seed'])
         
         print(f'Running spike sorting on {key}...')
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1('sorter','sorter_params')
@@ -546,23 +542,8 @@ class SpikeSorting(dj.Computed):
             shutil.rmtree(key['sorting_path'])
         sorting = sorting.save(folder=key['sorting_path'])
         
-        # NWB stuff
-        sort_interval_list_name = (SpikeSortingRecording & key).fetch1('sort_interval_list_name')
-        sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
-                                         'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')        
-        key['analysis_file_name'], key['units_object_id'] = self._save_sorting_nwb(key, sorting, timestamps,
-                                                                                   sort_interval_list_name, 
-                                                                                   sort_interval)
-        AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
-        
-        sorting_key = (self & key).proj().fetch1()
-        sorting_key['sorting_id'] = 'S_'+str(uuid.uuid4())[:8]
-        sorting_key['sorting_path'] = key['sorting_path']
-        sorting_key['parent_sorting_id'] = ''
-        
         # add sorting to CuratedSpikeSorting
-        CuratedSpikeSorting.insert1(sorting_key, skip_duplicates=True)
-        self.insert1(key)
+        CuratedSpikeSorting.insert_sorting(key, key['sorting_path'], '', sorting=sorting, timestamps=timestamps)
     
     def delete(self):
         """Extends the delete method of base class to implement permission checking.
@@ -613,70 +594,10 @@ class SpikeSorting(dj.Computed):
                        + key['artifact_removed_interval_list_name']
         return sorting_name
     
-    def _save_sorting_nwb(self, key, sorting, timestamps, sort_interval_list_name,
-                          sort_interval, metrics=None, unit_ids=None):
-        """Store a sorting in a new AnalysisNwbfile
-        Parameters
-        ----------
-        key : dict
-            key to SpikeSorting table
-        sorting : si.Sorting
-            sorting
-        timestamps : array_like
-            Time stamps of the sorted recoridng;
-            used to convert the spike timings from index to real time
-        sort_interval_list_name : str
-            name of sort interval
-        sort_interval : list
-            interval for start and end of sort
-        metrics : dict, optional
-            quality metrics, by default None
-        unit_ids : list, optional
-            IDs of units whose spiketrains to save, by default None
-
-        Returns
-        -------
-        analysis_file_name : str
-        units_object_id : str
-        """
-
-        sort_interval_valid_times = (IntervalList & \
-                {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
-
-        units = dict()
-        units_valid_times = dict()
-        units_sort_interval = dict()
-        if unit_ids is None:
-            unit_ids = sorting.get_unit_ids()
-        for unit_id in unit_ids:
-            spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
-            units[unit_id] = timestamps[spike_times_in_samples]
-            units_valid_times[unit_id] = sort_interval_valid_times
-            units_sort_interval[unit_id] = [sort_interval]
-
-        analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
-        object_ids = AnalysisNwbfile().add_units(analysis_file_name,
-                                        units, units_valid_times,
-                                        units_sort_interval,
-                                        metrics=metrics)
-        if object_ids=='':
-            print('Sorting contains no units. Created an empty analysis nwb file anyway.')
-            units_object_id = ''
-        else:
-            units_object_id = object_ids[0]
-        return analysis_file_name,  units_object_id
-    
+ 
     # TODO: write a function to import sortings done outside of dj
     def _import_sorting(self, key):
         raise NotImplementedError
                 
-@schema
-class CuratedSpikeSorting(dj.Manual):
-    definition = """
-    # Has records for every sorting; similar to IntervalList
-    sorting_id: varchar(10)
-    ---
-    -> SpikeSorting
-    sorting_path: varchar(1000)
-    parent_sorting_id='': varchar(10)
-    """ 
+
+
