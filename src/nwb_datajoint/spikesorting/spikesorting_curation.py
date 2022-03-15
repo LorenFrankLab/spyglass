@@ -327,6 +327,26 @@ class CuratedSpikeSorting(dj.Manual):
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
+@schema
+class FinalizedCuratedSpikeSorting(dj.Manual):
+    definition = """
+    -> CuratedSpikeSorting
+    ---
+    """
+    class Unit(dj.Part):
+        definition = """
+        # Table for holding sorted units
+        -> FinalizedCuratedSpikeSorting
+        unit_id: int   # ID for each unit
+        ---
+        label='': varchar(80)   # optional label for each unit
+        noise_overlap=-1: float   # noise overlap metric for each unit
+        isolation_score=-1: float   # isolation score metric for each unit
+        isi_violation=-1: float   # ISI violation score for each unit
+        firing_rate=-1: float   # firing rate
+        num_spikes=-1: int   # total number of spikes
+        """
+        
 # @schema 
 # class CuratedSpikeSortingSelection(dj.Manual):
 #     definition = """
