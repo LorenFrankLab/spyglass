@@ -4,14 +4,21 @@ import sortingview as sv
 import spikeinterface as si
 from pathlib import Path
 
-from .common_spikesorting import SpikeSortingRecording, SpikeSorting, CuratedSpikeSorting
+from .spikesorting_curation import CuratedSpikeSorting
+from .spikesorting import SpikeSortingRecording
 
 schema = dj.schema('common_sortingview')
 
 @schema
+class SortingviewWorkspaceSelection(dj.Manual):
+    definition = """
+    -> CuratedSpikeSorting
+    """
+
+@schema
 class SortingviewWorkspace(dj.Computed):
     definition = """
-    -> SpikeSortingRecording
+    -> SortingviewWorkspaceSelection
     ---
     workspace_uri: varchar(1000)
     sortingview_recording_id: varchar(30)
@@ -21,6 +28,7 @@ class SortingviewWorkspace(dj.Computed):
     def make(self, key: dict):
         # Load recording, wrap it as old spikeextractors recording extractor, 
         # then save as h5 (sortingview requires this format)
+        css = (CuratedSpikeSorting & key).fetch1()
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
         old_recording = si.create_extractor_from_new_recording(recording)

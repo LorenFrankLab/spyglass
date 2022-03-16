@@ -6,8 +6,9 @@ import datajoint as dj
 import sortingview as sv
 import spikeinterface as si
 
-from ...common_nwbfile import AnalysisNwbfile
-from .common_spikesorting import SpikeSortingRecording, SpikeSorting, Sortings
+from ..common.common_nwbfile import AnalysisNwbfile
+from .spikesorting import SpikeSortingRecording, SpikeSorting
+from .spikesorting_curation import Curation
 
 schema = dj.schema('common_waveforms')
 
@@ -27,7 +28,7 @@ class WaveformParameters(dj.Manual):
 @schema
 class WaveformSelection(dj.Manual):
     definition = """
-    -> CuratedSpikeSorting
+    -> Curation
     -> WaveformParameters
     ---
     """
@@ -39,15 +40,18 @@ class Waveforms(dj.Computed):
     ---
     waveform_extractor_path: varchar(220)
     -> AnalysisNwbfile
-    object_id: varchar(40)   # Object ID for the waveforms in NWB file
+    waveforms_object_id: varchar(40)   # Object ID for the waveforms in NWB file
     """
     def make(self, key):
+        recording = Curation.get_recording_extractor(key)
+        sorting = Curation.get_sorting_extractor(key)
+        
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
         
-        sorting_path = (Sortings & key).fetch1('sorting_path')
+        sorting_path = (SpikeSorting & key).fetch1('sorting_path')
         sorting = si.load_extractor(sorting_path)
-        
+
         print('Extracting waveforms...')
         waveform_params = (WaveformParameters & key).fetch1('waveform_params')
         waveform_extractor_name = self._get_waveform_extractor_name(key)
@@ -62,7 +66,7 @@ class Waveforms(dj.Computed):
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
         object_id = AnalysisNwbfile().add_units_waveforms(key['analysis_file_name'],
                                                           waveform_extractor=waveforms)
-        key['object_id'] = object_id       
+        key['waveforms_object_id'] = object_id       
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])       
              
         self.insert1(key)

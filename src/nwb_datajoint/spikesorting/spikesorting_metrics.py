@@ -5,8 +5,8 @@ import datajoint as dj
 import spikeinterface.toolkit as st
 import numpy as np
     
-from .common_waveforms import Waveforms
-from .common_nwbfile import AnalysisNwbfile
+from .spikesorting_waveforms import Waveforms
+from ..common.common_nwbfile import AnalysisNwbfile
 
 schema = dj.schema('common_metrics')
 
