@@ -7,10 +7,9 @@ import warnings
 import spikeinterface as si
 from spikeinterface.core.segmentutils import AppendSegmentRecording
 
-from .common_interval import IntervalList
-from .common_spikesorting import SpikeSortingRecording
-from .common_session import Session
-from .nwb_helper_fn import get_valid_intervals
+from ..common.common_interval import IntervalList
+from .spikesorting import SpikeSortingRecording
+from ..common.nwb_helper_fn import get_valid_intervals
 
 schema = dj.schema('common_artifact')
 
@@ -62,6 +61,7 @@ class ArtifactDetection(dj.Computed):
         artifact_params = (ArtifactDetectionParameters & key).fetch1("artifact_params")
         
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
+        recording_name = SpikeSortingRecording._get_recording_name(key)
         recording = si.load_extractor(recording_path) 
     
         artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
@@ -87,21 +87,23 @@ class ArtifactDetection(dj.Computed):
         key['artifact_removed_valid_times'] = artifact_removed_valid_times
         
         # set up a name for no-artifact times using recording id
-        key['artifact_removed_interval_list_name'] = key['recording_id'] + '_' + key['artifact_params_name'] + '_artifact_removed_valid_times'
+        key['artifact_removed_interval_list_name'] = recording_name + '_' + key['artifact_params_name'] + '_artifact_removed_valid_times'
         
-        # insert artifact times and valid times into ArtifactRemovedIntervalList with an appropriate name
-        tmp_key = (ArtifactDetectionSelection & key).proj().fetch1()
-        tmp_key['artifact_removed_interval_list_name'] = key['artifact_removed_interval_list_name']
-        tmp_key['artifact_removed_valid_times'] = key['artifact_removed_valid_times']
-        tmp_key['artifact_times'] = key['artifact_times']
-        ArtifactRemovedIntervalList.insert1(tmp_key, skip_duplicates = True)
+        ArtifactRemovedIntervalList.insert1(key, replace = True)
+
+        # # insert artifact times and valid times into ArtifactRemovedIntervalList with an appropriate name
+        # tmp_key = (ArtifactDetectionSelection & key).proj().fetch1()
+        # tmp_key['artifact_removed_interval_list_name'] = key['artifact_removed_interval_list_name']
+        # tmp_key['artifact_removed_valid_times'] = key['artifact_removed_valid_times']
+        # tmp_key['artifact_times'] = key['artifact_times']
+        # ArtifactRemovedIntervalList.insert1(tmp_key, skip_duplicates = True)
         
         # also insert into IntervalList
         tmp_key = {}
         tmp_key['nwb_file_name'] = key['nwb_file_name']
         tmp_key['interval_list_name'] = key['artifact_removed_interval_list_name']
         tmp_key['valid_times'] = key['artifact_removed_valid_times']
-        IntervalList.insert1(tmp_key, skip_duplicates=True)
+        IntervalList.insert1(tmp_key, replace=True)
         
         # insert into computed table
         self.insert1(key)
@@ -113,7 +115,7 @@ class ArtifactRemovedIntervalList(dj.Manual):
     # Note that entries can come from either ArtifactDetection() or alternative artifact removal analyses.
     artifact_removed_interval_list_name: varchar(200)
     ---
-    -> ArtifactDetection
+    -> ArtifactDetectionSelection
     artifact_removed_valid_times: longblob
     artifact_times: longblob # np array of artifact intervals
     """

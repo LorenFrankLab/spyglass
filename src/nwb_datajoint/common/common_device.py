@@ -3,6 +3,7 @@ import ndx_franklab_novela
 
 schema = dj.schema('common_device')
 
+system_list = ["SpikeGadgets","TDT_Rig1","TDT_Rig2","PCS","RCS","RNS","NeuroOmega","Other"]
 
 @schema
 class DataAcquisitionDevice(dj.Manual):
@@ -33,7 +34,10 @@ class DataAcquisitionDevice(dj.Manual):
             if isinstance(device, ndx_franklab_novela.DataAcqDevice):
                 device_dict = dict()
                 device_dict['device_name'] = device.name
-                device_dict['system'] = device.system
+                if device.system in system_list:
+                    device_dict['system'] = device.system
+                else:
+                    Warning(f'Data acquisition system {device.system} not in system list; setting to default value.')
                 device_dict['amplifier'] = device.amplifier
                 device_dict['adc_circuit'] = device.adc_circuit
                 cls.insert1(device_dict, skip_duplicates=True)

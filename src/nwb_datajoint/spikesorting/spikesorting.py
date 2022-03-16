@@ -25,8 +25,6 @@ from ..common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from ..common.common_session import Session
 from ..common.dj_helper_fn import dj_replace, fetch_nwb
 from ..common.nwb_helper_fn import get_valid_intervals
-#from .sortingview import SortingviewWorkspace, SortingviewWorkspaceSorting
-from .spikesorting_curation import CuratedSpikeSorting
 
 class Timer:
     """
@@ -305,7 +303,6 @@ class SpikeSortingRecording(dj.Computed):
     def make(self, key):
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         recording = self._get_filtered_recording(key)
-
         recording_name = self._get_recording_name(key)
 
         tmp_key = {}
@@ -327,7 +324,7 @@ class SpikeSortingRecording(dj.Computed):
         self.insert1(key)
     
     @staticmethod
-    def _get_recording_name(self, key):
+    def _get_recording_name(key):
         recording_name = key['nwb_file_name'] + '_' \
         + key['sort_interval_name'] + '_' \
         + str(key['sort_group_id']) + '_' \
@@ -540,10 +537,8 @@ class SpikeSorting(dj.Computed):
         key['sorting_path'] = str(sorting_folder / Path(sorting_name))
         if os.path.exists(key['sorting_path']):
             shutil.rmtree(key['sorting_path'])
-        sorting = sorting.save(folder=key['sorting_path'])
-        
-        # add sorting to CuratedSpikeSorting
-        CuratedSpikeSorting.insert_sorting(key, key['sorting_path'], '', sorting=sorting, timestamps=timestamps)
+        sorting = sorting.save(folder=key['sorting_path']) 
+        self.insert1(key)
     
     def delete(self):
         """Extends the delete method of base class to implement permission checking.

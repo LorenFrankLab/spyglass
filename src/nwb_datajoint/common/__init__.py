@@ -1,5 +1,3 @@
-# Reorganize this into hierarchy
-# Note: users will have their own tables... permission system
 from .common_behav import (HeadDir, LinPos, PositionSource, RawPosition, Speed,
                            StateScriptFile, VideoFile)
 from .common_device import CameraDevice, DataAcquisitionDevice, Probe
@@ -22,10 +20,6 @@ from .common_nwbfile import (AnalysisNwbfile, AnalysisNwbfileKachery, Nwbfile,
 from .common_region import BrainRegion
 from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session, SessionGroup
-from ..spikesorting.spikesorting import (SortGroup, SpikeSortingPreprocessingParameters,
-                                  SpikeSortingRecordingSelection, SpikeSortingRecording,SpikeSorterParameters,
-                                  SpikeSortingSelection, SpikeSorting, Sortings)
-from ..spikesorting.spikesorting_curation import (CuratedSpikeSorting)
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
 from .common_backup import SpikeSortingBackUp, CuratedSpikeSortingBackUp
@@ -34,8 +28,7 @@ from .nwb_helper_fn import (close_nwb_files, estimate_sampling_rate,
                             get_nwb_file, get_raw_eseries, get_valid_intervals)
 from .populate_all_common import populate_all_common
 
-import spikeinterface as si
 import os
 
-si.set_global_tmp_folder(os.environ['NWB_DATAJOINT_TEMP_DIR'])
+#si.set_global_tmp_folder(os.environ['NWB_DATAJOINT_TEMP_DIR'])
 

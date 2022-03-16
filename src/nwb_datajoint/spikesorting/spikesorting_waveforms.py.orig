@@ -8,7 +8,6 @@ import spikeinterface as si
 
 from ..common.common_nwbfile import AnalysisNwbfile
 from .spikesorting import SpikeSortingRecording, SpikeSorting
-from .spikesorting_curation import Curation
 
 schema = dj.schema('common_waveforms')
 
@@ -43,6 +42,7 @@ class Waveforms(dj.Computed):
     waveforms_object_id: varchar(40)   # Object ID for the waveforms in NWB file
     """
     def make(self, key):
+        from .spikesorting_curation import Curation
         recording = Curation.get_recording_extractor(key)
         sorting = Curation.get_sorting_extractor(key)
         
