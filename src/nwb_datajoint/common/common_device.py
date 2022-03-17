@@ -3,7 +3,6 @@ import ndx_franklab_novela
 
 schema = dj.schema('common_device')
 
-system_list = ["SpikeGadgets","TDT_Rig1","TDT_Rig2","PCS","RCS","RNS","NeuroOmega","Other"]
 
 @schema
 class DataAcquisitionDevice(dj.Manual):
