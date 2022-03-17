@@ -1,11 +1,11 @@
-from csv import list_dialects
 import os
 import pathlib
-import time
-from pathlib import Path
 import shutil
+import time
 import uuid
+from csv import list_dialects
 from functools import reduce
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -17,14 +17,16 @@ import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
 from ..common.common_device import Probe
-from ..common.common_lab import LabMember, LabTeam
 from ..common.common_ephys import Electrode, ElectrodeGroup
 from ..common.common_interval import (IntervalList, SortInterval,
-                              interval_list_intersect, union_adjacent_index)
+                                      interval_list_intersect,
+                                      union_adjacent_index)
+from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from ..common.common_session import Session
 from ..common.dj_helper_fn import dj_replace, fetch_nwb
 from ..common.nwb_helper_fn import get_valid_intervals
+
 
 class Timer:
     """
@@ -52,7 +54,9 @@ class Timer:
         if self._verbose:
             print(f"Elapsed time for {self._label}: {self.elapsed()} sec")
 
+
 schema = dj.schema('common_spikesorting')
+
 
 @schema
 class SortGroup(dj.Manual):
@@ -70,7 +74,7 @@ class SortGroup(dj.Manual):
         -> Electrode
         """
 
-    def set_group_by_shank(self, nwb_file_name: str, references: dict=None, omit_ref_electrode_group=False):
+    def set_group_by_shank(self, nwb_file_name: str, references: dict = None, omit_ref_electrode_group=False):
         """Divides electrodes into groups based on their shank position.
         * Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
           single group
@@ -110,7 +114,7 @@ class SortGroup(dj.Manual):
                 # specify reference electrode. Use 'references' if passed, otherwise use reference from config
                 if not references:
                     shank_elect_ref = electrodes['original_reference_electrode'][np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                                                                            electrodes['probe_shank'] == shank)]
+                                                                                                electrodes['probe_shank'] == shank)]
                     if np.max(shank_elect_ref) == np.min(shank_elect_ref):
                         sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
                     else:
@@ -118,7 +122,8 @@ class SortGroup(dj.Manual):
                             f'Error in electrode group {e_group}: reference electrodes are not all the same')
                 else:
                     if e_group not in references.keys():
-                        raise Exception(f"electrode group {e_group} not a key in references, so cannot set reference")
+                        raise Exception(
+                            f"electrode group {e_group} not a key in references, so cannot set reference")
                     else:
                         sg_key['sort_reference_electrode_id'] = references[e_group]
 
@@ -126,8 +131,8 @@ class SortGroup(dj.Manual):
                 # electrode group not same as reference electrode group, insert sort group and procceed to define sort
                 # group electrodes
                 reference_electrode_group = \
-                electrodes[electrodes["electrode_id"] == sg_key['sort_reference_electrode_id']][
-                    "electrode_group_name"]
+                    electrodes[electrodes["electrode_id"] == sg_key['sort_reference_electrode_id']][
+                        "electrode_group_name"]
                 # If reference electrode corresponds to a real electrode (and not for example the flag for common
                 # average referencing),
                 # check that exactly one electrode group was found for it, and take that electrode group.
@@ -146,7 +151,8 @@ class SortGroup(dj.Manual):
                         self.SortGroupElectrode().insert1(sge_key)
                     sort_group += 1
                 else:
-                    print(f"Omitting electrode group {e_group} from sort groups because contains reference.")
+                    print(
+                        f"Omitting electrode group {e_group} from sort groups because contains reference.")
 
     def set_group_by_electrode_group(self, nwb_file_name: str):
         """Assign groups to all non-bad channel electrodes based on their electrode group
@@ -170,7 +176,7 @@ class SortGroup(dj.Manual):
         for e_group in e_groups:
             sge_key['electrode_group_name'] = e_group
             #sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
-            #TEST
+            # TEST
             sg_key['sort_group_id'] = sge_key['sort_group_id'] = int(e_group)
             # get the list of references and make sure they are all the same
             shank_elect_ref = electrodes['original_reference_electrode'][electrodes['electrode_group_name'] == e_group]
@@ -200,8 +206,8 @@ class SortGroup(dj.Manual):
         for sort_group in sort_group_list:
             key['sort_group_id'] = sort_group
             self.insert(dj_replace(sort_group_list, sort_group_ref_list,
-                                    'sort_group_id', 'sort_reference_electrode_id'),
-                                             replace="True")
+                                   'sort_group_id', 'sort_reference_electrode_id'),
+                        replace="True")
 
     def get_geometry(self, sort_group_id, nwb_file_name):
         """
@@ -258,6 +264,7 @@ class SortGroup(dj.Manual):
                         f'Relative electrode locations have three coordinates; only two are currenlty supported')
         return np.ndarray.tolist(geometry)
 
+
 @schema
 class SpikeSortingPreprocessingParameters(dj.Manual):
     definition = """
@@ -265,12 +272,13 @@ class SpikeSortingPreprocessingParameters(dj.Manual):
     ---
     preproc_params: blob
     """
+
     def insert_default(self):
         # set up the default filter parameters
         freq_min = 300  # high pass filter value
         freq_max = 6000  # low pass filter value
-        margin_ms = 5 # margin in ms on border to avoid border effect
-        seed = 0 # random seed for whitening
+        margin_ms = 5  # margin in ms on border to avoid border effect
+        seed = 0  # random seed for whitening
 
         key = dict()
         key['preproc_params_name'] = 'default'
@@ -279,6 +287,7 @@ class SpikeSortingPreprocessingParameters(dj.Manual):
                                  'margin_ms': margin_ms,
                                  'seed': seed}
         self.insert1(key, skip_duplicates=True)
+
 
 @schema
 class SpikeSortingRecordingSelection(dj.Manual):
@@ -292,6 +301,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
     -> IntervalList
     """
 
+
 @schema
 class SpikeSortingRecording(dj.Computed):
     definition = """
@@ -300,6 +310,7 @@ class SpikeSortingRecording(dj.Computed):
     recording_path: varchar(1000)
     -> IntervalList.proj(sort_interval_list_name='interval_list_name')
     """
+
     def make(self, key):
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         recording = self._get_filtered_recording(key)
@@ -326,24 +337,26 @@ class SpikeSortingRecording(dj.Computed):
     @staticmethod
     def _get_recording_name(key):
         recording_name = key['nwb_file_name'] + '_' \
-        + key['sort_interval_name'] + '_' \
-        + str(key['sort_group_id']) + '_' \
-        + key['preproc_params_name']
+            + key['sort_interval_name'] + '_' \
+            + str(key['sort_group_id']) + '_' \
+            + key['preproc_params_name']
         return recording_name
 
     @staticmethod
     def _get_recording_timestamps(recording):
-        if recording.get_num_segments()>1:
+        if recording.get_num_segments() > 1:
             frames_per_segment = [0]
             for i in range(len(recording.recording_list)):
-                frames_per_segment.append(recording.get_num_frames(segment_index=i))
+                frames_per_segment.append(
+                    recording.get_num_frames(segment_index=i))
 
             cumsum_frames = np.cumsum(frames_per_segment)
             total_frames = np.sum(frames_per_segment)
 
             timestamps = np.zeros((total_frames,))
             for i in range(len(recording.recording_list)):
-                timestamps[cumsum_frames[i]:cumsum_frames[i+1]] = recording.get_times(segment_index=i)
+                timestamps[cumsum_frames[i]:cumsum_frames[i + 1]
+                           ] = recording.get_times(segment_index=i)
         else:
             timestamps = recording.get_times()
         return timestamps
@@ -366,7 +379,8 @@ class SpikeSortingRecording(dj.Computed):
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
         valid_interval_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
                                                 'interval_list_name': 'raw data valid times'}).fetch1('valid_times')
-        valid_sort_times = interval_list_intersect(sort_interval, valid_interval_times)
+        valid_sort_times = interval_list_intersect(
+            sort_interval, valid_interval_times)
         return valid_sort_times
 
     def _get_filtered_recording(self, key: dict):
@@ -387,19 +401,22 @@ class SpikeSortingRecording(dj.Computed):
         """
 
         nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
-        recording = se.read_nwb_recording(nwb_file_abs_path, load_time_vector=True)
+        recording = se.read_nwb_recording(
+            nwb_file_abs_path, load_time_vector=True)
 
         valid_sort_times = self._get_sort_interval_valid_times(key)
         # shape is (N, 2)
-        valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval) \
+        valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval)
                                              for interval in valid_sort_times])
         # join intervals of indices that are adjacent
-        valid_sort_times_indices = reduce(union_adjacent_index, valid_sort_times_indices)
-        if valid_sort_times_indices.ndim==1:
-            valid_sort_times_indices = np.expand_dims(valid_sort_times_indices, 0)
+        valid_sort_times_indices = reduce(
+            union_adjacent_index, valid_sort_times_indices)
+        if valid_sort_times_indices.ndim == 1:
+            valid_sort_times_indices = np.expand_dims(
+                valid_sort_times_indices, 0)
 
         # create an AppendRecording if there is more than one disjoint sort interval
-        if len(valid_sort_times_indices)>1:
+        if len(valid_sort_times_indices) > 1:
             recordings_list = []
             for interval_indices in valid_sort_times_indices:
                 recording_single = recording.frame_slice(start_frame=interval_indices[0],
@@ -431,11 +448,13 @@ class SpikeSortingRecording(dj.Computed):
                                                           operator='median')
         else:
             raise ValueError("Invalid reference channel ID")
-        filter_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
+        filter_params = (SpikeSortingPreprocessingParameters &
+                         key).fetch1('preproc_params')
         recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
                                                      freq_max=filter_params['frequency_max'])
 
         return recording
+
 
 @schema
 class SpikeSorterParameters(dj.Manual):
@@ -445,13 +464,15 @@ class SpikeSorterParameters(dj.Manual):
     ---
     sorter_params: blob
     """
+
     def insert_default(self):
         """Default params from spike sorters available via spikeinterface
         """
         sorters = ss.available_sorters()
         for sorter in sorters:
             sorter_params = ss.get_default_params(sorter)
-            self.insert1([sorter, 'default', sorter_params], skip_duplicates=True)
+            self.insert1([sorter, 'default', sorter_params],
+                         skip_duplicates=True)
 
         # Insert Frank lab defaults
         sorter = "mountainsort4"
@@ -467,7 +488,8 @@ class SpikeSorterParameters(dj.Manual):
                          'clip_size': 40,
                          'detect_threshold': 3,
                          'detect_interval': 10}
-        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+        self.insert1([sorter, sorter_params_name, sorter_params],
+                     skip_duplicates=True)
         # Cortical probe default
         sorter_params_name = "franklab_probe_ctx_30KHz"
         sorter_params = {'detect_sign': -1,
@@ -480,10 +502,13 @@ class SpikeSorterParameters(dj.Manual):
                          'clip_size': 40,
                          'detect_threshold': 3,
                          'detect_interval': 10}
-        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+        self.insert1([sorter, sorter_params_name, sorter_params],
+                     skip_duplicates=True)
 
 
-from .common_artifact import ArtifactRemovedIntervalList # noqa
+from .common_artifact import ArtifactRemovedIntervalList  # noqa
+
+
 @schema
 class SpikeSortingSelection(dj.Manual):
     definition = """
@@ -494,6 +519,7 @@ class SpikeSortingSelection(dj.Manual):
     ---
     import_path = "": varchar(200)  # optional path to previous curated sorting output
     """
+
 
 @schema
 class SpikeSorting(dj.Computed):
@@ -520,19 +546,20 @@ class SpikeSorting(dj.Computed):
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
         # load valid times
-        artifact_times = (ArtifactRemovedIntervalList & key).fetch1('artifact_times')
-        if artifact_times.ndim==1:
-            artifact_times = np.expand_dims(artifact_times,0)
+        artifact_times = (ArtifactRemovedIntervalList &
+                          key).fetch1('artifact_times')
+        if artifact_times.ndim == 1:
+            artifact_times = np.expand_dims(artifact_times, 0)
 
         if artifact_times:
             # convert valid intervals to indices
             list_triggers = []
             for interval in artifact_times:
                 list_triggers.append(np.arange(np.searchsorted(timestamps, interval[0]),
-                                            np.searchsorted(timestamps, interval[1])))
+                                               np.searchsorted(timestamps, interval[1])))
             list_triggers = np.asarray(list_triggers).flatten().tolist()
 
-            if recording.get_num_segments()>1:
+            if recording.get_num_segments() > 1:
                 recording = si.concatenate_recordings(recording.recording_list)
             recording = st.remove_artifacts(recording=recording, list_triggers=list_triggers,
                                             ms_before=0, ms_after=0, mode='zeros')
@@ -551,10 +578,12 @@ class SpikeSorting(dj.Computed):
         #     rec_list.append(sliced_rec)
         # recording = si.append_recordings(rec_list)
 
-        preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
+        preproc_params = (SpikeSortingPreprocessingParameters &
+                          key).fetch1('preproc_params')
 
         print(f'Running spike sorting on {key}...')
-        sorter, sorter_params = (SpikeSorterParameters & key).fetch1('sorter','sorter_params')
+        sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
+            'sorter', 'sorter_params')
         sorting = ss.run_sorter(sorter, recording,
                                 output_folder=os.getenv('KACHERY_TEMP_DIR'),
                                 delete_output_folder=True,
@@ -578,21 +607,26 @@ class SpikeSorting(dj.Computed):
         current_user_name = dj.config['database.user']
         entries = self.fetch()
         permission_bool = np.zeros((len(entries),))
-        print(f'Attempting to delete {len(entries)} entries, checking permission...')
+        print(
+            f'Attempting to delete {len(entries)} entries, checking permission...')
 
         for entry_idx in range(len(entries)):
             # check the team name for the entry, then look up the members in that team, then get their datajoint user names
-            team_name = (SpikeSortingRecordingSelection & (SpikeSortingRecordingSelection & entries[entry_idx]).proj()).fetch1()['team_name']
-            lab_member_name_list = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
+            team_name = (SpikeSortingRecordingSelection & (
+                SpikeSortingRecordingSelection & entries[entry_idx]).proj()).fetch1()['team_name']
+            lab_member_name_list = (LabTeam.LabTeamMember & {
+                                    'team_name': team_name}).fetch('lab_member_name')
             datajoint_user_names = []
             for lab_member_name in lab_member_name_list:
-                datajoint_user_names.append((LabMember.LabMemberInfo & {'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
+                datajoint_user_names.append((LabMember.LabMemberInfo & {
+                                            'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
             permission_bool[entry_idx] = current_user_name in datajoint_user_names
-        if np.sum(permission_bool)==len(entries):
+        if np.sum(permission_bool) == len(entries):
             print('Permission to delete all specified entries granted.')
             super().delete()
         else:
-            raise Exception('You do not have permission to delete all specified entries. Not deleting anything.')
+            raise Exception(
+                'You do not have permission to delete all specified entries. Not deleting anything.')
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
@@ -607,19 +641,21 @@ class SpikeSorting(dj.Computed):
         analysis_file_names = self.fetch('analysis_file_name')
         for dir in dir_names:
             if not dir in analysis_file_names:
-                full_path = str(pathlib.Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir)
+                full_path = str(pathlib.Path(
+                    os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir)
                 print(f'removing {full_path}')
-                shutil.rmtree(str(pathlib.Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir))
+                shutil.rmtree(
+                    str(pathlib.Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir))
 
     def _get_sorting_name(self, key):
         recording_name = SpikeSortingRecording._get_recording_name(key)
         sorting_name = recording_name + '_' \
-                       + key['sorter'] + '_' \
-                       + key['sorter_params_name'] + '_' \
-                       + key['artifact_removed_interval_list_name']
+            + key['sorter'] + '_' \
+            + key['sorter_params_name'] + '_' \
+            + key['artifact_removed_interval_list_name']
         return sorting_name
 
-
     # TODO: write a function to import sortings done outside of dj
+
     def _import_sorting(self, key):
         raise NotImplementedError
