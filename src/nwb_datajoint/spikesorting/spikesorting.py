@@ -320,7 +320,7 @@ class SpikeSortingRecording(dj.Computed):
         if os.path.exists(key['recording_path']):
             shutil.rmtree(key['recording_path'])
         recording = recording.save(folder=key['recording_path'], n_jobs=1,
-                                   total_memory='5G')        
+                                   total_memory='10G')        
         self.insert1(key)
     
     @staticmethod
