@@ -459,7 +459,7 @@ class SpikeSorterParameters(dj.Manual):
             sorter_params = ss.get_default_params(sorter)
             self.insert1([sorter, 'default', sorter_params], skip_duplicates=True)
 
-    def insert_franklab_defaults(self):
+        # Insert Frank lab defaults
         sorter = "mountainsort4"
         # Hippocampus tetrode default
         sorter_params_name = "franklab_tetrode_hippocampus_30KHz"
