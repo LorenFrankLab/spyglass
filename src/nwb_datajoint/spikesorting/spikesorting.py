@@ -151,7 +151,7 @@ class SortGroup(dj.Manual):
     def set_group_by_electrode_group(self, nwb_file_name: str):
         """Assign groups to all non-bad channel electrodes based on their electrode group
         and sets the reference for each group to the reference for the first channel of the group.
-        
+
         Parameters
         ----------
         nwb_file_name: str
@@ -263,7 +263,7 @@ class SpikeSortingPreprocessingParameters(dj.Manual):
     definition = """
     preproc_params_name: varchar(200)
     ---
-    preproc_params: blob 
+    preproc_params: blob
     """
     def insert_default(self):
         # set up the default filter parameters
@@ -271,7 +271,7 @@ class SpikeSortingPreprocessingParameters(dj.Manual):
         freq_max = 6000  # low pass filter value
         margin_ms = 5 # margin in ms on border to avoid border effect
         seed = 0 # random seed for whitening
-        
+
         key = dict()
         key['preproc_params_name'] = 'default'
         key['preproc_params'] = {'frequency_min': freq_min,
@@ -279,7 +279,7 @@ class SpikeSortingPreprocessingParameters(dj.Manual):
                                  'margin_ms': margin_ms,
                                  'seed': seed}
         self.insert1(key, skip_duplicates=True)
-        
+
 @schema
 class SpikeSortingRecordingSelection(dj.Manual):
     definition = """
@@ -320,9 +320,9 @@ class SpikeSortingRecording(dj.Computed):
         if os.path.exists(key['recording_path']):
             shutil.rmtree(key['recording_path'])
         recording = recording.save(folder=key['recording_path'], n_jobs=1,
-                                   total_memory='10G')        
+                                   total_memory='10G')
         self.insert1(key)
-    
+
     @staticmethod
     def _get_recording_name(key):
         recording_name = key['nwb_file_name'] + '_' \
@@ -330,7 +330,7 @@ class SpikeSortingRecording(dj.Computed):
         + str(key['sort_group_id']) + '_' \
         + key['preproc_params_name']
         return recording_name
-    
+
     @staticmethod
     def _get_recording_timestamps(recording):
         if recording.get_num_segments()>1:
@@ -378,17 +378,17 @@ class SpikeSortingRecording(dj.Computed):
 
         Parameters
         ----------
-        key: dict, 
+        key: dict,
             primary key of SpikeSortingRecording table
 
         Returns
         -------
         recording: si.Recording
         """
-        
-        nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])   
+
+        nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
         recording = se.read_nwb_recording(nwb_file_abs_path, load_time_vector=True)
-        
+
         valid_sort_times = self._get_sort_interval_valid_times(key)
         # shape is (N, 2)
         valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval) \
@@ -397,7 +397,7 @@ class SpikeSortingRecording(dj.Computed):
         valid_sort_times_indices = reduce(union_adjacent_index, valid_sort_times_indices)
         if valid_sort_times_indices.ndim==1:
             valid_sort_times_indices = np.expand_dims(valid_sort_times_indices, 0)
-            
+
         # create an AppendRecording if there is more than one disjoint sort interval
         if len(valid_sort_times_indices)>1:
             recordings_list = []
@@ -409,19 +409,19 @@ class SpikeSortingRecording(dj.Computed):
         else:
             recording = recording.frame_slice(start_frame=valid_sort_times_indices[0][0],
                                               end_frame=valid_sort_times_indices[0][1])
-        
+
         channel_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
                                                        'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
         channel_ids = channel_ids.tolist()
         ref_channel_id = (SortGroup & {'nwb_file_name': key['nwb_file_name'],
                                        'sort_group_id': key['sort_group_id']}).fetch('sort_reference_electrode_id')
         ref_channel_id = ref_channel_id.tolist()
-        
+
         # include ref channel in first slice, then exclude it in second slice
         if ref_channel_id[0] >= 0:
             channel_ids_ref = channel_ids + ref_channel_id
             recording = recording.channel_slice(channel_ids=channel_ids_ref)
-            
+
             recording = st.preprocessing.common_reference(recording, reference='single',
                                                           ref_channel_ids=ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids)
@@ -434,7 +434,7 @@ class SpikeSortingRecording(dj.Computed):
         filter_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
         recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
                                                      freq_max=filter_params['frequency_max'])
-       
+
         return recording
 
 @schema
@@ -453,7 +453,37 @@ class SpikeSorterParameters(dj.Manual):
             sorter_params = ss.get_default_params(sorter)
             self.insert1([sorter, 'default', sorter_params], skip_duplicates=True)
 
-from .spikesorting_artifact import ArtifactRemovedIntervalList
+        # Insert Frank lab defaults
+        sorter = "mountainsort4"
+        # Hippocampus tetrode default
+        sorter_params_name = "franklab_tetrode_hippocampus_30KHz"
+        sorter_params = {'detect_sign': -1,
+                         'adjacency_radius': -1,
+                         'freq_min': 600,
+                         'freq_max': 6000,
+                         'filter': False,
+                         'whiten': True,
+                         'num_workers': 1,
+                         'clip_size': 40,
+                         'detect_threshold': 3,
+                         'detect_interval': 10}
+        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+        # Cortical probe default
+        sorter_params_name = "franklab_probe_ctx_30KHz"
+        sorter_params = {'detect_sign': -1,
+                         'adjacency_radius': 100,
+                         'freq_min': 300,
+                         'freq_max': 6000,
+                         'filter': False,
+                         'whiten': True,
+                         'num_workers': 1,
+                         'clip_size': 40,
+                         'detect_threshold': 3,
+                         'detect_interval': 10}
+        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+
+
+from .common_artifact import ArtifactRemovedIntervalList # noqa
 @schema
 class SpikeSortingSelection(dj.Manual):
     definition = """
@@ -483,17 +513,17 @@ class SpikeSorting(dj.Computed):
         3. Creates an analysis NWB file and saves the sorting there
            (this is redundant with 2; will change in the future)
         """
-        
+
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
-        
+
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
         # load valid times
         artifact_times = (ArtifactRemovedIntervalList & key).fetch1('artifact_times')
         if artifact_times.ndim==1:
             artifact_times = np.expand_dims(artifact_times,0)
-        
+
         if artifact_times:
             # convert valid intervals to indices
             list_triggers = []
@@ -501,12 +531,12 @@ class SpikeSorting(dj.Computed):
                 list_triggers.append(np.arange(np.searchsorted(timestamps, interval[0]),
                                             np.searchsorted(timestamps, interval[1])))
             list_triggers = np.asarray(list_triggers).flatten().tolist()
-            
+
             if recording.get_num_segments()>1:
                 recording = si.concatenate_recordings(recording.recording_list)
             recording = st.remove_artifacts(recording=recording, list_triggers=list_triggers,
                                             ms_before=0, ms_after=0, mode='zeros')
-        
+
         # NOTE: decided not to do this and instead just use remove_artifacts; keep for now
         # slice valid times and append them
         # rec_list = []
@@ -520,9 +550,9 @@ class SpikeSorting(dj.Computed):
         #         sliced_rec = recording.frame_slice(start_frame=idx_interval[0], end_frame=idx_interval[1])
         #     rec_list.append(sliced_rec)
         # recording = si.append_recordings(rec_list)
-                
+
         preproc_params = (SpikeSortingPreprocessingParameters & key).fetch1('preproc_params')
-        
+
         print(f'Running spike sorting on {key}...')
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1('sorter','sorter_params')
         sorting = ss.run_sorter(sorter, recording,
@@ -537,9 +567,9 @@ class SpikeSorting(dj.Computed):
         key['sorting_path'] = str(sorting_folder / Path(sorting_name))
         if os.path.exists(key['sorting_path']):
             shutil.rmtree(key['sorting_path'])
-        sorting = sorting.save(folder=key['sorting_path']) 
+        sorting = sorting.save(folder=key['sorting_path'])
         self.insert1(key)
-    
+
     def delete(self):
         """Extends the delete method of base class to implement permission checking.
         Note that this is NOT a security feature, as anyone that has access to source code
@@ -563,10 +593,10 @@ class SpikeSorting(dj.Computed):
             super().delete()
         else:
             raise Exception('You do not have permission to delete all specified entries. Not deleting anything.')
-        
+
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
-    
+
     def nightly_cleanup(self):
         """Clean up spike sorting directories that are not in the SpikeSorting table.
         This should be run after AnalysisNwbFile().nightly_cleanup()
@@ -580,7 +610,7 @@ class SpikeSorting(dj.Computed):
                 full_path = str(pathlib.Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir)
                 print(f'removing {full_path}')
                 shutil.rmtree(str(pathlib.Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir))
-                
+
     def _get_sorting_name(self, key):
         recording_name = SpikeSortingRecording._get_recording_name(key)
         sorting_name = recording_name + '_' \
@@ -588,11 +618,8 @@ class SpikeSorting(dj.Computed):
                        + key['sorter_params_name'] + '_' \
                        + key['artifact_removed_interval_list_name']
         return sorting_name
-    
- 
+
+
     # TODO: write a function to import sortings done outside of dj
     def _import_sorting(self, key):
         raise NotImplementedError
-                
-
-
