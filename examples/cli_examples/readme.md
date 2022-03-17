@@ -79,6 +79,10 @@ Create a spike sorting recording.
 spyglass create-spike-sorting-recording recording.yaml
 
 spyglass list-spike-sorting-recordings RN2_20191110_.nwb
+
+# Create the associated view
+spyglass create-spike-sorting-recording-view recording.yaml
+# Use --replace to force recreate the view
 ```
 
 ### Insert artifact detection parameters
@@ -101,4 +105,19 @@ Define spike sorter parameters.
 spyglass insert-spike-sorter-parameters parameters.yaml
 
 spyglass list-spike-sorter-parameters
+```
+
+### Run spike sorting
+
+Run spike sorting
+
+```bash
+# To see the format of the .yaml file, run without the .yaml argument
+spyglass run-spike-sorting sorting.yaml
+
+spyglass list-spike-sortings RN2_20191110_.nwb
+
+# Create the associated view
+spyglass create-spike-sorting-view sorting.yaml
+# Use --replace to force recreate the view
 ```
