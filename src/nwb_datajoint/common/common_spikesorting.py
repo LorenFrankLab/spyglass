@@ -459,6 +459,36 @@ class SpikeSorterParameters(dj.Manual):
             sorter_params = ss.get_default_params(sorter)
             self.insert1([sorter, 'default', sorter_params], skip_duplicates=True)
 
+        # Insert Frank lab defaults
+        sorter = "mountainsort4"
+        # Hippocampus tetrode default
+        sorter_params_name = "franklab_tetrode_hippocampus_30KHz"
+        sorter_params = {'detect_sign': -1,
+                         'adjacency_radius': -1,
+                         'freq_min': 600,
+                         'freq_max': 6000,
+                         'filter': False,
+                         'whiten': True,
+                         'num_workers': 1,
+                         'clip_size': 40,
+                         'detect_threshold': 3,
+                         'detect_interval': 10}
+        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+        # Cortical probe default
+        sorter_params_name = "franklab_probe_ctx_30KHz"
+        sorter_params = {'detect_sign': -1,
+                         'adjacency_radius': 100,
+                         'freq_min': 300,
+                         'freq_max': 6000,
+                         'filter': False,
+                         'whiten': True,
+                         'num_workers': 1,
+                         'clip_size': 40,
+                         'detect_threshold': 3,
+                         'detect_interval': 10}
+        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+
+
 from .common_artifact import ArtifactRemovedIntervalList
 @schema
 class SpikeSortingSelection(dj.Manual):
