@@ -33,7 +33,10 @@ class DataAcquisitionDevice(dj.Manual):
             if isinstance(device, ndx_franklab_novela.DataAcqDevice):
                 device_dict = dict()
                 device_dict['device_name'] = device.name
-                device_dict['system'] = device.system
+                if device.system == 'MCU':
+                    device_dict['system'] = 'SpikeGadgets'
+                else:
+                    device_dict['system'] = device.system
                 device_dict['amplifier'] = device.amplifier
                 device_dict['adc_circuit'] = device.adc_circuit
                 cls.insert1(device_dict, skip_duplicates=True)
