@@ -1,0 +1,203 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Installation &#8212; Spyglass 0.0.6 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <link rel="shortcut icon" href="_static/lorenLabImage.png"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="copyright" title="Copyright" href="copyright.html" />
+    <link rel="next" title="Tutorials" href="tutorials.html" />
+    <link rel="prev" title="Spyglass" href="index.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="installation">
+<h1>Installation<a class="headerlink" href="#installation" title="Permalink to this headline">¶</a></h1>
+<section id="installing-packages">
+<h2>Installing packages<a class="headerlink" href="#installing-packages" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic">
+<li><p>Clone this repository:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>   git clone https://github.com/LorenFrankLab/nwb_datajoint.git
+</pre></div>
+</div>
+</li>
+<li><p>Set up and activate a conda environment from <code class="docutils literal notranslate"><span class="pre">environment.yml</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>   <span class="nb">cd</span> nwb_datajoint
+   conda env create -f environment.yml
+   conda activate nwb_datajoint
+</pre></div>
+</div>
+</li>
+<li><p>Install this repository:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>   pip install -e .
+</pre></div>
+</div>
+</li>
+</ol>
+</section>
+<section id="setting-up-database-access">
+<h2>Setting up database access<a class="headerlink" href="#setting-up-database-access" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic">
+<li><p>Ask Loren or Eric to set up an account for you on the Frank lab
+database. Note that you have to be connected to UCSF LAN to access
+this server.</p>
+<p>If you’re not affiliated with UCSF or if you are just looking to
+try out <code class="docutils literal notranslate"><span class="pre">nwb_datajoint</span></code>, then you will need to set up a
+different MySQL server. For example, you can set up your own local
+server with a Docker image of a MySQL server configured for
+Datajoint (see
+<code class="docutils literal notranslate"><span class="pre">instructions</span> <span class="pre">&lt;https://tutorials.datajoint.io/setting-up/local-database.html&gt;</span></code>__
+and/or <code class="docutils literal notranslate"><span class="pre">tutorial</span>&#160;&#160;&#160; <span class="pre">notebook</span> <span class="pre">&lt;./notebooks/docker_mysql_tutorial.ipynb&gt;</span></code>__).</p>
+</li>
+<li><p>Add the following environment variables (e.g. in <code class="docutils literal notranslate"><span class="pre">~/.bashrc</span></code>). This
+example assumes that you are interacting with the database on a
+computer that has mounted <code class="docutils literal notranslate"><span class="pre">stelmo</span></code> at <code class="docutils literal notranslate"><span class="pre">/stelmo</span></code> (if the mount
+location is different, change accordingly). For this to take effect,
+log out and log back in, or run <code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">~/.bashrc</span></code> in the terminal.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>   <span class="nb">export</span> <span class="nv">NWB_DATAJOINT_BASE_DIR</span><span class="o">=</span><span class="s2">&quot;/stelmo/nwb/&quot;</span>
+   <span class="nb">export</span> <span class="nv">SPIKE_SORTING_STORAGE_DIR</span><span class="o">=</span><span class="s2">&quot;/stelmo/nwb/spikesorting&quot;</span>
+   <span class="nb">export</span> <span class="nv">DJ_SUPPORT_FILEPATH_MANAGEMENT</span><span class="o">=</span><span class="s2">&quot;TRUE&quot;</span>
+   <span class="nb">export</span> <span class="nv">KACHERY_DAEMON_HOST</span><span class="o">=</span><span class="s2">&quot;typhoon&quot;</span>
+   <span class="nb">export</span> <span class="nv">KACHERY_DAEMON_PORT</span><span class="o">=</span><span class="s2">&quot;14747&quot;</span>
+   <span class="nb">export</span> <span class="nv">KACHERY_TEMP_DIR</span><span class="o">=</span><span class="s2">&quot;/stelmo/nwb/tmp&quot;</span>
+   <span class="nb">export</span> <span class="nv">NWB_DATAJOINT_TEMP_DIR</span><span class="o">=</span><span class="s2">&quot;/stelmo/nwb/tmp&quot;</span>
+   <span class="nb">export</span> <span class="nv">KACHERY_STORAGE_DIR</span><span class="o">=</span><span class="s2">&quot;/stelmo/nwb/kachery-storage&quot;</span>
+   <span class="nb">export</span> <span class="nv">FIGURL_CHANNEL</span><span class="o">=</span><span class="s2">&quot;franklab2&quot;</span>
+</pre></div>
+</div>
+<p>Note that a local NWB_DATAJOINT_TEMP_DIR (e.g. one on your machine)
+will speed up spikesorting, but make sure it has enough free space
+(ideally at least 500GB)</p>
+</li>
+<li><p>Check if you have access to the <code class="docutils literal notranslate"><span class="pre">kachery</span></code> daemon. Open up a
+terminal, activate the conda environment, and type</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>   kachery-client info
+</pre></div>
+</div>
+<p>If it says you do not have access to the daemon, ask Kyu to add your
+username to the <code class="docutils literal notranslate"><span class="pre">kachery-users</span></code> group. &gt; If you’re running your own
+<code class="docutils literal notranslate"><span class="pre">kachery</span></code> daemon, then this doesn’t apply.</p>
+</li>
+<li><p>Configure DataJoint. To connect to the Datajoint database, we have to
+specify information about it such as the hostname and the port. You
+should also change your password from the temporary one you were
+given. Go to the config directory, and run
+```dj_config.py`` <a class="reference external" href="https://github.com/LorenFrankLab/nwb_datajoint/blob/master/config/dj_config.py">https://github.com/LorenFrankLab/nwb_datajoint/blob/master/config/dj_config.py</a>`__
+in the terminal with your username:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>   <span class="nb">cd</span> config <span class="c1"># change to the config directory</span>
+   python dj_config.py &lt;username&gt; <span class="c1"># run the configuration script</span>
+</pre></div>
+</div>
+<p>..</p>
+<p>Again, if you’re using your own MySQL server, then you may need to
+change the other settings as well.</p>
+</li>
+</ol>
+<p>Finally, open up a python console (e.g. run <code class="docutils literal notranslate"><span class="pre">ipython</span></code> from terminal)
+and import <code class="docutils literal notranslate"><span class="pre">nwb_datajoint</span></code> to check that the installation has worked.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+            <p class="logo"><a href="index.html">
+              <img class="logo" src="_static/lorenLabImage.png" alt="Logo"/>
+            </a></p>
+<h1 class="logo"><a href="index.html">Spyglass</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="index.html">Home page</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#installing-packages">Installing packages</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#setting-up-database-access">Setting up database access</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="_autosummary/spyglass.html">API reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="how_to_contribute.html">How to Contribute</a></li>
+<li class="toctree-l1"><a class="reference internal" href="copyright.html">Copyright</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="index.html" title="previous chapter">Spyglass</a></li>
+      <li>Next: <a href="tutorials.html" title="next chapter">Tutorials</a></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020 - Present, Loren Frank.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
