@@ -567,7 +567,7 @@ class SpikeSorting(dj.Computed):
         print(f'Running spike sorting on {key}...')
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1('sorter','sorter_params')
         sorting = ss.run_sorter(sorter, recording,
-                                output_folder=os.getenv('KACHERY_TEMP_DIR'),
+                                output_folder=os.getenv('NWB_DATAJOINT_TEMP_DIR'),
                                 delete_output_folder=True,
                                 **sorter_params)
         key['time_of_sort'] = int(time.time())
