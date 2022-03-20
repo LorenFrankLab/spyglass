@@ -6,10 +6,10 @@ import numpy as np
 import sortingview as sv
 import spikeinterface as si
 
-from .spikesorting import SpikeSortingRecording
+from .spikesorting_recording import SpikeSortingRecording
 from .spikesorting_curation import Curation
 
-schema = dj.schema('sortingview')
+schema = dj.schema('spikesorting_sortingview')
 
 
 @schema

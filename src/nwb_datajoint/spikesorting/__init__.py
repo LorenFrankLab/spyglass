@@ -4,11 +4,10 @@
 #from .spikesorting_metrics import MetricParameters, MetricSelection, QualityMetrics
 #from .spikesorting_waveforms import WaveformParameters, WaveformSelection, Waveforms
 from .sortingview import SortingviewWorkspace
-from .spikesorting import (SortGroup, SpikeSorterParameters, SpikeSorting,
-                           SpikeSortingPreprocessingParameters,
-                           SpikeSortingRecording,
-                           SpikeSortingRecordingSelection,
-                           SpikeSortingSelection)
+from .spikesorting_recording import (SortGroup, SortInterval, SpikeSortingPreprocessingParameters,
+                                     SpikeSortingRecording, SpikeSortingRecordingSelection)
+from .spikesorting_sorting import SpikeSorterParameters, SpikeSortingSelection, SpikeSorting
+
 from .spikesorting_artifact import (ArtifactDetection,
                                     ArtifactDetectionParameters,
                                     ArtifactDetectionSelection,
