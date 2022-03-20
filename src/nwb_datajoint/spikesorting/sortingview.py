@@ -11,7 +11,6 @@ from .spikesorting_curation import Curation
 
 schema = dj.schema('spikesorting_sortingview')
 
-
 @schema
 class SortingviewWorkspaceSelection(dj.Manual):
     definition = """

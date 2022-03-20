@@ -128,10 +128,10 @@ class SpikeSorting(dj.Computed):
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
             'sorter', 'sorter_params')
         
-        # sorter_temp_dir = 
+        sorter_temp_dir = tempfile.TemporaryDirectory(dir=os.getenv('NWB_DATAJOINT_TEMP_DIR'))
         
         sorting = sis.run_sorter(sorter, recording,
-                                output_folder=os.getenv('NWB_DATAJOINT_TEMP_DIR'),
+                                output_folder=sorter_temp_dir.name,
                                 delete_output_folder=True,
                                 **sorter_params)
         key['time_of_sort'] = int(time.time())
