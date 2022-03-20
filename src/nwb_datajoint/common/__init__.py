@@ -8,7 +8,7 @@ from .common_dio import DIOEvents
 from .common_ephys import (LFP, Electrode, ElectrodeGroup, LFPBand,
                            LFPBandSelection, LFPSelection, Raw, SampleCount)
 from .common_filter import FirFilter
-from .common_interval import (IntervalList, SortInterval, interval_list_censor,
+from .common_interval import (IntervalList, interval_list_censor,
                               interval_list_contains,
                               interval_list_contains_ind,
                               interval_list_excludes,

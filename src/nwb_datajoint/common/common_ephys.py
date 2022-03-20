@@ -8,7 +8,6 @@ import pynwb
 from .common_device import Probe  # noqa: F401
 from .common_filter import FirFilter
 from .common_interval import IntervalList, interval_list_censor, interval_list_contains_ind, interval_list_intersect  # noqa: F401
-# SortInterval, interval_list_intersect, interval_list_excludes_ind
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_region import BrainRegion  # noqa: F401
 from .common_session import Session  # noqa: F401

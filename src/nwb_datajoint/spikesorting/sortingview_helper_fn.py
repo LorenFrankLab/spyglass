@@ -1,15 +1,14 @@
 "Sortingview helper functions"
 
+from ..common.common_lab import LabMember
+
 import os
 import tempfile
 from typing import List
-
-import kachery_client as kc
 import sortingview as sv
+
 import spikeinterface as si
 import spikeinterface.toolkit as st
-
-from .common_lab import LabMember
 
 
 def set_workspace_permission(workspace_uri: str, team_members: List[str], sortingview_sorting_id: str = None):
