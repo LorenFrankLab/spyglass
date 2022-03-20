@@ -506,9 +506,7 @@ class SpikeSorterParameters(dj.Manual):
                      skip_duplicates=True)
 
 
-from .common_artifact import ArtifactRemovedIntervalList  # noqa
-
-
+from .spikesorting_artifact import ArtifactRemovedIntervalList  # noqa
 @schema
 class SpikeSortingSelection(dj.Manual):
     definition = """

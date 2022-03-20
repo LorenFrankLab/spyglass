@@ -5,6 +5,7 @@ import tempfile
 import uuid
 from pathlib import Path
 from warnings import WarningMessage
+from xmlrpc.client import FastUnmarshaller
 
 import datajoint as dj
 import spikeinterface as si
@@ -105,6 +106,7 @@ class Curation(dj.Manual):
         merge_groups = (Curation & key).fetch1('merge_groups')
         # TODO: write code to get merged sorting extractor
         if len(merge_groups) != 0:
+
             return NotImplementedError
             # sorting = ...
 
@@ -212,6 +214,12 @@ class Waveforms(dj.Computed):
 
         print('Extracting waveforms...')
         waveform_params = (WaveformParameters & key).fetch1('waveform_params')
+        if 'whiten' in waveform_params:
+            if waveform_params['whiten']:
+                recording = st.preprocessing.whiten(recording)
+                # remove the 'whiten' dictionary entry as it is not recognized by spike interface
+            del waveform_params['whiten']
+  
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key['waveform_extractor_path'] = str(
             Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) / Path(waveform_extractor_name))
@@ -269,7 +277,8 @@ class MetricParameters(dj.Manual):
                 'num_chunks_per_segment': 20,
                 'chunk_size': 10000,
                 'seed': 0},
-        'isi_violation': {'isi_threshold_ms': 1.5},
+        'isi_violation': {'isi_threshold_ms': 1.5,
+                          'min_isi_ms' : 0.0},
         'nn_isolation': {'max_spikes_for_nn': 1000,
                          'n_neighbors': 5,
                          'n_components': 7,
@@ -326,6 +335,7 @@ class QualityMetrics(dj.Computed):
         qm = {}
         params = (MetricParameters & key).fetch1('metric_params')
         for metric_name, metric_params in params.items():
+            print(metric_params)
             metric = self._compute_metric(
                 waveform_extractor, metric_name, **metric_params)
             qm[metric_name] = metric
@@ -350,9 +360,13 @@ class QualityMetrics(dj.Computed):
 
     def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
         metric_func = _metric_name_to_func[metric_name]
-        if metric_name == 'snr' or metric_name == 'isi_violation':
-            metric = metric_func(waveform_extractor,
-                                 metric_name, **metric_params)
+        #TODO clean up code below
+        if metric_name == 'isi_violation':
+            metric = metric_func([], waveform_extractor, **metric_params)
+        elif metric_name == 'snr':
+            peak_sign = metric_params['peak_sign']
+            del metric_params['peak_sign']
+            metric = metric_func(waveform_extractor, peak_sign=peak_sign, **metric_params)
         else:
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():
@@ -372,8 +386,9 @@ class QualityMetrics(dj.Computed):
 
 
 def _compute_isi_violation_fractions(self, waveform_extractor, **metric_params):
-    isi_threshold_ms = metric_params[isi_threshold_ms]
-    min_isi_ms = metric_params[min_isi_ms]
+    print(metric_params)
+    isi_threshold_ms = metric_params['isi_threshold_ms']
+    min_isi_ms = metric_params['min_isi_ms']
 
     # Extract the total number of spikes that violated the isi_threshold for each unit
     isi_violation_counts = st.qualitymetrics.compute_isi_violations(
@@ -497,7 +512,24 @@ class AutomaticCuration(dj.Computed):
         if not merge_params:
             return sorting, False
         else:
-            return NotImplementedError
+            # TODO: use the metrics to identify clusters that should be merged
+            new_merges = []
+            # append these merges to the parent merge_groups
+            for m in new_merges:
+                # check to see if the first cluster listed is in a current merge group
+                found = False
+                for idx, pm in enumerate(parent_merge_groups):
+                    if m[0] == pm[0]:
+                        # add the additional units in m to the identified merge group.
+                        pm.extend(m[1:])
+                        pm.sort()
+                        found = True
+                        break;
+                if not found:
+                    #append this merge group to the list
+                    parent_merge_groups.append(m)
+            return parent_merge_groups.sort()
+   
 
     @staticmethod
     def get_labels(sorting, parent_labels, quality_metrics, label_params):
@@ -513,22 +545,26 @@ class AutomaticCuration(dj.Computed):
         :return: labels
         :rtype: dict
         """
-
         # overview:
         # 1. Use quality metrics to determine labels for units
         # 2. Append labels to current labels, checking for inconsistencies
         if not label_params:
-            return {}
+            return parent_labels
         else:
-            return NotImplementedError
-
+            new_labels = {}
+            for n in new_labels:
+                if n in parent_labels:
+                    parent_labels[n].extend(new_labels[n])
+                    #TODO Implement consistency checks? 
+                else:
+                    parent_labels[n] = new_labels[n]
+            return parent_labels
 
 @schema
 class FinalizedSpikeSortingSelection(dj.Manual):
     definition = """
     -> Curation
     """
-
 
 @schema
 class FinalizedSpikeSorting(dj.Manual):
@@ -555,6 +591,7 @@ class FinalizedSpikeSorting(dj.Manual):
         """
 
     def make(self, key):
+        unit_labels_to_remove = ['reject', 'noise']
         # check that the Curation has metrics
         try:
             metrics = (Curation & key).fetch1('metrics')
@@ -563,11 +600,16 @@ class FinalizedSpikeSorting(dj.Manual):
                 f'Metrics for Curation {key} must be calculated before it can be inserted here')
             return
 
+        sorting = Curation.get_curated_sorting_extractor(key)
+        unit_ids = sorting.get_unit_ids()
         # Get the labels for the units, add only those units that do not have 'reject' or 'noise' labels
         unit_labels = (Curation & key).fetch1('labels')
         accepted_units = []
-        for idx, unit_id in enumerate(unit_labels):
-            if not 'reject' in unit_labels[unit_id] and not 'noise' in unit_labels[unit_id]:
+        for unit_id in unit_ids:
+            if unit_id in unit_labels:
+                if len(set(unit_labels_to_remove) & set(unit_labels[unit_id])) == 0:
+                    accepted_units.append(unit_id)
+            else:
                 accepted_units.append(unit_id)
 
         # get the labels for the accepted units
@@ -582,7 +624,7 @@ class FinalizedSpikeSorting(dj.Manual):
 
         # exit out if there are no labels or no accepted units
         if len(unit_labels) == 0 or len(accepted_units) == 0:
-            print(f'{key}: no curation found or no accepted units')
+            print(f'{key}: no accepted units found')
             return
 
         # get the sorting and save it in the NWB file
