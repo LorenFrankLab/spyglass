@@ -1,6 +1,5 @@
 import datajoint as dj
 import sortingview as sv
-import labbox_ephys as le
 import numpy as np
 import pandas as pd
 import pynwb
@@ -9,6 +8,7 @@ from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.common_spikesorting import (CuratedSpikeSorting, SpikeSortingWorkspace,
                                           UnitInclusionParameters)
 from ..common.dj_helper_fn import fetch_nwb  # dj_replace
+from .get_unit_waveforms import get_unit_waveforms
 
 schema = dj.schema('decoding_clusterless')
 
@@ -90,7 +90,7 @@ class UnitMarks(dj.Computed):
         # assume the channels are all the same for the moment. This would need to be changed for larger probes
         channel_ids_by_unit = [channel_ids] * (max(units['unit_id']) + 1)
         # here we only get 8 points because that should be plenty to find the minimum/maximum
-        waveforms = le.get_unit_waveforms(
+        waveforms = get_unit_waveforms(
             recording, sorting, units['unit_id'], channel_ids_by_unit, 8)
         print(waveforms[0][0].shape[0])
 
