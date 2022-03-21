@@ -8,7 +8,7 @@ import kachery_client as kc
 import os
 import spikeinterface as si
 
-from ..common.common_spikesorting import SpikeSortingRecording
+from ..spikesorting.spikesorting_recording import SpikeSortingRecording
 
 schema = dj.schema('figurl_view_spike_sorting_recording')
 

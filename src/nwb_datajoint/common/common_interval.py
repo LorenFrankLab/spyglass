@@ -51,16 +51,6 @@ class IntervalList(dj.Manual):
                 [[epoch_data.start_time, epoch_data.stop_time]])
             cls.insert1(epoch_dict, skip_duplicates=True)
 
-@schema
-class SortInterval(dj.Manual):
-    definition = """
-    -> Session
-    sort_interval_name: varchar(200) # name for this interval
-    ---
-    sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
-    """
-
-
 # TODO: make all of the functions below faster if possible
 def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
     """Returns an interval list with only the intervals whose length is > min_length and < max_length

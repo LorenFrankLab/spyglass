@@ -9,10 +9,9 @@ from spikeinterface.core.segmentutils import AppendSegmentRecording
 
 from ..common.common_interval import IntervalList
 from ..common.nwb_helper_fn import get_valid_intervals
-from .spikesorting import SpikeSortingRecording
+from .spikesorting_recording import SpikeSortingRecording
 
-schema = dj.schema('common_artifact')
-
+schema = dj.schema('spikesorting_artifact')
 
 @schema
 class ArtifactDetectionParameters(dj.Manual):

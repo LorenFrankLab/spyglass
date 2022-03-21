@@ -11,14 +11,14 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.toolkit as st
 
-from ..common.common_interval import IntervalList, SortInterval
+from ..common.common_interval import IntervalList 
 from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.dj_helper_fn import fetch_nwb
-from .spikesorting import SpikeSorting, SpikeSortingRecording
+from .spikesorting_recording import SortInterval, SpikeSortingRecording
+from .spikesorting_sorting import SpikeSorting
 
-schema = dj.schema('common_curation')
-
+schema = dj.schema('spikesorting_curation')
 
 @schema
 class Curation(dj.Manual):
