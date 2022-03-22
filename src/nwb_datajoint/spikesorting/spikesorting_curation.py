@@ -470,7 +470,7 @@ class AutomaticCuration(dj.Computed):
         label_params = (AutomaticCurationParameters &
                         key).fetch1('label_params')
         labels = self.get_labels(
-            sorting, parent_labels, quality_metrics, label_params)
+            parent_sorting, parent_labels, quality_metrics, label_params)
 
         # keep the quality metrics only if no merging occurred.
         metrics = quality_metrics if not units_merged else None
@@ -481,7 +481,7 @@ class AutomaticCuration(dj.Computed):
             Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(curated_sorting_name))
         if os.path.exists(key['sorting_path']):
             shutil.rmtree(key['sorting_path'])
-        sorting = sorting.save(folder=key['sorting_path'])
+        parent_sorting = parent_sorting.save(folder=key['sorting_path'])
 
         # insert this sorting into the CuratedSpikeSorting Table
         key['sorting_id'] = Curation.insert_curation(key, parent_curation_id=key['parent_curation_id'],
