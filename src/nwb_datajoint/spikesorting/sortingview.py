@@ -6,8 +6,10 @@ import numpy as np
 import sortingview as sv
 import spikeinterface as si
 
+from ..common.common_lab import LabTeam
 from .spikesorting_recording import SpikeSortingRecording
 from .spikesorting_curation import Curation
+from .sortingview_helper_fn import set_workspace_permission
 
 schema = dj.schema('spikesorting_sortingview')
 
@@ -61,6 +63,11 @@ class SortingviewWorkspace(dj.Computed):
         metrics = (Curation & key).fetch1('metrics')
         self.add_metrics_to_sorting(
             key, metrics, key['sortingview_sorting_id'])
+
+        # set the permissions
+        team_name = (SpikeSortingRecording & key).fetch1()['team_name']
+        team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
+        set_workspace_permission(workspace.uri, team_members, key['sortingview_sorting_id'])
 
     def remove_sorting_from_workspace(self, key):
         return NotImplementedError
