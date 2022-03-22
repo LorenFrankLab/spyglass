@@ -112,15 +112,15 @@ def list_lab_team_members(team_name: str):
 @click.command(help="List sort groups for a session. Note that nwb_file_name should include the trailing underscore.")
 @click.argument('nwb_file_name')
 def list_sort_groups(nwb_file_name: str):
-    import nwb_datajoint.common as ndc
-    results = ndc.SortGroup & {'nwb_file_name': nwb_file_name}
+    import nwb_datajoint.spikesorting as nds
+    results = nds.SortGroup & {'nwb_file_name': nwb_file_name}
     print(results)
 
 @click.command(help="List sort group electrodes for a session. Note that nwb_file_name should include the trailing underscore.")
 @click.argument('nwb_file_name')
 def list_sort_group_electrodes(nwb_file_name: str):
-    import nwb_datajoint.common as ndc
-    results = ndc.SortGroup.SortGroupElectrode & {'nwb_file_name': nwb_file_name}
+    import nwb_datajoint.spikesorting as nds
+    results = nds.SortGroup.SortGroupElectrode & {'nwb_file_name': nwb_file_name}
     print(results)
 
 @click.command(help="List interval lists for a session.")
@@ -133,8 +133,8 @@ def list_interval_lists(nwb_file_name: str):
 @click.command(help="List sort intervals for a session.")
 @click.argument('nwb_file_name')
 def list_sort_intervals(nwb_file_name: str):
-    import nwb_datajoint.common as ndc
-    results = ndc.SortInterval & {'nwb_file_name': nwb_file_name}
+    import nwb_datajoint.spikesorting as nds
+    results = nds.SortInterval & {'nwb_file_name': nwb_file_name}
     print(results)
 
 sample_spike_sorting_preprocessing_parameters = {
@@ -159,17 +159,17 @@ def insert_spike_sorting_preprocessing_parameters(yaml_file_name: Union[str, Non
         )
         return
 
-    import nwb_datajoint.common as ndc
+    import nwb_datajoint.spikesorting as nds
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
     x = { k: x[k] for k in sample_spike_sorting_preprocessing_parameters.keys() }
-    ndc.SpikeSortingPreprocessingParameters.insert1(x)
+    nds.SpikeSortingPreprocessingParameters.insert1(x)
 
 @click.command(help="List spike sorting preprocessing parameters.")
 def list_spike_sorting_preprocessing_parameters():
-    import nwb_datajoint.common as ndc
-    results = ndc.SpikeSortingPreprocessingParameters & {}
+    import nwb_datajoint.spikesorting as nds
+    results = nds.SpikeSortingPreprocessingParameters & {}
     print(results)
 
 sample_artifact_detection_parameters = {
@@ -193,17 +193,17 @@ def insert_artifact_detection_parameters(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.common as ndc
+    import nwb_datajoint.spikesorting as nds
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
     x = { k: x[k] for k in sample_artifact_detection_parameters.keys() }
-    ndc.ArtifactDetectionParameters.insert1(x)
+    nds.ArtifactDetectionParameters.insert1(x)
 
 @click.command(help="List artifact detection parameters.")
 def list_artifact_detection_parameters():
-    import nwb_datajoint.common as ndc
-    results = ndc.ArtifactDetectionParameters & {}
+    import nwb_datajoint.spikesorting as nds
+    results = nds.ArtifactDetectionParameters & {}
     print(results)
 
 sample_spike_sorting_recording_selection_key = {
@@ -226,24 +226,25 @@ def create_spike_sorting_recording(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.common as ndc
+    import nwb_datajoint.spikesorting as nds
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
     x = { k: x[k] for k in sample_spike_sorting_recording_selection_key.keys() }
-    ndc.SpikeSortingRecordingSelection.insert1(x, skip_duplicates=True)
-    ndc.SpikeSortingRecording.populate([(ndc.SpikeSortingRecordingSelection & x).proj()])
+    nds.SpikeSortingRecordingSelection.insert1(x, skip_duplicates=True)
+    nds.SpikeSortingRecording.populate([(nds.SpikeSortingRecordingSelection & x).proj()])
 
 @click.command(help="List spike sorting recordings for a session.")
 @click.argument('nwb_file_name')
 def list_spike_sorting_recordings(nwb_file_name: str):
-    import nwb_datajoint.common as ndc
-    results = ndc.SpikeSortingRecording & {'nwb_file_name': nwb_file_name}
+    import nwb_datajoint.spikesorting as nds
+    results = nds.SpikeSortingRecording & {'nwb_file_name': nwb_file_name}
     print(results)
 
 @click.command(help="Create a spike sorting recording view")
 @click.argument('yaml_file_name', required=False)
-def create_spike_sorting_recording_view(yaml_file_name: Union[str, None]):
+@click.option('--replace', is_flag=True)
+def create_spike_sorting_recording_view(yaml_file_name: Union[str, None], replace: bool):
     if yaml_file_name is None:
         print('You must specify a yaml file. Sample content:')
         print('==========================================')
@@ -252,13 +253,16 @@ def create_spike_sorting_recording_view(yaml_file_name: Union[str, None]):
         )
         return
 
-    raise Exception('Not implemented. Waiting for figurl views PR to be merged.')
-    # import nwb_datajoint.common as ndc
-    # import nwb_datajoint.figurl_views as ndf
-    # with open(yaml_file_name, 'r') as f:
-    #     x = yaml.safe_load(f)
-    # x = { k: x[k] for k in sample_spike_sorting_recording_key.keys() }
-    # ndf.SpikeSortingRecordingView.populate([(ndc.SpikeSortingRecording & x).proj()])
+    import nwb_datajoint.spikesorting as nds
+    import nwb_datajoint.figurl_views as ndf
+    with open(yaml_file_name, 'r') as f:
+        x = yaml.safe_load(f)
+    x = { k: x[k] for k in sample_spike_sorting_recording_selection_key.keys() }
+    if replace:
+        (ndf.SpikeSortingRecordingView & x).delete()
+    ndf.SpikeSortingRecordingView.populate([(nds.SpikeSortingRecording & x).proj()])
+    figurl = (ndf.SpikeSortingRecordingView & x).fetch1('figurl')
+    print(figurl)
 
 sample_spike_sorter_params_key = {
     'sorter_params_name': 'example',
@@ -285,16 +289,16 @@ def insert_spike_sorter_parameters(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.common as ndc
+    import nwb_datajoint.spikesorting as nds
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     x = { k: x[k] for k in sample_spike_sorter_params_key.keys() }
-    ndc.SpikeSorterParameters.insert1(x)
+    nds.SpikeSorterParameters.insert1(x)
 
 @click.command(help="List spike sorter parameters.")
 def list_spike_sorter_parameters():
-    import nwb_datajoint.common as ndc
-    results = ndc.SpikeSorterParameters & {}
+    import nwb_datajoint.spikesorting as nds
+    results = nds.SpikeSorterParameters & {}
     print(results)
 
 sample_spike_sorting_key = dict(sample_spike_sorting_recording_selection_key, **{
@@ -313,23 +317,23 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.common as ndc
+    import nwb_datajoint.spikesorting as nds
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
     x = { k: x[k] for k in sample_spike_sorting_key.keys() }
     spike_sorting_recording_query = { k: x[k] for k in sample_spike_sorting_recording_selection_key.keys() }
-    spike_sorting_recording_key = (ndc.SpikeSortingRecording & spike_sorting_recording_query).proj().fetch1()
+    spike_sorting_recording_key = (nds.SpikeSortingRecording & spike_sorting_recording_query).proj().fetch1()
 
     artifact_key = dict(spike_sorting_recording_key, **{
         'artifact_params_name': x['artifact_params_name']
     })
-    ndc.ArtifactDetectionSelection.insert1(artifact_key, skip_duplicates=True)
-    ndc.ArtifactDetection.populate([(ndc.ArtifactDetectionSelection & artifact_key).proj()])
-    artifact_removed_interval_list_name = (ndc.ArtifactDetection & artifact_key).fetch1('artifact_removed_interval_list_name')
+    nds.ArtifactDetectionSelection.insert1(artifact_key, skip_duplicates=True)
+    nds.ArtifactDetection.populate([(nds.ArtifactDetectionSelection & artifact_key).proj()])
+    artifact_removed_interval_list_name = (nds.ArtifactDetection & artifact_key).fetch1('artifact_removed_interval_list_name')
 
     sorter_params_name = x['sorter_params_name']
-    sorter = (ndc.SpikeSorterParameters & {'sorter_params_name': sorter_params_name}).fetch1('sorter')
+    sorter = (nds.SpikeSorterParameters & {'sorter_params_name': sorter_params_name}).fetch1('sorter')
     
     sorting_key = dict(spike_sorting_recording_key, **{
         'sorter': sorter,
@@ -337,15 +341,38 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
         'artifact_removed_interval_list_name': artifact_removed_interval_list_name
     })
         
-    ndc.SpikeSortingSelection.insert1(sorting_key, skip_duplicates=True)
-    ndc.SpikeSorting.populate([(ndc.SpikeSortingSelection & sorting_key).proj()])
+    nds.SpikeSortingSelection.insert1(sorting_key, skip_duplicates=True)
+    nds.SpikeSorting.populate([(nds.SpikeSortingSelection & sorting_key).proj()])
 
 @click.command(help="List spike sortings for a session.")
 @click.argument('nwb_file_name')
 def list_spike_sortings(nwb_file_name: str):
-    import nwb_datajoint.common as ndc
-    results = ndc.SpikeSorting & {'nwb_file_name': nwb_file_name}
+    import nwb_datajoint.spikesorting as nds
+    results = nds.SpikeSorting & {'nwb_file_name': nwb_file_name}
     print(results)
+
+@click.command(help="Create a spike sorting view")
+@click.argument('yaml_file_name', required=False)
+@click.option('--replace', is_flag=True)
+def create_spike_sorting_view(yaml_file_name: Union[str, None], replace: bool):
+    if yaml_file_name is None:
+        print('You must specify a yaml file. Sample content:')
+        print('==========================================')
+        print(
+            yaml.safe_dump(sample_spike_sorting_key, sort_keys=False)
+        )
+        return
+
+    import nwb_datajoint.spikesorting as nds
+    import nwb_datajoint.figurl_views as ndf
+    with open(yaml_file_name, 'r') as f:
+        x = yaml.safe_load(f)
+    x = { k: x[k] for k in sample_spike_sorting_key.keys() }
+    if replace:
+        (ndf.SpikeSortingView & x).delete()
+    ndf.SpikeSortingView.populate([(nds.SpikeSorting & x).proj()])
+    figurl = (ndf.SpikeSortingView & x).fetch1('figurl')
+    print(figurl)
 
 cli.add_command(insert_session)
 cli.add_command(list_sessions)
@@ -370,3 +397,4 @@ cli.add_command(insert_spike_sorter_parameters)
 cli.add_command(list_spike_sorter_parameters)
 cli.add_command(run_spike_sorting)
 cli.add_command(list_spike_sortings)
+cli.add_command(create_spike_sorting_view)

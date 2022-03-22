@@ -92,7 +92,6 @@ class Session(dj.Imported):
         # print('Unit...')
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
-
 @schema
 class ExperimenterList(dj.Imported):
     definition = """
@@ -120,3 +119,55 @@ class ExperimenterList(dj.Imported):
             key['nwb_file_name'] = nwb_file_name
             key['lab_member_name'] = name
             self.Experimenter().insert1(key)
+
+@schema
+class SessionGroup(dj.Manual):
+    definition = """
+    session_group_name: varchar(200)
+    ---
+    session_group_description: varchar(2000)
+    """
+    @staticmethod
+    def add_group(session_group_name: str, session_group_description):
+        SessionGroup.insert1({
+            'session_group_name': session_group_name,
+            'session_group_description': session_group_description
+        })
+    @staticmethod
+    def update_session_group_description(session_group_name: str, session_group_description):
+        SessionGroup.update1({
+            'session_group_name': session_group_name,
+            'session_group_description': session_group_description
+        })
+    @staticmethod
+    def add_session_to_group(nwb_file_name: str, session_group_name: str):
+        SessionGroupSession.insert1({
+            'session_group_name': session_group_name,
+            'nwb_file_name': nwb_file_name
+        })
+    @staticmethod
+    def remove_session_from_group(nwb_file_name: str, session_group_name: str):
+        query = {'session_group_name': session_group_name, 'nwb_file_name': nwb_file_name}
+        (SessionGroupSession & query).delete()
+    @staticmethod
+    def delete_group(session_group_name: str):
+        query = {'session_group_name': session_group_name}
+        (SessionGroup & query).delete()
+    @staticmethod
+    def get_group_sessions(session_group_name: str):
+        results = (SessionGroupSession & {'session_group_name': session_group_name}).fetch(as_dict=True)
+        return [
+            {'nwb_file_name': result['nwb_file_name']}
+            for result in results
+        ]
+
+# The reason this is not implemented as a dj.Part is that
+# datajoint prohibits deleting from a subtable without
+# also deleting the parent table.
+# See: https://docs.datajoint.org/python/computation/03-master-part.html
+@schema
+class SessionGroupSession(dj.Manual):
+    definition = """
+    -> SessionGroup
+    -> Session
+    """

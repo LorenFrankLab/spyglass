@@ -20,8 +20,7 @@ from nwb_datajoint.common import (RawPosition, HeadDir, Speed, LinPos, StateScri
                                   DIOEvents,
                                   ElectrodeGroup, Electrode, Raw, SampleCount,
                                   LFPSelection, LFP, LFPBandSelection, LFPBand,
-                                  SortGroup, SpikeSorting, SpikeSorter, SpikeSorterParameters,
-                                  IntervalList, SortInterval,
+                                  IntervalList,
                                   Lab, LabMember, LabTeam, Institution,
                                   BrainRegion,
                                   SensorData,
@@ -29,7 +28,7 @@ from nwb_datajoint.common import (RawPosition, HeadDir, Speed, LinPos, StateScri
                                   Subject,
                                   Task, TaskEpoch,
                                   Nwbfile, AnalysisNwbfile, NwbfileKachery, AnalysisNwbfileKachery)
-
+from nwb_datajoint.spikesorting import SortGroup, SortInterval, SpikeSorting, SpikeSorterParameters
 
 def main():
     

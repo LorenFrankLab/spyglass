@@ -19,7 +19,7 @@ def add_module(module_name):
             break
 
     # get a list of usernames 
-    for user in group.members:
+    for user in group.gr_mem:
         file.write(
             f"GRANT ALL PRIVILEGES ON `{module_name}\_%`.* TO `{user}`@'%';\n")
     file.flush()

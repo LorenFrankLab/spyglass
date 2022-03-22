@@ -33,7 +33,8 @@ class MarkParameters(dj.Manual):
     definition = """
     mark_param_name : varchar(80) # a name for this set of parameters
     ---
-    mark_type = 'amplitude':  varchar(40) # the type of mark. Currently only 'amplitude' is supported
+    # the type of mark. Currently only 'amplitude' is supported
+    mark_type = 'amplitude':  varchar(40)
     mark_param_dict:    BLOB    # dictionary of parameters for the mark extraction function
     """
 
@@ -104,6 +105,9 @@ class UnitMarks(dj.Computed):
         # assume the channels are all the same for the moment. This would need to be changed for larger probes
         channel_ids_by_unit = [channel_ids] * (max(units['unit_id']) + 1)
 
+
+<< << << < HEAD
+
         N_WAVEFORM_POINTS = 2
         waveforms = le.get_unit_waveforms(
             recording,
@@ -111,6 +115,11 @@ class UnitMarks(dj.Computed):
             units['unit_id'],
             channel_ids_by_unit,
             N_WAVEFORM_POINTS)
+== == == =
+        # here we only get 8 points because that should be plenty to find the minimum/maximum
+        waveforms = get_unit_waveforms(
+            recording, sorting, units['unit_id'], channel_ids_by_unit, 8)
+>>>>>> > master
 
         if mark_param['mark_type'] == 'amplitude':
             # peak is stored in the middle of the waveform

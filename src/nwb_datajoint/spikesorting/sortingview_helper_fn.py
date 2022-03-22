@@ -1,18 +1,19 @@
 "Sortingview helper functions"
 
-from typing import List
+from ..common.common_lab import LabMember
+
 import os
-import kachery_client as kc
+import tempfile
+from typing import List
+import sortingview as sv
+
 import spikeinterface as si
 import spikeinterface.toolkit as st
-import sortingview as sv
-from .common_lab import LabMember
 
-import tempfile
 
-def set_workspace_permission(workspace_uri: str, team_members: List[str], sortingview_sorting_id: str=None):
+def set_workspace_permission(workspace_uri: str, team_members: List[str], sortingview_sorting_id: str = None):
     """Sets permission curate specified sorting on sortingview workspace based on google ID
-    
+
     Parameters
     ----------
     workspace_uri : str
@@ -24,21 +25,25 @@ def set_workspace_permission(workspace_uri: str, team_members: List[str], sortin
     if sortingview_sorting_id is None:
         sortingview_sorting_id = workspace.sorting_ids[0]
     # check if team_members is empty
-    if len(team_members)==0:
+    if len(team_members) == 0:
         raise ValueError('The specified team does not exist or there are no members in the team;\
                           create or change the entry in LabTeam table first.')
     for team_member in team_members:
-        google_user_id = (LabMember.LabMemberInfo & {'lab_member_name': team_member}).fetch('google_user_name')  
-        if len(google_user_id)!=1:
+        google_user_id = (LabMember.LabMemberInfo & {
+                          'lab_member_name': team_member}).fetch('google_user_name')
+        if len(google_user_id) != 1:
             print(f'Google user ID for {team_member} does not exist or more than one ID detected;\
                     permission not given to {team_member}, skipping...')
-            continue          
-        workspace.set_sorting_curation_authorized_users(sorting_id=sortingview_sorting_id, user_ids=[google_user_id[0]])
-        print(f'Permissions to curate sorting {sortingview_sorting_id} given to {google_user_id[0]}.')
+            continue
+        workspace.set_sorting_curation_authorized_users(
+            sorting_id=sortingview_sorting_id, user_ids=[google_user_id[0]])
+        print(
+            f'Permissions to curate sorting {sortingview_sorting_id} given to {google_user_id[0]}.')
     return workspace_uri
 
-def add_metrics_to_workspace_nocuration(workspace_uri: str, sorting_id: str=None,
-                                        user_ids: List[str]=None):
+
+def add_metrics_to_workspace_nocuration(workspace_uri: str, sorting_id: str = None,
+                                        user_ids: List[str] = None):
     """Computes nearest neighbor isolation and noise overlap metrics and inserts them
     in the specified sorting of the workspace. This bypasses the spyglass pipeline
     for computing metrics and should be used only for spike sortings done in the
@@ -53,7 +58,7 @@ def add_metrics_to_workspace_nocuration(workspace_uri: str, sorting_id: str=None
         sorting id, by default None
     user_ids : list of str, optional
         google ids to confer curation permission, by default None
-        
+
     Returns
     -------
     url : str
@@ -63,15 +68,15 @@ def add_metrics_to_workspace_nocuration(workspace_uri: str, sorting_id: str=None
     """
 
     workspace = sv.load_workspace(workspace_uri)
-    
+
     recording_id = workspace.recording_ids[0]
     recording = workspace.get_recording_extractor(recording_id=recording_id)
 
     new_recording = si.create_recording_from_old_extractor(recording)
     new_recording.annotate(is_filtered=True)
     new_recording = st.preprocessing.whiten(recording=new_recording, seed=0)
-    new_recording.is_dumpable=False 
-    
+    new_recording.is_dumpable = False
+
     if sorting_id is None:
         sorting_id = workspace.sorting_ids[0]
     sorting = workspace.get_sorting_extractor(sorting_id=sorting_id)
@@ -85,21 +90,25 @@ def add_metrics_to_workspace_nocuration(workspace_uri: str, sorting_id: str=None
     isolation = {}
     noise_overlap = {}
     for unit_id in sorting.get_unit_ids():
-        isolation[str(unit_id)] = st.qualitymetrics.pca_metrics.nearest_neighbors_isolation(waveforms, this_unit_id=unit_id)
-        noise_overlap[str(unit_id)] = st.qualitymetrics.pca_metrics.nearest_neighbors_noise_overlap(waveforms, this_unit_id=unit_id)
-    
+        isolation[str(unit_id)] = st.qualitymetrics.pca_metrics.nearest_neighbors_isolation(
+            waveforms, this_unit_id=unit_id)
+        noise_overlap[str(unit_id)] = st.qualitymetrics.pca_metrics.nearest_neighbors_noise_overlap(
+            waveforms, this_unit_id=unit_id)
+
     # external metrics must be in this format to be added to workspace
     external_metrics = [{'name': 'isolation', 'label': 'isolation', 'tooltip': 'isolation',
                         'data': isolation},
                         {'name': 'noise_overlap', 'label': 'noise_overlap', 'tooltip': 'noise_overlap',
                         'data': noise_overlap}]
-    workspace.set_unit_metrics_for_sorting(sorting_id=sorting_id, metrics=external_metrics)
-    
+    workspace.set_unit_metrics_for_sorting(
+        sorting_id=sorting_id, metrics=external_metrics)
+
     if user_ids is not None:
-        workspace.set_sorting_curation_authorized_users(sorting_id=sorting_id, user_ids=user_ids)
+        workspace.set_sorting_curation_authorized_users(
+            sorting_id=sorting_id, user_ids=user_ids)
     url = workspace.spikesortingview(recording_id=recording_id, sorting_id=sorting_id,
                                      label=workspace.label, include_curation=True)
 
     print(f'URL for sortingview: {url}')
-    
+
     return url, external_metrics
