@@ -301,7 +301,7 @@ class SpikeSortingRecording(dj.Computed):
         key['sort_interval_list_name'] = tmp_key['interval_list_name']
 
         # Path to files that will hold the recording extractors
-        recording_folder = Path(os.getenv('NWB_DATAJOINT_RECORDING_DIR'))
+        recording_folder = Path(os.getenv('SPYGLASS_RECORDING_DIR'))
         key['recording_path'] = str(recording_folder / Path(recording_name))
         if os.path.exists(key['recording_path']):
             shutil.rmtree(key['recording_path'])

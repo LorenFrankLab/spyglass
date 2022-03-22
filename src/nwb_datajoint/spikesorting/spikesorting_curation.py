@@ -239,7 +239,7 @@ class Waveforms(dj.Computed):
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key['waveform_extractor_path'] = str(
-            Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) /
+            Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) /
             Path(waveform_extractor_name))
         if os.path.exists(key['waveform_extractor_path']):
             shutil.rmtree(key['waveform_extractor_path'])
@@ -360,7 +360,7 @@ class QualityMetrics(dj.Computed):
             qm[metric_name] = metric
         qm_name = self._get_quality_metrics_name(key)
         key['quality_metrics_path'] = str(
-            Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) / Path(qm_name + '.json'))
+            Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) / Path(qm_name + '.json'))
         # save metrics dict as json
         print(f'Computed all metrics: {qm}')
         self._dump_to_json(qm, key['quality_metrics_path'])
@@ -501,7 +501,7 @@ class AutomaticCuration(dj.Computed):
         # save the new curation
         curated_sorting_name = self._get_curated_sorting_name(key)
         key['sorting_path'] = str(
-            Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) /
+            Path(os.getenv('SPYGLASS_SORTING_DIR')) /
             Path(curated_sorting_name))
         if os.path.exists(key['sorting_path']):
             shutil.rmtree(key['sorting_path'])

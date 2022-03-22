@@ -7,15 +7,15 @@ import yaml
 def cli():
     pass
 
-@click.command(help="Insert a session from a .nwb file that lives in the $NWB_DATAJOINT_BASE_DIR directory")
+@click.command(help="Insert a session from a .nwb file that lives in the $SPYGLASS_BASE_DIR directory")
 @click.argument('nwb_file_name')
 def insert_session(nwb_file_name: str):
-    import nwb_datajoint as nd
+    import spyglass as nd
     nd.insert_sessions(nwb_file_name)
 
 @click.command(help="List all sessions")
 def list_sessions():
-    import nwb_datajoint.common as ndc
+    import spyglass.common as ndc
     results = ndc.Session & {}
     print(results)
 
@@ -35,7 +35,7 @@ def insert_lab_team(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.common as ndc
+    import spyglass.common as ndc
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
@@ -44,7 +44,7 @@ def insert_lab_team(yaml_file_name: Union[str, None]):
 
 @click.command(help="List all lab teams")
 def list_lab_teams():
-    import nwb_datajoint.common as ndc
+    import spyglass.common as ndc
     results = ndc.LabTeam & {}
     print(results)
 
@@ -66,7 +66,7 @@ def insert_lab_member(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.common as ndc
+    import spyglass.common as ndc
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
@@ -75,7 +75,7 @@ def insert_lab_member(yaml_file_name: Union[str, None]):
 
 @click.command(help="List all lab members")
 def list_lab_members():
-    import nwb_datajoint.common as ndc
+    import spyglass.common as ndc
     results = ndc.LabMember & {}
     print(results)
 
@@ -95,7 +95,7 @@ def insert_lab_team_member(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.common as ndc
+    import spyglass.common as ndc
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
@@ -105,35 +105,35 @@ def insert_lab_team_member(yaml_file_name: Union[str, None]):
 @click.command(help="List all lab team members for a team")
 @click.argument('team_name')
 def list_lab_team_members(team_name: str):
-    import nwb_datajoint.common as ndc
+    import spyglass.common as ndc
     results = ndc.LabTeam.LabTeamMember & {'team_name': team_name}
     print(results)
 
 @click.command(help="List sort groups for a session. Note that nwb_file_name should include the trailing underscore.")
 @click.argument('nwb_file_name')
 def list_sort_groups(nwb_file_name: str):
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     results = nds.SortGroup & {'nwb_file_name': nwb_file_name}
     print(results)
 
 @click.command(help="List sort group electrodes for a session. Note that nwb_file_name should include the trailing underscore.")
 @click.argument('nwb_file_name')
 def list_sort_group_electrodes(nwb_file_name: str):
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     results = nds.SortGroup.SortGroupElectrode & {'nwb_file_name': nwb_file_name}
     print(results)
 
 @click.command(help="List interval lists for a session.")
 @click.argument('nwb_file_name')
 def list_interval_lists(nwb_file_name: str):
-    import nwb_datajoint.common as ndc
+    import spyglass.common as ndc
     results = ndc.IntervalList & {'nwb_file_name': nwb_file_name}
     print(results)
 
 @click.command(help="List sort intervals for a session.")
 @click.argument('nwb_file_name')
 def list_sort_intervals(nwb_file_name: str):
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     results = nds.SortInterval & {'nwb_file_name': nwb_file_name}
     print(results)
 
@@ -159,7 +159,7 @@ def insert_spike_sorting_preprocessing_parameters(yaml_file_name: Union[str, Non
         )
         return
 
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
@@ -168,7 +168,7 @@ def insert_spike_sorting_preprocessing_parameters(yaml_file_name: Union[str, Non
 
 @click.command(help="List spike sorting preprocessing parameters.")
 def list_spike_sorting_preprocessing_parameters():
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     results = nds.SpikeSortingPreprocessingParameters & {}
     print(results)
 
@@ -193,7 +193,7 @@ def insert_artifact_detection_parameters(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
@@ -202,7 +202,7 @@ def insert_artifact_detection_parameters(yaml_file_name: Union[str, None]):
 
 @click.command(help="List artifact detection parameters.")
 def list_artifact_detection_parameters():
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     results = nds.ArtifactDetectionParameters & {}
     print(results)
 
@@ -226,7 +226,7 @@ def create_spike_sorting_recording(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
@@ -237,7 +237,7 @@ def create_spike_sorting_recording(yaml_file_name: Union[str, None]):
 @click.command(help="List spike sorting recordings for a session.")
 @click.argument('nwb_file_name')
 def list_spike_sorting_recordings(nwb_file_name: str):
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     results = nds.SpikeSortingRecording & {'nwb_file_name': nwb_file_name}
     print(results)
 
@@ -253,8 +253,8 @@ def create_spike_sorting_recording_view(yaml_file_name: Union[str, None], replac
         )
         return
 
-    import nwb_datajoint.spikesorting as nds
-    import nwb_datajoint.figurl_views as ndf
+    import spyglass.spikesorting as nds
+    import spyglass.figurl_views as ndf
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     x = { k: x[k] for k in sample_spike_sorting_recording_selection_key.keys() }
@@ -289,7 +289,7 @@ def insert_spike_sorter_parameters(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     x = { k: x[k] for k in sample_spike_sorter_params_key.keys() }
@@ -297,7 +297,7 @@ def insert_spike_sorter_parameters(yaml_file_name: Union[str, None]):
 
 @click.command(help="List spike sorter parameters.")
 def list_spike_sorter_parameters():
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     results = nds.SpikeSorterParameters & {}
     print(results)
 
@@ -317,7 +317,7 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
         )
         return
 
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
@@ -347,7 +347,7 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
 @click.command(help="List spike sortings for a session.")
 @click.argument('nwb_file_name')
 def list_spike_sortings(nwb_file_name: str):
-    import nwb_datajoint.spikesorting as nds
+    import spyglass.spikesorting as nds
     results = nds.SpikeSorting & {'nwb_file_name': nwb_file_name}
     print(results)
 
@@ -363,8 +363,8 @@ def create_spike_sorting_view(yaml_file_name: Union[str, None], replace: bool):
         )
         return
 
-    import nwb_datajoint.spikesorting as nds
-    import nwb_datajoint.figurl_views as ndf
+    import spyglass.spikesorting as nds
+    import spyglass.figurl_views as ndf
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     x = { k: x[k] for k in sample_spike_sorting_key.keys() }

@@ -128,7 +128,7 @@ class SpikeSorting(dj.Computed):
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
             'sorter', 'sorter_params')
         
-        sorter_temp_dir = tempfile.TemporaryDirectory(dir=os.getenv('NWB_DATAJOINT_TEMP_DIR'))
+        sorter_temp_dir = tempfile.TemporaryDirectory(dir=os.getenv('SPYGLASS_TEMP_DIR'))
         
         sorting = sis.run_sorter(sorter, recording,
                                 output_folder=sorter_temp_dir.name,
@@ -137,7 +137,7 @@ class SpikeSorting(dj.Computed):
         key['time_of_sort'] = int(time.time())
 
         print('Saving sorting results...')
-        sorting_folder = Path(os.getenv('NWB_DATAJOINT_SORTING_DIR'))
+        sorting_folder = Path(os.getenv('SPYGLASS_SORTING_DIR'))
         sorting_name = self._get_sorting_name(key)
         key['sorting_path'] = str(sorting_folder / Path(sorting_name))
         if os.path.exists(key['sorting_path']):
@@ -182,16 +182,16 @@ class SpikeSorting(dj.Computed):
         This should be run after AnalysisNwbFile().nightly_cleanup()
         """
         # get a list of the files in the spike sorting storage directory
-        dir_names = next(os.walk(os.environ['NWB_DATAJOINT_SORTING_DIR']))[1]
+        dir_names = next(os.walk(os.environ['SPYGLASS_SORTING_DIR']))[1]
         # now retrieve a list of the currently used analysis nwb files
         analysis_file_names = self.fetch('analysis_file_name')
         for dir in dir_names:
             if not dir in analysis_file_names:
                 full_path = str(Path(
-                    os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir)
+                    os.environ['SPYGLASS_SORTING_DIR']) / dir)
                 print(f'removing {full_path}')
                 shutil.rmtree(
-                    str(Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir))
+                    str(Path(os.environ['SPYGLASS_SORTING_DIR']) / dir))
 
     def _get_sorting_name(self, key):
         recording_name = SpikeSortingRecording._get_recording_name(key)

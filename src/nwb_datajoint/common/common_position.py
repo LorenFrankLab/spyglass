@@ -4,14 +4,14 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-import nwb_datajoint as nd
+import spyglass as nd
 import pandas as pd
 import pynwb
 import pynwb.behavior
 import skimage
 from matplotlib.path import Path
 from matplotlib.widgets import PolygonSelector
-from nwb_datajoint.common.dj_helper_fn import fetch_nwb
+from spyglass.common.dj_helper_fn import fetch_nwb
 from position_tools import (get_angle, get_centriod, get_distance, get_speed,
                             get_velocity, interpolate_nan)
 from position_tools.core import gaussian_smooth

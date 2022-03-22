@@ -1,4 +1,4 @@
-name: nwb_datajoint
+name: spyglass
 channels:
   - conda-forge
   - defaults

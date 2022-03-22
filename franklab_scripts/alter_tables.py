@@ -1,4 +1,4 @@
-"""Update the MySQL tables with the latest table definitions in each nwb_datajoint.common class."""
+"""Update the MySQL tables with the latest table definitions in each spyglass.common class."""
 
 import datajoint as dj
 import importlib
@@ -7,13 +7,13 @@ import warnings
 
 # NOTE: for some reason, all classes need to be imported first for datajoint to be able to resolve foreign
 # key references properly in the code below
-from nwb_datajoint.common import *  # noqa: F401,F403
+from spyglass.common import *  # noqa: F401,F403
 
 
 def main():
     warnings.simplefilter('ignore', category=DeprecationWarning)
     warnings.simplefilter('ignore', category=FutureWarning)
-    module = importlib.import_module('nwb_datajoint.common')
+    module = importlib.import_module('spyglass.common')
     for name, cls in inspect.getmembers(module, inspect.isclass):
         update_cls(cls)
         for attrname in dir(cls):
