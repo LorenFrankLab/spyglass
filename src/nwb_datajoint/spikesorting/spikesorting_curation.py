@@ -1,24 +1,22 @@
 import json
 import os
 import shutil
-import tempfile
 import uuid
 from pathlib import Path
 from warnings import WarningMessage
 
 import datajoint as dj
 import spikeinterface as si
-import spikeinterface.extractors as se
 import spikeinterface.toolkit as st
 
-from ..common.common_interval import IntervalList 
-from ..common.common_lab import LabMember, LabTeam
+from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.dj_helper_fn import fetch_nwb
-from .spikesorting_recording import SortInterval, SpikeSortingRecording
+from .spikesorting_recording import SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema('spikesorting_curation')
+
 
 @schema
 class Curation(dj.Manual):
@@ -35,23 +33,29 @@ class Curation(dj.Manual):
     """
 
     @staticmethod
-    def insert_curation(sorting_key: dict, parent_curation_id: str = 'original', labels=None, merge_groups=None, metrics=None, description=''):
-        """Given a SpikeSorting key and the parent_sorting_id (and optional arguments) insert an entry into Curation
+    def insert_curation(sorting_key: dict, parent_curation_id: str = 'original',
+                        labels=None, merge_groups=None, metrics=None,
+                        description=''):
+        """Given a SpikeSorting key and the `parent_sorting_id`
+        (and optional arguments) insert an entry into Curation
 
-        :param sorting_key: the key for the original SpikeSorting
-        :type dict
-        :param parent_sorting_id: the id of the parent sorting (optional)
-        :type parent_sorting_id: str
-        :param metrics: computed metrics for sorting (optional)
-        :type dict
-        :param description: text description of this sort (optional)
-        :type str
-        :param labels: dictionary of labels for this sort (optional)
-        :type dict
+        Parameters
+        ----------
+        sorting_key : dict
+            the key for the original SpikeSorting
+        parent_sorting_id : str
+            the id of the parent sorting (optional)
+        parent_sorting_id : str
+        param metrics : dict
+            computed metrics for sorting (optional)
+        description : str
+            text description of this sort (optional)
+        labels : dict
+            dictionary of labels for this sort (optional)
 
-        returns:
-        :param sorting_id
-        :type str
+        Returns
+        -------
+        sorting_id : str
 
         """
         if labels is None:
@@ -62,11 +66,12 @@ class Curation(dj.Manual):
             metrics = {}
 
         # generate a unique ID
-        found = 1
+        found = True
         while found:
             id = 'C_' + str(uuid.uuid4())[:8]
             if len((Curation & {'curation_id': id}).fetch()) == 0:
-                found = 0
+                found = False
+
         sorting_key['curation_id'] = id
         sorting_key['parent_curation_id'] = parent_curation_id
         sorting_key['description'] = description
@@ -75,6 +80,7 @@ class Curation(dj.Manual):
         sorting_key['metrics'] = metrics
 
         Curation.insert1(sorting_key)
+
         return sorting_key['curation_id']
 
     @staticmethod
@@ -105,6 +111,7 @@ class Curation(dj.Manual):
         merge_groups = (Curation & key).fetch1('merge_groups')
         # TODO: write code to get merged sorting extractor
         if len(merge_groups) != 0:
+
             return NotImplementedError
             # sorting = ...
 
@@ -112,7 +119,8 @@ class Curation(dj.Manual):
 
     @staticmethod
     def save_sorting_nwb(key, sorting, timestamps, sort_interval_list_name,
-                         sort_interval, labels=None, metrics=None, unit_ids=None):
+                         sort_interval, labels=None, metrics=None,
+                         unit_ids=None):
         """Store a sorting in a new AnalysisNwbfile
         Parameters
         ----------
@@ -140,14 +148,17 @@ class Curation(dj.Manual):
         units_object_id : str
         """
 
-        sort_interval_valid_times = (IntervalList &
-                                     {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
+        sort_interval_valid_times = (
+            IntervalList & {'interval_list_name': sort_interval_list_name}
+        ).fetch1('valid_times')
 
         units = dict()
         units_valid_times = dict()
         units_sort_interval = dict()
+
         if unit_ids is None:
             unit_ids = sorting.get_unit_ids()
+
         for unit_id in unit_ids:
             spike_times_in_samples = sorting.get_unit_spike_train(
                 unit_id=unit_id)
@@ -160,15 +171,19 @@ class Curation(dj.Manual):
                                                  units, units_valid_times,
                                                  units_sort_interval,
                                                  metrics=metrics, labels=labels)
+
         if object_ids == '':
-            print('Sorting contains no units. Created an empty analysis nwb file anyway.')
+            print('Sorting contains no units.'
+                  'Created an empty analysis nwb file anyway.')
             units_object_id = ''
         else:
             units_object_id = object_ids[0]
+
         return analysis_file_name,  units_object_id
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
+                         *attrs, **kwargs)
 
 
 @schema
@@ -181,8 +196,11 @@ class WaveformParameters(dj.Manual):
 
     def insert_default(self):
         waveform_params_name = 'default'
-        waveform_params = {'ms_before': 0.5, 'ms_after': 0.5, 'max_spikes_per_unit': 5000,
-                           'n_jobs': 5, 'total_memory': '5G'}
+        waveform_params = {'ms_before': 0.5,
+                           'ms_after': 0.5,
+                           'max_spikes_per_unit': 5000,
+                           'n_jobs': 5,
+                           'total_memory': '5G'}
         self.insert1([waveform_params_name, waveform_params],
                      skip_duplicates=True)
 
@@ -212,9 +230,17 @@ class Waveforms(dj.Computed):
 
         print('Extracting waveforms...')
         waveform_params = (WaveformParameters & key).fetch1('waveform_params')
+        if 'whiten' in waveform_params:
+            if waveform_params['whiten']:
+                recording = st.preprocessing.whiten(recording)
+                # remove the 'whiten' dictionary entry as it is not recognized
+                # by spike interface
+            del waveform_params['whiten']
+
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key['waveform_extractor_path'] = str(
-            Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) / Path(waveform_extractor_name))
+            Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) /
+            Path(waveform_extractor_name))
         if os.path.exists(key['waveform_extractor_path']):
             shutil.rmtree(key['waveform_extractor_path'])
         waveforms = si.extract_waveforms(recording=recording,
@@ -223,8 +249,9 @@ class Waveforms(dj.Computed):
                                          **waveform_params)
 
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
-        object_id = AnalysisNwbfile().add_units_waveforms(key['analysis_file_name'],
-                                                          waveform_extractor=waveforms)
+        object_id = AnalysisNwbfile().add_units_waveforms(
+            key['analysis_file_name'],
+            waveform_extractor=waveforms)
         key['waveforms_object_id'] = object_id
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
 
@@ -269,7 +296,8 @@ class MetricParameters(dj.Manual):
                 'num_chunks_per_segment': 20,
                 'chunk_size': 10000,
                 'seed': 0},
-        'isi_violation': {'isi_threshold_ms': 1.5},
+        'isi_violation': {'isi_threshold_ms': 1.5,
+                          'min_isi_ms': 0.0},
         'nn_isolation': {'max_spikes_for_nn': 1000,
                          'n_neighbors': 5,
                          'n_components': 7,
@@ -326,6 +354,7 @@ class QualityMetrics(dj.Computed):
         qm = {}
         params = (MetricParameters & key).fetch1('metric_params')
         for metric_name, metric_params in params.items():
+            print(metric_params)
             metric = self._compute_metric(
                 waveform_extractor, metric_name, **metric_params)
             qm[metric_name] = metric
@@ -350,9 +379,14 @@ class QualityMetrics(dj.Computed):
 
     def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
         metric_func = _metric_name_to_func[metric_name]
-        if metric_name == 'snr' or metric_name == 'isi_violation':
+        # TODO clean up code below
+        if metric_name == 'isi_violation':
+            metric = metric_func([], waveform_extractor, **metric_params)
+        elif metric_name == 'snr':
+            peak_sign = metric_params['peak_sign']
+            del metric_params['peak_sign']
             metric = metric_func(waveform_extractor,
-                                 metric_name, **metric_params)
+                                 peak_sign=peak_sign, **metric_params)
         else:
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():
@@ -372,12 +406,14 @@ class QualityMetrics(dj.Computed):
 
 
 def _compute_isi_violation_fractions(self, waveform_extractor, **metric_params):
-    isi_threshold_ms = metric_params[isi_threshold_ms]
-    min_isi_ms = metric_params[min_isi_ms]
+    print(metric_params)
+    isi_threshold_ms = metric_params['isi_threshold_ms']
+    min_isi_ms = metric_params['min_isi_ms']
 
     # Extract the total number of spikes that violated the isi_threshold for each unit
     isi_violation_counts = st.qualitymetrics.compute_isi_violations(
-        waveform_extractor, isi_threshold_ms=isi_threshold_ms, min_isi_ms=min_isi_ms).isi_violations_count
+        waveform_extractor, isi_threshold_ms=isi_threshold_ms,
+        min_isi_ms=min_isi_ms).isi_violations_count
 
     # Extract the total number of spikes from each unit
     num_spikes = st.qualitymetrics.compute_num_spikes(waveform_extractor)
@@ -430,11 +466,13 @@ class AutomaticCuration(dj.Computed):
     """
 
     def make(self, key):
-        metrics_path = (QualityMetrics & {'nwb_file_name': key['nwb_file_name'],
-                                          'recording_id': key['recording_id'],
-                                          'waveform_params_name': key['waveform_params_name'],
-                                          'metric_params_name': key['metric_params_name'],
-                                          'sorting_id': key['parent_sorting_id']}).fetch1('quality_metrics_path')
+        metrics_path = (QualityMetrics &
+                        {'nwb_file_name': key['nwb_file_name'],
+                         'recording_id': key['recording_id'],
+                         'waveform_params_name': key['waveform_params_name'],
+                         'metric_params_name': key['metric_params_name'],
+                         'sorting_id': key['parent_sorting_id']}
+                        ).fetch1('quality_metrics_path')
         with open(metrics_path) as f:
             quality_metrics = json.load(f)
 
@@ -455,7 +493,7 @@ class AutomaticCuration(dj.Computed):
         label_params = (AutomaticCurationParameters &
                         key).fetch1('label_params')
         labels = self.get_labels(
-            sorting, parent_labels, quality_metrics, label_params)
+            parent_sorting, parent_labels, quality_metrics, label_params)
 
         # keep the quality metrics only if no merging occurred.
         metrics = quality_metrics if not units_merged else None
@@ -463,64 +501,102 @@ class AutomaticCuration(dj.Computed):
         # save the new curation
         curated_sorting_name = self._get_curated_sorting_name(key)
         key['sorting_path'] = str(
-            Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(curated_sorting_name))
+            Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) /
+            Path(curated_sorting_name))
         if os.path.exists(key['sorting_path']):
             shutil.rmtree(key['sorting_path'])
-        sorting = sorting.save(folder=key['sorting_path'])
+        parent_sorting = parent_sorting.save(folder=key['sorting_path'])
 
         # insert this sorting into the CuratedSpikeSorting Table
-        key['sorting_id'] = Curation.insert_curation(key, parent_curation_id=key['parent_curation_id'],
-                                                     labels=labels, merge_groups=merge_groups, metrics=metrics, description='auto curated')
+        key['sorting_id'] = Curation.insert_curation(
+            key, parent_curation_id=key['parent_curation_id'],
+            labels=labels, merge_groups=merge_groups, metrics=metrics,
+            description='auto curated')
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
+                         *attrs, **kwargs)
 
     @staticmethod
-    def get_merge_groups(sorting, parent_merge_groups, quality_metrics, merge_params):
-        """ Identifies units to be merged based on the quality_metrics and merge parameters and returns an updated list of merges for the curation
+    def get_merge_groups(sorting, parent_merge_groups, quality_metrics,
+                         merge_params):
+        """Identifies units to be merged based on the quality_metrics and
+        merge parameters and returns an updated list of merges for the curation
 
-        :param sorting: sorting object
-        :type sorting: spike interface sorting object
-        :param parent_merge_groups: information about previous merges
-        :type quality_metrics: list
-        :param quality_metrics: dictionary of quality metrics by unit
-        :type quality_metrics: dict
-        :param merge_params: dictionary of merge parameters
-        :type merge_params: dict
-        :return: sorting, merge_occurred
-        :rtype: sorting_extractor, bool
-        """  # overview:
+        Parameters
+        ----------
+        sorting : spike interface sorting object
+        parent_merge_groups : list
+            Information about previous merges
+        quality_metrics : dict
+            quality metrics by unit
+        merge_params : dict
+
+        Returns
+        -------
+        sorting : sorting_extractor
+        merge_occurred : bool
+
+        """
+        # overview:
         # 1. Use quality metrics to determine merge groups for units
         # 2. Combine merge groups with current merge groups to produce union of merges
 
         if not merge_params:
             return sorting, False
         else:
-            return NotImplementedError
+            # TODO: use the metrics to identify clusters that should be merged
+            new_merges = []
+            # append these merges to the parent merge_groups
+            for m in new_merges:
+                # check to see if the first cluster listed is in a current merge group
+                found = False
+                for idx, pm in enumerate(parent_merge_groups):
+                    if m[0] == pm[0]:
+                        # add the additional units in m to the identified merge group.
+                        pm.extend(m[1:])
+                        pm.sort()
+                        found = True
+                        break
+                if not found:
+                    # append this merge group to the list
+                    parent_merge_groups.append(m)
+            return parent_merge_groups.sort()
 
     @staticmethod
     def get_labels(sorting, parent_labels, quality_metrics, label_params):
-        """ Returns a dictionary of labels using quality_metrics and label parameters
+        """ Returns a dictionary of labels using quality_metrics and label
+        parameters.
 
-        :param sorting: sorting object
-        :type sorting: spike interface sorting object
-        :param parent_labels: previously applied labels
-        :type quality_metrics: list:param quality_metrics: dictionary of quality metrics by unit
-        :type quality_metrics: dict
-        :param label_params: dictionary of label parameters
-        :type labe_params: dict
-        :return: labels
-        :rtype: dict
+        Parameters
+        ----------
+        sorting : spike interface sorting object
+        parent_labels : list
+            Previously applied labels
+        quality_metrics : dict
+            quality metrics by unit
+        label_params : dict
+
+        Returns
+        -------
+        labels : dict
+
         """
-
         # overview:
         # 1. Use quality metrics to determine labels for units
         # 2. Append labels to current labels, checking for inconsistencies
         if not label_params:
-            return {}
+            return parent_labels
         else:
-            return NotImplementedError
+            new_labels = {}
+            for n in new_labels:
+                if n in parent_labels:
+                    parent_labels[n].extend(new_labels[n])
+                    # TODO Implement consistency checks?
+                else:
+                    parent_labels[n] = new_labels[n]
+            return parent_labels
 
 
 @schema
@@ -555,6 +631,7 @@ class FinalizedSpikeSorting(dj.Manual):
         """
 
     def make(self, key):
+        unit_labels_to_remove = ['reject', 'noise']
         # check that the Curation has metrics
         try:
             metrics = (Curation & key).fetch1('metrics')
@@ -563,11 +640,16 @@ class FinalizedSpikeSorting(dj.Manual):
                 f'Metrics for Curation {key} must be calculated before it can be inserted here')
             return
 
+        sorting = Curation.get_curated_sorting_extractor(key)
+        unit_ids = sorting.get_unit_ids()
         # Get the labels for the units, add only those units that do not have 'reject' or 'noise' labels
         unit_labels = (Curation & key).fetch1('labels')
         accepted_units = []
-        for idx, unit_id in enumerate(unit_labels):
-            if not 'reject' in unit_labels[unit_id] and not 'noise' in unit_labels[unit_id]:
+        for unit_id in unit_ids:
+            if unit_id in unit_labels:
+                if len(set(unit_labels_to_remove) & set(unit_labels[unit_id])) == 0:
+                    accepted_units.append(unit_id)
+            else:
                 accepted_units.append(unit_id)
 
         # get the labels for the accepted units
@@ -582,7 +664,7 @@ class FinalizedSpikeSorting(dj.Manual):
 
         # exit out if there are no labels or no accepted units
         if len(unit_labels) == 0 or len(accepted_units) == 0:
-            print(f'{key}: no curation found or no accepted units')
+            print(f'{key}: no accepted units found')
             return
 
         # get the sorting and save it in the NWB file
@@ -599,8 +681,10 @@ class FinalizedSpikeSorting(dj.Manual):
 
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
-        key['analysis_file_name'], key['units_object_id'] = Curation.save_sorting_nwb(self, key, sorting, timestamps, sort_interval_list_name,
-                                                                                      sort_interval, metrics=metrics, unit_ids=accepted_units)
+        (key['analysis_file_name'],
+         key['units_object_id']) = Curation.save_sorting_nwb(
+            self, key, sorting, timestamps, sort_interval_list_name,
+            sort_interval, metrics=metrics, unit_ids=accepted_units)
         self.insert1(key)
 
         # now add the units
@@ -631,133 +715,5 @@ class FinalizedSpikeSorting(dj.Manual):
         return [field for field in unit_fields if field not in parent_fields]
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
-
-
-#         # 3. Save the accepted, merged units and their metrics
-#         # load the AnalysisNWBFile from the original sort to get the sort_interval_valid times and the sort_interval
-#         key['analysis_file_name'], key['units_object_id'] = \
-#             SortingID.store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name,
-#                               sort_interval=sort_interval, metrics=metrics, unit_ids=accepted_units)
-
-#         # Insert entry to CuratedSpikeSorting table
-#         self.insert1(key)
-
-
-#     def delete(self):
-#         """
-#         Extends the delete method of base class to implement permission checking
-#         """
-#         current_user_name = dj.config['database.user']
-#         entries = self.fetch()
-#         permission_bool = np.zeros((len(entries),))
-#         print(f'Attempting to delete {len(entries)} entries, checking permission...')
-
-#         for entry_idx in range(len(entries)):
-#             # check the team name for the entry, then look up the members in that team, then get their datajoint user names
-#             team_name = (SpikeSortingRecordingSelection & (SpikeSortingRecordingSelection & entries[entry_idx]).proj()).fetch1()['team_name']
-#             lab_member_name_list = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
-#             datajoint_user_names = []
-#             for lab_member_name in lab_member_name_list:
-#                 datajoint_user_names.append((LabMember.LabMemberInfo & {'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
-#             permission_bool[entry_idx] = current_user_name in datajoint_user_names
-#         if np.sum(permission_bool)==len(entries):
-#             print('Permission to delete all specified entries granted.')
-#             super().delete()
-#         else:
-#             raise Exception('You do not have permission to delete all specified entries. Not deleting anything.')
-
-#     def fetch_nwb(self, *attrs, **kwargs):
-#         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
-
-#     def delete_extractors(self, key):
-#         """Delete directories with sorting and recording extractors that are no longer needed
-
-#         :param key: key to curated sortings where the extractors can be removed
-#         :type key: dict
-#         """
-#         # get a list of the files in the spike sorting storage directory
-#         dir_names = next(os.walk(os.environ['SPIKE_SORTING_STORAGE_DIR']))[1]
-#         # now retrieve a list of the currently used analysis nwb files
-#         analysis_file_names = (self & key).fetch('analysis_file_name')
-#         delete_list = []
-#         for dir in dir_names:
-#             if not dir in analysis_file_names:
-#                 delete_list.append(dir)
-#                 print(f'Adding {dir} to delete list')
-#         delete = input('Delete all listed directories (y/n)? ')
-#         if delete == 'y' or delete == 'Y':
-#             for dir in delete_list:
-#                 shutil.rmtree(dir)
-#             return
-#         print('No files deleted')
-#     # def delete(self, key)
-
-# @schema
-# class SelectedUnitsParameters(dj.Manual):
-#     definition = """
-#     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
-#     ---
-#     max_noise_overlap=1:        float   # noise overlap threshold (include below)
-#     min_nn_isolation=-1:        float   # isolation score threshold (include above)
-#     max_isi_violation=100:      float   # ISI violation threshold
-#     min_firing_rate=0:          float   # minimum firing rate threshold
-#     max_firing_rate=100000:     float   # maximum fring rate thershold
-#     min_num_spikes=0:           int     # minimum total number of spikes
-#     exclude_label_list=NULL:    BLOB    # list of labels to EXCLUDE
-#     """
-
-#     def get_included_units(self, curated_sorting_key, unit_inclusion_key):
-#         """given a reference to a set of curated sorting units and a specific unit inclusion parameter list, returns
-#         the units that should be included
-
-#         :param curated_sorting_key: key to entries in CuratedSpikeSorting.Unit table
-#         :type curated_sorting_key: dict
-#         :param unit_inclusion_key: key to a single unit inclusion parameter set
-#         :type unit_inclusion_key: dict
-#         """
-#         curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
-#         inclusion_key = (self & unit_inclusion_key).fetch1()
-
-#         units = (CuratedSpikeSorting().Unit() & curated_sortings).fetch()
-#         # get a list of the metrics in the units table
-#         metrics_list = CuratedSpikeSorting().metrics_fields()
-#         # create a list of the units to kepp.
-#         #TODO: make this code more flexible
-#         keep = np.asarray([True] * len(units))
-#         if 'noise_overlap' in metrics_list and "max_noise_overlap" in inclusion_key:
-#             keep = np.logical_and(keep, units['noise_overlap'] <= inclusion_key["max_noise_overlap"])
-#         if 'nn_isolation' in metrics_list and "min_isolation" in inclusion_key:
-#             keep = np.logical_and(keep, units['nn_isolation'] >= inclusion_key["min_isolation"])
-#         if 'isi_violation' in metrics_list and "isi_violation" in inclusion_key:
-#             keep = np.logical_and(keep, units['isi_violation'] <= inclusion_key["isi_violation"])
-#         if 'firing_rate' in metrics_list and "firing_rate" in inclusion_key:
-#             keep = np.logical_and(keep, units['firing_rate'] >= inclusion_key["min_firing_rate"])
-#             keep = np.logical_and(keep, units['firing_rate'] <= inclusion_key["max_firing_rate"])
-#         if 'num_spikes' in metrics_list and "min_num_spikes" in inclusion_key:
-#             keep = np.logical_and(keep, units['num_spikes'] >= inclusion_key["min_num_spikes"])
-#         units = units[keep]
-#         #now exclude by label if it is specified
-#         if inclusion_key['exclude_label_list'] is not None:
-#             included_units = []
-#             for unit in units:
-#                 labels = unit['label'].split(',')
-#                 exclude = False
-#                 for label in labels:
-#                     if label in inclusion_key['exclude_label_list']:
-#                         exclude = True
-#                 if not exclude:
-#                     included_units.append(unit)
-#             return included_units
-#         else:
-#             return units
-
-# @schema
-# class SelectedUnits(dj.Computed):
-#     definition = """
-#     -> CuratedSpikeSorting
-#     -> SelectedUnitsParameters
-#     ---
-#     -> AnalysisNwbfile   # New analysis NWB file to hold unit info
-#     units_object_id: varchar(40)   # Object ID for the units in NWB file
-#     """
+        return fetch_nwb(
+            self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
