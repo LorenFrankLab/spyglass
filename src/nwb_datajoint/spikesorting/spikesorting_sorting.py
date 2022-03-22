@@ -42,7 +42,7 @@ class SpikeSorterParameters(dj.Manual):
         # Hippocampus tetrode default
         sorter_params_name = "franklab_tetrode_hippocampus_30KHz"
         sorter_params = {'detect_sign': -1,
-                         'adjacency_radius': -1,
+                         'adjacency_radius': 100,
                          'freq_min': 600,
                          'freq_max': 6000,
                          'filter': False,

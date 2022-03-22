@@ -335,7 +335,6 @@ class QualityMetrics(dj.Computed):
         qm = {}
         params = (MetricParameters & key).fetch1('metric_params')
         for metric_name, metric_params in params.items():
-            print(metric_params)
             metric = self._compute_metric(
                 waveform_extractor, metric_name, **metric_params)
             qm[metric_name] = metric
@@ -386,7 +385,6 @@ class QualityMetrics(dj.Computed):
 
 
 def _compute_isi_violation_fractions(self, waveform_extractor, **metric_params):
-    print(metric_params)
     isi_threshold_ms = metric_params['isi_threshold_ms']
     min_isi_ms = metric_params['min_isi_ms']
 
@@ -423,7 +421,9 @@ class AutomaticCurationParameters(dj.Manual):
     def insert_default(self):
         auto_curation_params_name = 'default'
         merge_params = {}
-        label_params = {}
+        # label_params parsing: Each key is the name of a metric, 
+        # the contents are a three value list with the comparison, a value, and the label if the comparison is true
+        label_params = {'nn_noise_overlap' : ['>', 0.1, 'noise']}
         self.insert1([auto_curation_params_name, merge_params,
                      label_params], skip_duplicates=True)
 
@@ -435,28 +435,31 @@ class AutomaticCurationSelection(dj.Manual):
     -> AutomaticCurationParameters
     """
 
+_comparison_to_function = {
+    "<": np.less,
+    "<=": np.less_equal,
+    ">": np.greater,
+    ">=": np.greater_equal,
+}
 
 @schema
 class AutomaticCuration(dj.Computed):
     definition = """
     -> AutomaticCurationSelection
     ---
-    curation_id: varchar(10) # the ID of this sorting
+    auto_curation_id: varchar(10) # the ID of this curation
     """
 
     def make(self, key):
-        metrics_path = (QualityMetrics & {'nwb_file_name': key['nwb_file_name'],
-                                          'recording_id': key['recording_id'],
-                                          'waveform_params_name': key['waveform_params_name'],
-                                          'metric_params_name': key['metric_params_name'],
-                                          'sorting_id': key['parent_sorting_id']}).fetch1('quality_metrics_path')
+        metrics_path = (QualityMetrics & key).fetch1('quality_metrics_path')
         with open(metrics_path) as f:
             quality_metrics = json.load(f)
 
         # get the curation information and the curated sorting
-        parent_curation = (Curation & key).fetch1(as_dict=True)
+        parent_curation = (Curation & key).fetch(as_dict=True)[0]
         parent_merge_groups = parent_curation['merge_groups']
         parent_labels = parent_curation['labels']
+        parent_curation_id = parent_curation['parent_curation_id']
         parent_sorting = Curation.get_curated_sorting_extractor(key)
 
         merge_params = (AutomaticCurationParameters &
@@ -465,7 +468,9 @@ class AutomaticCuration(dj.Computed):
             parent_sorting, parent_merge_groups, quality_metrics, merge_params)
         if units_merged:
             # get merged sorting extractor here
-            return NotImplementedError
+            sorting = apply_merge_groups_to_sorting(parent_sorting, merge_groups=merge_groups)
+        else:
+            sorting = parent_sorting
 
         label_params = (AutomaticCurationParameters &
                         key).fetch1('label_params')
@@ -475,17 +480,13 @@ class AutomaticCuration(dj.Computed):
         # keep the quality metrics only if no merging occurred.
         metrics = quality_metrics if not units_merged else None
 
-        # save the new curation
-        curated_sorting_name = self._get_curated_sorting_name(key)
-        key['sorting_path'] = str(
-            Path(os.getenv('NWB_DATAJOINT_SORTING_DIR')) / Path(curated_sorting_name))
-        if os.path.exists(key['sorting_path']):
-            shutil.rmtree(key['sorting_path'])
-        sorting = sorting.save(folder=key['sorting_path'])
-
         # insert this sorting into the CuratedSpikeSorting Table
-        key['sorting_id'] = Curation.insert_curation(key, parent_curation_id=key['parent_curation_id'],
+        # first remove keys that aren't part of the Sorting (the primary key of curation)
+        c_key = (SpikeSorting & key).fetch("KEY")[0]
+        curation_key = {item : key[item] for item in key if item in c_key}
+        key['auto_curation_id'] = Curation.insert_curation(curation_key, parent_curation_id=parent_curation_id,
                                                      labels=labels, merge_groups=merge_groups, metrics=metrics, description='auto curated')
+
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
@@ -503,14 +504,14 @@ class AutomaticCuration(dj.Computed):
         :type quality_metrics: dict
         :param merge_params: dictionary of merge parameters
         :type merge_params: dict
-        :return: sorting, merge_occurred
-        :rtype: sorting_extractor, bool
+        :return: merge_groups, merge_occurred
+        :rtype: list of lists, bool
         """  # overview:
         # 1. Use quality metrics to determine merge groups for units
         # 2. Combine merge groups with current merge groups to produce union of merges
 
         if not merge_params:
-            return sorting, False
+            return parent_merge_groups, False
         else:
             # TODO: use the metrics to identify clusters that should be merged
             new_merges = []
@@ -528,7 +529,7 @@ class AutomaticCuration(dj.Computed):
                 if not found:
                     #append this merge group to the list
                     parent_merge_groups.append(m)
-            return parent_merge_groups.sort()
+            return parent_merge_groups.sort(), True
    
 
     @staticmethod
@@ -538,7 +539,7 @@ class AutomaticCuration(dj.Computed):
         :param sorting: sorting object
         :type sorting: spike interface sorting object
         :param parent_labels: previously applied labels
-        :type quality_metrics: list:param quality_metrics: dictionary of quality metrics by unit
+        :param quality_metrics: dictionary of quality metrics by unit
         :type quality_metrics: dict
         :param label_params: dictionary of label parameters
         :type labe_params: dict
@@ -551,14 +552,22 @@ class AutomaticCuration(dj.Computed):
         if not label_params:
             return parent_labels
         else:
-            new_labels = {}
-            for n in new_labels:
-                if n in parent_labels:
-                    parent_labels[n].extend(new_labels[n])
-                    #TODO Implement consistency checks? 
+            for label in label_params:
+                if not label in quality_metrics:
+                    Warning(f'{label} not found in quality metrics; skipping')
                 else:
-                    parent_labels[n] = new_labels[n]
+                    for unit_id in quality_metrics[label].keys():
+                        # compare the quality metric to the threshold with the specified operator
+                        # note that label_params[label] is a three element list with a comparison operator as a string, 
+                        # the threshold value, and the label to be applied if the comparison is true
+                        if _comparison_to_function[label_params[label][0]](quality_metrics[label][unit_id], label_params[label][1]):
+                            if unit_id not in parent_labels:
+                                parent_labels[unit_id] = label_params[label][2]
+                            else:
+                                parent_labels[unit_id].extend(label_params[label][2])
             return parent_labels
+
+
 
 @schema
 class FinalizedSpikeSortingSelection(dj.Manual):
@@ -582,8 +591,8 @@ class FinalizedSpikeSorting(dj.Manual):
         unit_id: int   # ID for each unit
         ---
         label='': varchar(200)   # optional set of labels for each unit
-        noise_overlap=-1: float   # noise overlap metric for each unit
-        isolation_score=-1: float   # isolation score metric for each unit
+        nn_noise_overlap=-1: float   # noise overlap metric for each unit
+        nn_isolation=-1: float   # isolation score metric for each unit
         isi_violation=-1: float   # ISI violation score for each unit
         snr=0: float            # SNR for each unit
         firing_rate=-1: float   # firing rate
@@ -804,6 +813,7 @@ class FinalizedSpikeSorting(dj.Manual):
 #     units_object_id: varchar(40)   # Object ID for the units in NWB file
 #     """
 # Note this is completely untested
+
 def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[List[int]]):
     # return a new sorting where the units are merged according to merge_groups
     # merge_groups is a list of lists of unit_ids.

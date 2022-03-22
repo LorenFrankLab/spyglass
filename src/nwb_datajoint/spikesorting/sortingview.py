@@ -52,15 +52,15 @@ class SortingviewWorkspace(dj.Computed):
         sorting = si.create_extractor_from_new_sorting(sorting)
         h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(
             sorting, str(Path(recording_path) / 'sorting.h5'))
-        workspace_uri = (self & key).fetch1('workspace_uri')
-        workspace = sv.load_workspace(workspace_uri)
+
         key['sortingview_sorting_id'] = workspace.add_sorting(recording_id=workspace.recording_ids[0],
-                                                              sorting=h5_sorting)
+                                                              sorting=h5_sorting, label=key['curation_id'])
+        self.insert1(key)
+
         # add metrics to the sorting if they exist
         metrics = (Curation & key).fetch1('metrics')
         self.add_metrics_to_sorting(
             key, metrics, key['sortingview_sorting_id'])
-        self.insert1(key)
 
     def remove_sorting_from_workspace(self, key):
         return NotImplementedError
@@ -141,7 +141,7 @@ class SortingviewWorkspace(dj.Computed):
         return url
 
     def insert_manual_curation(self, key: dict, description=''):
-        """Based on information in key for an AutoCurationSorting, loads the curated sorting from sortingview,
+        """Based on information in key for an SortingviewWorkspace, loads the curated sorting from sortingview,
         saves it (with labels and the optional description, and inserts it to CuratedSorting
 
         Assumes that the workspace corresponding to the recording and (original) sorting exists
