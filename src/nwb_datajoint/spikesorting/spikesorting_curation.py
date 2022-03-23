@@ -145,9 +145,15 @@ class Curation(dj.Manual):
         else:
             id = 0
 
-        curation_id_str = 'C_' + uuid()
+        # generate a unique ID string
+        found = True
+        while found:
+            id_str = 'C_' + str(uuid.uuid4())[:8]
+            if len((Curation & {'curation_id_str': id_str}).fetch()) == 0:
+                found = False
         
         sorting_key['curation_id'] = id
+        sorting_key['curation_id_str'] = id_str
         sorting_key['parent_curation_id'] = parent_curation_id
         sorting_key['description'] = description
         sorting_key['labels'] = labels
