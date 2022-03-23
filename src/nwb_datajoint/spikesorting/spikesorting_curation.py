@@ -647,7 +647,7 @@ class AutomaticCuration(dj.Computed):
                         # the threshold value, and the label to be applied if the comparison is true
                         if _comparison_to_function[label_params[label][0]](quality_metrics[label][unit_id], label_params[label][1]):
                             if unit_id not in parent_labels:
-                                parent_labels[unit_id] = [c]
+                                parent_labels[unit_id] = [label_params[label][2]]
                             # check if the label is already there, and if not, add it
                             elif label_params[label][2] not in parent_labels[unit_id]:
                                 parent_labels[unit_id].extend(label_params[label][2])
@@ -690,7 +690,7 @@ class FinalizedSpikeSorting(dj.Manual):
         # check that the Curation has metrics
         metrics = (Curation & key).fetch1('metrics')
         if metrics == {}:
-            Warning(f'Metrics for Curation {key} should normally be calculated before insertion here'
+            Warning(f'Metrics for Curation {key} should normally be calculated before insertion here')
 
         sorting = Curation.get_curated_sorting_extractor(key)
         unit_ids = sorting.get_unit_ids()
