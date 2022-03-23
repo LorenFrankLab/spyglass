@@ -98,11 +98,11 @@ def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[Li
 class Curation(dj.Manual):
     definition = """
     # Stores each spike sorting; similar to IntervalList
-    curation_id: int
+    curation_id: varchar(10) #A unique identifier for each curation entry for convenience
     -> SpikeSorting
     ---
-    curation_id_str = '': varchar(10) # A unique identifier for each curation entry for convenience
-    parent_curation_id=-1: int
+    curation_num = -1: int #  
+    parent_curation_id='': varchar(10)
     labels: blob # a dictionary of labels for the units
     merge_groups: blob # a list of merge groups for the units
     metrics: blob # a list of quality metrics for the units (if available)
@@ -138,22 +138,22 @@ class Curation(dj.Manual):
             metrics = {}
 
         # generate a unique ID
-        current_id = (Curation & sorting_key).fetch('curation_id')
-        if len(current_id) > 0:
-            current_id.sort()
-            id = current_id[-1] + 1
+        num = (Curation & sorting_key).fetch('curation_id')
+        if len(num) > 0:
+            num.sort()
+            curation_num = num[-1] + 1
         else:
-            id = 0
+            curation_num = 0
 
         # generate a unique ID string
         found = True
         while found:
-            id_str = 'C_' + str(uuid.uuid4())[:8]
-            if len((Curation & {'curation_id_str': id_str}).fetch()) == 0:
+            curation_id = 'C_' + str(uuid.uuid4())[:8]
+            if len((Curation & {'curation_id': curation_id}).fetch()) == 0:
                 found = False
         
-        sorting_key['curation_id'] = id
-        sorting_key['curation_id_str'] = id_str
+        sorting_key['curation_id'] = curation_id
+        sorting_key['curation_num'] = curation_num
         sorting_key['parent_curation_id'] = parent_curation_id
         sorting_key['description'] = description
         sorting_key['labels'] = labels
@@ -287,7 +287,7 @@ class Waveforms(dj.Computed):
     definition = """
     -> WaveformSelection
     ---
-    waveform_extractor_path: varchar(220)
+    waveform_extractor_path: varchar(400)
     -> AnalysisNwbfile
     waveforms_object_id: varchar(40)   # Object ID for the waveforms in NWB file
     """
@@ -344,8 +344,7 @@ class Waveforms(dj.Computed):
         return NotImplementedError
 
     def _get_waveform_extractor_name(self, key):
-        sorting_name = SpikeSorting()._get_sorting_name(key)
-        we_name = sorting_name +'_' + str(key['curation_id']) + '_waveform'
+        we_name = str(key['curation_id']) + '_waveform'
         return we_name
 
 
@@ -540,7 +539,7 @@ class AutomaticCuration(dj.Computed):
     definition = """
     -> AutomaticCurationSelection
     ---
-    auto_curation_id: int # the ID of this curation
+    auto_curation_id: varchar(10) # the ID of this curation, matches curation_id in Curation
     """
 
     def make(self, key):
