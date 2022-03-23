@@ -13,6 +13,7 @@ import spikeinterface.extractors as se
 import spikeinterface.toolkit as st
 import numpy as np
 from typing import List, Dict, Union
+import time
 
 from ..common.common_interval import IntervalList 
 from ..common.common_lab import LabMember, LabTeam
@@ -27,18 +28,19 @@ schema = dj.schema('spikesorting_curation')
 class Curation(dj.Manual):
     definition = """
     # Stores each spike sorting; similar to IntervalList
-    curation_id: varchar(10)
+    curation_id: int
     -> SpikeSorting
     ---
-    parent_curation_id='': varchar(10)
+    parent_curation_id=-1: int
     labels: blob # a dictionary of labels for the units
     merge_groups: blob # a list of merge groups for the units
     metrics: blob # a list of quality metrics for the units (if available)
     description='': varchar(1000) #optional description for this curated sort
+    time_of_creation: int   # in Unix time, to the nearest second
     """
 
     @staticmethod
-    def insert_curation(sorting_key: dict, parent_curation_id: str = 'original', labels=None, merge_groups=None, metrics=None, description=''):
+    def insert_curation(sorting_key: dict, parent_curation_id: int = -1, labels=None, merge_groups=None, metrics=None, description=''):
         """Given a SpikeSorting key and the parent_sorting_id (and optional arguments) insert an entry into Curation
 
         :param sorting_key: the key for the original SpikeSorting
@@ -65,17 +67,20 @@ class Curation(dj.Manual):
             metrics = {}
 
         # generate a unique ID
-        found = 1
-        while found:
-            id = 'C_' + str(uuid.uuid4())[:8]
-            if len((Curation & {'curation_id': id}).fetch()) == 0:
-                found = 0
+        current_id = (Curation & sorting_key).fetch('curation_id')
+        if len(current_id) > 0:
+            current_id.sort()
+            id = current_id[-1] + 1
+        else:
+            id = 0
+        
         sorting_key['curation_id'] = id
         sorting_key['parent_curation_id'] = parent_curation_id
         sorting_key['description'] = description
         sorting_key['labels'] = labels
         sorting_key['merge_groups'] = merge_groups
         sorting_key['metrics'] = metrics
+        sorting_key['time_of_creation'] = int(time.time())
 
         Curation.insert1(sorting_key)
         return sorting_key['curation_id']
@@ -260,7 +265,8 @@ class Waveforms(dj.Computed):
         return NotImplementedError
 
     def _get_waveform_extractor_name(self, key):
-        we_name = key['curation_id'] + '_waveform'
+        sorting_name = SpikeSorting()._get_sorting_name(key)
+        we_name = sorting_name +'_' + str(key['curation_id']) + '_waveform'
         return we_name
 
 
@@ -447,7 +453,7 @@ class AutomaticCuration(dj.Computed):
     definition = """
     -> AutomaticCurationSelection
     ---
-    auto_curation_id: varchar(10) # the ID of this curation
+    auto_curation_id: int # the ID of this curation
     """
 
     def make(self, key):
@@ -562,7 +568,7 @@ class AutomaticCuration(dj.Computed):
                         # the threshold value, and the label to be applied if the comparison is true
                         if _comparison_to_function[label_params[label][0]](quality_metrics[label][unit_id], label_params[label][1]):
                             if unit_id not in parent_labels:
-                                parent_labels[unit_id] = label_params[label][2]
+                                parent_labels[unit_id] = [label_params[label][2]]
                             else:
                                 parent_labels[unit_id].extend(label_params[label][2])
             return parent_labels
