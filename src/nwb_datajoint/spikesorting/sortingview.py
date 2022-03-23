@@ -190,10 +190,10 @@ class SortingviewWorkspace(dj.Computed):
         if bool(labels['mergeGroups']):
             # clusters were merged, so we empty out metrics
             metrics = {}
-        else :
+        else:
              # get the metrics from the parent curation
             metrics = (Curation & key).fetch1('metrics')
 
         # insert this curation into the  Table
-        return Curation.insert_curation(key, parent_curation_id=key['parent_curation_id'], labels=labels['labelsByUnit'],
+        return Curation.insert_curation(key, parent_curation_id=key['curation_id'], labels=labels['labelsByUnit'],
                                     merge_groups=labels['mergeGroups'], metrics=metrics, description='manually curated')
