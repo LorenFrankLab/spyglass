@@ -577,7 +577,7 @@ class AutomaticCuration(dj.Computed):
         parent_curation = (Curation & key).fetch(as_dict=True)[0]
         parent_merge_groups = parent_curation['merge_groups']
         parent_labels = parent_curation['labels']
-        parent_curation_id = parent_curation['parent_curation_id']
+        parent_curation_id = parent_curation['curation_id']
         parent_sorting = Curation.get_curated_sorting_extractor(key)
 
         merge_params = (AutomaticCurationParameters &
