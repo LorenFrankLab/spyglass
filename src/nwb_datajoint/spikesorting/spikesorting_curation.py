@@ -374,7 +374,7 @@ class MetricParameters(dj.Manual):
                              'n_components': 7,
                              'radius_um': 100,
                              'seed': 0},
-
+        'peak_offset' : {'peak_sign' : 'neg'}
     }
     available_metrics = list(metric_default_params.keys())
 
@@ -446,16 +446,17 @@ class QualityMetrics(dj.Computed):
         metric_func = _metric_name_to_func[metric_name]
         #TODO clean up code below
         if metric_name == 'isi_violation':
-            metric = metric_func([], waveform_extractor, **metric_params)
-        elif metric_name == 'snr':
+            metric = metric_func(waveform_extractor, **metric_params)
+        elif (metric_name == 'snr' or
+            metric_name == 'peak_offset'):
             peak_sign = metric_params['peak_sign']
             del metric_params['peak_sign']
             metric = metric_func(waveform_extractor, peak_sign=peak_sign, **metric_params)
         else:
-            metric = {}
-            for unit_id in waveform_extractor.sorting.get_unit_ids():
-                metric[str(unit_id)] = metric_func(
-                    waveform_extractor, this_unit_id=unit_id, **metric_params)
+            metric = {str(unit_id) : metric_func(waveform_extractor,
+                            this_unit_id=unit_id, **metric_params)
+                            for unit_id in 
+                            waveform_extractor.sorting.get_unit_ids()}
         return metric
 
     def _dump_to_json(self, qm_dict, save_path):
@@ -469,7 +470,7 @@ class QualityMetrics(dj.Computed):
             json.dump(new_qm, f, ensure_ascii=False, indent=4)
 
 
-def _compute_isi_violation_fractions(self, waveform_extractor, **metric_params):
+def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
     isi_threshold_ms = metric_params['isi_threshold_ms']
     min_isi_ms = metric_params['min_isi_ms']
 
@@ -479,18 +480,25 @@ def _compute_isi_violation_fractions(self, waveform_extractor, **metric_params):
 
     # Extract the total number of spikes from each unit
     num_spikes = st.qualitymetrics.compute_num_spikes(waveform_extractor)
-    isi_viol_frac_metric = {}
-    for unit_id in waveform_extractor.sorting.get_unit_ids():
-        isi_viol_frac_metric[str(
-            unit_id)] = isi_violation_counts[unit_id] / num_spikes[unit_id]
+    isi_viol_frac_metric = {str(unit_id) : isi_violation_counts[unit_id] /
+        num_spikes[unit_id] for unit_id in waveform_extractor.sorting.get_unit_ids()}
     return isi_viol_frac_metric
 
+def _get_peak_offset(waveform_extractor:si.WaveformExtractor, peak_sign:str, **metric_params):
+    if 'peak_sign' in metric_params:
+        del metric_params['peak_sign']
+    peak_offset_inds = st.get_template_extremum_channel_peak_shift(
+                        waveform_extractor=waveform_extractor,
+                        peak_sign=peak_sign, **metric_params)
+    peak_offset = {key : np.int16(val) for key,val in peak_offset_inds.items()}
+    return peak_offset
 
 _metric_name_to_func = {
     "snr": st.qualitymetrics.compute_snrs,
     "isi_violation": _compute_isi_violation_fractions,
     'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
-    'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap
+    'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap,
+    'peak_offset' : _get_peak_offset
 }
 
 
