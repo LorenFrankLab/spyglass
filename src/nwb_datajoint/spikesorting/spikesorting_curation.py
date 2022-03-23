@@ -362,7 +362,7 @@ class Waveforms(dj.Computed):
     def _get_waveform_extractor_name(self, key):
         waveform_params_name = (WaveformParameters & key).fetch1('waveform_params_name')
         we_name = str(key['curation_id']) + '_' + waveform_params_name + '_waveforms'
-
+        return we_name
 
 @schema
 class MetricParameters(dj.Manual):
@@ -505,7 +505,7 @@ def _get_peak_offset(waveform_extractor:si.WaveformExtractor, peak_sign:str, **m
     peak_offset_inds = st.get_template_extremum_channel_peak_shift(
                         waveform_extractor=waveform_extractor,
                         peak_sign=peak_sign, **metric_params)
-    peak_offset = {key : np.int16(val) for key,val in peak_offset_inds.items()}
+    peak_offset = {key : int(val) for key,val in peak_offset_inds.items()}
     return peak_offset
 
 _metric_name_to_func = {
