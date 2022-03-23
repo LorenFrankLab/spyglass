@@ -5,7 +5,6 @@ from .spikesorting_artifact import (ArtifactDetection,
                                     ArtifactDetectionParameters,
                                     ArtifactDetectionSelection,
                                     ArtifactRemovedIntervalList)
-from .spikesorting_sorting import SpikeSorterParameters, SpikeSortingSelection, SpikeSorting
 from .spikesorting_curation import (AutomaticCurationParameters,
                                     AutomaticCurationSelection, AutomaticCuration, Curation,
                                     MetricParameters, MetricSelection,

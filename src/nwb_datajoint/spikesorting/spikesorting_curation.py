@@ -1,25 +1,21 @@
 import json
 import os
 import shutil
-import tempfile
 import uuid
 from pathlib import Path
 from warnings import WarningMessage
-from xmlrpc.client import FastUnmarshaller
 
 import datajoint as dj
 import spikeinterface as si
-import spikeinterface.extractors as se
 import spikeinterface.toolkit as st
 import numpy as np
 from typing import List, Dict, Union
 import time
 
-from ..common.common_interval import IntervalList 
-from ..common.common_lab import LabMember, LabTeam
+from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.dj_helper_fn import fetch_nwb
-from .spikesorting_recording import SortInterval, SpikeSortingRecording
+from .spikesorting_recording import SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema('spikesorting_curation')
@@ -173,6 +169,7 @@ class Curation(dj.Manual):
         sorting_key['time_of_creation'] = int(time.time())
 
         Curation.insert1(sorting_key)
+
         return sorting_key['curation_id']
 
     @staticmethod
@@ -209,7 +206,8 @@ class Curation(dj.Manual):
 
     @staticmethod
     def save_sorting_nwb(key, sorting, timestamps, sort_interval_list_name,
-                         sort_interval, labels=None, metrics=None, unit_ids=None):
+                         sort_interval, labels=None, metrics=None,
+                         unit_ids=None):
         """Store a sorting in a new AnalysisNwbfile
         Parameters
         ----------
@@ -237,14 +235,17 @@ class Curation(dj.Manual):
         units_object_id : str
         """
 
-        sort_interval_valid_times = (IntervalList &
-                                     {'interval_list_name': sort_interval_list_name}).fetch1('valid_times')
+        sort_interval_valid_times = (
+            IntervalList & {'interval_list_name': sort_interval_list_name}
+        ).fetch1('valid_times')
 
         units = dict()
         units_valid_times = dict()
         units_sort_interval = dict()
+
         if unit_ids is None:
             unit_ids = sorting.get_unit_ids()
+
         for unit_id in unit_ids:
             spike_times_in_samples = sorting.get_unit_spike_train(
                 unit_id=unit_id)
@@ -257,15 +258,19 @@ class Curation(dj.Manual):
                                                  units, units_valid_times,
                                                  units_sort_interval,
                                                  metrics=metrics, labels=labels)
+
         if object_ids == '':
-            print('Sorting contains no units. Created an empty analysis nwb file anyway.')
+            print('Sorting contains no units.'
+                  'Created an empty analysis nwb file anyway.')
             units_object_id = ''
         else:
             units_object_id = object_ids[0]
+
         return analysis_file_name,  units_object_id
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
+                         *attrs, **kwargs)
 
 
 @schema
@@ -317,12 +322,14 @@ class Waveforms(dj.Computed):
         if 'whiten' in waveform_params:
             if waveform_params['whiten']:
                 recording = st.preprocessing.whiten(recording)
-                # remove the 'whiten' dictionary entry as it is not recognized by spike interface
+                # remove the 'whiten' dictionary entry as it is not recognized
+                # by spike interface
             del waveform_params['whiten']
-  
+
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key['waveform_extractor_path'] = str(
-            Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) / Path(waveform_extractor_name))
+            Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) /
+            Path(waveform_extractor_name))
         if os.path.exists(key['waveform_extractor_path']):
             shutil.rmtree(key['waveform_extractor_path'])
         waveforms = si.extract_waveforms(recording=recording,
@@ -331,8 +338,9 @@ class Waveforms(dj.Computed):
                                          **waveform_params)
 
         key['analysis_file_name'] = AnalysisNwbfile().create(key['nwb_file_name'])
-        object_id = AnalysisNwbfile().add_units_waveforms(key['analysis_file_name'],
-                                                          waveform_extractor=waveforms)
+        object_id = AnalysisNwbfile().add_units_waveforms(
+            key['analysis_file_name'],
+            waveform_extractor=waveforms)
         key['waveforms_object_id'] = object_id
         AnalysisNwbfile().add(key['nwb_file_name'], key['analysis_file_name'])
 
@@ -378,7 +386,7 @@ class MetricParameters(dj.Manual):
                 'chunk_size': 10000,
                 'seed': 0},
         'isi_violation': {'isi_threshold_ms': 1.5,
-                          'min_isi_ms' : 0.0},
+                          'min_isi_ms': 0.0},
         'nn_isolation': {'max_spikes_for_nn': 1000,
                          'n_neighbors': 5,
                          'n_components': 7,
@@ -459,14 +467,15 @@ class QualityMetrics(dj.Computed):
 
     def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
         metric_func = _metric_name_to_func[metric_name]
-        #TODO clean up code below
+        # TODO clean up code below
         if metric_name == 'isi_violation':
             metric = metric_func(waveform_extractor, **metric_params)
         elif (metric_name == 'snr' or
             metric_name == 'peak_offset'):
             peak_sign = metric_params['peak_sign']
             del metric_params['peak_sign']
-            metric = metric_func(waveform_extractor, peak_sign=peak_sign, **metric_params)
+            metric = metric_func(waveform_extractor,
+                                 peak_sign=peak_sign, **metric_params)
         else:
             metric = {str(unit_id) : metric_func(waveform_extractor,
                             this_unit_id=unit_id, **metric_params)
@@ -491,7 +500,8 @@ def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
 
     # Extract the total number of spikes that violated the isi_threshold for each unit
     isi_violation_counts = st.qualitymetrics.compute_isi_violations(
-        waveform_extractor, isi_threshold_ms=isi_threshold_ms, min_isi_ms=min_isi_ms).isi_violations_count
+        waveform_extractor, isi_threshold_ms=isi_threshold_ms,
+        min_isi_ms=min_isi_ms).isi_violations_count
 
     # Extract the total number of spikes from each unit
     num_spikes = st.qualitymetrics.compute_num_spikes(waveform_extractor)
@@ -583,7 +593,7 @@ class AutomaticCuration(dj.Computed):
         label_params = (AutomaticCurationParameters &
                         key).fetch1('label_params')
         labels = self.get_labels(
-            sorting, parent_labels, quality_metrics, label_params)
+            parent_sorting, parent_labels, quality_metrics, label_params)
 
         # keep the quality metrics only if no merging occurred.
         metrics = quality_metrics if not units_merged else None
@@ -598,7 +608,8 @@ class AutomaticCuration(dj.Computed):
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
+                         *attrs, **kwargs)
 
     @staticmethod
     def get_merge_groups(sorting, parent_merge_groups, quality_metrics, merge_params):
@@ -633,9 +644,9 @@ class AutomaticCuration(dj.Computed):
                         pm.extend(m[1:])
                         pm.sort()
                         found = True
-                        break;
+                        break
                 if not found:
-                    #append this merge group to the list
+                    # append this merge group to the list
                     parent_merge_groups.append(m)
             return parent_merge_groups.sort(), True
    
@@ -677,12 +688,12 @@ class AutomaticCuration(dj.Computed):
             return parent_labels
 
 
-
 @schema
 class FinalizedSpikeSortingSelection(dj.Manual):
     definition = """
     -> Curation
     """
+
 
 @schema
 class FinalizedSpikeSorting(dj.Manual):
@@ -756,8 +767,10 @@ class FinalizedSpikeSorting(dj.Manual):
 
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
-        key['analysis_file_name'], key['units_object_id'] = Curation.save_sorting_nwb(self, key, sorting, timestamps, sort_interval_list_name,
-                                                                                      sort_interval, metrics=metrics, unit_ids=accepted_units)
+        (key['analysis_file_name'],
+         key['units_object_id']) = Curation.save_sorting_nwb(
+            self, key, sorting, timestamps, sort_interval_list_name,
+            sort_interval, metrics=metrics, unit_ids=accepted_units)
         self.insert1(key)
 
         # now add the units
