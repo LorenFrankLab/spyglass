@@ -360,8 +360,8 @@ class Waveforms(dj.Computed):
         return NotImplementedError
 
     def _get_waveform_extractor_name(self, key):
-        we_name = str(key['curation_id']) + '_waveform'
-        return we_name
+        waveform_params_name = (WaveformParameters & key).fetch1('waveform_params_name')
+        we_name = str(key['curation_id']) + '_' + waveform_params_name + '_waveforms'
 
 
 @schema
