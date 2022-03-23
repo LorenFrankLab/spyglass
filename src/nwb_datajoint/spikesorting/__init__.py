@@ -10,4 +10,5 @@ from .spikesorting_curation import (AutomaticCurationParameters,
                                     AutomaticCurationSelection, AutomaticCuration, Curation,
                                     MetricParameters, MetricSelection,
                                     QualityMetrics, WaveformParameters,
-                                    Waveforms, WaveformSelection)
+                                    Waveforms, WaveformSelection, FinalizedSpikeSortingSelection,
+                                    FinalizedSpikeSorting)

@@ -52,13 +52,11 @@ def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[Li
                 spike_times = spike_times[spike_times < end_frame]
             return spike_times
 
-    # Here's the new sorting we are going to return
-    new_sorting = si.BaseSorting(
-        sampling_frequency=sorting.get_sampling_frequency(),
-        unit_ids=sorting.get_unit_ids()
-    )
+    
     # Loop through the sorting segments in the original sorting
     # and add merged versions to the new sorting
+    sorting_segment_list = []
+    final_unit_ids = []
     for sorting_segment in sorting._sorting_segments: # Note: sorting_segments should be exposed in spikeinterface
         # initialize the new sorting segment
         new_sorting_segment = NewSortingSegment()
@@ -68,11 +66,13 @@ def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[Li
         for merge_group in merge_groups:
             # the representative unit_id is the min in the group
             representative_unit_id = min(merge_group)
+            if representative_unit_id not in final_unit_ids:
+                final_unit_ids.append(representative_unit_id)
             # we are going to take the union of all the spike trains for the merge group
             spike_trains_to_concatenate = []
             for unit_id in merge_group:
                 spike_trains_to_concatenate.append(
-                    sorting_segment.get_unit_spike_train(unit_id)
+                    sorting_segment.get_unit_spike_train(unit_id, start_frame=None, end_frame=None)
                 )
                 # append this unit_id to the used unit_ids
                 used_unit_ids.append(unit_id)
@@ -87,9 +87,20 @@ def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[Li
             if unit_id not in used_unit_ids:
                 new_sorting_segment.add_unit(
                     unit_id,
-                    sorting_segment.get_unit_spike_train(unit_id)
+                    sorting_segment.get_unit_spike_train(unit_id, start_frame=None, end_frame=None)
                 )
+                if unit_id not in final_unit_ids:
+                    final_unit_ids.append(unit_id)
+        
         # add the new sorting segment to the new sorting
+        sorting_segment_list.append(new_sorting_segment)
+
+    # Here's the new sorting we are going to return
+    final_unit_ids.sort()
+    new_sorting = si.BaseSorting(
+        sampling_frequency=sorting.get_sampling_frequency(),
+        unit_ids=final_unit_ids)
+    for new_sorting_segment in sorting_segment_list:
         new_sorting.add_sorting_segment(new_sorting_segment)
     # finally, return the new sorting
     return new_sorting 
@@ -138,7 +149,7 @@ class Curation(dj.Manual):
             metrics = {}
 
         # generate a unique ID
-        num = (Curation & sorting_key).fetch('curation_id')
+        num = (Curation & sorting_key).fetch('curation_num')
         if len(num) > 0:
             num.sort()
             curation_num = num[-1] + 1
@@ -266,9 +277,14 @@ class WaveformParameters(dj.Manual):
     """
 
     def insert_default(self):
-        waveform_params_name = 'default'
+        waveform_params_name = 'default_not_whitened'
         waveform_params = {'ms_before': 0.5, 'ms_after': 0.5, 'max_spikes_per_unit': 5000,
-                           'n_jobs': 5, 'total_memory': '5G'}
+                           'n_jobs': 5, 'total_memory': '5G', 'whiten': False}
+        self.insert1([waveform_params_name, waveform_params],
+                     skip_duplicates=True)
+        waveform_params_name = 'default_whitened'
+        waveform_params = {'ms_before': 0.5, 'ms_after': 0.5, 'max_spikes_per_unit': 5000,
+                           'n_jobs': 5, 'total_memory': '5G', 'whiten': True}
         self.insert1([waveform_params_name, waveform_params],
                      skip_duplicates=True)
 
