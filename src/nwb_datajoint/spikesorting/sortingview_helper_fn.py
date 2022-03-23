@@ -28,6 +28,7 @@ def set_workspace_permission(workspace_uri: str, team_members: List[str], sortin
     if len(team_members) == 0:
         raise ValueError('The specified team does not exist or there are no members in the team;\
                           create or change the entry in LabTeam table first.')
+    google_user_ids = []
     for team_member in team_members:
         google_user_id = (LabMember.LabMemberInfo & {
                           'lab_member_name': team_member}).fetch('google_user_name')
@@ -35,10 +36,11 @@ def set_workspace_permission(workspace_uri: str, team_members: List[str], sortin
             print(f'Google user ID for {team_member} does not exist or more than one ID detected;\
                     permission not given to {team_member}, skipping...')
             continue
-        workspace.set_sorting_curation_authorized_users(
-            sorting_id=sortingview_sorting_id, user_ids=[google_user_id[0]])
-        print(
-            f'Permissions to curate sorting {sortingview_sorting_id} given to {google_user_id[0]}.')
+        google_user_ids.append(google_user_id[0])
+    workspace.set_sorting_curation_authorized_users(
+        sorting_id=sortingview_sorting_id, user_ids=google_user_ids)
+    print(
+        f'Permissions to curate sorting {sortingview_sorting_id} given to {google_user_ids}.')
     return workspace_uri
 
 
