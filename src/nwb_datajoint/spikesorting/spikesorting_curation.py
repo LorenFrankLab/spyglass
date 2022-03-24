@@ -478,6 +478,13 @@ class AutomaticCurationParameters(dj.Manual):
         label_params = {'nn_noise_overlap': ['>', 0.1, 'noise']}
         self.insert1([auto_curation_params_name, merge_params,
                      label_params], skip_duplicates=True)
+        # Second default parameter set for not applying any labels,
+        # or merges, but adding metrics
+        auto_curation_params_name = 'none'
+        merge_params = {}
+        label_params = {}
+        self.insert1([auto_curation_params_name, merge_params,
+                     label_params], skip_duplicates=True)
 
 
 @schema
@@ -629,7 +636,7 @@ class FinalizedSpikeSortingSelection(dj.Manual):
 
 
 @schema
-class FinalizedSpikeSorting(dj.Manual):
+class FinalizedSpikeSorting(dj.Computed):
     definition = """
     -> FinalizedSpikeSortingSelection
     ---
