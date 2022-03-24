@@ -520,6 +520,11 @@ class AutomaticCuration(dj.Computed):
                         key).fetch1('merge_params')
         merge_groups, units_merged = self.get_merge_groups(
             parent_sorting, parent_merge_groups, quality_metrics, merge_params)
+        if units_merged:
+            # get merged sorting extractor here
+            sorting = MergedSortingExtractor(parent_sorting=parent_sorting, merge_groups=merge_groups)
+        else:
+            sorting = parent_sorting
 
         label_params = (AutomaticCurationParameters &
                         key).fetch1('label_params')
