@@ -3,11 +3,6 @@ import os
 from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import (HeadDir, LinPos, PositionSource, RawPosition, Speed,
                            StateScriptFile, VideoFile)
-from .common_curation import (AutomaticCurationParameters,
-                              AutomaticCurationSelection,
-                              AutomaticCurationSorting, CuratedSpikeSorting,
-                              CuratedSpikeSortingSelection, SelectedUnits,
-                              SelectedUnitsParameters)
 from .common_device import CameraDevice, DataAcquisitionDevice, Probe
 from .common_dio import DIOEvents
 from .common_ephys import (LFP, Electrode, ElectrodeGroup, LFPBand,
@@ -21,7 +16,6 @@ from .common_interval import (IntervalList, interval_list_censor,
                               interval_list_intersect, interval_list_union,
                               intervals_by_length)
 from .common_lab import Institution, Lab, LabMember, LabTeam
-from .common_metrics import MetricParameters, MetricSelection, QualityMetrics
 from .common_nwbfile import (AnalysisNwbfile, AnalysisNwbfileKachery, Nwbfile,
                              NwbfileKachery)
 from .common_position import (IntervalLinearizationSelection,
