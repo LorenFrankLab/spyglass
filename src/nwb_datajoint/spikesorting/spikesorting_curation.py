@@ -12,7 +12,7 @@ import numpy as np
 from typing import List, Dict, Union
 import time
 
-from .MergedSortingExtractor import MergedSortingExtractor
+from .merged_sorting_extractor import MergedSortingExtractor
 
 from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
@@ -128,7 +128,7 @@ class Curation(dj.Manual):
         merge_groups = (Curation & key).fetch1('merge_groups')
         # TODO: write code to get merged sorting extractor
         if len(merge_groups) != 0:
-            return apply_merge_groups_to_sorting(sorting, merge_groups)
+            return MergedSortingExtractor(parent_sorting=sorting, merge_groups=merge_groups)
         else:
             return sorting
 
@@ -514,7 +514,7 @@ class AutomaticCuration(dj.Computed):
             parent_sorting, parent_merge_groups, quality_metrics, merge_params)
         if units_merged:
             # get merged sorting extractor here
-            sorting = apply_merge_groups_to_sorting(parent_sorting, merge_groups=merge_groups)
+            sorting = MergedSortingExtractor(parent_sorting=parent_sorting, merge_groups=merge_groups)
         else:
             sorting = parent_sorting
 
