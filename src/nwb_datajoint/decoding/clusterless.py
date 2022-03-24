@@ -7,14 +7,13 @@ import numpy as np
 import pandas as pd
 import pynwb
 import xarray as xr
-from nwb_datajoint.common.common_curation import (CuratedSpikeSorting,
-                                                  SelectedUnitsParameters)
 from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
 from nwb_datajoint.common.common_position import IntervalPositionInfo
-from nwb_datajoint.common.common_sortingview import SortingviewWorkspace
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
 from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
+from nwb_datajoint.spikesorting.spikesorting_curation import \
+    FinalizedSpikeSorting
 from replay_trajectory_classification.classifier import (
     _DEFAULT_CLUSTERLESS_MODEL_KWARGS, _DEFAULT_CONTINUOUS_TRANSITIONS,
     _DEFAULT_ENVIRONMENT)
@@ -61,8 +60,7 @@ class MarkParameters(dj.Manual):
 @schema
 class UnitMarkParameters(dj.Manual):
     definition = """
-    -> CuratedSpikeSorting
-    -> UnitInclusionParameters
+    -> FinalizedSpikeSorting
     -> MarkParameters
     """
 
@@ -93,7 +91,7 @@ class UnitMarks(dj.Computed):
             unit_inclusion_key=key)
 
         # retrieve the units from the NWB file
-        nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
+        nwb_units = (FinalizedSpikeSorting() & key).fetch_nwb()[0]['units']
 
         # get the labbox workspace so we can get the waveforms from the recording
         workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
@@ -105,9 +103,6 @@ class UnitMarks(dj.Computed):
         # assume the channels are all the same for the moment. This would need to be changed for larger probes
         channel_ids_by_unit = [channel_ids] * (max(units['unit_id']) + 1)
 
-
-<< << << < HEAD
-
         N_WAVEFORM_POINTS = 2
         waveforms = le.get_unit_waveforms(
             recording,
@@ -115,11 +110,6 @@ class UnitMarks(dj.Computed):
             units['unit_id'],
             channel_ids_by_unit,
             N_WAVEFORM_POINTS)
-== == == =
-        # here we only get 8 points because that should be plenty to find the minimum/maximum
-        waveforms = get_unit_waveforms(
-            recording, sorting, units['unit_id'], channel_ids_by_unit, 8)
->>>>>> > master
 
         if mark_param['mark_type'] == 'amplitude':
             # peak is stored in the middle of the waveform
