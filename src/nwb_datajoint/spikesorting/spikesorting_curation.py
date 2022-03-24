@@ -522,15 +522,14 @@ class AutomaticCuration(dj.Computed):
             parent_sorting, parent_merge_groups, quality_metrics, merge_params)
         if units_merged:
             # get merged sorting extractor here
-            sorting = MergedSortingExtractor(
-                parent_sorting=parent_sorting, merge_groups=merge_groups)
+            sorting = MergedSortingExtractor(parent_sorting=parent_sorting, merge_groups=merge_groups)
         else:
             sorting = parent_sorting
 
         label_params = (AutomaticCurationParameters &
                         key).fetch1('label_params')
         labels = self.get_labels(
-            sorting, parent_labels, quality_metrics, label_params)
+            parent_sorting, parent_labels, quality_metrics, label_params)
 
         # keep the quality metrics only if no merging occurred.
         metrics = quality_metrics if not units_merged else None
