@@ -1,30 +1,25 @@
 import os
-import pathlib
 import shutil
-import time
-from csv import list_dialects
 from functools import reduce
 from pathlib import Path
 
 import datajoint as dj
 import numpy as np
-import scipy.stats as stats
 import spikeinterface as si
 import spikeinterface.extractors as se
-import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
 from ..common.common_device import Probe
 from ..common.common_ephys import Electrode, ElectrodeGroup
-from ..common.common_interval import (IntervalList,
-                                      interval_list_intersect,
+from ..common.common_interval import (IntervalList, interval_list_intersect,
                                       union_adjacent_index)
-from ..common.common_lab import LabMember, LabTeam
-from ..common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from ..common.common_lab import LabTeam
+from ..common.common_nwbfile import Nwbfile
 from ..common.common_session import Session
 from ..common.dj_helper_fn import dj_replace
 
 schema = dj.schema('spikesorting_recording')
+
 
 @schema
 class SortGroup(dj.Manual):
@@ -143,7 +138,7 @@ class SortGroup(dj.Manual):
         sort_group = 0
         for e_group in e_groups:
             sge_key['electrode_group_name'] = e_group
-            #sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
+            # sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
             # TEST
             sg_key['sort_group_id'] = sge_key['sort_group_id'] = int(e_group)
             # get the list of references and make sure they are all the same
@@ -191,8 +186,6 @@ class SortGroup(dj.Manual):
         channel_group = dict()
         key = dict()
         key['nwb_file_name'] = nwb_file_name
-        sort_group_list = (SortGroup() & key).fetch('sort_group_id')
-        max_group = int(np.max(np.asarray(sort_group_list)))
         electrodes = (Electrode() & key).fetch()
 
         key['sort_group_id'] = sort_group_id
@@ -203,7 +196,6 @@ class SortGroup(dj.Manual):
         channel_group[sort_group_id] = dict()
         channel_group[sort_group_id]['channels'] = sort_group_electrodes['electrode_id'].tolist()
 
-        label = list()
         n_chan = len(channel_group[sort_group_id]['channels'])
 
         geometry = np.zeros((n_chan, 2), dtype='float')
@@ -229,8 +221,9 @@ class SortGroup(dj.Manual):
                     n_found += 1
                 else:
                     Warning(
-                        f'Relative electrode locations have three coordinates; only two are currenlty supported')
+                        'Relative electrode locations have three coordinates; only two are currenlty supported')
         return np.ndarray.tolist(geometry)
+
 
 @schema
 class SortInterval(dj.Manual):
@@ -240,6 +233,7 @@ class SortInterval(dj.Manual):
     ---
     sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
+
 
 @schema
 class SpikeSortingPreprocessingParameters(dj.Manual):
@@ -276,6 +270,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
     ---
     -> IntervalList
     """
+
 
 @schema
 class SpikeSortingRecording(dj.Computed):
@@ -429,4 +424,3 @@ class SpikeSortingRecording(dj.Computed):
                                                      freq_max=filter_params['frequency_max'])
 
         return recording
-

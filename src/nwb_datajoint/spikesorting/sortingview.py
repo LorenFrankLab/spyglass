@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import datajoint as dj
@@ -6,10 +5,13 @@ import numpy as np
 import sortingview as sv
 import spikeinterface as si
 
-from .spikesorting_recording import SpikeSortingRecording
+from ..common.common_lab import LabTeam
+from .sortingview_helper_fn import set_workspace_permission
 from .spikesorting_curation import Curation
+from .spikesorting_recording import SpikeSortingRecording
 
 schema = dj.schema('spikesorting_sortingview')
+
 
 @schema
 class SortingviewWorkspaceSelection(dj.Manual):
@@ -52,15 +54,30 @@ class SortingviewWorkspace(dj.Computed):
         sorting = si.create_extractor_from_new_sorting(sorting)
         h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(
             sorting, str(Path(recording_path) / 'sorting.h5'))
-        workspace_uri = (self & key).fetch1('workspace_uri')
-        workspace = sv.load_workspace(workspace_uri)
+
         key['sortingview_sorting_id'] = workspace.add_sorting(recording_id=workspace.recording_ids[0],
-                                                              sorting=h5_sorting)
+                                                              sorting=h5_sorting, label=key['curation_id'])
+        self.insert1(key)
+
         # add metrics to the sorting if they exist
         metrics = (Curation & key).fetch1('metrics')
         self.add_metrics_to_sorting(
             key, metrics, key['sortingview_sorting_id'])
-        self.insert1(key)
+
+        # TODO add labels...
+        labels = (Curation & key).fetch1('labels')
+        print(labels)
+        for unit_id in labels:
+            for label in labels[unit_id]:
+                workspace.sorting_curation_add_label(
+                    sorting_id=key['sortingview_sorting_id'], label=label, unit_ids=[int(unit_id)])
+
+        # set the permissions
+        team_name = (SpikeSortingRecording & key).fetch1()['team_name']
+        team_members = (LabTeam.LabTeamMember & {
+                        'team_name': team_name}).fetch('lab_member_name')
+        set_workspace_permission(
+            workspace.uri, team_members, key['sortingview_sorting_id'])
 
     def remove_sorting_from_workspace(self, key):
         return NotImplementedError
@@ -140,9 +157,10 @@ class SortingviewWorkspace(dj.Computed):
                                          include_curation=True)
         return url
 
-    def insert_manual_curation(self, key: dict, description=''):
-        """Based on information in key for an AutoCurationSorting, loads the curated sorting from sortingview,
-        saves it (with labels and the optional description, and inserts it to CuratedSorting
+    @staticmethod
+    def insert_manual_curation(key: dict, description=''):
+        """ Based on information in key for an SortingviewWorkspace, loads the curated sorting from sortingview,
+        saves it (with labels and the optional description) and inserts it to CuratedSorting
 
         Assumes that the workspace corresponding to the recording and (original) sorting exists
 
@@ -153,13 +171,12 @@ class SortingviewWorkspace(dj.Computed):
         description: str
             optional description of curated sort
         """
+        print(key)
         workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
         workspace = sv.load_workspace(workspace_uri=workspace_uri)
 
         sortingview_sorting_id = (SortingviewWorkspace & key).fetch1(
             'sortingview_sorting_id')
-        manually_curated_sorting = workspace.get_curated_sorting_extractor(
-            sorting_id=sortingview_sorting_id)
 
         # get the labels and remove the non-primary merged units
         labels = workspace.get_sorting_curation(
@@ -167,30 +184,19 @@ class SortingviewWorkspace(dj.Computed):
         # turn labels to list of str, only including accepted units.
 
         unit_labels = labels['labelsByUnit']
-        unit_ids = [unit_id for unit_id in unit_labels]
 
-        # load the metrics
-        from .spikesorting_curation import QualityMetrics
-        metrics_path = (QualityMetrics & {'nwb_file_name': key['nwb_file_name'],
-                                          'recording_id': key['recording_id'],
-                                          'waveform_params_name': key['waveform_params_name'],
-                                          'metric_params_name': key['metric_params_name'],
-                                          'sorting_id': key['parent_sorting_id']}).fetch1('quality_metrics_path')
-        with open(metrics_path) as f:
-            quality_metrics = json.load(f)
-
-        # remove non-primary merged units
-        clusters_merged = bool(labels['mergeGroups'])
-        if clusters_merged:
-            for m in labels['mergeGroups']:
-                for merged_unit in m[1:]:
-                    unit_ids.remove(merged_unit)
-                    del labels['labelsByUnit'][merged_unit]
-            # if we've merged we have to recompute metrics
-            metrics = None
+        if bool(labels['mergeGroups']):
+            # clusters were merged, so we empty out metrics
+            metrics = {}
         else:
-            metrics = quality_metrics
+            # get the metrics from the parent curation
+            metrics = (Curation & key).fetch1('metrics')
 
         # insert this curation into the  Table
-        return self.insert_curation(key, parent_curation_id=key['parent_curation_id'], labels=labels['labelsByUnit'],
-                                    merge_groups=labels['mergeGroups'], metrics=metrics, description='manually curated')
+        return Curation.insert_curation(
+            key,
+            parent_curation_id=key['curation_id'],
+            labels=labels['labelsByUnit'],
+            merge_groups=labels['mergeGroups'],
+            metrics=metrics,
+            description='manually curated')

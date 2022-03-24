@@ -5,13 +5,13 @@ import datajoint as dj
 import numpy as np
 import scipy.stats as stats
 import spikeinterface as si
-from spikeinterface.core.segmentutils import AppendSegmentRecording
 
 from ..common.common_interval import IntervalList
 from ..common.nwb_helper_fn import get_valid_intervals
 from .spikesorting_recording import SpikeSortingRecording
 
 schema = dj.schema('spikesorting_artifact')
+
 
 @schema
 class ArtifactDetectionParameters(dj.Manual):
