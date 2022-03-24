@@ -1,26 +1,26 @@
 import json
 import os
 import shutil
+import time
 import uuid
 from pathlib import Path
+from typing import List
 from warnings import WarningMessage
 
 import datajoint as dj
+import numpy as np
 import spikeinterface as si
 import spikeinterface.toolkit as st
-import numpy as np
-from typing import List, Dict, Union
-import time
-
-from .merged_sorting_extractor import MergedSortingExtractor
 
 from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.dj_helper_fn import fetch_nwb
+from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema('spikesorting_curation')
+
 
 def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[List[int]]):
     # return a new sorting where the units are merged according to merge_groups
@@ -29,6 +29,7 @@ def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[Li
 
     return MergedSortingExtractor(parent_sorting=sorting, merge_groups=merge_groups)
 
+
 @schema
 class Curation(dj.Manual):
     definition = """
@@ -36,7 +37,7 @@ class Curation(dj.Manual):
     curation_id: varchar(10) #A unique identifier for each curation entry for convenience
     -> SpikeSorting
     ---
-    curation_num = -1: int #  
+    curation_num = -1: int #
     parent_curation_id='': varchar(10)
     labels: blob # a dictionary of labels for the units
     merge_groups: blob # a list of merge groups for the units
@@ -86,7 +87,7 @@ class Curation(dj.Manual):
             curation_id = 'C_' + str(uuid.uuid4())[:8]
             if len((Curation & {'curation_id': curation_id}).fetch()) == 0:
                 found = False
-        
+
         sorting_key['curation_id'] = curation_id
         sorting_key['curation_num'] = curation_num
         sorting_key['parent_curation_id'] = parent_curation_id
@@ -296,9 +297,12 @@ class Waveforms(dj.Computed):
         return NotImplementedError
 
     def _get_waveform_extractor_name(self, key):
-        waveform_params_name = (WaveformParameters & key).fetch1('waveform_params_name')
-        we_name = str(key['curation_id']) + '_' + waveform_params_name + '_waveforms'
+        waveform_params_name = (WaveformParameters & key).fetch1(
+            'waveform_params_name')
+        we_name = str(key['curation_id']) + '_' + \
+            waveform_params_name + '_waveforms'
         return we_name
+
 
 @schema
 class MetricParameters(dj.Manual):
@@ -325,7 +329,7 @@ class MetricParameters(dj.Manual):
                              'n_components': 7,
                              'radius_um': 100,
                              'seed': 0},
-        'peak_offset' : {'peak_sign' : 'neg'}
+        'peak_offset': {'peak_sign': 'neg'}
     }
     available_metrics = list(metric_default_params.keys())
 
@@ -399,16 +403,16 @@ class QualityMetrics(dj.Computed):
         if metric_name == 'isi_violation':
             metric = metric_func(waveform_extractor, **metric_params)
         elif (metric_name == 'snr' or
-            metric_name == 'peak_offset'):
+              metric_name == 'peak_offset'):
             peak_sign = metric_params['peak_sign']
             del metric_params['peak_sign']
             metric = metric_func(waveform_extractor,
                                  peak_sign=peak_sign, **metric_params)
         else:
-            metric = {str(unit_id) : metric_func(waveform_extractor,
-                            this_unit_id=unit_id, **metric_params)
-                            for unit_id in 
-                            waveform_extractor.sorting.get_unit_ids()}
+            metric = {str(unit_id): metric_func(waveform_extractor,
+                                                this_unit_id=unit_id, **metric_params)
+                      for unit_id in
+                      waveform_extractor.sorting.get_unit_ids()}
         return metric
 
     def _dump_to_json(self, qm_dict, save_path):
@@ -433,25 +437,27 @@ def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
 
     # Extract the total number of spikes from each unit
     num_spikes = st.qualitymetrics.compute_num_spikes(waveform_extractor)
-    isi_viol_frac_metric = {str(unit_id) : isi_violation_counts[unit_id] /
-        num_spikes[unit_id] for unit_id in waveform_extractor.sorting.get_unit_ids()}
+    isi_viol_frac_metric = {str(unit_id): isi_violation_counts[unit_id] /
+                            num_spikes[unit_id] for unit_id in waveform_extractor.sorting.get_unit_ids()}
     return isi_viol_frac_metric
 
-def _get_peak_offset(waveform_extractor:si.WaveformExtractor, peak_sign:str, **metric_params):
+
+def _get_peak_offset(waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params):
     if 'peak_sign' in metric_params:
         del metric_params['peak_sign']
     peak_offset_inds = st.get_template_extremum_channel_peak_shift(
-                        waveform_extractor=waveform_extractor,
-                        peak_sign=peak_sign, **metric_params)
-    peak_offset = {key : int(val) for key,val in peak_offset_inds.items()}
+        waveform_extractor=waveform_extractor,
+        peak_sign=peak_sign, **metric_params)
+    peak_offset = {key: int(val) for key, val in peak_offset_inds.items()}
     return peak_offset
+
 
 _metric_name_to_func = {
     "snr": st.qualitymetrics.compute_snrs,
     "isi_violation": _compute_isi_violation_fractions,
     'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
     'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap,
-    'peak_offset' : _get_peak_offset
+    'peak_offset': _get_peak_offset
 }
 
 
@@ -467,9 +473,9 @@ class AutomaticCurationParameters(dj.Manual):
     def insert_default(self):
         auto_curation_params_name = 'default'
         merge_params = {}
-        # label_params parsing: Each key is the name of a metric, 
+        # label_params parsing: Each key is the name of a metric,
         # the contents are a three value list with the comparison, a value, and the label if the comparison is true
-        label_params = {'nn_noise_overlap' : ['>', 0.1, 'noise']}
+        label_params = {'nn_noise_overlap': ['>', 0.1, 'noise']}
         self.insert1([auto_curation_params_name, merge_params,
                      label_params], skip_duplicates=True)
 
@@ -481,12 +487,14 @@ class AutomaticCurationSelection(dj.Manual):
     -> AutomaticCurationParameters
     """
 
+
 _comparison_to_function = {
     "<": np.less,
     "<=": np.less_equal,
     ">": np.greater,
     ">=": np.greater_equal,
 }
+
 
 @schema
 class AutomaticCuration(dj.Computed):
@@ -529,9 +537,10 @@ class AutomaticCuration(dj.Computed):
         # insert this sorting into the CuratedSpikeSorting Table
         # first remove keys that aren't part of the Sorting (the primary key of curation)
         c_key = (SpikeSorting & key).fetch("KEY")[0]
-        curation_key = {item : key[item] for item in key if item in c_key}
-        key['auto_curation_id'] = Curation.insert_curation(curation_key, parent_curation_id=parent_curation_id,
-                                                     labels=labels, merge_groups=merge_groups, metrics=metrics, description='auto curated')
+        curation_key = {item: key[item] for item in key if item in c_key}
+        key['auto_curation_id'] = Curation.insert_curation(
+            curation_key, parent_curation_id=parent_curation_id,
+            labels=labels, merge_groups=merge_groups, metrics=metrics, description='auto curated')
 
         self.insert1(key)
 
@@ -577,7 +586,6 @@ class AutomaticCuration(dj.Computed):
                     # append this merge group to the list
                     parent_merge_groups.append(m)
             return parent_merge_groups.sort(), True
-   
 
     @staticmethod
     def get_labels(sorting, parent_labels, quality_metrics, label_params):
@@ -600,19 +608,21 @@ class AutomaticCuration(dj.Computed):
             return parent_labels
         else:
             for label in label_params:
-                if not label in quality_metrics:
+                if label not in quality_metrics:
                     Warning(f'{label} not found in quality metrics; skipping')
                 else:
                     for unit_id in quality_metrics[label].keys():
                         # compare the quality metric to the threshold with the specified operator
-                        # note that label_params[label] is a three element list with a comparison operator as a string, 
+                        # note that label_params[label] is a three element list with a comparison operator as a string,
                         # the threshold value, and the label to be applied if the comparison is true
                         if _comparison_to_function[label_params[label][0]](quality_metrics[label][unit_id], label_params[label][1]):
                             if unit_id not in parent_labels:
-                                parent_labels[unit_id] = [label_params[label][2]]
+                                parent_labels[unit_id] = [
+                                    label_params[label][2]]
                             # check if the label is already there, and if not, add it
                             elif label_params[label][2] not in parent_labels[unit_id]:
-                                parent_labels[unit_id].extend(label_params[label][2])
+                                parent_labels[unit_id].extend(
+                                    label_params[label][2])
             return parent_labels
 
 
@@ -652,7 +662,8 @@ class FinalizedSpikeSorting(dj.Manual):
         # check that the Curation has metrics
         metrics = (Curation & key).fetch1('metrics')
         if metrics == {}:
-            Warning(f'Metrics for Curation {key} should normally be calculated before insertion here')
+            Warning(
+                f'Metrics for Curation {key} should normally be calculated before insertion here')
 
         sorting = Curation.get_curated_sorting_extractor(key)
         unit_ids = sorting.get_unit_ids()
@@ -730,134 +741,3 @@ class FinalizedSpikeSorting(dj.Manual):
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
-
-
-#         # 3. Save the accepted, merged units and their metrics
-#         # load the AnalysisNWBFile from the original sort to get the sort_interval_valid times and the sort_interval
-#         key['analysis_file_name'], key['units_object_id'] = \
-#             SortingID.store_sorting_nwb(key, sorting=sorting, sort_interval_list_name=sort_interval_list_name,
-#                               sort_interval=sort_interval, metrics=metrics, unit_ids=accepted_units)
-
-#         # Insert entry to CuratedSpikeSorting table
-#         self.insert1(key)
-
-
-#     def delete(self):
-#         """
-#         Extends the delete method of base class to implement permission checking
-#         """
-#         current_user_name = dj.config['database.user']
-#         entries = self.fetch()
-#         permission_bool = np.zeros((len(entries),))
-#         print(f'Attempting to delete {len(entries)} entries, checking permission...')
-
-#         for entry_idx in range(len(entries)):
-#             # check the team name for the entry, then look up the members in that team, then get their datajoint user names
-#             team_name = (SpikeSortingRecordingSelection & (SpikeSortingRecordingSelection & entries[entry_idx]).proj()).fetch1()['team_name']
-#             lab_member_name_list = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
-#             datajoint_user_names = []
-#             for lab_member_name in lab_member_name_list:
-#                 datajoint_user_names.append((LabMember.LabMemberInfo & {'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
-#             permission_bool[entry_idx] = current_user_name in datajoint_user_names
-#         if np.sum(permission_bool)==len(entries):
-#             print('Permission to delete all specified entries granted.')
-#             super().delete()
-#         else:
-#             raise Exception('You do not have permission to delete all specified entries. Not deleting anything.')
-
-#     def fetch_nwb(self, *attrs, **kwargs):
-#         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
-
-#     def delete_extractors(self, key):
-#         """Delete directories with sorting and recording extractors that are no longer needed
-
-#         :param key: key to curated sortings where the extractors can be removed
-#         :type key: dict
-#         """
-#         # get a list of the files in the spike sorting storage directory
-#         dir_names = next(os.walk(os.environ['SPIKE_SORTING_STORAGE_DIR']))[1]
-#         # now retrieve a list of the currently used analysis nwb files
-#         analysis_file_names = (self & key).fetch('analysis_file_name')
-#         delete_list = []
-#         for dir in dir_names:
-#             if not dir in analysis_file_names:
-#                 delete_list.append(dir)
-#                 print(f'Adding {dir} to delete list')
-#         delete = input('Delete all listed directories (y/n)? ')
-#         if delete == 'y' or delete == 'Y':
-#             for dir in delete_list:
-#                 shutil.rmtree(dir)
-#             return
-#         print('No files deleted')
-#     # def delete(self, key)
-
-# @schema
-# class SelectedUnitsParameters(dj.Manual):
-#     definition = """
-#     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
-#     ---
-#     max_noise_overlap=1:        float   # noise overlap threshold (include below)
-#     min_nn_isolation=-1:        float   # isolation score threshold (include above)
-#     max_isi_violation=100:      float   # ISI violation threshold
-#     min_firing_rate=0:          float   # minimum firing rate threshold
-#     max_firing_rate=100000:     float   # maximum fring rate thershold
-#     min_num_spikes=0:           int     # minimum total number of spikes
-#     exclude_label_list=NULL:    BLOB    # list of labels to EXCLUDE
-#     """
-
-#     def get_included_units(self, curated_sorting_key, unit_inclusion_key):
-#         """given a reference to a set of curated sorting units and a specific unit inclusion parameter list, returns
-#         the units that should be included
-
-#         :param curated_sorting_key: key to entries in CuratedSpikeSorting.Unit table
-#         :type curated_sorting_key: dict
-#         :param unit_inclusion_key: key to a single unit inclusion parameter set
-#         :type unit_inclusion_key: dict
-#         """
-#         curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
-#         inclusion_key = (self & unit_inclusion_key).fetch1()
-
-#         units = (CuratedSpikeSorting().Unit() & curated_sortings).fetch()
-#         # get a list of the metrics in the units table
-#         metrics_list = CuratedSpikeSorting().metrics_fields()
-#         # create a list of the units to kepp.
-#         #TODO: make this code more flexible
-#         keep = np.asarray([True] * len(units))
-#         if 'noise_overlap' in metrics_list and "max_noise_overlap" in inclusion_key:
-#             keep = np.logical_and(keep, units['noise_overlap'] <= inclusion_key["max_noise_overlap"])
-#         if 'nn_isolation' in metrics_list and "min_isolation" in inclusion_key:
-#             keep = np.logical_and(keep, units['nn_isolation'] >= inclusion_key["min_isolation"])
-#         if 'isi_violation' in metrics_list and "isi_violation" in inclusion_key:
-#             keep = np.logical_and(keep, units['isi_violation'] <= inclusion_key["isi_violation"])
-#         if 'firing_rate' in metrics_list and "firing_rate" in inclusion_key:
-#             keep = np.logical_and(keep, units['firing_rate'] >= inclusion_key["min_firing_rate"])
-#             keep = np.logical_and(keep, units['firing_rate'] <= inclusion_key["max_firing_rate"])
-#         if 'num_spikes' in metrics_list and "min_num_spikes" in inclusion_key:
-#             keep = np.logical_and(keep, units['num_spikes'] >= inclusion_key["min_num_spikes"])
-#         units = units[keep]
-#         #now exclude by label if it is specified
-#         if inclusion_key['exclude_label_list'] is not None:
-#             included_units = []
-#             for unit in units:
-#                 labels = unit['label'].split(',')
-#                 exclude = False
-#                 for label in labels:
-#                     if label in inclusion_key['exclude_label_list']:
-#                         exclude = True
-#                 if not exclude:
-#                     included_units.append(unit)
-#             return included_units
-#         else:
-#             return units
-
-# @schema
-# class SelectedUnits(dj.Computed):
-#     definition = """
-#     -> CuratedSpikeSorting
-#     -> SelectedUnitsParameters
-#     ---
-#     -> AnalysisNwbfile   # New analysis NWB file to hold unit info
-#     units_object_id: varchar(40)   # Object ID for the units in NWB file
-#     """
-# Note this is completely untested
-

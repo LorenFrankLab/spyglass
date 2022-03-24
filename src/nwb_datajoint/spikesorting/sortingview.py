@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import datajoint as dj
@@ -7,12 +6,12 @@ import sortingview as sv
 import spikeinterface as si
 
 from ..common.common_lab import LabTeam
-from .spikesorting_recording import SpikeSortingRecording
-from .spikesorting_curation import Curation
 from .sortingview_helper_fn import set_workspace_permission
-
+from .spikesorting_curation import Curation
+from .spikesorting_recording import SpikeSortingRecording
 
 schema = dj.schema('spikesorting_sortingview')
+
 
 @schema
 class SortingviewWorkspaceSelection(dj.Manual):
@@ -65,18 +64,20 @@ class SortingviewWorkspace(dj.Computed):
         self.add_metrics_to_sorting(
             key, metrics, key['sortingview_sorting_id'])
 
-        #TODO add labels...
+        # TODO add labels...
         labels = (Curation & key).fetch1('labels')
         print(labels)
         for unit_id in labels:
             for label in labels[unit_id]:
-                workspace.sorting_curation_add_label(sorting_id=key['sortingview_sorting_id'], label=label, unit_ids=[int(unit_id)])
+                workspace.sorting_curation_add_label(
+                    sorting_id=key['sortingview_sorting_id'], label=label, unit_ids=[int(unit_id)])
 
         # set the permissions
         team_name = (SpikeSortingRecording & key).fetch1()['team_name']
-        team_members = (LabTeam.LabTeamMember & {'team_name': team_name}).fetch('lab_member_name')
-        set_workspace_permission(workspace.uri, team_members, key['sortingview_sorting_id'])
-
+        team_members = (LabTeam.LabTeamMember & {
+                        'team_name': team_name}).fetch('lab_member_name')
+        set_workspace_permission(
+            workspace.uri, team_members, key['sortingview_sorting_id'])
 
     def remove_sorting_from_workspace(self, key):
         return NotImplementedError
@@ -176,8 +177,6 @@ class SortingviewWorkspace(dj.Computed):
 
         sortingview_sorting_id = (SortingviewWorkspace & key).fetch1(
             'sortingview_sorting_id')
-        manually_curated_sorting = workspace.get_curated_sorting_extractor(
-            sorting_id=sortingview_sorting_id)
 
         # get the labels and remove the non-primary merged units
         labels = workspace.get_sorting_curation(
@@ -185,15 +184,19 @@ class SortingviewWorkspace(dj.Computed):
         # turn labels to list of str, only including accepted units.
 
         unit_labels = labels['labelsByUnit']
-        unit_ids = [unit_id for unit_id in unit_labels]
 
         if bool(labels['mergeGroups']):
             # clusters were merged, so we empty out metrics
             metrics = {}
         else:
-             # get the metrics from the parent curation
+            # get the metrics from the parent curation
             metrics = (Curation & key).fetch1('metrics')
 
         # insert this curation into the  Table
-        return Curation.insert_curation(key, parent_curation_id=key['curation_id'], labels=labels['labelsByUnit'],
-                                    merge_groups=labels['mergeGroups'], metrics=metrics, description='manually curated')
+        return Curation.insert_curation(
+            key,
+            parent_curation_id=key['curation_id'],
+            labels=labels['labelsByUnit'],
+            merge_groups=labels['mergeGroups'],
+            metrics=metrics,
+            description='manually curated')
