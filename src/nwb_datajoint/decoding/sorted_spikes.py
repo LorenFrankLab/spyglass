@@ -15,7 +15,7 @@ from replay_trajectory_classification.discrete_state_transitions import \
 from replay_trajectory_classification.initial_conditions import \
     UniformInitialConditions
 
-schema = dj.schema('decoding_clusterless')
+schema = dj.schema('decoding_sortedspikes')
 
 
 @schema
