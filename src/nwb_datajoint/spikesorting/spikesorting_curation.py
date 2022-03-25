@@ -421,9 +421,10 @@ class QualityMetrics(dj.Computed):
             else:
                 raise Exception('snr and peak_offset metrics require peak_sign to be defined in the metric parameters')
         else:
-            metric = {unit_id: metric_func(waveform_extractor,
-                                        unit_id=unit_id, **metric_params)
-                    for unit_id in waveform_extractor.sorting.get_unit_ids()}
+            metric = {}
+            for unit_id in waveform_extractor.sorting.get_unit_ids():
+                metric[str(unit_id)] = metric_func(
+                    waveform_extractor, this_unit_id=unit_id, **metric_params)
         return metric
 
     def _dump_to_json(self, qm_dict, save_path):
