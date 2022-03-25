@@ -604,7 +604,7 @@ class AutomaticCuration(dj.Computed):
         else:
             for label in label_params:
                 if label not in quality_metrics:
-                    Warning(f'{label} not found in quality metrics; skipping')
+                    print(f'{label} not found in quality metrics; skipping')
                 else:
                     for unit_id in quality_metrics[label].keys():
                         # compare the quality metric to the threshold with the specified operator
