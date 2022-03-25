@@ -56,6 +56,14 @@ class MarkParameters(dj.Manual):
             return True
         return False
 
+@schema
+class MarkSource(dj.Manual):
+    definition = """
+    ---
+    source
+    mark_param_dict:    BLOB    # dictionary of parameters for the mark extraction function
+    """
+
 
 @schema
 class UnitMarkParameters(dj.Manual):
