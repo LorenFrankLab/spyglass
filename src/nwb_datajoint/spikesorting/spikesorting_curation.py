@@ -67,6 +67,14 @@ class Curation(dj.Manual):
         :type str
 
         """
+        sorting_key['parent_curation_id'] = parent_curation_id
+        if parent_curation_id == -1:
+            # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
+            inserted_curation = (Curation & sorting_key).fetch(as_dict=True)
+            if len(inserted_curation) > 0:
+                Warning(f'Sorting has already been inserted, returning previously inserted curation_id')
+                return inserted_curation[0]['curation_id']
+
         if labels is None:
             labels = {}
         if merge_groups is None:
@@ -405,18 +413,17 @@ class QualityMetrics(dj.Computed):
             metric = metric_func(waveform_extractor, **metric_params)
         elif (metric_name == 'snr' or
               metric_name == 'peak_offset'):
-            if 'peak_offset' in metric_params:
+            if 'peak_sign' in metric_params:
                 peak_sign = metric_params['peak_sign']
                 del metric_params['peak_sign']
                 metric = metric_func(waveform_extractor,
                                     peak_sign=peak_sign, **metric_params)
-            elif metric_name == 'snr':
-                metric = metric_func(waveform_extractor, **metric_params)
-
+            else:
+                raise Exception('snr and peak_offset metrics require peak_sign to be defined in the metric parameters')
+        else:
             metric = {unit_id: metric_func(waveform_extractor,
-                                                this_unit_id=unit_id, **metric_params)
-                      for unit_id in
-                      waveform_extractor.sorting.get_unit_ids()}
+                                        unit_id=unit_id, **metric_params)
+                    for unit_id in waveform_extractor.sorting.get_unit_ids()}
         return metric
 
     def _dump_to_json(self, qm_dict, save_path):

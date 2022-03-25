@@ -7,11 +7,12 @@ from .spikesorting_artifact import (ArtifactDetection,
                                     ArtifactDetectionParameters,
                                     ArtifactDetectionSelection,
                                     ArtifactRemovedIntervalList)
+from .spikesorting_sorting import (SpikeSorterParameters, SpikeSortingSelection, SpikeSorting)
 from .spikesorting_curation import (AutomaticCuration,
                                     AutomaticCurationParameters,
                                     AutomaticCurationSelection, Curation,
-                                    FinalizedSpikeSorting,
-                                    FinalizedSpikeSortingSelection,
+                                    CuratedSpikeSorting,
+                                    CuratedSpikeSortingSelection,
                                     MetricParameters, MetricSelection,
                                     QualityMetrics, WaveformParameters,
                                     Waveforms, WaveformSelection)
