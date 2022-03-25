@@ -10,6 +10,8 @@ import spikeinterface as si
 import spikeinterface.sorters as sis
 import spikeinterface.toolkit as sit
 
+from nwb_datajoint.spikesorting.spikesorting_curation import Curation
+
 from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.dj_helper_fn import fetch_nwb
@@ -148,6 +150,8 @@ class SpikeSorting(dj.Computed):
             shutil.rmtree(key['sorting_path'])
         sorting = sorting.save(folder=key['sorting_path'])
         self.insert1(key)
+        # insert this sorting into the Curation table
+        Curation.insert_curation(key)
 
     def delete(self):
         """Extends the delete method of base class to implement permission checking.
