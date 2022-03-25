@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
-from nwb_datajoint.common.common_spikesorting import CuratedSpikeSorting
+from nwb_datajoint.spikesorting.spikesorting_curation import \
+    CuratedSpikeSorting
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
 from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
 from replay_trajectory_classification.classifier import (
@@ -31,7 +32,6 @@ class SortedSpikesIndicatorSelection(dj.Lookup):
 @schema
 class SortedSpikesIndicator(dj.Computed):
     definition = """
-    -> CuratedSpikeSorting
     -> SortedSpikesIndicatorSelection
     ---
     -> AnalysisNwbfile

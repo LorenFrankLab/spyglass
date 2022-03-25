@@ -13,7 +13,7 @@ from nwb_datajoint.common.common_position import IntervalPositionInfo
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
 from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
 from nwb_datajoint.spikesorting.spikesorting_curation import \
-    FinalizedSpikeSorting
+    CuratedSpikeSorting
 from replay_trajectory_classification.classifier import (
     _DEFAULT_CLUSTERLESS_MODEL_KWARGS, _DEFAULT_CONTINUOUS_TRANSITIONS,
     _DEFAULT_ENVIRONMENT)
@@ -60,7 +60,6 @@ class MarkParameters(dj.Manual):
 @schema
 class UnitMarkParameters(dj.Manual):
     definition = """
-    -> FinalizedSpikeSorting
     -> MarkParameters
     """
 
@@ -91,7 +90,7 @@ class UnitMarks(dj.Computed):
             unit_inclusion_key=key)
 
         # retrieve the units from the NWB file
-        nwb_units = (FinalizedSpikeSorting() & key).fetch_nwb()[0]['units']
+        nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
 
         # get the labbox workspace so we can get the waveforms from the recording
         workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
