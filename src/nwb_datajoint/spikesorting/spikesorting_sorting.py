@@ -74,7 +74,7 @@ class SpikeSorterParameters(dj.Manual):
 
         # clusterless defaults
         sorter = 'clusterless_thresholder'
-        sorter_params_name = 'default'
+        sorter_params_name = 'default_clusterless'
         sorter_params = dict(
             detect_threshold=100.0,  # uV
             # Locally exclusive means one unit per spike detected
