@@ -3,9 +3,10 @@ import stat
 import warnings
 
 import pynwb
+from nwb_datajoint.common.nwb_helper_fn import (get_raw_eseries,
+                                                populate_all_common)
+from nwb_datajoint.common_nwbfile import Nwbfile
 
-from .common.common_nwbfile import Nwbfile
-from .common.nwb_helper_fn import get_raw_eseries, populate_all_common
 from .storage_dirs import check_env
 
 
