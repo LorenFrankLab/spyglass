@@ -21,6 +21,7 @@ from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema('spikesorting_curation')
 
+valid_labels = ['reject', 'noise', 'artifact', 'mua', 'accept']
 
 def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[List[int]]):
     # return a new sorting where the units are merged according to merge_groups
@@ -39,9 +40,9 @@ class Curation(dj.Manual):
     ---
     curation_num = -1: int #
     parent_curation_id='': varchar(10)
-    labels: blob # a dictionary of labels for the units
+    curation_labels: blob # a dictionary of labels for the units
     merge_groups: blob # a list of merge groups for the units
-    metrics: blob # a list of quality metrics for the units (if available)
+    quality_metrics: blob # a list of quality metrics for the units (if available)
     description='': varchar(1000) #optional description for this curated sort
     time_of_creation: int   # in Unix time, to the nearest second
     """
@@ -73,7 +74,7 @@ class Curation(dj.Manual):
         if metrics is None:
             metrics = {}
 
-        # generate a unique ID
+        # generate a unique number
         num = (Curation & sorting_key).fetch('curation_num')
         if len(num) > 0:
             num.sort()
@@ -92,9 +93,9 @@ class Curation(dj.Manual):
         sorting_key['curation_num'] = curation_num
         sorting_key['parent_curation_id'] = parent_curation_id
         sorting_key['description'] = description
-        sorting_key['labels'] = labels
+        sorting_key['curation_labels'] = labels
         sorting_key['merge_groups'] = merge_groups
-        sorting_key['metrics'] = metrics
+        sorting_key['quality_metrics'] = metrics
         sorting_key['time_of_creation'] = int(time.time())
 
         Curation.insert1(sorting_key)
@@ -404,12 +405,15 @@ class QualityMetrics(dj.Computed):
             metric = metric_func(waveform_extractor, **metric_params)
         elif (metric_name == 'snr' or
               metric_name == 'peak_offset'):
-            peak_sign = metric_params['peak_sign']
-            del metric_params['peak_sign']
-            metric = metric_func(waveform_extractor,
-                                 peak_sign=peak_sign, **metric_params)
-        else:
-            metric = {str(unit_id): metric_func(waveform_extractor,
+            if 'peak_offset' in metric_params:
+                peak_sign = metric_params['peak_sign']
+                del metric_params['peak_sign']
+                metric = metric_func(waveform_extractor,
+                                    peak_sign=peak_sign, **metric_params)
+            elif metric_name == 'snr':
+                metric = metric_func(waveform_extractor, **metric_params)
+
+            metric = {unit_id: metric_func(waveform_extractor,
                                                 this_unit_id=unit_id, **metric_params)
                       for unit_id in
                       waveform_extractor.sorting.get_unit_ids()}
@@ -466,16 +470,41 @@ class AutomaticCurationParameters(dj.Manual):
     definition = """
     auto_curation_params_name: varchar(200)   # name of this parameter set
     ---
-    merge_params: blob   # params to merge units
-    label_params: blob   # params to label units
+    merge_params: blob   # dictionary of params to merge units
+    label_params: blob   # dictionary params to label units
     """
+    def insert1(key):
+        # validate the labels and then insert
+        #TODO: add validation for merge_params
+        for metric in key['label_params']:
+            if metric not in _metric_name_to_func:
+                raise Exception(f'{metric} not in list of available metrics')
+            comparison_list = key['label_params'][metric]
+            if comparison_list[0] not in _comparison_to_function:
+                raise Exception(f'{metric}: {comparison_list[0]} not in list of available comparisons')
+            if type(comparison_list[1]) != int and type(comparison_list) != float:
+                raise Exception(f'{metric}: {comparison_list[1]} not a number')
+            for label in comparison_list[2]:
+                if label not in valid_labels:
+                  raise Exception(f'{metric}: {comparison_list[2]} not a valid label: {valid_labels}')
 
+
+
+
+        super().insert1(key)
     def insert_default(self):
         auto_curation_params_name = 'default'
         merge_params = {}
         # label_params parsing: Each key is the name of a metric,
-        # the contents are a three value list with the comparison, a value, and the label if the comparison is true
-        label_params = {'nn_noise_overlap': ['>', 0.1, 'noise']}
+        # the contents are a three value list with the comparison, a value, and a list of labels to apply if the comparison is true
+        label_params = {'nn_noise_overlap': ['>', 0.1, ['noise', 'reject']]}
+        self.insert1([auto_curation_params_name, merge_params,
+                     label_params], skip_duplicates=True)
+        # Second default parameter set for not applying any labels,
+        # or merges, but adding metrics
+        auto_curation_params_name = 'none'
+        merge_params = {}
+        label_params = {}
         self.insert1([auto_curation_params_name, merge_params,
                      label_params], skip_duplicates=True)
 
@@ -512,7 +541,7 @@ class AutomaticCuration(dj.Computed):
         # get the curation information and the curated sorting
         parent_curation = (Curation & key).fetch(as_dict=True)[0]
         parent_merge_groups = parent_curation['merge_groups']
-        parent_labels = parent_curation['labels']
+        parent_labels = parent_curation['curation_labels']
         parent_curation_id = parent_curation['curation_id']
         parent_sorting = Curation.get_curated_sorting_extractor(key)
 
@@ -602,36 +631,35 @@ class AutomaticCuration(dj.Computed):
         if not label_params:
             return parent_labels
         else:
-            for label in label_params:
-                if label not in quality_metrics:
-                    print(f'{label} not found in quality metrics; skipping')
+            for metric in label_params:
+                if metric not in quality_metrics:
+                    print(f'{metric} not found in quality metrics; skipping')
                 else:
-                    for unit_id in quality_metrics[label].keys():
+                    for unit_id in quality_metrics[metric].keys():
                         # compare the quality metric to the threshold with the specified operator
-                        # note that label_params[label] is a three element list with a comparison operator as a string,
-                        # the threshold value, and the label to be applied if the comparison is true
-                        if _comparison_to_function[label_params[label][0]](quality_metrics[label][unit_id], label_params[label][1]):
+                        # note that label_params[metric] is a three element list with a comparison operator as a string,
+                        # the threshold value, and a list of labels to be applied if the comparison is true
+                        if _comparison_to_function[label_params[metric][0]](quality_metrics[metric][unit_id], label_params[metric][1]):
                             if unit_id not in parent_labels:
-                                parent_labels[unit_id] = [
-                                    label_params[label][2]]
+                                parent_labels[unit_id] = label_params[metric][2]
                             # check if the label is already there, and if not, add it
-                            elif label_params[label][2] not in parent_labels[unit_id]:
+                            elif label_params[metric][2] not in parent_labels[unit_id]:
                                 parent_labels[unit_id].extend(
-                                    label_params[label][2])
+                                    label_params[metric][2])
             return parent_labels
 
 
 @schema
-class FinalizedSpikeSortingSelection(dj.Manual):
+class CuratedSpikeSortingSelection(dj.Manual):
     definition = """
     -> Curation
     """
 
 
 @schema
-class FinalizedSpikeSorting(dj.Computed):
+class CuratedSpikeSorting(dj.Computed):
     definition = """
-    -> FinalizedSpikeSortingSelection
+    -> CuratedSpikeSortingSelection
     ---
     -> AnalysisNwbfile
     units_object_id: varchar(40)
@@ -640,7 +668,7 @@ class FinalizedSpikeSorting(dj.Computed):
     class Unit(dj.Part):
         definition = """
         # Table for holding sorted units
-        -> FinalizedSpikeSorting
+        -> CuratedSpikeSorting
         unit_id: int   # ID for each unit
         ---
         label='': varchar(200)   # optional set of labels for each unit
@@ -729,7 +757,7 @@ class FinalizedSpikeSorting(dj.Computed):
         """Returns a list of the metrics that are currently in the Units table
         """
         unit_fields = list(self.Unit().fetch(limit=1, as_dict=True)[0].keys())
-        parent_fields = list(FinalizedSpikeSorting.fetch(
+        parent_fields = list(CuratedSpikeSorting.fetch(
             limit=1, as_dict=True)[0].keys())
         parent_fields.extend(['unit_id', 'label'])
         return [field for field in unit_fields if field not in parent_fields]
