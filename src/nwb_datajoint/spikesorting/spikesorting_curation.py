@@ -629,7 +629,7 @@ class FinalizedSpikeSortingSelection(dj.Manual):
 
 
 @schema
-class FinalizedSpikeSorting(dj.Manual):
+class FinalizedSpikeSorting(dj.Computed):
     definition = """
     -> FinalizedSpikeSortingSelection
     ---
@@ -657,7 +657,7 @@ class FinalizedSpikeSorting(dj.Manual):
         # check that the Curation has metrics
         metrics = (Curation & key).fetch1('metrics')
         if metrics == {}:
-            Warning(
+            print(
                 f'Metrics for Curation {key} should normally be calculated before insertion here')
 
         sorting = Curation.get_curated_sorting_extractor(key)
