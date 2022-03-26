@@ -306,9 +306,9 @@ class Waveforms(dj.Computed):
     def _get_waveform_extractor_name(self, key):
         waveform_params_name = (WaveformParameters & key).fetch1(
             'waveform_params_name')
-        sorting_path = SpikeSorting._get_sorting_name(key)
-        we_name = sorting_path + '_' + str(key['curation_id']) + '_' + \
-            waveform_params_name + '_waveforms'
+        import uuid
+        uuid_string = uuid.uuid4()
+        we_name = f'{key["nwb_file_name"]}_{uuid_string[0:8]}_{key["curation_id")}_{waveform_params_name}_waveforms'
         return we_name
 
 
@@ -721,14 +721,11 @@ class CuratedSpikeSorting(dj.Computed):
         sorting = Curation.get_curated_sorting_extractor(key)
         recording = Curation.get_recording_extractor(key)
 
-        # get the original units from the Automatic curation NWB file to get the sort interval information
+        # get the sort_interval and sorting interval list
         ss_key = (SpikeSorting & key).fetch1("KEY")
-        orig_units = (SpikeSorting & ss_key).fetch_nwb()[0]['units']
-        orig_units = orig_units.loc[accepted_units]
-        # TODO: fix if unit 0 doesn't exist
-        sort_interval = orig_units.iloc[0]['sort_interval']
-        sort_interval_list_name = (SpikeSortingRecording & key).fetch1(
-            'sort_interval_list_name')
+        
+        sort_interval = (SpikeSortingRecording & key).fetch('sort_interval')
+        sort_interval_list_name = (SpikeSorting & key).fetch('artifact_removed_interval_list_name')
 
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
