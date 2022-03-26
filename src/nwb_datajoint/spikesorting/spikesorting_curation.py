@@ -306,7 +306,7 @@ class Waveforms(dj.Computed):
     def _get_waveform_extractor_name(self, key):
         waveform_params_name = (WaveformParameters & key).fetch1(
             'waveform_params_name')
-        sorting_path = SpikeSorting._get_sorting_name(key)
+        sorting_path = SpikeSorting()._get_sorting_name(key)
         we_name = sorting_path + '_' + str(key['curation_id']) + '_' + \
             waveform_params_name + '_waveforms'
         return we_name
@@ -366,7 +366,16 @@ class MetricSelection(dj.Manual):
     -> MetricParameters
     ---
     """
-
+    def insert1(self, key, **kwargs):
+        waveform_params = (WaveformParameters & key).fetch1(
+                                        'waveform_params')
+        metric_params = (MetricParameters & key).fetch1(
+                                            'metric_params')
+        if 'peak_offset' in metric_params:
+            if waveform_params['whiten'] is True:
+                raise Exception("metric 'peak_offset' needs to be "
+                         "calculated on unwhitened waveforms")
+        super().insert1(key, **kwargs)
 
 @schema
 class QualityMetrics(dj.Computed):
@@ -480,21 +489,21 @@ class AutomaticCurationParameters(dj.Manual):
     merge_params: blob   # dictionary of params to merge units
     label_params: blob   # dictionary params to label units
     """
-    # def insert1(key, **kwargs):
-    #     # validate the labels and then insert
-    #     #TODO: add validation for merge_params
-    #     for metric in key['label_params']:
-    #         if metric not in _metric_name_to_func:
-    #             raise Exception(f'{metric} not in list of available metrics')
-    #         comparison_list = key['label_params'][metric]
-    #         if comparison_list[0] not in _comparison_to_function:
-    #             raise Exception(f'{metric}: {comparison_list[0]} not in list of available comparisons')
-    #         if type(comparison_list[1]) != int and type(comparison_list) != float:
-    #             raise Exception(f'{metric}: {comparison_list[1]} not a number')
-    #         for label in comparison_list[2]:
-    #             if label not in valid_labels:
-    #               raise Exception(f'{metric}: {comparison_list[2]} not a valid label: {valid_labels}')               
-    #     super().insert1(key, **kwargs)
+    def insert1(self, key, **kwargs):
+        # validate the labels and then insert
+        #TODO: add validation for merge_params
+        for metric in key['label_params']:
+            if metric not in _metric_name_to_func:
+                raise Exception(f'{metric} not in list of available metrics')
+            comparison_list = key['label_params'][metric]
+            if comparison_list[0] not in _comparison_to_function:
+                raise Exception(f'{metric}: {comparison_list[0]} not in list of available comparisons')
+            if type(comparison_list[1]) != int and type(comparison_list[1]) != float:
+                raise Exception(f'{metric}: {comparison_list[1]} not a number')
+            for label in comparison_list[2]:
+                if label not in valid_labels:
+                  raise Exception(f'{metric}: {comparison_list[2]} not a valid label: {valid_labels}')               
+        super().insert1(key, **kwargs)
 
     def insert_default(self):
         key = {}
