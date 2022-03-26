@@ -2,10 +2,11 @@ import json
 import os
 import shutil
 import time
-import uuid
+import copy
 from pathlib import Path
 from typing import List
 from warnings import WarningMessage
+
 
 import datajoint as dj
 import numpy as np
@@ -305,7 +306,8 @@ class Waveforms(dj.Computed):
     def _get_waveform_extractor_name(self, key):
         waveform_params_name = (WaveformParameters & key).fetch1(
             'waveform_params_name')
-        we_name = str(key['curation_id']) + '_' + \
+        sorting_path = SpikeSorting._get_sorting_name(key)
+        we_name = sorting_path + '_' + str(key['curation_id']) + '_' + \
             waveform_params_name + '_waveforms'
         return we_name
 
@@ -569,9 +571,7 @@ class AutomaticCuration(dj.Computed):
 
         self.insert1(key)
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
-                         *attrs, **kwargs)
+ 
 
     @staticmethod
     def get_merge_groups(sorting, parent_merge_groups, quality_metrics, merge_params):
@@ -704,24 +704,26 @@ class CuratedSpikeSorting(dj.Computed):
         # get the labels for the accepted units
         labels = {}
         for unit_id in accepted_units:
-            labels[unit_id] = ','.join(unit_labels[unit_id])
+            if unit_id in unit_labels:
+                labels[unit_id] = ','.join(unit_labels[unit_id])
 
         # Limit the metrics to accepted units
-        metrics = metrics.loc[accepted_units]
+        tmp_metrics = copy.deepcopy(metrics)
+        for metric in metrics:
+            for unit_id in metrics[metric]:
+                if unit_id not in accepted_units:
+                    del tmp_metrics[metric][unit_id]
+        metrics = tmp_metrics
 
         print(f'Found {len(accepted_units)} accepted units')
-
-        # exit out if there are no labels or no accepted units
-        if len(unit_labels) == 0 or len(accepted_units) == 0:
-            print(f'{key}: no accepted units found')
-            return
 
         # get the sorting and save it in the NWB file
         sorting = Curation.get_curated_sorting_extractor(key)
         recording = Curation.get_recording_extractor(key)
 
         # get the original units from the Automatic curation NWB file to get the sort interval information
-        orig_units = (SpikeSorting & key).fetch_nwb()[0]['units']
+        ss_key = (SpikeSorting & key).fetch1("KEY")
+        orig_units = (SpikeSorting & ss_key).fetch_nwb()[0]['units']
         orig_units = orig_units.loc[accepted_units]
         # TODO: fix if unit 0 doesn't exist
         sort_interval = orig_units.iloc[0]['sort_interval']
