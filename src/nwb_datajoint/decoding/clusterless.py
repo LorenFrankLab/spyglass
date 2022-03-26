@@ -11,7 +11,8 @@ from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
 from nwb_datajoint.common.common_position import IntervalPositionInfo
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
-from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
+from nwb_datajoint.decoding.core import (_convert_classes_to_dict,
+                                         _restore_classes)
 from nwb_datajoint.spikesorting.spikesorting_curation import \
     CuratedSpikeSorting
 from replay_trajectory_classification.classifier import (
@@ -288,30 +289,17 @@ class UnitMarksIndicator(dj.Computed):
                 .transpose('time', 'marks', 'electrodes'))
 
 
-def _convert_algorithm_params(algo_params):
-    try:
-        algo_params = algo_params.copy()
-        algo_params['model'] = algo_params['model'].__name__
-    except KeyError:
-        pass
-
-    return algo_params
-
-
 def make_default_decoding_parameters_cpu():
 
     classifier_parameters = dict(
-        environments=[vars(_DEFAULT_ENVIRONMENT)],
+        environments=[_DEFAULT_ENVIRONMENT],
         observation_models=None,
-        continuous_transition_types=_convert_transitions_to_dict(
-            _DEFAULT_CONTINUOUS_TRANSITIONS),
-        discrete_transition_type=_to_dict(DiagonalDiscrete(0.98)),
-        initial_conditions_type=_to_dict(UniformInitialConditions()),
+        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
+        discrete_transition_type=DiagonalDiscrete(0.98),
+        initial_conditions_type=UniformInitialConditions(),
         infer_track_interior=True,
         clusterless_algorithm='multiunit_likelihood_integer',
-        clusterless_algorithm_params=_convert_algorithm_params(
-            _DEFAULT_CLUSTERLESS_MODEL_KWARGS)
-    )
+        clusterless_algorithm_params=_DEFAULT_CLUSTERLESS_MODEL_KWARGS)
 
     predict_parameters = {
         'is_compute_acausal': True,
@@ -325,12 +313,11 @@ def make_default_decoding_parameters_cpu():
 
 def make_default_decoding_parameters_gpu():
     classifier_parameters = dict(
-        environments=[vars(_DEFAULT_ENVIRONMENT)],
+        environments=[_DEFAULT_ENVIRONMENT],
         observation_models=None,
-        continuous_transition_types=_convert_transitions_to_dict(
-            _DEFAULT_CONTINUOUS_TRANSITIONS),
-        discrete_transition_type=_to_dict(DiagonalDiscrete(0.98)),
-        initial_conditions_type=_to_dict(UniformInitialConditions()),
+        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
+        discrete_transition_type=DiagonalDiscrete(0.98),
+        initial_conditions_type=UniformInitialConditions(),
         infer_track_interior=True,
         clusterless_algorithm='multiunit_likelihood_integer_gpu',
         clusterless_algorithm_params={
@@ -378,6 +365,12 @@ class ClusterlessClassifierParameters(dj.Manual):
              'fit_params': fit_parameters,
              'predict_params': predict_parameters},
             skip_duplicates=True)
+
+    def insert1(self, key, **kwargs):
+        super().insert1(_convert_classes_to_dict(key), **kwargs)
+
+    def fetch1(self, key, **kwargs):
+        return _restore_classes(super().fetch1(key, **kwargs))
 
 
 @schema

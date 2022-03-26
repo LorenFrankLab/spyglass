@@ -1,8 +1,8 @@
+import copy
 import json
 import os
 import shutil
 import time
-import uuid
 from pathlib import Path
 from typing import List
 from warnings import WarningMessage
@@ -23,6 +23,7 @@ schema = dj.schema('spikesorting_curation')
 
 valid_labels = ['reject', 'noise', 'artifact', 'mua', 'accept']
 
+
 def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[List[int]]):
     # return a new sorting where the units are merged according to merge_groups
     # merge_groups is a list of lists of unit_ids.
@@ -35,11 +36,10 @@ def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[Li
 class Curation(dj.Manual):
     definition = """
     # Stores each spike sorting; similar to IntervalList
-    curation_id: varchar(10) #A unique identifier for each curation entry for convenience
+    curation_id: int # a number correponding to the index of this curation
     -> SpikeSorting
     ---
-    curation_num = -1: int #
-    parent_curation_id='': varchar(10)
+    parent_curation_id=-1: int
     curation_labels: blob # a dictionary of labels for the units
     merge_groups: blob # a list of merge groups for the units
     quality_metrics: blob # a list of quality metrics for the units (if available)
@@ -63,17 +63,17 @@ class Curation(dj.Manual):
         :type dict
 
         returns:
-        :param sorting_id
-        :type str
+        :param curation_key
+        :type dict
 
         """
-        sorting_key['parent_curation_id'] = parent_curation_id
         if parent_curation_id == -1:
             # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
-            inserted_curation = (Curation & sorting_key).fetch(as_dict=True)
+            inserted_curation = (Curation & sorting_key).fetch("KEY")
             if len(inserted_curation) > 0:
-                Warning(f'Sorting has already been inserted, returning previously inserted curation_id')
-                return inserted_curation[0]['curation_id']
+                Warning(
+                    f'Sorting has already been inserted, returning key to previously inserted curation')
+                return inserted_curation[0]
 
         if labels is None:
             labels = {}
@@ -82,23 +82,15 @@ class Curation(dj.Manual):
         if metrics is None:
             metrics = {}
 
-        # generate a unique number
-        num = (Curation & sorting_key).fetch('curation_num')
-        if len(num) > 0:
-            num.sort()
-            curation_num = num[-1] + 1
+        # generate a unique number for this curation
+        id = (Curation & sorting_key).fetch('curation_id')
+        if len(id) > 0:
+            id.sort()
+            curation_id = id[-1] + 1
         else:
-            curation_num = 0
-
-        # generate a unique ID string
-        found = True
-        while found:
-            curation_id = 'C_' + str(uuid.uuid4())[:8]
-            if len((Curation & {'curation_id': curation_id}).fetch()) == 0:
-                found = False
+            curation_id = 0
 
         sorting_key['curation_id'] = curation_id
-        sorting_key['curation_num'] = curation_num
         sorting_key['parent_curation_id'] = parent_curation_id
         sorting_key['description'] = description
         sorting_key['curation_labels'] = labels
@@ -106,9 +98,15 @@ class Curation(dj.Manual):
         sorting_key['quality_metrics'] = metrics
         sorting_key['time_of_creation'] = int(time.time())
 
+        print(sorting_key)
+
         Curation.insert1(sorting_key)
 
-        return sorting_key['curation_id']
+        # get the primary key for this curation
+        c_key = Curation.fetch("KEY")[0]
+        curation_key = {item: sorting_key[item] for item in c_key}
+
+        return curation_key
 
     @staticmethod
     def get_recording_extractor(key):
@@ -308,7 +306,8 @@ class Waveforms(dj.Computed):
     def _get_waveform_extractor_name(self, key):
         waveform_params_name = (WaveformParameters & key).fetch1(
             'waveform_params_name')
-        we_name = str(key['curation_id']) + '_' + \
+        sorting_path = SpikeSorting()._get_sorting_name(key)
+        we_name = sorting_path + '_' + str(key['curation_id']) + '_' + \
             waveform_params_name + '_waveforms'
         return we_name
 
@@ -368,6 +367,17 @@ class MetricSelection(dj.Manual):
     ---
     """
 
+    def insert1(self, key, **kwargs):
+        waveform_params = (WaveformParameters & key).fetch1(
+            'waveform_params')
+        metric_params = (MetricParameters & key).fetch1(
+            'metric_params')
+        if 'peak_offset' in metric_params:
+            if waveform_params['whiten'] is True:
+                raise Exception("metric 'peak_offset' needs to be "
+                                "calculated on unwhitened waveforms")
+        super().insert1(key, **kwargs)
+
 
 @schema
 class QualityMetrics(dj.Computed):
@@ -417,9 +427,10 @@ class QualityMetrics(dj.Computed):
                 peak_sign = metric_params['peak_sign']
                 del metric_params['peak_sign']
                 metric = metric_func(waveform_extractor,
-                                    peak_sign=peak_sign, **metric_params)
+                                     peak_sign=peak_sign, **metric_params)
             else:
-                raise Exception('snr and peak_offset metrics require peak_sign to be defined in the metric parameters')
+                raise Exception(
+                    'snr and peak_offset metrics require peak_sign to be defined in the metric parameters')
         else:
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():
@@ -481,40 +492,40 @@ class AutomaticCurationParameters(dj.Manual):
     merge_params: blob   # dictionary of params to merge units
     label_params: blob   # dictionary params to label units
     """
-    def insert1(key):
+
+    def insert1(self, key, **kwargs):
         # validate the labels and then insert
-        #TODO: add validation for merge_params
+        # TODO: add validation for merge_params
         for metric in key['label_params']:
             if metric not in _metric_name_to_func:
                 raise Exception(f'{metric} not in list of available metrics')
             comparison_list = key['label_params'][metric]
             if comparison_list[0] not in _comparison_to_function:
-                raise Exception(f'{metric}: {comparison_list[0]} not in list of available comparisons')
-            if type(comparison_list[1]) != int and type(comparison_list) != float:
+                raise Exception(
+                    f'{metric}: {comparison_list[0]} not in list of available comparisons')
+            if type(comparison_list[1]) != int and type(comparison_list[1]) != float:
                 raise Exception(f'{metric}: {comparison_list[1]} not a number')
             for label in comparison_list[2]:
                 if label not in valid_labels:
-                  raise Exception(f'{metric}: {comparison_list[2]} not a valid label: {valid_labels}')
+                    raise Exception(
+                        f'{metric}: {comparison_list[2]} not a valid label: {valid_labels}')
+        super().insert1(key, **kwargs)
 
-
-
-
-        super().insert1(key)
     def insert_default(self):
-        auto_curation_params_name = 'default'
-        merge_params = {}
+        key = {}
+        key['auto_curation_params_name'] = 'default'
+        key['merge_params'] = {}
         # label_params parsing: Each key is the name of a metric,
         # the contents are a three value list with the comparison, a value, and a list of labels to apply if the comparison is true
-        label_params = {'nn_noise_overlap': ['>', 0.1, ['noise', 'reject']]}
-        self.insert1([auto_curation_params_name, merge_params,
-                     label_params], skip_duplicates=True)
+        key['label_params'] = {'nn_noise_overlap': [
+            '>', 0.1, ['noise', 'reject']]}
+        self.insert1(key, skip_duplicates=True)
         # Second default parameter set for not applying any labels,
         # or merges, but adding metrics
-        auto_curation_params_name = 'none'
-        merge_params = {}
-        label_params = {}
-        self.insert1([auto_curation_params_name, merge_params,
-                     label_params], skip_duplicates=True)
+        key['auto_curation_params_name'] = 'none'
+        key['merge_params'] = {}
+        key['label_params'] = {}
+        self.insert1(key, skip_duplicates=True)
 
 
 @schema
@@ -538,7 +549,7 @@ class AutomaticCuration(dj.Computed):
     definition = """
     -> AutomaticCurationSelection
     ---
-    auto_curation_id: varchar(10) # the ID of this curation, matches curation_id in Curation
+    auto_curation_key: blob # the key to the curation inserted by make
     """
 
     def make(self, key):
@@ -570,15 +581,11 @@ class AutomaticCuration(dj.Computed):
         # first remove keys that aren't part of the Sorting (the primary key of curation)
         c_key = (SpikeSorting & key).fetch("KEY")[0]
         curation_key = {item: key[item] for item in key if item in c_key}
-        key['auto_curation_id'] = Curation.insert_curation(
+        key['auto_curation_key'] = Curation.insert_curation(
             curation_key, parent_curation_id=parent_curation_id,
             labels=labels, merge_groups=merge_groups, metrics=metrics, description='auto curated')
 
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
-                         *attrs, **kwargs)
 
     @staticmethod
     def get_merge_groups(sorting, parent_merge_groups, quality_metrics, merge_params):
@@ -689,9 +696,9 @@ class CuratedSpikeSorting(dj.Computed):
         """
 
     def make(self, key):
-        unit_labels_to_remove = ['reject', 'noise']
+        unit_labels_to_remove = ['reject']
         # check that the Curation has metrics
-        metrics = (Curation & key).fetch1('metrics')
+        metrics = (Curation & key).fetch1('quality_metrics')
         if metrics == {}:
             print(
                 f'Metrics for Curation {key} should normally be calculated before insertion here')
@@ -699,7 +706,7 @@ class CuratedSpikeSorting(dj.Computed):
         sorting = Curation.get_curated_sorting_extractor(key)
         unit_ids = sorting.get_unit_ids()
         # Get the labels for the units, add only those units that do not have 'reject' or 'noise' labels
-        unit_labels = (Curation & key).fetch1('labels')
+        unit_labels = (Curation & key).fetch1('curation_labels')
         accepted_units = []
         for unit_id in unit_ids:
             if unit_id in unit_labels:
@@ -711,24 +718,26 @@ class CuratedSpikeSorting(dj.Computed):
         # get the labels for the accepted units
         labels = {}
         for unit_id in accepted_units:
-            labels[unit_id] = ','.join(unit_labels[unit_id])
+            if unit_id in unit_labels:
+                labels[unit_id] = ','.join(unit_labels[unit_id])
 
         # Limit the metrics to accepted units
-        metrics = metrics.loc[accepted_units]
+        tmp_metrics = copy.deepcopy(metrics)
+        for metric in metrics:
+            for unit_id in metrics[metric]:
+                if unit_id not in accepted_units:
+                    del tmp_metrics[metric][unit_id]
+        metrics = tmp_metrics
 
         print(f'Found {len(accepted_units)} accepted units')
-
-        # exit out if there are no labels or no accepted units
-        if len(unit_labels) == 0 or len(accepted_units) == 0:
-            print(f'{key}: no accepted units found')
-            return
 
         # get the sorting and save it in the NWB file
         sorting = Curation.get_curated_sorting_extractor(key)
         recording = Curation.get_recording_extractor(key)
 
         # get the original units from the Automatic curation NWB file to get the sort interval information
-        orig_units = (SpikeSorting & key).fetch_nwb()[0]['units']
+        ss_key = (SpikeSorting & key).fetch1("KEY")
+        orig_units = (SpikeSorting & ss_key).fetch_nwb()[0]['units']
         orig_units = orig_units.loc[accepted_units]
         # TODO: fix if unit 0 doesn't exist
         sort_interval = orig_units.iloc[0]['sort_interval']
