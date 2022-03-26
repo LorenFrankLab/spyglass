@@ -82,3 +82,36 @@ def _restore_classes(params):
         pass
 
     return params
+
+
+def _convert_algorithm_params(algo_params):
+    try:
+        algo_params = algo_params.copy()
+        algo_params['model'] = algo_params['model'].__name__
+    except KeyError:
+        pass
+
+    return algo_params
+
+
+def _convert_classes_to_dict(key):
+    key['classifier_params']['environments'] = [
+        vars(env) for env in key['classifier_params']['environments']]
+    key['classifier_params']['continuous_transition_types'] = _convert_transitions_to_dict(
+        key['classifier_params']['continuous_transition_types'])
+    key['classifier_params']['discrete_transition_type'] = _to_dict(
+        key['classifier_params']['discrete_transition_type'])
+    key['classifier_params']['initial_conditions_type'] = _to_dict(
+        key['classifier_params']['initial_conditions_type'])
+
+    if key['classifier_params']['observation_models'] is not None:
+        key['classifier_params']['observation_models'] = [vars(
+            obs) for obs in key['classifier_params']['observation_models']]
+
+    try:
+        key['classifier_params']['clusterless_algorithm_params'] = _convert_algorithm_params(
+            key['classifier_params']['clusterless_algorithm_params'])
+    except KeyError:
+        pass
+
+    return key
