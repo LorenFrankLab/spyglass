@@ -60,12 +60,11 @@ class SortingviewWorkspace(dj.Computed):
         self.insert1(key)
 
         # add metrics to the sorting if they exist
-        metrics = (Curation & key).fetch1('metrics')
+        metrics = (Curation & key).fetch1('quality_metrics')
         self.add_metrics_to_sorting(
             key, metrics, key['sortingview_sorting_id'])
 
-        # TODO add labels...
-        labels = (Curation & key).fetch1('labels')
+        labels = (Curation & key).fetch1('curation_labels')
         print(labels)
         for unit_id in labels:
             for label in labels[unit_id]:
