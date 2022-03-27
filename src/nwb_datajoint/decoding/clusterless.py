@@ -1,11 +1,15 @@
+import os
 import pprint
+import shutil
+import uuid
+from pathlib import Path
 
 import datajoint as dj
-import labbox_ephys as le
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pynwb
+import spikeinterface as si
 import xarray as xr
 from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
@@ -13,8 +17,8 @@ from nwb_datajoint.common.common_position import IntervalPositionInfo
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
 from nwb_datajoint.decoding.core import (_convert_classes_to_dict,
                                          _restore_classes)
-from nwb_datajoint.spikesorting.spikesorting_curation import \
-    CuratedSpikeSorting
+from nwb_datajoint.spikesorting.spikesorting_curation import (
+    CuratedSpikeSorting, Curation)
 from replay_trajectory_classification.classifier import (
     _DEFAULT_CLUSTERLESS_MODEL_KWARGS, _DEFAULT_CONTINUOUS_TRANSITIONS,
     _DEFAULT_ENVIRONMENT)
@@ -39,9 +43,10 @@ class MarkParameters(dj.Manual):
     """
 
     def insert_default(self):
-        """insert the default parameter set {'sign': -1, 'threshold' : 0} corresponding to negative going waveforms of at least 100 uV size
+        """insert the default parameter set {'sign': -1, 'threshold' : 0}
+        corresponding to negative going waveforms of at least 100 uV size
         """
-        default_dict = {'sign': -1, 'threshold': 0}
+        default_dict = {}
         self.insert1({'mark_param_name': 'default',
                       'mark_param_dict': default_dict}, skip_duplicates=True)
 
@@ -61,6 +66,7 @@ class MarkParameters(dj.Manual):
 @schema
 class UnitMarkParameters(dj.Manual):
     definition = """
+    -> CuratedSpikeSorting
     -> MarkParameters
     """
 
@@ -77,7 +83,6 @@ class UnitMarks(dj.Computed):
     def make(self, key):
         # get the list of mark parameters
         mark_param = (MarkParameters & key).fetch1()
-        mark_param_dict = mark_param['mark_param_dict']
 
         # check that the mark type is supported
         if not MarkParameters().supported_mark_type(mark_param['mark_type']):
@@ -85,79 +90,65 @@ class UnitMarks(dj.Computed):
                 f'Mark type {mark_param["mark_type"]} not supported; skipping')
             return
 
-        # get the list of units
-        units = SelectedUnitsParameters().get_included_units(
-            curated_sorting_key=key,
-            unit_inclusion_key=key)
-
         # retrieve the units from the NWB file
         nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
 
-        # get the labbox workspace so we can get the waveforms from the recording
-        workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
-        workspace = le.load_workspace(workspace_uri)
-        recording = workspace.get_recording_extractor(
-            workspace.recording_ids[0])
-        sorting = workspace.get_sorting_extractor(workspace.sorting_ids[0])
-        channel_ids = recording.get_channel_ids()
-        # assume the channels are all the same for the moment. This would need to be changed for larger probes
-        channel_ids_by_unit = [channel_ids] * (max(units['unit_id']) + 1)
+        recording = Curation.get_recording_extractor(key)
+        sorting = Curation.get_curated_sorting_extractor(key)
+        waveform_extractor_name = (
+            f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
+            f'{key["curation_id"]}_clusterless_waveforms')
+        key['waveform_extractor_path'] = str(
+            Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) /
+            Path(waveform_extractor_name))
+        if os.path.exists(key['waveform_extractor_path']):
+            shutil.rmtree(key['waveform_extractor_path'])
 
-        N_WAVEFORM_POINTS = 2
-        waveforms = le.get_unit_waveforms(
-            recording,
-            sorting,
-            units['unit_id'],
-            channel_ids_by_unit,
-            N_WAVEFORM_POINTS)
+        WAVEFORM_PARAMS = {
+            'ms_before': 0.5,
+            'ms_after': 0.5,
+            'max_spikes_per_unit': None,
+            'n_jobs': 5,
+            'total_memory': '5G',
+        }
+        waveform_extractor = si.extract_waveforms(
+            recording=recording,
+            sorting=sorting,
+            folder=key['waveform_extractor_path'],
+            **WAVEFORM_PARAMS)
 
         if mark_param['mark_type'] == 'amplitude':
-            # peak is stored in the middle of the waveform
-            peak_ind = N_WAVEFORM_POINTS // 2
-            marks = np.concatenate(waveforms, axis=0)[
-                :, :, peak_ind].astype(np.int16)
-            timestamps = np.concatenate(np.asarray(
-                nwb_units.loc[units['unit_id']].spike_times))
+            marks = np.concatenate(
+                [UnitMarks._get_peak_amplitude(
+                    waveform_extractor.get_waveforms(unit_id))
+                 for unit_id in nwb_units.index], axis=0)
+            timestamps = np.concatenate(np.asarray(nwb_units['spike_times']))
+            sorted_timestamp_ind = np.argsort(timestamps)
+            marks = marks[sorted_timestamp_ind]
+            timestamps = timestamps[sorted_timestamp_ind]
 
-            # sort the timestamps to order them properly
-            sort_order = np.argsort(timestamps)
-            timestamps = timestamps[sort_order]
-            marks = marks[sort_order, :]
+        if 'threshold' in mark_param['mark_param_dict']:
+            timestamps, marks = UnitMarks._threshold(
+                timestamps, marks, mark_param['mark_param_dict'])
 
-            if 'threshold' in mark_param_dict:
-                print('thresholding')
-                # filter the marks by the amplitude threshold
-                if mark_param_dict['sign'] == -1:
-                    threshold = (mark_param_dict['sign'] *
-                                 mark_param_dict['threshold'])
-                    include = np.min(marks, axis=1) <= threshold
-                elif mark_param_dict['sign'] == 1:
-                    threshold = (mark_param_dict['sign'] *
-                                 mark_param_dict['threshold'])
-                    include = np.max(marks, axis=1) >= threshold
-                else:
-                    threshold = mark_param_dict['sign']
-                    include = np.max(np.abs(marks), axis=1) >= threshold
-                timestamps = timestamps[include]
-                marks = marks[include, :]
-
-            # create a new AnalysisNwbfile and a timeseries for the marks and save
-            key['analysis_file_name'] = AnalysisNwbfile().create(
-                key['nwb_file_name'])
-            nwb_object = pynwb.TimeSeries(
-                name='marks',
-                data=marks,
-                unit='uV',
-                timestamps=timestamps,
-                description=f'amplitudes of spikes from electrodes {recording.get_channel_ids()}')
-            key['marks_object_id'] = (AnalysisNwbfile().add_nwb_object(
-                key['analysis_file_name'], nwb_object))
-            AnalysisNwbfile().add(key['nwb_file_name'],
-                                  key['analysis_file_name'])
-            self.insert1(key)
+        # create a new AnalysisNwbfile and a timeseries for the marks and save
+        key['analysis_file_name'] = AnalysisNwbfile().create(
+            key['nwb_file_name'])
+        nwb_object = pynwb.TimeSeries(
+            name='marks',
+            data=marks,
+            unit='uV',
+            timestamps=timestamps,
+            description='spike features for clusterless decoding')
+        key['marks_object_id'] = (AnalysisNwbfile().add_nwb_object(
+            key['analysis_file_name'], nwb_object))
+        AnalysisNwbfile().add(key['nwb_file_name'],
+                              key['analysis_file_name'])
+        self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
+                         *attrs, **kwargs)
 
     def fetch1_dataframe(self):
         return self.fetch_dataframe()[0]
@@ -173,6 +164,27 @@ class UnitMarks(dj.Computed):
                             index=pd.Index(nwb_data['marks'].timestamps,
                                            name='time'),
                             columns=columns)
+
+    @staticmethod
+    def _get_peak_amplitude(waveform):
+        spike_peak_ind = waveform.shape[1] // 2
+        return waveform[:, spike_peak_ind]
+
+    @staticmethod
+    def _threshold(timestamps, marks, mark_param_dict):
+        # filter the marks by the amplitude threshold
+        if mark_param_dict['sign'] == -1:
+            threshold = (mark_param_dict['sign'] *
+                         mark_param_dict['threshold'])
+            include = np.min(marks, axis=1) <= threshold
+        elif mark_param_dict['sign'] == 1:
+            threshold = (mark_param_dict['sign'] *
+                         mark_param_dict['threshold'])
+            include = np.max(marks, axis=1) >= threshold
+        else:
+            threshold = mark_param_dict['sign']
+            include = np.max(np.abs(marks), axis=1) >= threshold
+        return timestamps[include], marks[include]
 
 
 @schema
