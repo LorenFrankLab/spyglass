@@ -39,6 +39,7 @@ class SortGroup(dj.Manual):
 
     def set_group_by_shank(self, nwb_file_name: str, references: dict = None, omit_ref_electrode_group=False):
         """Divides electrodes into groups based on their shank position.
+
         * Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
           single group
         * Electrodes from probes with multiple shanks (e.g. polymer probes) are
@@ -76,8 +77,9 @@ class SortGroup(dj.Manual):
                 sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
                 # specify reference electrode. Use 'references' if passed, otherwise use reference from config
                 if not references:
-                    shank_elect_ref = electrodes['original_reference_electrode'][np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                                                                                electrodes['probe_shank'] == shank)]
+                    shank_elect_ref = electrodes['original_reference_electrode'][
+                        np.logical_and(electrodes['electrode_group_name'] == e_group,
+                                       electrodes['probe_shank'] == shank)]
                     if np.max(shank_elect_ref) == np.min(shank_elect_ref):
                         sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
                     else:
@@ -107,8 +109,9 @@ class SortGroup(dj.Manual):
                         f"but found {len(reference_electrode_group)}.")
                 if not omit_ref_electrode_group or (str(e_group) != str(reference_electrode_group)):
                     self.insert1(sg_key)
-                    shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                                                            electrodes['probe_shank'] == shank)]
+                    shank_elect = electrodes['electrode_id'][
+                        np.logical_and(electrodes['electrode_group_name'] == e_group,
+                                       electrodes['probe_shank'] == shank)]
                     for elect in shank_elect:
                         sge_key['electrode_id'] = elect
                         self.SortGroupElectrode().insert1(sge_key)
@@ -175,11 +178,20 @@ class SortGroup(dj.Manual):
     def get_geometry(self, sort_group_id, nwb_file_name):
         """
         Returns a list with the x,y coordinates of the electrodes in the sort group
-        for use with the SpikeInterface package. Converts z locations to y where appropriate
-        :param sort_group_id: the id of the sort group
-        :param nwb_file_name: the name of the nwb file for the session you wish to use
-        :param prb_file_name: the name of the output prb file
-        :return: geometry: list of coordinate pairs, one per electrode
+        for use with the SpikeInterface package.
+
+        Converts z locations to y where appropriate.
+
+        Parameters
+        ----------
+        sort_group_id : int
+        nwb_file_name : str
+        prb_file_name : str
+
+        Returns
+        -------
+        geometry : list
+            List of coordinate pairs, one per electrode
         """
 
         # create the channel_groups dictiorary
@@ -344,6 +356,7 @@ class SpikeSortingRecording(dj.Computed):
         -------
         sort_interval_valid_times: ndarray of tuples
             (start, end) times for valid stretches of the sorting interval
+
         """
         sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
                                          'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
