@@ -98,11 +98,11 @@ class UnitMarks(dj.Computed):
         waveform_extractor_name = (
             f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
             f'{key["curation_id"]}_clusterless_waveforms')
-        key['waveform_extractor_path'] = str(
+        waveform_extractor_path = str(
             Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) /
             Path(waveform_extractor_name))
-        if os.path.exists(key['waveform_extractor_path']):
-            shutil.rmtree(key['waveform_extractor_path'])
+        if os.path.exists(waveform_extractor_path):
+            shutil.rmtree(waveform_extractor_path)
 
         WAVEFORM_PARAMS = {
             'ms_before': 0.5,
@@ -114,7 +114,7 @@ class UnitMarks(dj.Computed):
         waveform_extractor = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
-            folder=key['waveform_extractor_path'],
+            folder=waveform_extractor_path,
             **WAVEFORM_PARAMS)
 
         if mark_param['mark_type'] == 'amplitude':
