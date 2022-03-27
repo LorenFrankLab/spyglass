@@ -16,7 +16,7 @@ from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.dj_helper_fn import fetch_nwb
 from .merged_sorting_extractor import MergedSortingExtractor
-from .spikesorting_recording import SpikeSortingRecording
+from .spikesorting_recording import SortInterval, SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema('spikesorting_curation')
@@ -90,15 +90,16 @@ class Curation(dj.Manual):
         else:
             curation_id = 0
 
+        # convert unit_ids in labels to integers for labels from sortingview.
+        new_labels = {int(unit_id): labels[unit_id] for unit_id in labels}
+
         sorting_key['curation_id'] = curation_id
         sorting_key['parent_curation_id'] = parent_curation_id
         sorting_key['description'] = description
-        sorting_key['curation_labels'] = labels
+        sorting_key['curation_labels'] = new_labels
         sorting_key['merge_groups'] = merge_groups
         sorting_key['quality_metrics'] = metrics
         sorting_key['time_of_creation'] = int(time.time())
-
-        print(sorting_key)
 
         Curation.insert1(sorting_key)
 
@@ -194,6 +195,7 @@ class Curation(dj.Manual):
                                                  units, units_valid_times,
                                                  units_sort_interval,
                                                  metrics=metrics, labels=labels)
+        AnalysisNwbfile().add(key['nwb_file_name'], analysis_file_name)
 
         if object_ids == '':
             print('Sorting contains no units.'
@@ -306,9 +308,9 @@ class Waveforms(dj.Computed):
     def _get_waveform_extractor_name(self, key):
         waveform_params_name = (WaveformParameters & key).fetch1(
             'waveform_params_name')
-        sorting_path = SpikeSorting()._get_sorting_name(key)
-        we_name = sorting_path + '_' + str(key['curation_id']) + '_' + \
-            waveform_params_name + '_waveforms'
+        import uuid
+        uuid_string = uuid.uuid4()
+        we_name = f'{key["nwb_file_name"]}_{str(uuid_string)[0:8]}_{key["curation_id"]}_{waveform_params_name}_waveforms'
         return we_name
 
 
@@ -721,13 +723,12 @@ class CuratedSpikeSorting(dj.Computed):
             if unit_id in unit_labels:
                 labels[unit_id] = ','.join(unit_labels[unit_id])
 
-        # Limit the metrics to accepted units
-        tmp_metrics = copy.deepcopy(metrics)
+        # convert unit_ids in metrics to integers, including only accepted units.
+        #  TODO: convert to int this somewhere else
+        final_metrics = {}
         for metric in metrics:
-            for unit_id in metrics[metric]:
-                if unit_id not in accepted_units:
-                    del tmp_metrics[metric][unit_id]
-        metrics = tmp_metrics
+            final_metrics[metric] = {int(unit_id): metrics[metric][unit_id]
+                                     for unit_id in metrics[metric] if int(unit_id) in accepted_units}
 
         print(f'Found {len(accepted_units)} accepted units')
 
@@ -735,21 +736,22 @@ class CuratedSpikeSorting(dj.Computed):
         sorting = Curation.get_curated_sorting_extractor(key)
         recording = Curation.get_recording_extractor(key)
 
-        # get the original units from the Automatic curation NWB file to get the sort interval information
+        # get the sort_interval and sorting interval list
         ss_key = (SpikeSorting & key).fetch1("KEY")
-        orig_units = (SpikeSorting & ss_key).fetch_nwb()[0]['units']
-        orig_units = orig_units.loc[accepted_units]
-        # TODO: fix if unit 0 doesn't exist
-        sort_interval = orig_units.iloc[0]['sort_interval']
-        sort_interval_list_name = (SpikeSortingRecording & key).fetch1(
-            'sort_interval_list_name')
+
+        sort_interval_name = (SpikeSortingRecording &
+                              key).fetch1('sort_interval_name')
+        sort_interval = (SortInterval & {
+                         'sort_interval_name': sort_interval_name}).fetch1('sort_interval')
+        sort_interval_list_name = (SpikeSorting & key).fetch1(
+            'artifact_removed_interval_list_name')
 
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
         (key['analysis_file_name'],
-         key['units_object_id']) = Curation.save_sorting_nwb(
-            self, key, sorting, timestamps, sort_interval_list_name,
-            sort_interval, metrics=metrics, unit_ids=accepted_units)
+         key['units_object_id']) = Curation().save_sorting_nwb(
+            key, sorting, timestamps, sort_interval_list_name,
+            sort_interval, metrics=final_metrics, unit_ids=accepted_units)
         self.insert1(key)
 
         # now add the units
@@ -761,23 +763,23 @@ class CuratedSpikeSorting(dj.Computed):
 
         for unit_id in accepted_units:
             key['unit_id'] = unit_id
-            key['label'] = labels[unit_id]
+            if unit_id in labels:
+                key['label'] = labels[unit_id]
             for field in metric_fields:
-                if field in metrics[unit_id]:
-                    key[field] = metrics[unit_id][field]
+                if field in final_metrics:
+                    key[field] = final_metrics[field][unit_id]
                 else:
-                    WarningMessage(
-                        f'No metric named {field} in metrics table; skipping')
+                    Warning(
+                        f'No metric named {field} in computed unit quality metrics; skipping')
         self.Unit.insert1(key)
 
     def metrics_fields(self):
-        """Returns a list of the metrics that are currently in the Units table
+        """Returns a list of the metrics that are currently in the Units table, which is everything except the
         """
-        unit_fields = list(self.Unit().fetch(limit=1, as_dict=True)[0].keys())
-        parent_fields = list(CuratedSpikeSorting.fetch(
-            limit=1, as_dict=True)[0].keys())
-        parent_fields.extend(['unit_id', 'label'])
-        return [field for field in unit_fields if field not in parent_fields]
+        unit_info = self.Unit().fetch(limit=1, format="frame")
+        unit_fields = [column for column in unit_info.columns]
+        unit_fields.remove('label')
+        return unit_fields
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
