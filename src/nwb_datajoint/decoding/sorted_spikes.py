@@ -42,29 +42,14 @@ class SortedSpikesIndicator(dj.Computed):
     def make(self, key):
         pprint.pprint(key)
         # TODO: intersection of sort interval and interval list
-        interval_times = (IntervalList &
-                          {
-                              'nwb_file_name': key['nwb_file_name'],
-                              'interval_list_name': key['interval_list_name']
-                          }
-                          ).fetch1('valid_times')
+        interval_times = (IntervalList & key).fetch1('valid_times')
 
-        sampling_rate = (SortedSpikesIndicatorSelection & {
-            'nwb_file_name': key['nwb_file_name'],
-            'sort_interval_name': key['sort_interval_name'],
-            'filter_parameter_set_name': key['filter_parameter_set_name'],
-            'sorting_id': key['sorting_id'],
-            'interval_list_name': key['interval_list_name']
-        }).fetch('sampling_rate')
+        sampling_rate = (SortedSpikesIndicatorSelection &
+                         key).fetch('sampling_rate')
 
         time = self.get_time_bins_from_interval(interval_times, sampling_rate)
 
-        spikes_nwb = (CuratedSpikeSorting & {
-            'nwb_file_name': key['nwb_file_name'],
-            'sort_interval_name': key['sort_interval_name'],
-            'filter_parameter_set_name': key['filter_parameter_set_name'],
-            'sorting_id': key['sorting_id'],
-        }).fetch_nwb()
+        spikes_nwb = (CuratedSpikeSorting & key).fetch_nwb()
 
         spikes = np.concatenate(
             [np.asarray(n_trode['units']['spike_times']) for n_trode in spikes_nwb])
@@ -183,12 +168,6 @@ class SortedSpikesClassifierParameters(dj.Manual):
              'predict_params': predict_parameters},
             skip_duplicates=True)
 
-    def insert1(self, key, **kwargs):
-        super().insert1(_convert_classes_to_dict(key), **kwargs)
-
-    def fetch1(self, key, **kwargs):
-        return _restore_classes(super().fetch1(key, **kwargs))
-
         (classifier_parameters, fit_parameters,
          predict_parameters) = make_default_decoding_parameters_gpu()
         self.insert1(
@@ -197,3 +176,9 @@ class SortedSpikesClassifierParameters(dj.Manual):
              'fit_params': fit_parameters,
              'predict_params': predict_parameters},
             skip_duplicates=True)
+
+    def insert1(self, key, **kwargs):
+        super().insert1(_convert_classes_to_dict(key), **kwargs)
+
+    def fetch1(self, key, **kwargs):
+        return _restore_classes(super().fetch1(key, **kwargs))

@@ -210,31 +210,13 @@ class UnitMarksIndicator(dj.Computed):
     def make(self, key):
         pprint.pprint(key)
         # TODO: intersection of sort interval and interval list
-        interval_times = (IntervalList &
-                          {
-                              'nwb_file_name': key['nwb_file_name'],
-                              'interval_list_name': key['interval_list_name']
-                          }
+        interval_times = (IntervalList & key
                           ).fetch1('valid_times')
 
-        sampling_rate = (UnitMarksIndicatorSelection & {
-            'nwb_file_name': key['nwb_file_name'],
-            'sort_interval_name': key['sort_interval_name'],
-            'filter_parameter_set_name': key['filter_parameter_set_name'],
-            'sorting_id': key['sorting_id'],
-            'unit_inclusion_param_name': key['unit_inclusion_param_name'],
-            'mark_param_name': key['mark_param_name'],
-            'interval_list_name': key['interval_list_name']
-        }).fetch('sampling_rate')
+        sampling_rate = (UnitMarksIndicatorSelection &
+                         key).fetch('sampling_rate')
 
-        marks_df = (UnitMarks & {
-            'nwb_file_name': key['nwb_file_name'],
-            'sort_interval_name': key['sort_interval_name'],
-            'filter_parameter_set_name': key['filter_parameter_set_name'],
-            'sorting_id': key['sorting_id'],
-            'unit_inclusion_param_name': key['unit_inclusion_param_name'],
-            'mark_param_name': key['mark_param_name'],
-        }).fetch1_dataframe()
+        marks_df = (UnitMarks & key).fetch1_dataframe()
 
         time = self.get_time_bins_from_interval(interval_times, sampling_rate)
 
