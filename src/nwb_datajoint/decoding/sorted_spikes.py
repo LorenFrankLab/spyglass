@@ -5,10 +5,11 @@ import numpy as np
 import pandas as pd
 from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
+from nwb_datajoint.common.dj_helper_fn import fetch_nwb
+from nwb_datajoint.decoding.core import (_convert_classes_to_dict,
+                                         _restore_classes)
 from nwb_datajoint.spikesorting.spikesorting_curation import \
     CuratedSpikeSorting
-from nwb_datajoint.common.dj_helper_fn import fetch_nwb
-from nwb_datajoint.decoding.core import _convert_transitions_to_dict, _to_dict
 from replay_trajectory_classification.classifier import (
     _DEFAULT_CONTINUOUS_TRANSITIONS, _DEFAULT_ENVIRONMENT)
 from replay_trajectory_classification.discrete_state_transitions import \
@@ -119,12 +120,11 @@ class SortedSpikesIndicator(dj.Computed):
 def make_default_decoding_parameters_cpu():
 
     classifier_parameters = dict(
-        environments=[vars(_DEFAULT_ENVIRONMENT)],
+        environments=[_DEFAULT_ENVIRONMENT],
         observation_models=None,
-        continuous_transition_types=_convert_transitions_to_dict(
-            _DEFAULT_CONTINUOUS_TRANSITIONS),
-        discrete_transition_type=_to_dict(DiagonalDiscrete(0.98)),
-        initial_conditions_type=_to_dict(UniformInitialConditions()),
+        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
+        discrete_transition_type=DiagonalDiscrete(0.98),
+        initial_conditions_type=UniformInitialConditions(),
         infer_track_interior=True,
         knot_spacing=10,
         spike_model_penalty=1E1
@@ -142,12 +142,11 @@ def make_default_decoding_parameters_cpu():
 
 def make_default_decoding_parameters_gpu():
     classifier_parameters = dict(
-        environments=[vars(_DEFAULT_ENVIRONMENT)],
+        environments=[_DEFAULT_ENVIRONMENT],
         observation_models=None,
-        continuous_transition_types=_convert_transitions_to_dict(
-            _DEFAULT_CONTINUOUS_TRANSITIONS),
-        discrete_transition_type=_to_dict(DiagonalDiscrete(0.98)),
-        initial_conditions_type=_to_dict(UniformInitialConditions()),
+        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
+        discrete_transition_type=DiagonalDiscrete(0.98),
+        initial_conditions_type=UniformInitialConditions(),
         infer_track_interior=True,
         knot_spacing=10,
         spike_model_penalty=1E1
@@ -183,6 +182,12 @@ class SortedSpikesClassifierParameters(dj.Manual):
              'fit_params': fit_parameters,
              'predict_params': predict_parameters},
             skip_duplicates=True)
+
+    def insert1(self, key, **kwargs):
+        super().insert1(_convert_classes_to_dict(key), **kwargs)
+
+    def fetch1(self, key, **kwargs):
+        return _restore_classes(super().fetch1(key, **kwargs))
 
         (classifier_parameters, fit_parameters,
          predict_parameters) = make_default_decoding_parameters_gpu()
