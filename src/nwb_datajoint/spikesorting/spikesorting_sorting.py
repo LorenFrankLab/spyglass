@@ -149,7 +149,6 @@ class SpikeSorting(dj.Computed):
         sorting = sorting.save(folder=key['sorting_path'])
         self.insert1(key)
 
-
     def delete(self):
         """Extends the delete method of base class to implement permission checking.
         Note that this is NOT a security feature, as anyone that has access to source code

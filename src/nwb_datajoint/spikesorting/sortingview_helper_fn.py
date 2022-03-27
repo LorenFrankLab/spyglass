@@ -7,7 +7,9 @@ import sortingview as sv
 from ..common.common_lab import LabMember
 
 
-def set_workspace_permission(workspace_uri: str, team_members: List[str], sortingview_sorting_id: str = None):
+def set_workspace_permission(workspace_uri: str,
+                             team_members: List[str],
+                             sortingview_sorting_id: str = None):
     """Sets permission curate specified sorting on sortingview workspace based on google ID
 
     Parameters

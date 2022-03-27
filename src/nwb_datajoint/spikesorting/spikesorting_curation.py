@@ -2,11 +2,8 @@ import json
 import os
 import shutil
 import time
-import copy
 from pathlib import Path
 from typing import List
-from warnings import WarningMessage
-
 
 import datajoint as dj
 import numpy as np
@@ -17,12 +14,13 @@ from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.dj_helper_fn import fetch_nwb
 from .merged_sorting_extractor import MergedSortingExtractor
-from .spikesorting_recording import SpikeSortingRecording, SortInterval
+from .spikesorting_recording import SortInterval, SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema('spikesorting_curation')
 
 valid_labels = ['reject', 'noise', 'artifact', 'mua', 'accept']
+
 
 def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[List[int]]):
     # return a new sorting where the units are merged according to merge_groups
@@ -36,7 +34,7 @@ def apply_merge_groups_to_sorting(sorting: si.BaseSorting, merge_groups: List[Li
 class Curation(dj.Manual):
     definition = """
     # Stores each spike sorting; similar to IntervalList
-    curation_id: int # a number correponding to the index of this curation 
+    curation_id: int # a number correponding to the index of this curation
     -> SpikeSorting
     ---
     parent_curation_id=-1: int
@@ -71,7 +69,8 @@ class Curation(dj.Manual):
             # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
             inserted_curation = (Curation & sorting_key).fetch("KEY")
             if len(inserted_curation) > 0:
-                Warning(f'Sorting has already been inserted, returning key to previously inserted curation')
+                Warning(
+                    f'Sorting has already been inserted, returning key to previously inserted curation')
                 return inserted_curation[0]
 
         if labels is None:
@@ -89,8 +88,8 @@ class Curation(dj.Manual):
         else:
             curation_id = 0
 
-        # convert unit_ids in labels to integers for labels from sortingview. 
-        new_labels = {int(unit_id) : labels[unit_id] for unit_id in labels}
+        # convert unit_ids in labels to integers for labels from sortingview.
+        new_labels = {int(unit_id): labels[unit_id] for unit_id in labels}
 
         sorting_key['curation_id'] = curation_id
         sorting_key['parent_curation_id'] = parent_curation_id
@@ -102,10 +101,10 @@ class Curation(dj.Manual):
 
         Curation.insert1(sorting_key)
 
-        #get the primary key for this curation
-        c_key  = Curation.fetch("KEY")[0]
-        curation_key = {item : sorting_key[item] for item in c_key}
-        
+        # get the primary key for this curation
+        c_key = Curation.fetch("KEY")[0]
+        curation_key = {item: sorting_key[item] for item in c_key}
+
         return curation_key
 
     @staticmethod
@@ -367,16 +366,18 @@ class MetricSelection(dj.Manual):
     -> MetricParameters
     ---
     """
+
     def insert1(self, key, **kwargs):
         waveform_params = (WaveformParameters & key).fetch1(
-                                        'waveform_params')
+            'waveform_params')
         metric_params = (MetricParameters & key).fetch1(
-                                            'metric_params')
+            'metric_params')
         if 'peak_offset' in metric_params:
             if waveform_params['whiten'] is True:
                 raise Exception("metric 'peak_offset' needs to be "
-                         "calculated on unwhitened waveforms")
+                                "calculated on unwhitened waveforms")
         super().insert1(key, **kwargs)
+
 
 @schema
 class QualityMetrics(dj.Computed):
@@ -426,9 +427,10 @@ class QualityMetrics(dj.Computed):
                 peak_sign = metric_params['peak_sign']
                 del metric_params['peak_sign']
                 metric = metric_func(waveform_extractor,
-                                    peak_sign=peak_sign, **metric_params)
+                                     peak_sign=peak_sign, **metric_params)
             else:
-                raise Exception('snr and peak_offset metrics require peak_sign to be defined in the metric parameters')
+                raise Exception(
+                    'snr and peak_offset metrics require peak_sign to be defined in the metric parameters')
         else:
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():
@@ -490,20 +492,23 @@ class AutomaticCurationParameters(dj.Manual):
     merge_params: blob   # dictionary of params to merge units
     label_params: blob   # dictionary params to label units
     """
+
     def insert1(self, key, **kwargs):
         # validate the labels and then insert
-        #TODO: add validation for merge_params
+        # TODO: add validation for merge_params
         for metric in key['label_params']:
             if metric not in _metric_name_to_func:
                 raise Exception(f'{metric} not in list of available metrics')
             comparison_list = key['label_params'][metric]
             if comparison_list[0] not in _comparison_to_function:
-                raise Exception(f'{metric}: {comparison_list[0]} not in list of available comparisons')
+                raise Exception(
+                    f'{metric}: {comparison_list[0]} not in list of available comparisons')
             if type(comparison_list[1]) != int and type(comparison_list[1]) != float:
                 raise Exception(f'{metric}: {comparison_list[1]} not a number')
             for label in comparison_list[2]:
                 if label not in valid_labels:
-                  raise Exception(f'{metric}: {comparison_list[2]} not a valid label: {valid_labels}')               
+                    raise Exception(
+                        f'{metric}: {comparison_list[2]} not a valid label: {valid_labels}')
         super().insert1(key, **kwargs)
 
     def insert_default(self):
@@ -512,7 +517,8 @@ class AutomaticCurationParameters(dj.Manual):
         key['merge_params'] = {}
         # label_params parsing: Each key is the name of a metric,
         # the contents are a three value list with the comparison, a value, and a list of labels to apply if the comparison is true
-        key['label_params'] = {'nn_noise_overlap': ['>', 0.1, ['noise', 'reject']]}
+        key['label_params'] = {'nn_noise_overlap': [
+            '>', 0.1, ['noise', 'reject']]}
         self.insert1(key, skip_duplicates=True)
         # Second default parameter set for not applying any labels,
         # or merges, but adding metrics
@@ -580,8 +586,6 @@ class AutomaticCuration(dj.Computed):
             labels=labels, merge_groups=merge_groups, metrics=metrics, description='auto curated')
 
         self.insert1(key)
-
- 
 
     @staticmethod
     def get_merge_groups(sorting, parent_merge_groups, quality_metrics, merge_params):
@@ -721,8 +725,8 @@ class CuratedSpikeSorting(dj.Computed):
         #  TODO: convert to int this somewhere else
         final_metrics = {}
         for metric in metrics:
-            final_metrics[metric] = {int(unit_id) : metrics[metric][unit_id] for unit_id in metrics[metric] if int(unit_id) in accepted_units}
-
+            final_metrics[metric] = {int(unit_id): metrics[metric][unit_id]
+                                     for unit_id in metrics[metric] if int(unit_id) in accepted_units}
 
         print(f'Found {len(accepted_units)} accepted units')
 
@@ -732,10 +736,13 @@ class CuratedSpikeSorting(dj.Computed):
 
         # get the sort_interval and sorting interval list
         ss_key = (SpikeSorting & key).fetch1("KEY")
-        
-        sort_interval_name = (SpikeSortingRecording & key).fetch1('sort_interval_name')
-        sort_interval = (SortInterval & {'sort_interval_name' : sort_interval_name}).fetch1('sort_interval')
-        sort_interval_list_name = (SpikeSorting & key).fetch1('artifact_removed_interval_list_name')
+
+        sort_interval_name = (SpikeSortingRecording &
+                              key).fetch1('sort_interval_name')
+        sort_interval = (SortInterval & {
+                         'sort_interval_name': sort_interval_name}).fetch1('sort_interval')
+        sort_interval_list_name = (SpikeSorting & key).fetch1(
+            'artifact_removed_interval_list_name')
 
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
@@ -755,7 +762,7 @@ class CuratedSpikeSorting(dj.Computed):
         for unit_id in accepted_units:
             key['unit_id'] = unit_id
             if unit_id in labels:
-                key['label'] = labels[unit_id] 
+                key['label'] = labels[unit_id]
             for field in metric_fields:
                 if field in final_metrics:
                     key[field] = final_metrics[field][unit_id]

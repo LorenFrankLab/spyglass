@@ -10,7 +10,10 @@ class MergedSortingExtractor(si.BaseSorting):
     installation_mesg = "Always installed"
     is_writable = False
 
-    def __init__(self, *, parent_sorting: si.BaseSorting, merge_groups: List[List[int]]):
+    def __init__(self,
+                 *,
+                 parent_sorting: si.BaseSorting,
+                 merge_groups: List[List[int]]):
 
         # Loop through the sorting segments in the original sorting
         # and add merged versions to the new sorting
@@ -61,9 +64,12 @@ class MergedSortingExtractor(si.BaseSorting):
         # Add the segments to this sorting
         final_unit_ids.sort()  # TODO: not sure what final_unit_ids is used for
         si.BaseSorting.__init__(
-            self, sampling_frequency=parent_sorting.get_sampling_frequency(), unit_ids=final_unit_ids)
-        self._kwargs = {'parent_sorting': parent_sorting.to_dict(
-            include_annotations=True, include_properties=True), 'merge_groups': merge_groups}
+            self, sampling_frequency=parent_sorting.get_sampling_frequency(),
+            unit_ids=final_unit_ids)
+        self._kwargs = {
+            'parent_sorting': parent_sorting.to_dict(
+                include_annotations=True, include_properties=True),
+            'merge_groups': merge_groups}
         for new_sorting_segment in sorting_segment_list:
             self.add_sorting_segment(new_sorting_segment)
         print(self)
