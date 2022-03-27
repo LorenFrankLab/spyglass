@@ -47,23 +47,33 @@ class Curation(dj.Manual):
     """
 
     @staticmethod
-    def insert_curation(sorting_key: dict, parent_curation_id: int = -1, labels=None, merge_groups=None, metrics=None, description=''):
-        """Given a SpikeSorting key and the parent_sorting_id (and optional arguments) insert an entry into Curation
+    def insert_curation(
+            sorting_key: dict,
+            parent_curation_id: int = -1,
+            labels=None,
+            merge_groups=None,
+            metrics=None,
+            description=''):
+        """Given a SpikeSorting key and the parent_sorting_id (and optional
+        arguments) insert an entry into Curation.
 
-        :param sorting_key: the key for the original SpikeSorting
-        :type dict
-        :param parent_sorting_id: the id of the parent sorting (optional)
-        :type parent_sorting_id: str
-        :param metrics: computed metrics for sorting (optional)
-        :type dict
-        :param description: text description of this sort (optional)
-        :type str
-        :param labels: dictionary of labels for this sort (optional)
-        :type dict
 
-        returns:
-        :param curation_key
-        :type dict
+        Parameters
+        ----------
+        sorting_key : dict
+            The key for the original SpikeSorting
+        parent_curation_id : int, optional
+            The id of the parent sorting
+        labels : dict or None, optional
+        merge_groups : dict or None, optional
+        metrics : dict or None, optional
+            Computed metrics for sorting
+        description : str, optional
+            text description of this sort
+
+        Returns
+        -------
+        curation_key : dict
 
         """
         if parent_curation_id == -1:
@@ -110,27 +120,36 @@ class Curation(dj.Manual):
         return curation_key
 
     @staticmethod
-    def get_recording_extractor(key):
+    def get_recording_extractor(key: dict):
         """Returns the recording extractor for the recording related to this curation
 
-        :param key: key to a single Curation entry
-        :type key: dict
+        Parameters
+        ----------
+        key : dict
+            SpikeSortingRecording key
 
-        returns
-            recording_extractor: spike interface recording extractor
+        Returns
+        -------
+        recording_extractor : spike interface recording extractor
+
         """
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         return si.load_extractor(recording_path)
 
     @staticmethod
-    def get_curated_sorting_extractor(key):
-        """Returns the sorting extractor related to this curation, with merges applied
+    def get_curated_sorting_extractor(key: dict):
+        """Returns the sorting extractor related to this curation,
+        with merges applied.
 
-        :param key: key to a single Curation entry
-        :type key: dict
+        Parameters
+        ----------
+        key : dict
+            Curation key
 
-        returns
-            sorting_extractor: spike interface sorting extractor
+        Returns
+        -------
+        sorting_extractor: spike interface sorting extractor
+
         """
         sorting_path = (SpikeSorting & key).fetch1('sorting_path')
         sorting = si.load_extractor(sorting_path)
@@ -146,6 +165,7 @@ class Curation(dj.Manual):
                          sort_interval, labels=None, metrics=None,
                          unit_ids=None):
         """Store a sorting in a new AnalysisNwbfile
+
         Parameters
         ----------
         key : dict
@@ -170,6 +190,7 @@ class Curation(dj.Manual):
         -------
         analysis_file_name : str
         units_object_id : str
+
         """
 
         sort_interval_valid_times = (
@@ -589,20 +610,29 @@ class AutomaticCuration(dj.Computed):
         self.insert1(key)
 
     @staticmethod
-    def get_merge_groups(sorting, parent_merge_groups, quality_metrics, merge_params):
-        """ Identifies units to be merged based on the quality_metrics and merge parameters and returns an updated list of merges for the curation
+    def get_merge_groups(sorting,
+                         parent_merge_groups,
+                         quality_metrics,
+                         merge_params):
+        """Identifies units to be merged based on the quality_metrics and
+        merge parameters and returns an updated list of merges for the curation.
 
-        :param sorting: sorting object
-        :type sorting: spike interface sorting object
-        :param parent_merge_groups: information about previous merges
-        :type quality_metrics: list
-        :param quality_metrics: dictionary of quality metrics by unit
-        :type quality_metrics: dict
-        :param merge_params: dictionary of merge parameters
-        :type merge_params: dict
-        :return: merge_groups, merge_occurred
-        :rtype: list of lists, bool
-        """  # overview:
+        Parameters
+        ---------
+        sorting : spikeinterface.sorting
+        parent_merge_groups : list
+            Information about previous merges
+        quality_metrics : list
+        merge_params : dict
+
+        Returns
+        -------
+        merge_groups : list of lists
+        merge_occurred : bool
+
+        """
+
+        # overview:
         # 1. Use quality metrics to determine merge groups for units
         # 2. Combine merge groups with current merge groups to produce union of merges
 
@@ -629,17 +659,21 @@ class AutomaticCuration(dj.Computed):
 
     @staticmethod
     def get_labels(sorting, parent_labels, quality_metrics, label_params):
-        """ Returns a dictionary of labels using quality_metrics and label parameters
+        """Returns a dictionary of labels using quality_metrics and label
+        parameters.
 
-        :param sorting: sorting object
-        :type sorting: spike interface sorting object
-        :param parent_labels: previously applied labels
-        :param quality_metrics: dictionary of quality metrics by unit
-        :type quality_metrics: dict
-        :param label_params: dictionary of label parameters
-        :type labe_params: dict
-        :return: labels
-        :rtype: dict
+        Parameters
+        ---------
+        sorting : spikeinterface.sorting
+        parent_labels : list
+            Information about previous merges
+        quality_metrics : list
+        label_params : dict
+
+        Returns
+        -------
+        parent_labels : list
+
         """
         # overview:
         # 1. Use quality metrics to determine labels for units
@@ -771,7 +805,7 @@ class CuratedSpikeSorting(dj.Computed):
         self.Unit.insert1(key)
 
     def metrics_fields(self):
-        """Returns a list of the metrics that are currently in the Units table, which is everything except the
+        """Returns a list of the metrics that are currently in the Units table.
         """
         unit_info = self.Unit().fetch(limit=1, format="frame")
         unit_fields = [column for column in unit_info.columns]

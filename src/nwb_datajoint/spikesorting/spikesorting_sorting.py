@@ -96,11 +96,13 @@ class SpikeSorting(dj.Computed):
     def make(self, key: dict):
         """Runs spike sorting on the data and parameters specified by the
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
+
         Specifically,
         1. Loads saved recording and runs the sort on it with spikeinterface
         2. Saves the sorting with spikeinterface
         3. Creates an analysis NWB file and saves the sorting there
            (this is redundant with 2; will change in the future)
+
         """
 
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
