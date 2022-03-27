@@ -4,7 +4,7 @@ import warnings
 
 import pynwb
 
-from ..common import Nwbfile, get_raw_eseries
+from ..common import Nwbfile, get_raw_eseries, populate_all_common
 from .storage_dirs import check_env
 
 
