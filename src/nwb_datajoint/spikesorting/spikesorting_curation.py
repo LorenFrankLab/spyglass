@@ -685,11 +685,14 @@ class AutomaticCuration(dj.Computed):
                 if metric not in quality_metrics:
                     Warning(f'{metric} not found in quality metrics; skipping')
                 else:
+                    compare = _comparison_to_function[label_params[metric][0]]
+
                     for unit_id in quality_metrics[metric].keys():
                         # compare the quality metric to the threshold with the specified operator
                         # note that label_params[metric] is a three element list with a comparison operator as a string,
                         # the threshold value, and a list of labels to be applied if the comparison is true
-                        if _comparison_to_function[label_params[metric][0]](quality_metrics[metric][unit_id], label_params[metric][1]):
+                        if compare(quality_metrics[metric][unit_id],
+                                   label_params[metric][1]):
                             if unit_id not in parent_labels:
                                 parent_labels[unit_id] = label_params[metric][2]
                             # check if the label is already there, and if not, add it

@@ -77,8 +77,9 @@ class SortGroup(dj.Manual):
                 sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
                 # specify reference electrode. Use 'references' if passed, otherwise use reference from config
                 if not references:
-                    shank_elect_ref = electrodes['original_reference_electrode'][np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                                                                                electrodes['probe_shank'] == shank)]
+                    shank_elect_ref = electrodes['original_reference_electrode'][
+                        np.logical_and(electrodes['electrode_group_name'] == e_group,
+                                       electrodes['probe_shank'] == shank)]
                     if np.max(shank_elect_ref) == np.min(shank_elect_ref):
                         sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
                     else:
@@ -108,8 +109,9 @@ class SortGroup(dj.Manual):
                         f"but found {len(reference_electrode_group)}.")
                 if not omit_ref_electrode_group or (str(e_group) != str(reference_electrode_group)):
                     self.insert1(sg_key)
-                    shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                                                            electrodes['probe_shank'] == shank)]
+                    shank_elect = electrodes['electrode_id'][
+                        np.logical_and(electrodes['electrode_group_name'] == e_group,
+                                       electrodes['probe_shank'] == shank)]
                     for elect in shank_elect:
                         sge_key['electrode_id'] = elect
                         self.SortGroupElectrode().insert1(sge_key)
