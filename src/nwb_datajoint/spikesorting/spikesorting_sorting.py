@@ -222,7 +222,7 @@ class SpikeSorting(dj.Computed):
                 shutil.rmtree(
                     str(Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir))
 
-    def _get_sorting_name(self, key):
+    def _get_recording_name(self, key):
         recording_name = SpikeSortingRecording._get_recording_name(key)
         sorting_name = recording_name + '_' \
             + key['sorter'] + '_' \
