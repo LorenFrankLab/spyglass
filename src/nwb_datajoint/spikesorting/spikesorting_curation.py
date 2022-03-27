@@ -71,7 +71,8 @@ class Curation(dj.Manual):
             inserted_curation = (Curation & sorting_key).fetch("KEY")
             if len(inserted_curation) > 0:
                 Warning(
-                    f'Sorting has already been inserted, returning key to previously inserted curation')
+                    'Sorting has already been inserted, returning key to previously'
+                    'inserted curation')
                 return inserted_curation[0]
 
         if labels is None:
@@ -735,8 +736,6 @@ class CuratedSpikeSorting(dj.Computed):
         recording = Curation.get_recording_extractor(key)
 
         # get the sort_interval and sorting interval list
-        ss_key = (SpikeSorting & key).fetch1("KEY")
-
         sort_interval_name = (SpikeSortingRecording &
                               key).fetch1('sort_interval_name')
         sort_interval = (SortInterval & {
