@@ -180,10 +180,8 @@ class SortingviewWorkspace(dj.Computed):
         # get the labels and remove the non-primary merged units
         labels = workspace.get_sorting_curation(
             sorting_id=sortingview_sorting_id)
+
         # turn labels to list of str, only including accepted units.
-
-        unit_labels = labels['labelsByUnit']
-
         if bool(labels['mergeGroups']):
             # clusters were merged, so we empty out metrics
             metrics = {}
