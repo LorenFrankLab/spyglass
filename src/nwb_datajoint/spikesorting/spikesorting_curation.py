@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import List
 
@@ -306,7 +307,6 @@ class Waveforms(dj.Computed):
     def _get_waveform_extractor_name(self, key):
         waveform_params_name = (WaveformParameters & key).fetch1(
             'waveform_params_name')
-        import uuid
         uuid_string = uuid.uuid4()
         we_name = f'{key["nwb_file_name"]}_{str(uuid_string)[0:8]}_{key["curation_id"]}_{waveform_params_name}_waveforms'
         return we_name
