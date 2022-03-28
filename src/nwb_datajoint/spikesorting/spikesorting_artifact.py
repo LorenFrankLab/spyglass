@@ -147,7 +147,8 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     proportion_above_thresh : float, optional, should be>0 and <=1
         Proportion of electrodes that need to have threshold crossings, defaults to 1
     removal_window_ms : float, optional
-        Width of the window in milliseconds to mask out per artifact (window/2 removed on each side of threshold crossing), defaults to 1 ms
+        Width of the window in milliseconds to mask out per artifact
+        (window/2 removed on each side of threshold crossing), defaults to 1 ms
 
     Returns
     ------_
@@ -276,10 +277,12 @@ def _check_artifact_thresholds(amplitude_thresh, zscore_thresh, proportion_above
     # proportion_above_threshold should be in [0:1] inclusive
     if proportion_above_thresh < 0:
         warnings.warn(
-            "Warning: proportion_above_thresh must be a proportion >0 and <=1. Using proportion_above_thresh = 0.01 instead of " + str(proportion_above_thresh))
+            "Warning: proportion_above_thresh must be a proportion >0 and <=1."
+            f" Using proportion_above_thresh = 0.01 instead of {str(proportion_above_thresh)}")
         proportion_above_thresh = 0.01
     elif proportion_above_thresh > 1:
         warnings.warn(
-            "Warning: proportion_above_thresh must be a proportion >0 and <=1. Using proportion_above_thresh = 1 instead of " + str(proportion_above_thresh))
+            "Warning: proportion_above_thresh must be a proportion >0 and <=1. "
+            f"Using proportion_above_thresh = 1 instead of {str(proportion_above_thresh)}")
         proportion_above_thresh = 1
     return amplitude_thresh, zscore_thresh, proportion_above_thresh
