@@ -50,7 +50,7 @@ class SortingviewWorkspace(dj.Computed):
         key['workspace_uri'] = workspace.uri
         key['sortingview_recording_id'] = workspace.add_recording(recording=h5_recording,
                                                                   label=workspace_name)
-        sorting = Curation.get_curated_sorting_extractor(key)
+        sorting = Curation.get_curated_sorting(key)
         sorting = si.create_extractor_from_new_sorting(sorting)
         h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(
             sorting, str(Path(recording_path) / 'sorting.h5'))

@@ -137,7 +137,7 @@ class Curation(dj.Manual):
         return si.load_extractor(recording_path)
 
     @staticmethod
-    def get_curated_sorting_extractor(key: dict):
+    def get_curated_sorting(key: dict):
         """Returns the sorting extractor related to this curation,
         with merges applied.
 
@@ -274,7 +274,7 @@ class Waveforms(dj.Computed):
 
     def make(self, key):
         recording = Curation.get_recording(key)
-        sorting = Curation.get_curated_sorting_extractor(key)
+        sorting = Curation.get_curated_sorting(key)
 
         print('Extracting waveforms...')
         waveform_params = (WaveformParameters & key).fetch1('waveform_params')
@@ -589,7 +589,7 @@ class AutomaticCuration(dj.Computed):
         parent_merge_groups = parent_curation['merge_groups']
         parent_labels = parent_curation['curation_labels']
         parent_curation_id = parent_curation['curation_id']
-        parent_sorting = Curation.get_curated_sorting_extractor(key)
+        parent_sorting = Curation.get_curated_sorting(key)
 
         merge_params = (AutomaticCurationParameters &
                         key).fetch1('merge_params')
@@ -746,7 +746,7 @@ class CuratedSpikeSorting(dj.Computed):
             Warning(
                 f'Metrics for Curation {key} should normally be calculated before insertion here')
 
-        sorting = Curation.get_curated_sorting_extractor(key)
+        sorting = Curation.get_curated_sorting(key)
         unit_ids = sorting.get_unit_ids()
         # Get the labels for the units, add only those units that do not have 'reject' or 'noise' labels
         unit_labels = (Curation & key).fetch1('curation_labels')
@@ -774,7 +774,7 @@ class CuratedSpikeSorting(dj.Computed):
         print(f'Found {len(accepted_units)} accepted units')
 
         # get the sorting and save it in the NWB file
-        sorting = Curation.get_curated_sorting_extractor(key)
+        sorting = Curation.get_curated_sorting(key)
         recording = Curation.get_recording(key)
 
         # get the sort_interval and sorting interval list
