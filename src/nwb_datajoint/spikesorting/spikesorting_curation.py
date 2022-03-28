@@ -642,25 +642,23 @@ class AutomaticCuration(dj.Computed):
         # 2. Combine merge groups with current merge groups to produce union of merges
 
         if not merge_params:
-            return parent_merge_groups, False            
+            return parent_merge_groups, False
         else:
             # TODO: use the metrics to identify clusters that should be merged
             # new_merges should then reflect those merges and the line below should be deleted.
             new_merges = []
             # append these merges to the parent merge_groups
-            for m in new_merges:
+            for new_merge in new_merges:
                 # check to see if the first cluster listed is in a current merge group
-                found = False
-                for idx, pm in enumerate(parent_merge_groups):
-                    if m[0] == pm[0]:
-                        # add the additional units in m to the identified merge group.
-                        pm.extend(m[1:])
-                        pm.sort()
-                        found = True
+                for previous_merge in parent_merge_groups:
+                    if new_merge[0] == previous_merge[0]:
+                        # add the additional units in new_merge to the identified merge group.
+                        previous_merge.extend(new_merge[1:])
+                        previous_merge.sort()
                         break
-                if not found:
-                    # append this merge group to the list
-                    parent_merge_groups.append(m)
+                else:
+                    # append this merge group to the list if no previous merge
+                    parent_merge_groups.append(new_merge)
             return parent_merge_groups.sort(), True
 
     @staticmethod
