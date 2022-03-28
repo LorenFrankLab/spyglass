@@ -279,11 +279,8 @@ class Waveforms(dj.Computed):
         print('Extracting waveforms...')
         waveform_params = (WaveformParameters & key).fetch1('waveform_params')
         if 'whiten' in waveform_params:
-            if waveform_params['whiten']:
+            if waveform_params.pop('whiten'):
                 recording = st.preprocessing.whiten(recording)
-                # remove the 'whiten' dictionary entry as it is not recognized
-                # by spike interface
-            del waveform_params['whiten']
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key['waveform_extractor_path'] = str(
@@ -446,10 +443,9 @@ class QualityMetrics(dj.Computed):
         elif (metric_name == 'snr' or
               metric_name == 'peak_offset'):
             if 'peak_sign' in metric_params:
-                peak_sign = metric_params['peak_sign']
-                del metric_params['peak_sign']
                 metric = metric_func(waveform_extractor,
-                                     peak_sign=peak_sign, **metric_params)
+                                     peak_sign=metric_params.pop('peak_sign'),
+                                     **metric_params)
             else:
                 raise Exception(
                     'snr and peak_offset metrics require peak_sign to be defined in the metric parameters')
