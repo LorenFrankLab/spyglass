@@ -642,9 +642,10 @@ class AutomaticCuration(dj.Computed):
         # 2. Combine merge groups with current merge groups to produce union of merges
 
         if not merge_params:
-            return parent_merge_groups, False
+            return parent_merge_groups, False            
         else:
             # TODO: use the metrics to identify clusters that should be merged
+            # new_merges should then reflect those merges and the line below should be deleted.
             new_merges = []
             # append these merges to the parent merge_groups
             for m in new_merges:
