@@ -120,7 +120,7 @@ class Curation(dj.Manual):
         return curation_key
 
     @staticmethod
-    def get_recording_extractor(key: dict):
+    def get_recording(key: dict):
         """Returns the recording extractor for the recording related to this curation
 
         Parameters
@@ -273,17 +273,14 @@ class Waveforms(dj.Computed):
     """
 
     def make(self, key):
-        recording = Curation.get_recording_extractor(key)
+        recording = Curation.get_recording(key)
         sorting = Curation.get_curated_sorting_extractor(key)
 
         print('Extracting waveforms...')
         waveform_params = (WaveformParameters & key).fetch1('waveform_params')
         if 'whiten' in waveform_params:
-            if waveform_params['whiten']:
+            if waveform_params.pop('whiten'):
                 recording = st.preprocessing.whiten(recording)
-                # remove the 'whiten' dictionary entry as it is not recognized
-                # by spike interface
-            del waveform_params['whiten']
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key['waveform_extractor_path'] = str(
@@ -446,10 +443,9 @@ class QualityMetrics(dj.Computed):
         elif (metric_name == 'snr' or
               metric_name == 'peak_offset'):
             if 'peak_sign' in metric_params:
-                peak_sign = metric_params['peak_sign']
-                del metric_params['peak_sign']
                 metric = metric_func(waveform_extractor,
-                                     peak_sign=peak_sign, **metric_params)
+                                     peak_sign=metric_params.pop('peak_sign'),
+                                     **metric_params)
             else:
                 raise Exception(
                     'snr and peak_offset metrics require peak_sign to be defined in the metric parameters')
@@ -526,8 +522,7 @@ class AutomaticCurationParameters(dj.Manual):
                 raise Exception(
                     f'{metric}: "{comparison_list[0]}" '
                     f'not in list of available comparisons')
-            if (type(comparison_list[1]) != int and
-                    type(comparison_list[1]) != float):
+            if not isinstance(comparison_list[1], (int, float)):
                 raise Exception(f'{metric}: {comparison_list[1]} is of type '
                                 f'{type(comparison_list[1])} and not a number')
             for label in comparison_list[2]:
@@ -538,20 +533,26 @@ class AutomaticCurationParameters(dj.Manual):
         super().insert1(key, **kwargs)
 
     def insert_default(self):
-        key = {}
-        key['auto_curation_params_name'] = 'default'
-        key['merge_params'] = {}
         # label_params parsing: Each key is the name of a metric,
-        # the contents are a three value list with the comparison, a value, and a list of labels to apply if the comparison is true
-        key['label_params'] = {'nn_noise_overlap': [
-            '>', 0.1, ['noise', 'reject']]}
-        self.insert1(key, skip_duplicates=True)
+        # the contents are a three value list with the comparison, a value,
+        # and a list of labels to apply if the comparison is true
+        default_params = {
+            'auto_curation_params_name': 'default',
+            'merge_params': {},
+            'label_params': {
+                'nn_noise_overlap': ['>', 0.1, ['noise', 'reject']]
+            }
+        }
+        self.insert1(default_params, skip_duplicates=True)
+
         # Second default parameter set for not applying any labels,
         # or merges, but adding metrics
-        key['auto_curation_params_name'] = 'none'
-        key['merge_params'] = {}
-        key['label_params'] = {}
-        self.insert1(key, skip_duplicates=True)
+        no_label_params = {
+            'auto_curation_params_name': 'none',
+            'merge_params': {},
+            'label_params': {},
+        }
+        self.insert1(no_label_params, skip_duplicates=True)
 
 
 @schema
@@ -774,7 +775,7 @@ class CuratedSpikeSorting(dj.Computed):
 
         # get the sorting and save it in the NWB file
         sorting = Curation.get_curated_sorting_extractor(key)
-        recording = Curation.get_recording_extractor(key)
+        recording = Curation.get_recording(key)
 
         # get the sort_interval and sorting interval list
         sort_interval_name = (SpikeSortingRecording &
