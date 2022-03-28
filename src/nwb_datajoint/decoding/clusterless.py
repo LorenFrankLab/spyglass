@@ -402,14 +402,14 @@ class MultiunitFiringRate(dj.Computed):
 
         self.insert1(key)
 
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
-        def fetch1_dataframe(self):
-            return self.fetch_dataframe()[0]
+    def fetch1_dataframe(self):
+        return self.fetch_dataframe()[0]
 
-        def fetch_dataframe(self):
-            return [data['multiunit_firing_rate'].set_index('time') for data in self.fetch_nwb()]
+    def fetch_dataframe(self):
+        return [data['multiunit_firing_rate'].set_index('time') for data in self.fetch_nwb()]
 
 
 @schema
