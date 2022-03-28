@@ -396,7 +396,7 @@ class MetricSelection(dj.Manual):
         metric_params = (MetricParameters & key).fetch1(
             'metric_params')
         if 'peak_offset' in metric_params:
-            if waveform_params['whiten'] is True:
+            if waveform_params['whiten']:
                 raise Exception("metric 'peak_offset' needs to be "
                                 "calculated on unwhitened waveforms")
         super().insert1(key, **kwargs)
@@ -525,13 +525,17 @@ class AutomaticCurationParameters(dj.Manual):
             comparison_list = key['label_params'][metric]
             if comparison_list[0] not in _comparison_to_function:
                 raise Exception(
-                    f'{metric}: {comparison_list[0]} not in list of available comparisons')
-            if type(comparison_list[1]) != int and type(comparison_list[1]) != float:
-                raise Exception(f'{metric}: {comparison_list[1]} not a number')
+                    f'{metric}: "{comparison_list[0]}" '
+                    f'not in list of available comparisons')
+            if (type(comparison_list[1]) != int and
+             type(comparison_list[1]) != float):
+                raise Exception(f'{metric}: {comparison_list[1]} is of type '
+                 f'{type(comparison_list[1])} and not a number')
             for label in comparison_list[2]:
                 if label not in valid_labels:
                     raise Exception(
-                        f'{metric}: {comparison_list[2]} not a valid label: {valid_labels}')
+                        f'{metric}: "{label}" '
+                        f'not in list of valid labels: {valid_labels}')
         super().insert1(key, **kwargs)
 
     def insert_default(self):
@@ -722,7 +726,7 @@ class CuratedSpikeSorting(dj.Computed):
     class Unit(dj.Part):
         definition = """
         # Table for holding sorted units
-        -> CuratedSpikeSorting
+        -> master
         unit_id: int   # ID for each unit
         ---
         label='': varchar(200)   # optional set of labels for each unit
@@ -795,7 +799,6 @@ class CuratedSpikeSorting(dj.Computed):
         del key['analysis_file_name']
 
         metric_fields = self.metrics_fields()
-
         for unit_id in accepted_units:
             key['unit_id'] = unit_id
             if unit_id in labels:
@@ -806,7 +809,7 @@ class CuratedSpikeSorting(dj.Computed):
                 else:
                     Warning(
                         f'No metric named {field} in computed unit quality metrics; skipping')
-        self.Unit.insert1(key)
+            CuratedSpikeSorting.Unit.insert1(key)
 
     def metrics_fields(self):
         """Returns a list of the metrics that are currently in the Units table.
