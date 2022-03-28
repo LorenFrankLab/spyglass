@@ -395,7 +395,7 @@ class MetricSelection(dj.Manual):
         metric_params = (MetricParameters & key).fetch1(
             'metric_params')
         if 'peak_offset' in metric_params:
-            if waveform_params['whiten'] is True:
+            if waveform_params['whiten']:
                 raise Exception("metric 'peak_offset' needs to be "
                                 "calculated on unwhitened waveforms")
         super().insert1(key, **kwargs)
