@@ -93,7 +93,7 @@ class UnitMarks(dj.Computed):
         # retrieve the units from the NWB file
         nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
 
-        recording = Curation.get_recording_extractor(key)
+        recording = Curation.get_recording(key)
         sorting = Curation.get_curated_sorting_extractor(key)
         waveform_extractor_name = (
             f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
