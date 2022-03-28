@@ -363,8 +363,8 @@ class ClusterlessClassifierParameters(dj.Manual):
     def insert1(self, key, **kwargs):
         super().insert1(convert_classes_to_dict(key), **kwargs)
 
-    def fetch1(self, key, **kwargs):
-        return restore_classes(super().fetch1(key, **kwargs))
+    def fetch1(self, *args, **kwargs):
+        return restore_classes(super().fetch1(*args, **kwargs))
 
 
 @schema
