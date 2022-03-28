@@ -15,8 +15,8 @@ from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
 from nwb_datajoint.common.common_position import IntervalPositionInfo
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
-from nwb_datajoint.decoding.core import (_convert_classes_to_dict,
-                                         _restore_classes)
+from nwb_datajoint.decoding.core import (convert_classes_to_dict,
+                                         restore_classes)
 from nwb_datajoint.spikesorting.spikesorting_curation import (
     CuratedSpikeSorting, Curation)
 from replay_trajectory_classification.classifier import (
@@ -210,31 +210,13 @@ class UnitMarksIndicator(dj.Computed):
     def make(self, key):
         pprint.pprint(key)
         # TODO: intersection of sort interval and interval list
-        interval_times = (IntervalList &
-                          {
-                              'nwb_file_name': key['nwb_file_name'],
-                              'interval_list_name': key['interval_list_name']
-                          }
+        interval_times = (IntervalList & key
                           ).fetch1('valid_times')
 
-        sampling_rate = (UnitMarksIndicatorSelection & {
-            'nwb_file_name': key['nwb_file_name'],
-            'sort_interval_name': key['sort_interval_name'],
-            'filter_parameter_set_name': key['filter_parameter_set_name'],
-            'sorting_id': key['sorting_id'],
-            'unit_inclusion_param_name': key['unit_inclusion_param_name'],
-            'mark_param_name': key['mark_param_name'],
-            'interval_list_name': key['interval_list_name']
-        }).fetch('sampling_rate')
+        sampling_rate = (UnitMarksIndicatorSelection &
+                         key).fetch('sampling_rate')
 
-        marks_df = (UnitMarks & {
-            'nwb_file_name': key['nwb_file_name'],
-            'sort_interval_name': key['sort_interval_name'],
-            'filter_parameter_set_name': key['filter_parameter_set_name'],
-            'sorting_id': key['sorting_id'],
-            'unit_inclusion_param_name': key['unit_inclusion_param_name'],
-            'mark_param_name': key['mark_param_name'],
-        }).fetch1_dataframe()
+        marks_df = (UnitMarks & key).fetch1_dataframe()
 
         time = self.get_time_bins_from_interval(interval_times, sampling_rate)
 
@@ -379,10 +361,10 @@ class ClusterlessClassifierParameters(dj.Manual):
             skip_duplicates=True)
 
     def insert1(self, key, **kwargs):
-        super().insert1(_convert_classes_to_dict(key), **kwargs)
+        super().insert1(convert_classes_to_dict(key), **kwargs)
 
     def fetch1(self, key, **kwargs):
-        return _restore_classes(super().fetch1(key, **kwargs))
+        return restore_classes(super().fetch1(key, **kwargs))
 
 
 @schema
