@@ -533,20 +533,26 @@ class AutomaticCurationParameters(dj.Manual):
         super().insert1(key, **kwargs)
 
     def insert_default(self):
-        key = {}
-        key['auto_curation_params_name'] = 'default'
-        key['merge_params'] = {}
         # label_params parsing: Each key is the name of a metric,
-        # the contents are a three value list with the comparison, a value, and a list of labels to apply if the comparison is true
-        key['label_params'] = {'nn_noise_overlap': [
-            '>', 0.1, ['noise', 'reject']]}
-        self.insert1(key, skip_duplicates=True)
+        # the contents are a three value list with the comparison, a value,
+        # and a list of labels to apply if the comparison is true
+        default_params = {
+            'auto_curation_params_name': 'default',
+            'merge_params': {},
+            'label_params': {
+                'nn_noise_overlap': ['>', 0.1, ['noise', 'reject']]
+            }
+        }
+        self.insert1(default_params, skip_duplicates=True)
+
         # Second default parameter set for not applying any labels,
         # or merges, but adding metrics
-        key['auto_curation_params_name'] = 'none'
-        key['merge_params'] = {}
-        key['label_params'] = {}
-        self.insert1(key, skip_duplicates=True)
+        no_label_params = {
+            'auto_curation_params_name': 'none',
+            'merge_params': {},
+            'label_params': {},
+        }
+        self.insert1(no_label_params, skip_duplicates=True)
 
 
 @schema
