@@ -216,8 +216,10 @@ class SortGroup(dj.Manual):
             # get the relative x and y locations of this channel from the probe table
             probe_electrode = int(
                 electrodes['probe_electrode'][electrodes['electrode_id'] == electrode_id])
-            rel_x, rel_y, rel_z = (Probe().Electrode() & {'probe_type': probe_type,
-                                                          'probe_electrode': probe_electrode}).fetch('rel_x', 'rel_y', 'rel_z')
+            rel_x, rel_y, rel_z = (Probe().Electrode() &
+                                   {'probe_type': probe_type,
+                                    'probe_electrode': probe_electrode}
+                                   ).fetch('rel_x', 'rel_y', 'rel_z')
             # TODO: Fix this HACK when we can use probeinterface:
             rel_x = float(rel_x)
             rel_y = float(rel_y)
@@ -298,10 +300,11 @@ class SpikeSortingRecording(dj.Computed):
         recording = self._get_filtered_recording(key)
         recording_name = self._get_recording_name(key)
 
-        tmp_key = {}
-        tmp_key['nwb_file_name'] = key['nwb_file_name']
-        tmp_key['interval_list_name'] = recording_name
-        tmp_key['valid_times'] = sort_interval_valid_times
+        tmp_key = {
+            'nwb_file_name': key['nwb_file_name'],
+            'interval_list_name': recording_name,
+            'valid_times': sort_interval_valid_times
+        }
         IntervalList.insert1(tmp_key, replace=True)
 
         # store the list of valid times for the sort
@@ -358,10 +361,14 @@ class SpikeSortingRecording(dj.Computed):
             (start, end) times for valid stretches of the sorting interval
 
         """
-        sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
-                                         'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
-        valid_interval_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
-                                                'interval_list_name': 'raw data valid times'}).fetch1('valid_times')
+        sort_interval = (SortInterval &
+                         {'nwb_file_name': key['nwb_file_name'],
+                          'sort_interval_name': key['sort_interval_name']}
+                         ).fetch1('sort_interval')
+        valid_interval_times = (IntervalList &
+                                {'nwb_file_name': key['nwb_file_name'],
+                                 'interval_list_name': 'raw data valid times'}
+                                ).fetch1('valid_times')
         valid_sort_times = interval_list_intersect(
             sort_interval, valid_interval_times)
         return valid_sort_times
@@ -389,8 +396,9 @@ class SpikeSortingRecording(dj.Computed):
 
         valid_sort_times = self._get_sort_interval_valid_times(key)
         # shape is (N, 2)
-        valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval)
-                                             for interval in valid_sort_times])
+        valid_sort_times_indices = np.array(
+            [np.searchsorted(recording.get_times(), interval)
+             for interval in valid_sort_times])
         # join intervals of indices that are adjacent
         valid_sort_times_indices = reduce(
             union_adjacent_index, valid_sort_times_indices)
@@ -402,19 +410,25 @@ class SpikeSortingRecording(dj.Computed):
         if len(valid_sort_times_indices) > 1:
             recordings_list = []
             for interval_indices in valid_sort_times_indices:
-                recording_single = recording.frame_slice(start_frame=interval_indices[0],
-                                                         end_frame=interval_indices[1])
+                recording_single = recording.frame_slice(
+                    start_frame=interval_indices[0],
+                    end_frame=interval_indices[1])
                 recordings_list.append(recording_single)
             recording = si.append_recordings(recordings_list)
         else:
-            recording = recording.frame_slice(start_frame=valid_sort_times_indices[0][0],
-                                              end_frame=valid_sort_times_indices[0][1])
+            recording = recording.frame_slice(
+                start_frame=valid_sort_times_indices[0][0],
+                end_frame=valid_sort_times_indices[0][1])
 
-        channel_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
-                                                       'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
+        channel_ids = (SortGroup.SortGroupElectrode &
+                       {'nwb_file_name': key['nwb_file_name'],
+                        'sort_group_id': key['sort_group_id']}
+                       ).fetch('electrode_id')
         channel_ids = channel_ids.tolist()
-        ref_channel_id = (SortGroup & {'nwb_file_name': key['nwb_file_name'],
-                                       'sort_group_id': key['sort_group_id']}).fetch('sort_reference_electrode_id')
+        ref_channel_id = (SortGroup &
+                          {'nwb_file_name': key['nwb_file_name'],
+                           'sort_group_id': key['sort_group_id']}
+                          ).fetch('sort_reference_electrode_id')
         ref_channel_id = ref_channel_id.tolist()
 
         # include ref channel in first slice, then exclude it in second slice
@@ -422,18 +436,23 @@ class SpikeSortingRecording(dj.Computed):
             channel_ids_ref = channel_ids + ref_channel_id
             recording = recording.channel_slice(channel_ids=channel_ids_ref)
 
-            recording = st.preprocessing.common_reference(recording, reference='single',
-                                                          ref_channel_ids=ref_channel_id)
+            recording = st.preprocessing.common_reference(
+                recording, reference='single',
+                ref_channel_ids=ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids)
         elif ref_channel_id[0] == -2:
             recording = recording.channel_slice(channel_ids=channel_ids)
-            recording = st.preprocessing.common_reference(recording, reference='global',
-                                                          operator='median')
+            recording = st.preprocessing.common_reference(
+                recording,
+                reference='global',
+                operator='median')
         else:
             raise ValueError("Invalid reference channel ID")
         filter_params = (SpikeSortingPreprocessingParameters &
                          key).fetch1('preproc_params')
-        recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
-                                                     freq_max=filter_params['frequency_max'])
+        recording = st.preprocessing.bandpass_filter(
+            recording,
+            freq_min=filter_params['frequency_min'],
+            freq_max=filter_params['frequency_max'])
 
         return recording

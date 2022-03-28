@@ -120,14 +120,17 @@ class SpikeSorting(dj.Computed):
             # convert valid intervals to indices
             list_triggers = []
             for interval in artifact_times:
-                list_triggers.append(np.arange(np.searchsorted(timestamps, interval[0]),
-                                               np.searchsorted(timestamps, interval[1])))
+                list_triggers.append(
+                    np.arange(np.searchsorted(timestamps, interval[0]),
+                              np.searchsorted(timestamps, interval[1])))
             list_triggers = np.asarray(list_triggers).flatten().tolist()
 
             if recording.get_num_segments() > 1:
                 recording = si.concatenate_recordings(recording.recording_list)
-            recording = sit.remove_artifacts(recording=recording, list_triggers=list_triggers,
-                                             ms_before=0, ms_after=0, mode='zeros')
+            recording = sit.remove_artifacts(
+                recording=recording,
+                list_triggers=list_triggers,
+                ms_before=0, ms_after=0, mode='zeros')
 
         print(f'Running spike sorting on {key}...')
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
@@ -163,22 +166,28 @@ class SpikeSorting(dj.Computed):
             f'Attempting to delete {len(entries)} entries, checking permission...')
 
         for entry_idx in range(len(entries)):
-            # check the team name for the entry, then look up the members in that team, then get their datajoint user names
-            team_name = (SpikeSortingRecordingSelection & (
-                SpikeSortingRecordingSelection & entries[entry_idx]).proj()).fetch1()['team_name']
-            lab_member_name_list = (LabTeam.LabTeamMember & {
-                                    'team_name': team_name}).fetch('lab_member_name')
+            # check the team name for the entry, then look up the members in that team,
+            # then get their datajoint user names
+            team_name = (SpikeSortingRecordingSelection &
+                         (SpikeSortingRecordingSelection &
+                          entries[entry_idx]).proj()
+                         ).fetch1()['team_name']
+            lab_member_name_list = (LabTeam.LabTeamMember &
+                                    {'team_name': team_name}
+                                    ).fetch('lab_member_name')
             datajoint_user_names = []
             for lab_member_name in lab_member_name_list:
-                datajoint_user_names.append((LabMember.LabMemberInfo & {
-                                            'lab_member_name': lab_member_name}).fetch1('datajoint_user_name'))
+                datajoint_user_names.append(
+                    (LabMember.LabMemberInfo & {
+                        'lab_member_name': lab_member_name}
+                     ).fetch1('datajoint_user_name'))
             permission_bool[entry_idx] = current_user_name in datajoint_user_names
         if np.sum(permission_bool) == len(entries):
             print('Permission to delete all specified entries granted.')
             super().delete()
         else:
-            raise Exception(
-                'You do not have permission to delete all specified entries. Not deleting anything.')
+            raise Exception('You do not have permission to delete all specified'
+                            'entries. Not deleting anything.')
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
