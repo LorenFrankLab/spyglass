@@ -8,8 +8,8 @@ import datajoint as dj
 import numpy as np
 import spikeinterface as si
 import spikeinterface.sorters as sis
-import spikeinterface.toolkit as sit
 import spikeinterface.sortingcomponents as scp
+import spikeinterface.toolkit as sit
 
 from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import AnalysisNwbfile
