@@ -95,8 +95,7 @@ class Curation(dj.Manual):
         # generate a unique number for this curation
         id = (Curation & sorting_key).fetch('curation_id')
         if len(id) > 0:
-            id.sort()
-            curation_id = id[-1] + 1
+            curation_id = max(id) + 1
         else:
             curation_id = 0
 
