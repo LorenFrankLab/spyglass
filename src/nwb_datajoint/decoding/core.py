@@ -106,9 +106,13 @@ def _convert_environment_to_dict(env):
 
 
 def convert_classes_to_dict(key):
-    key['classifier_params']['environments'] = [
-        _convert_environment_to_dict(env)
-        for env in key['classifier_params']['environments']]
+    try:
+        key['classifier_params']['environments'] = [
+            _convert_environment_to_dict(env)
+            for env in key['classifier_params']['environments']]
+    except TypeError:
+        key['classifier_params']['environments'] = [
+            _convert_environment_to_dict(key['classifier_params']['environments'])]
     key['classifier_params']['continuous_transition_types'] = _convert_transitions_to_dict(
         key['classifier_params']['continuous_transition_types'])
     key['classifier_params']['discrete_transition_type'] = _to_dict(
