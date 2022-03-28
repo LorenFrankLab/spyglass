@@ -123,7 +123,6 @@ class ArtifactRemovedIntervalList(dj.Manual):
     # Note that entries can come from either ArtifactDetection() or alternative artifact removal analyses.
     artifact_removed_interval_list_name: varchar(200)
     ---
-    -> ArtifactDetectionSelection
     artifact_removed_valid_times: longblob
     artifact_times: longblob # np array of artifact intervals
     """
