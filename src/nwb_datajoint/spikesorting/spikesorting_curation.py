@@ -120,7 +120,7 @@ class Curation(dj.Manual):
         return curation_key
 
     @staticmethod
-    def get_recording_extractor(key: dict):
+    def get_recording(key: dict):
         """Returns the recording extractor for the recording related to this curation
 
         Parameters
@@ -273,7 +273,7 @@ class Waveforms(dj.Computed):
     """
 
     def make(self, key):
-        recording = Curation.get_recording_extractor(key)
+        recording = Curation.get_recording(key)
         sorting = Curation.get_curated_sorting_extractor(key)
 
         print('Extracting waveforms...')
@@ -775,7 +775,7 @@ class CuratedSpikeSorting(dj.Computed):
 
         # get the sorting and save it in the NWB file
         sorting = Curation.get_curated_sorting_extractor(key)
-        recording = Curation.get_recording_extractor(key)
+        recording = Curation.get_recording(key)
 
         # get the sort_interval and sorting interval list
         sort_interval_name = (SpikeSortingRecording &
