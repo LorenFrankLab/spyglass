@@ -262,25 +262,6 @@ class AnalysisNwbfile(dj.Manual):
             base_dir / 'analysis' / analysis_nwb_file_name)
         return analysis_nwb_file_abspath
 
-    @staticmethod
-    def add_to_lock(analysis_file_name):
-        """Add the specified analysis NWB file to the file with the list of nwb files to be locked.
-
-        The ANALYSIS_LOCK_FILE environment variable must be set.
-
-        Parameters
-        ----------
-        analysis_file_name : str
-            The name of the NWB file that has been inserted into the AnalysisNwbfile() schema
-        """
-        key = {'analysis_file_name': analysis_file_name}
-        # check to make sure the file exists
-        assert len((AnalysisNwbfile() & key).fetch()) > 0, \
-            f'Error adding {analysis_file_name} to lock file, not in AnalysisNwbfile() schema'
-        lock_file = open(os.getenv('ANALYSIS_LOCK_FILE'), mode='a+')
-        lock_file.write(f'{analysis_file_name}\n')
-        lock_file.close()
-
     def add_nwb_object(self, analysis_file_name, nwb_object):
         # TODO: change to add_object with checks for object type and a name parameter, which should be specified if
         # it is not an NWB container
@@ -352,12 +333,16 @@ class AnalysisNwbfile(dj.Manual):
                                      data=sort_intervals)
                 # If metrics were specified, add one column per metric
                 if metrics is not None:
-                    for metric in list(metrics):
-                        metric_data = metrics[metric].to_list()
-                        print(f'Adding metric {metric} : {metric_data}')
-                        nwbf.add_unit_column(name=metric,
-                                             description=f'{metric} metric',
-                                             data=metric_data)
+                    for metric in metrics:
+                        if metrics[metric]:
+                            unit_ids = np.array(list(metrics[metric].keys()))
+                            metric_values = np.array(list(metrics[metric].values()))
+                            # sort by unit_ids and apply that sorting to values to ensure that things go in the right order
+                            metric_values = metric_values[np.argsort(unit_ids)]
+                            print(f'Adding metric {metric} : {metric_values}')
+                            nwbf.add_unit_column(name=metric,
+                                                description=f'{metric} metric',
+                                                data=metric_values)
                 if labels is not None:
                     nwbf.add_unit_column(
                         name='label', description='label given during curation', data=labels)

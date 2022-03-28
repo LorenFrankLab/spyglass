@@ -16,6 +16,7 @@ dependencies:
   - ipympl
   - tqdm
   - nb_conda
+  - jinja2==3.0.2
   - pip:
     - kachery
     - kachery-client>=1.1.7

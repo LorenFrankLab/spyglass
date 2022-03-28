@@ -20,7 +20,7 @@ def insert_sessions(nwb_file_names):
     """
     check_env()
 
-    if type(nwb_file_names) is str:
+    if isinstance(nwb_file_names, str):
         nwb_file_names = [nwb_file_names]
 
     for nwb_file_name in nwb_file_names:

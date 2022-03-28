@@ -1,30 +1,25 @@
 import os
-import pathlib
 import shutil
-import time
-from csv import list_dialects
 from functools import reduce
 from pathlib import Path
 
 import datajoint as dj
 import numpy as np
-import scipy.stats as stats
 import spikeinterface as si
 import spikeinterface.extractors as se
-import spikeinterface.sorters as ss
 import spikeinterface.toolkit as st
 
 from ..common.common_device import Probe
 from ..common.common_ephys import Electrode, ElectrodeGroup
-from ..common.common_interval import (IntervalList,
-                                      interval_list_intersect,
+from ..common.common_interval import (IntervalList, interval_list_intersect,
                                       union_adjacent_index)
-from ..common.common_lab import LabMember, LabTeam
-from ..common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from ..common.common_lab import LabTeam
+from ..common.common_nwbfile import Nwbfile
 from ..common.common_session import Session
 from ..common.dj_helper_fn import dj_replace
 
 schema = dj.schema('spikesorting_recording')
+
 
 @schema
 class SortGroup(dj.Manual):
@@ -44,6 +39,7 @@ class SortGroup(dj.Manual):
 
     def set_group_by_shank(self, nwb_file_name: str, references: dict = None, omit_ref_electrode_group=False):
         """Divides electrodes into groups based on their shank position.
+
         * Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
           single group
         * Electrodes from probes with multiple shanks (e.g. polymer probes) are
@@ -81,8 +77,9 @@ class SortGroup(dj.Manual):
                 sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
                 # specify reference electrode. Use 'references' if passed, otherwise use reference from config
                 if not references:
-                    shank_elect_ref = electrodes['original_reference_electrode'][np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                                                                                electrodes['probe_shank'] == shank)]
+                    shank_elect_ref = electrodes['original_reference_electrode'][
+                        np.logical_and(electrodes['electrode_group_name'] == e_group,
+                                       electrodes['probe_shank'] == shank)]
                     if np.max(shank_elect_ref) == np.min(shank_elect_ref):
                         sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
                     else:
@@ -112,8 +109,9 @@ class SortGroup(dj.Manual):
                         f"but found {len(reference_electrode_group)}.")
                 if not omit_ref_electrode_group or (str(e_group) != str(reference_electrode_group)):
                     self.insert1(sg_key)
-                    shank_elect = electrodes['electrode_id'][np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                                                            electrodes['probe_shank'] == shank)]
+                    shank_elect = electrodes['electrode_id'][
+                        np.logical_and(electrodes['electrode_group_name'] == e_group,
+                                       electrodes['probe_shank'] == shank)]
                     for elect in shank_elect:
                         sge_key['electrode_id'] = elect
                         self.SortGroupElectrode().insert1(sge_key)
@@ -143,7 +141,7 @@ class SortGroup(dj.Manual):
         sort_group = 0
         for e_group in e_groups:
             sge_key['electrode_group_name'] = e_group
-            #sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
+            # sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
             # TEST
             sg_key['sort_group_id'] = sge_key['sort_group_id'] = int(e_group)
             # get the list of references and make sure they are all the same
@@ -180,19 +178,26 @@ class SortGroup(dj.Manual):
     def get_geometry(self, sort_group_id, nwb_file_name):
         """
         Returns a list with the x,y coordinates of the electrodes in the sort group
-        for use with the SpikeInterface package. Converts z locations to y where appropriate
-        :param sort_group_id: the id of the sort group
-        :param nwb_file_name: the name of the nwb file for the session you wish to use
-        :param prb_file_name: the name of the output prb file
-        :return: geometry: list of coordinate pairs, one per electrode
+        for use with the SpikeInterface package.
+
+        Converts z locations to y where appropriate.
+
+        Parameters
+        ----------
+        sort_group_id : int
+        nwb_file_name : str
+        prb_file_name : str
+
+        Returns
+        -------
+        geometry : list
+            List of coordinate pairs, one per electrode
         """
 
         # create the channel_groups dictiorary
         channel_group = dict()
         key = dict()
         key['nwb_file_name'] = nwb_file_name
-        sort_group_list = (SortGroup() & key).fetch('sort_group_id')
-        max_group = int(np.max(np.asarray(sort_group_list)))
         electrodes = (Electrode() & key).fetch()
 
         key['sort_group_id'] = sort_group_id
@@ -203,7 +208,6 @@ class SortGroup(dj.Manual):
         channel_group[sort_group_id] = dict()
         channel_group[sort_group_id]['channels'] = sort_group_electrodes['electrode_id'].tolist()
 
-        label = list()
         n_chan = len(channel_group[sort_group_id]['channels'])
 
         geometry = np.zeros((n_chan, 2), dtype='float')
@@ -212,8 +216,10 @@ class SortGroup(dj.Manual):
             # get the relative x and y locations of this channel from the probe table
             probe_electrode = int(
                 electrodes['probe_electrode'][electrodes['electrode_id'] == electrode_id])
-            rel_x, rel_y, rel_z = (Probe().Electrode() & {'probe_type': probe_type,
-                                                          'probe_electrode': probe_electrode}).fetch('rel_x', 'rel_y', 'rel_z')
+            rel_x, rel_y, rel_z = (Probe().Electrode() &
+                                   {'probe_type': probe_type,
+                                    'probe_electrode': probe_electrode}
+                                   ).fetch('rel_x', 'rel_y', 'rel_z')
             # TODO: Fix this HACK when we can use probeinterface:
             rel_x = float(rel_x)
             rel_y = float(rel_y)
@@ -229,8 +235,9 @@ class SortGroup(dj.Manual):
                     n_found += 1
                 else:
                     Warning(
-                        f'Relative electrode locations have three coordinates; only two are currenlty supported')
+                        'Relative electrode locations have three coordinates; only two are currenlty supported')
         return np.ndarray.tolist(geometry)
+
 
 @schema
 class SortInterval(dj.Manual):
@@ -240,6 +247,7 @@ class SortInterval(dj.Manual):
     ---
     sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
+
 
 @schema
 class SpikeSortingPreprocessingParameters(dj.Manual):
@@ -277,6 +285,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
     -> IntervalList
     """
 
+
 @schema
 class SpikeSortingRecording(dj.Computed):
     definition = """
@@ -291,10 +300,11 @@ class SpikeSortingRecording(dj.Computed):
         recording = self._get_filtered_recording(key)
         recording_name = self._get_recording_name(key)
 
-        tmp_key = {}
-        tmp_key['nwb_file_name'] = key['nwb_file_name']
-        tmp_key['interval_list_name'] = recording_name
-        tmp_key['valid_times'] = sort_interval_valid_times
+        tmp_key = {
+            'nwb_file_name': key['nwb_file_name'],
+            'interval_list_name': recording_name,
+            'valid_times': sort_interval_valid_times
+        }
         IntervalList.insert1(tmp_key, replace=True)
 
         # store the list of valid times for the sort
@@ -349,11 +359,16 @@ class SpikeSortingRecording(dj.Computed):
         -------
         sort_interval_valid_times: ndarray of tuples
             (start, end) times for valid stretches of the sorting interval
+
         """
-        sort_interval = (SortInterval & {'nwb_file_name': key['nwb_file_name'],
-                                         'sort_interval_name': key['sort_interval_name']}).fetch1('sort_interval')
-        valid_interval_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
-                                                'interval_list_name': 'raw data valid times'}).fetch1('valid_times')
+        sort_interval = (SortInterval &
+                         {'nwb_file_name': key['nwb_file_name'],
+                          'sort_interval_name': key['sort_interval_name']}
+                         ).fetch1('sort_interval')
+        valid_interval_times = (IntervalList &
+                                {'nwb_file_name': key['nwb_file_name'],
+                                 'interval_list_name': 'raw data valid times'}
+                                ).fetch1('valid_times')
         valid_sort_times = interval_list_intersect(
             sort_interval, valid_interval_times)
         return valid_sort_times
@@ -381,8 +396,9 @@ class SpikeSortingRecording(dj.Computed):
 
         valid_sort_times = self._get_sort_interval_valid_times(key)
         # shape is (N, 2)
-        valid_sort_times_indices = np.array([np.searchsorted(recording.get_times(), interval)
-                                             for interval in valid_sort_times])
+        valid_sort_times_indices = np.array(
+            [np.searchsorted(recording.get_times(), interval)
+             for interval in valid_sort_times])
         # join intervals of indices that are adjacent
         valid_sort_times_indices = reduce(
             union_adjacent_index, valid_sort_times_indices)
@@ -394,19 +410,25 @@ class SpikeSortingRecording(dj.Computed):
         if len(valid_sort_times_indices) > 1:
             recordings_list = []
             for interval_indices in valid_sort_times_indices:
-                recording_single = recording.frame_slice(start_frame=interval_indices[0],
-                                                         end_frame=interval_indices[1])
+                recording_single = recording.frame_slice(
+                    start_frame=interval_indices[0],
+                    end_frame=interval_indices[1])
                 recordings_list.append(recording_single)
             recording = si.append_recordings(recordings_list)
         else:
-            recording = recording.frame_slice(start_frame=valid_sort_times_indices[0][0],
-                                              end_frame=valid_sort_times_indices[0][1])
+            recording = recording.frame_slice(
+                start_frame=valid_sort_times_indices[0][0],
+                end_frame=valid_sort_times_indices[0][1])
 
-        channel_ids = (SortGroup.SortGroupElectrode & {'nwb_file_name': key['nwb_file_name'],
-                                                       'sort_group_id': key['sort_group_id']}).fetch('electrode_id')
+        channel_ids = (SortGroup.SortGroupElectrode &
+                       {'nwb_file_name': key['nwb_file_name'],
+                        'sort_group_id': key['sort_group_id']}
+                       ).fetch('electrode_id')
         channel_ids = channel_ids.tolist()
-        ref_channel_id = (SortGroup & {'nwb_file_name': key['nwb_file_name'],
-                                       'sort_group_id': key['sort_group_id']}).fetch('sort_reference_electrode_id')
+        ref_channel_id = (SortGroup &
+                          {'nwb_file_name': key['nwb_file_name'],
+                           'sort_group_id': key['sort_group_id']}
+                          ).fetch('sort_reference_electrode_id')
         ref_channel_id = ref_channel_id.tolist()
 
         # include ref channel in first slice, then exclude it in second slice
@@ -414,19 +436,23 @@ class SpikeSortingRecording(dj.Computed):
             channel_ids_ref = channel_ids + ref_channel_id
             recording = recording.channel_slice(channel_ids=channel_ids_ref)
 
-            recording = st.preprocessing.common_reference(recording, reference='single',
-                                                          ref_channel_ids=ref_channel_id)
+            recording = st.preprocessing.common_reference(
+                recording, reference='single',
+                ref_channel_ids=ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids)
         elif ref_channel_id[0] == -2:
             recording = recording.channel_slice(channel_ids=channel_ids)
-            recording = st.preprocessing.common_reference(recording, reference='global',
-                                                          operator='median')
+            recording = st.preprocessing.common_reference(
+                recording,
+                reference='global',
+                operator='median')
         else:
             raise ValueError("Invalid reference channel ID")
         filter_params = (SpikeSortingPreprocessingParameters &
                          key).fetch1('preproc_params')
-        recording = st.preprocessing.bandpass_filter(recording, freq_min=filter_params['frequency_min'],
-                                                     freq_max=filter_params['frequency_max'])
+        recording = st.preprocessing.bandpass_filter(
+            recording,
+            freq_min=filter_params['frequency_min'],
+            freq_max=filter_params['frequency_max'])
 
         return recording
-
