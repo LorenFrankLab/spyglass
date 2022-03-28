@@ -15,8 +15,8 @@ from nwb_datajoint.common.common_interval import IntervalList
 from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
 from nwb_datajoint.common.common_position import IntervalPositionInfo
 from nwb_datajoint.common.dj_helper_fn import fetch_nwb
-from nwb_datajoint.decoding.core import (_convert_classes_to_dict,
-                                         _restore_classes)
+from nwb_datajoint.decoding.core import (convert_classes_to_dict,
+                                         restore_classes)
 from nwb_datajoint.spikesorting.spikesorting_curation import (
     CuratedSpikeSorting, Curation)
 from replay_trajectory_classification.classifier import (
@@ -361,10 +361,10 @@ class ClusterlessClassifierParameters(dj.Manual):
             skip_duplicates=True)
 
     def insert1(self, key, **kwargs):
-        super().insert1(_convert_classes_to_dict(key), **kwargs)
+        super().insert1(convert_classes_to_dict(key), **kwargs)
 
     def fetch1(self, key, **kwargs):
-        return _restore_classes(super().fetch1(key, **kwargs))
+        return restore_classes(super().fetch1(key, **kwargs))
 
 
 @schema

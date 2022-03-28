@@ -1,4 +1,3 @@
-from nwb_datajoint.common.common_position import TrackGraph
 from replay_trajectory_classification.continuous_state_transitions import (
     Identity, RandomWalk, RandomWalkDirection1, RandomWalkDirection2, Uniform)
 from replay_trajectory_classification.discrete_state_transitions import (
@@ -8,6 +7,7 @@ from replay_trajectory_classification.initial_conditions import (
     UniformInitialConditions, UniformOneEnvironmentInitialConditions)
 from replay_trajectory_classification.misc import NumbaKDE
 from replay_trajectory_classification.observation_model import ObservationModel
+from track_linearization import make_track_graph
 
 
 def _convert_dict_to_class(d: dict, class_conversion: dict):
@@ -15,12 +15,12 @@ def _convert_dict_to_class(d: dict, class_conversion: dict):
     return class_conversion[class_name](**d)
 
 
-def _convert_env(env_params):
+def _convert_env_dict(env_params):
     if env_params['track_graph'] is not None:
-        env_params['track_graph'] = (TrackGraph & {
-                                     'track_graph_name': env_params['track_graph']}).get_networkx_track_graph()
+        env_params['track_graph'] = make_track_graph(
+            **env_params['track_graph'])
 
-    return env_params
+    return Environment(**env_params)
 
 
 def _to_dict(transition):
@@ -35,7 +35,7 @@ def _convert_transitions_to_dict(transitions):
             for transition_rows in transitions]
 
 
-def _restore_classes(params):
+def restore_classes(params):
     continuous_state_transition_types = {
         'RandomWalk': RandomWalk,
         'RandomWalkDirection1': RandomWalkDirection1,
@@ -64,8 +64,8 @@ def _restore_classes(params):
         [_convert_dict_to_class(
             st, continuous_state_transition_types) for st in sts]
         for sts in params['classifier_params']['continuous_transition_types']]
-    params['classifier_params']['environments'] = [Environment(
-        **_convert_env(env_params)) for env_params in params['classifier_params']['environments']]
+    params['classifier_params']['environments'] = [
+        _convert_env_dict(env_params) for env_params in params['classifier_params']['environments']]
     params['classifier_params']['discrete_transition_type'] = _convert_dict_to_class(
         params['classifier_params']['discrete_transition_type'], discrete_state_transition_types)
     params['classifier_params']['initial_conditions_type'] = _convert_dict_to_class(
@@ -94,9 +94,21 @@ def _convert_algorithm_params(algo_params):
     return algo_params
 
 
-def _convert_classes_to_dict(key):
+def _convert_environment_to_dict(env):
+    if env.track_graph is not None:
+        track_graph = env.track_graph
+        env.track_graph = {
+            'node_positions': [v['pos'] for v in dict(track_graph.nodes).values()],
+            'edges': list(track_graph.edges),
+        }
+
+    return vars(env)
+
+
+def convert_classes_to_dict(key):
     key['classifier_params']['environments'] = [
-        vars(env) for env in key['classifier_params']['environments']]
+        _convert_environment_to_dict(env)
+        for env in key['classifier_params']['environments']]
     key['classifier_params']['continuous_transition_types'] = _convert_transitions_to_dict(
         key['classifier_params']['continuous_transition_types'])
     key['classifier_params']['discrete_transition_type'] = _to_dict(
