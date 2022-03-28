@@ -157,9 +157,10 @@ class SortingviewWorkspace(dj.Computed):
         return url
 
     @staticmethod
-    def insert_manual_curation(key: dict, description=''):
-        """ Based on information in key for an SortingviewWorkspace, loads the curated sorting from sortingview,
-        saves it (with labels and the optional description) and inserts it to CuratedSorting
+    def insert_manual_curation(key: dict, description='manually curated'):
+        """Based on information in key for an SortingviewWorkspace, loads the
+        curated sorting from sortingview, saves it (with labels and the
+        optional description) and inserts it to CuratedSorting
 
         Assumes that the workspace corresponding to the recording and (original) sorting exists
 
@@ -196,4 +197,4 @@ class SortingviewWorkspace(dj.Computed):
             labels=labels['labelsByUnit'],
             merge_groups=labels['mergeGroups'],
             metrics=metrics,
-            description='manually curated')
+            description=description)
