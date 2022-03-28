@@ -522,8 +522,7 @@ class AutomaticCurationParameters(dj.Manual):
                 raise Exception(
                     f'{metric}: "{comparison_list[0]}" '
                     f'not in list of available comparisons')
-            if (type(comparison_list[1]) != int and
-                    type(comparison_list[1]) != float):
+            if not isinstance(comparison_list[1], (int, float)):
                 raise Exception(f'{metric}: {comparison_list[1]} is of type '
                                 f'{type(comparison_list[1])} and not a number')
             for label in comparison_list[2]:
