@@ -177,8 +177,16 @@ class SortedSpikesClassifierParameters(dj.Manual):
              'predict_params': predict_parameters},
             skip_duplicates=True)
 
+    def insert(self, keys, **kwargs):
+        super().insert([convert_classes_to_dict(key)
+                        for key in keys], **kwargs)
+
     def insert1(self, key, **kwargs):
         super().insert1(convert_classes_to_dict(key), **kwargs)
+
+    def fetch(self, *args, **kwargs):
+        return [restore_classes(output)
+                for output in super().fetch(*args, **kwargs)]
 
     def fetch1(self, *args, **kwargs):
         return restore_classes(super().fetch1(*args, **kwargs))
