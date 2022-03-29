@@ -46,7 +46,7 @@ class ArtifactDetectionSelection(dj.Manual):
     -> SpikeSortingRecording
     -> ArtifactDetectionParameters
     ---
-    custom_artifact_detection : enum(True, False)
+    custom_artifact_detection=0 : tinyint
     """
 
 
@@ -62,7 +62,7 @@ class ArtifactDetection(dj.Computed):
     """
 
     def make(self, key):
-        if not (ArtifactDetectionParameters & key).fetch1("custom_artifact_detection"):
+        if not (ArtifactDetectionSelection & key).fetch1("custom_artifact_detection"):
             # get the dict of artifact params associated with this artifact_params_name
             artifact_params = (ArtifactDetectionParameters &
                                key).fetch1("artifact_params")
