@@ -147,7 +147,7 @@ class SpikeSorting(dj.Computed):
 
         print('Saving sorting results...')
         sorting_folder = Path(os.getenv('NWB_DATAJOINT_SORTING_DIR'))
-        sorting_name = self._get_sorting_name(key)
+        sorting_name = self._get_recording_name(key)
         key['sorting_path'] = str(sorting_folder / Path(sorting_name))
         if os.path.exists(key['sorting_path']):
             shutil.rmtree(key['sorting_path'])
