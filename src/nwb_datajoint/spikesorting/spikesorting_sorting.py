@@ -117,7 +117,7 @@ class SpikeSorting(dj.Computed):
         if artifact_times.ndim == 1:
             artifact_times = np.expand_dims(artifact_times, 0)
 
-        if artifact_times:
+        if len(artifact_times):
             # convert valid intervals to indices
             list_triggers = []
             for interval in artifact_times:
