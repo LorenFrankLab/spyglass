@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 import datajoint as dj
@@ -232,12 +233,10 @@ class SpikeSorting(dj.Computed):
                 shutil.rmtree(
                     str(Path(os.environ['NWB_DATAJOINT_SORTING_DIR']) / dir))
 
-    def _get_recording_name(self, key):
+    def _get_sorting_name(self, key):
         recording_name = SpikeSortingRecording._get_recording_name(key)
         sorting_name = recording_name + '_' \
-            + key['sorter'] + '_' \
-            + key['sorter_params_name'] + '_' \
-            + key['artifact_removed_interval_list_name']
+            + str(uuid.uuid4())[0:8] + '_spikesorting'
         return sorting_name
 
     # TODO: write a function to import sortings done outside of dj
