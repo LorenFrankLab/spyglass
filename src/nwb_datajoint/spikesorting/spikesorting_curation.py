@@ -686,7 +686,7 @@ class AutomaticCuration(dj.Computed):
         else:
             for metric in label_params:
                 if metric not in quality_metrics:
-                    print(f'{metric} not found in quality metrics; skipping')
+                    Warning(f'{metric} not found in quality metrics; skipping')
                 else:
                     compare = _comparison_to_function[label_params[metric][0]]
 
@@ -741,7 +741,7 @@ class CuratedSpikeSorting(dj.Computed):
         # check that the Curation has metrics
         metrics = (Curation & key).fetch1('quality_metrics')
         if metrics == {}:
-            print(
+            Warning(
                 f'Metrics for Curation {key} should normally be calculated before insertion here')
 
         sorting = Curation.get_curated_sorting(key)
