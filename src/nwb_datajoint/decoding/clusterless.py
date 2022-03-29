@@ -94,7 +94,7 @@ class UnitMarks(dj.Computed):
         nwb_units = (CuratedSpikeSorting() & key).fetch_nwb()[0]['units']
 
         recording = Curation.get_recording(key)
-        sorting = Curation.get_curated_sorting_extractor(key)
+        sorting = Curation.get_curated_sorting(key)
         waveform_extractor_name = (
             f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
             f'{key["curation_id"]}_clusterless_waveforms')
