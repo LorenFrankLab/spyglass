@@ -1,3 +1,7 @@
+"""Converts decoder classes into dictionaries and dictionaries into classes
+so that datajoint can store them in tables."""
+
+
 from replay_trajectory_classification.continuous_state_transitions import (
     Identity, RandomWalk, RandomWalkDirection1, RandomWalkDirection2, Uniform)
 from replay_trajectory_classification.discrete_state_transitions import (
