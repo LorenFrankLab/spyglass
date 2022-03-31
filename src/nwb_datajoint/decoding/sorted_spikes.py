@@ -1,3 +1,13 @@
+"""Pipeline for decoding the animal's mental position and some category of interest
+from clustered spikes times. See [1] for details.
+
+References
+----------
+[1] Denovellis, E. L. et al. Hippocampal replay of experience at real-world
+speeds. eLife 10, e64505 (2021).
+
+"""
+
 import pprint
 
 import datajoint as dj
@@ -22,6 +32,9 @@ schema = dj.schema('decoding_sortedspikes')
 
 @schema
 class SortedSpikesIndicatorSelection(dj.Lookup):
+    """Bins spike times into regular intervals given by the sampling rate.
+    Start and stop time of the interval are defined by the interval list.
+    """
     definition = """
     -> CuratedSpikeSorting
     -> IntervalList
@@ -32,6 +45,10 @@ class SortedSpikesIndicatorSelection(dj.Lookup):
 
 @schema
 class SortedSpikesIndicator(dj.Computed):
+    """Bins spike times into regular intervals given by the sampling rate.
+    Useful for GLMs and for decoding.
+
+    """
     definition = """
     -> SortedSpikesIndicatorSelection
     ---
@@ -87,6 +104,7 @@ class SortedSpikesIndicator(dj.Computed):
 
     @staticmethod
     def get_time_bins_from_interval(interval_times, sampling_rate):
+        """Gets the superset of the interval."""
         start_time, end_time = interval_times[0][0], interval_times[-1][-1]
         n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
 
@@ -150,6 +168,8 @@ def make_default_decoding_parameters_gpu():
 
 @schema
 class SortedSpikesClassifierParameters(dj.Manual):
+    """Stores parameters for decoding with sorted spikes"""
+
     definition = """
     classifier_param_name : varchar(80) # a name for this set of parameters
     ---

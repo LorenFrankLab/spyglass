@@ -1,3 +1,13 @@
+"""Pipeline for decoding the animal's mental position and some category of interest
+from unclustered spikes and spike waveform features. See [1] for details.
+
+References
+----------
+[1] Denovellis, E. L. et al. Hippocampal replay of experience at real-world
+speeds. eLife 10, e64505 (2021).
+
+"""
+
 import os
 import pprint
 import shutil
@@ -34,6 +44,9 @@ schema = dj.schema('decoding_clusterless')
 
 @schema
 class MarkParameters(dj.Manual):
+    """Defines the type of spike waveform feature computed for a given spike
+    time."""
+
     definition = """
     mark_param_name : varchar(80) # a name for this set of parameters
     ---
@@ -52,10 +65,13 @@ class MarkParameters(dj.Manual):
 
     @staticmethod
     def supported_mark_type(mark_type):
-        """checks whether the requested mark type is supported. Currently only 'amplitude" is supported
+        """checks whether the requested mark type is supported.
+        Currently only 'amplitude" is supported.
 
-        Args:
-            mark_type (str): the requested mark type
+        Parameters
+        ----------
+        mark_type : str
+
         """
         supported_types = ['amplitude']
         if mark_type in supported_types:
@@ -73,6 +89,10 @@ class UnitMarkParameters(dj.Manual):
 
 @schema
 class UnitMarks(dj.Computed):
+    """For each spike time, compute a spike waveform feature associated with that
+    spike. Used for clusterless decoding.
+    """
+
     definition = """
     -> UnitMarkParameters
     ---
@@ -151,6 +171,7 @@ class UnitMarks(dj.Computed):
                          *attrs, **kwargs)
 
     def fetch1_dataframe(self):
+        """Convenience function for returning the marks in a readable format"""
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self):
@@ -189,6 +210,9 @@ class UnitMarks(dj.Computed):
 
 @schema
 class UnitMarksIndicatorSelection(dj.Lookup):
+    """Bins the spike times and associated spike waveform features for a given
+    time interval into regular time bins determined by the sampling rate."""
+
     definition = """
     -> UnitMarks
     -> IntervalList
@@ -199,6 +223,11 @@ class UnitMarksIndicatorSelection(dj.Lookup):
 
 @schema
 class UnitMarksIndicator(dj.Computed):
+    """Bins the spike times and associated spike waveform features into regular
+    time bins according to the sampling rate. Features that fall into the same
+    time bin are averaged.
+    """
+
     definition = """
     -> UnitMarks
     -> UnitMarksIndicatorSelection
@@ -246,13 +275,22 @@ class UnitMarksIndicator(dj.Computed):
 
     @staticmethod
     def get_time_bins_from_interval(interval_times, sampling_rate):
+        """Picks the superset of the interval"""
         start_time, end_time = interval_times[0][0], interval_times[-1][-1]
         n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
 
         return np.linspace(start_time, end_time, n_samples)
 
     @staticmethod
-    def plot_all_marks(marks_indicators):
+    def plot_all_marks(marks_indicators: xr.DataArray):
+        """Plots 2D slices of each of the spike features against each other
+        for all electrodes.
+
+        Parameters
+        ----------
+        marks_indicators : xr.DataArray, shape (n_time, n_electrodes, n_features)
+            Spike times and associated spike waveform features binned into
+        """
         for electrode_ind in marks_indicators.electrodes:
             marks = marks_indicators.sel(electrodes=electrode_ind).dropna(
                 'time', how='all').dropna('marks')
@@ -333,6 +371,10 @@ def make_default_decoding_parameters_gpu():
 
 @schema
 class ClusterlessClassifierParameters(dj.Manual):
+    """Decodes the animal's mental position and some category of interest
+    from unclustered spikes and spike waveform features
+    """
+
     definition = """
     classifier_param_name : varchar(80) # a name for this set of parameters
     ---
@@ -369,6 +411,9 @@ class ClusterlessClassifierParameters(dj.Manual):
 
 @schema
 class MultiunitFiringRate(dj.Computed):
+    """Computes the population multiunit firing rate from the spikes in
+    MarksIndicator."""
+
     definition = """
     -> UnitMarksIndicator
     ---
@@ -414,6 +459,8 @@ class MultiunitFiringRate(dj.Computed):
 
 @schema
 class MultiunitHighSynchronyEventsParameters(dj.Manual):
+    """Parameters for extracting times of high mulitunit activity during immobility.
+    """
     definition = """
     param_name : varchar(80) # a name for this set of parameters
     ---
@@ -425,6 +472,8 @@ class MultiunitHighSynchronyEventsParameters(dj.Manual):
 
 @schema
 class MultiunitHighSynchronyEvents(dj.Computed):
+    """Finds times of high mulitunit activity during immobility."""
+
     definition = """
     -> MultiunitHighSynchronyEventsParameters
     -> UnitMarksIndicator
