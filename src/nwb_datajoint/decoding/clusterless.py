@@ -56,8 +56,12 @@ class MarkParameters(dj.Manual):
     """
 
     def insert_default(self):
-        """insert the default parameter set {'sign': -1, 'threshold' : 0}
-        corresponding to negative going waveforms of at least 100 uV size
+        """Insert the default parameter set
+
+        Examples
+        --------
+        {'peak_sign': 'neg', 'threshold' : 100}
+        corresponds to negative going waveforms of at least 100 uV size
         """
         default_dict = {}
         self.insert1({'mark_param_name': 'default',
@@ -138,10 +142,24 @@ class UnitMarks(dj.Computed):
             **WAVEFORM_PARAMS)
 
         if mark_param['mark_type'] == 'amplitude':
+            sorter = (CuratedSpikeSorting() & key).fetch1('sorter')
+            if sorter == 'clusterless_thresholder':
+                estimate_peak_time = False
+            else:
+                estimate_peak_time = True
+
+            try:
+                peak_sign = mark_param['mark_param_dict']['peak_sign']
+            except KeyError:
+                peak_sign = 'neg'
+
             marks = np.concatenate(
                 [UnitMarks._get_peak_amplitude(
-                    waveform_extractor.get_waveforms(unit_id))
+                    waveform=waveform_extractor.get_waveforms(unit_id),
+                    peak_sign=peak_sign,
+                    estimate_peak_time=estimate_peak_time)
                  for unit_id in nwb_units.index], axis=0)
+
             timestamps = np.concatenate(np.asarray(nwb_units['spike_times']))
             sorted_timestamp_ind = np.argsort(timestamps)
             marks = marks[sorted_timestamp_ind]
@@ -187,24 +205,65 @@ class UnitMarks(dj.Computed):
                             columns=columns)
 
     @staticmethod
-    def _get_peak_amplitude(waveform):
-        spike_peak_ind = waveform.shape[1] // 2
+    def _get_peak_amplitude(waveform, peak_sign='neg',
+                            estimate_peak_time=False):
+        """Returns the amplitudes of all channels at the time of the peak
+        amplitude across channels.
+
+        Parameters
+        ----------
+        waveform : array-like, shape (n_spikes, n_time, n_channels)
+        peak_sign : ('pos', 'neg', 'both'), optional
+            Direction of the peak in the waveform
+        estimate_peak_time : bool, optional
+            Find the peak times for each spike because some spikesorters do not
+            align the spike time (at index n_time // 2) to the peak
+
+        Returns
+        -------
+        peak_amplitudes : array-like, shape (n_spikes, n_channels)
+
+        """
+        if estimate_peak_time:
+            if peak_sign == 'neg':
+                peak_inds = np.argmin(np.min(waveform, axis=2), axis=1)
+            elif peak_sign == 'pos':
+                peak_inds = np.argmax(np.max(waveform, axis=2), axis=1)
+            elif peak_sign == 'both':
+                peak_inds = np.argmax(np.max(np.abs(waveform), axis=2), axis=1)
+
+            # Get mode of peaks to find the peak time
+            values, counts = np.unique(peak_inds, return_counts=True)
+            spike_peak_ind = values[counts.argmax()]
+        else:
+            spike_peak_ind = waveform.shape[1] // 2
+
         return waveform[:, spike_peak_ind]
 
     @staticmethod
     def _threshold(timestamps, marks, mark_param_dict):
-        # filter the marks by the amplitude threshold
-        if mark_param_dict['sign'] == -1:
-            threshold = (mark_param_dict['sign'] *
-                         mark_param_dict['threshold'])
-            include = np.min(marks, axis=1) <= threshold
-        elif mark_param_dict['sign'] == 1:
-            threshold = (mark_param_dict['sign'] *
-                         mark_param_dict['threshold'])
-            include = np.max(marks, axis=1) >= threshold
-        else:
-            threshold = mark_param_dict['sign']
-            include = np.max(np.abs(marks), axis=1) >= threshold
+        """Filter the marks by an amplitude threshold
+
+        Parameters
+        ----------
+        timestamps : array-like, shape (n_time,)
+        marks : array-like, shape (n_time, n_channels)
+        mark_param_dict : dict
+
+        Returns
+        -------
+        filtered_timestamps : array-like, shape (n_filtered_time,)
+        filtered_marks : array-like, shape (n_filtered_time, n_channels)
+
+        """
+        if mark_param_dict['peak_sign'] == 'neg':
+            include = (np.min(marks, axis=1) <=
+                       -1 * mark_param_dict['threshold'])
+        elif mark_param_dict['peak_sign'] == 'pos':
+            include = np.max(marks, axis=1) >= mark_param_dict['threshold']
+        elif mark_param_dict['peak_sign'] == 'both':
+            include = (np.max(np.abs(marks), axis=1) >=
+                       mark_param_dict['threshold'])
         return timestamps[include], marks[include]
 
 
