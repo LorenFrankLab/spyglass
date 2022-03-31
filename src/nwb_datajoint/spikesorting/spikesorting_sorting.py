@@ -162,6 +162,7 @@ class SpikeSorting(dj.Computed):
             dir=os.getenv('NWB_DATAJOINT_TEMP_DIR'))
 
         if sorter == 'clusterless_thresholder':
+            # Detect peaks for clusterless decoding
             sorting = scp.detect_peaks(recording, **sorter_params)
         else:
             sorting = sis.run_sorter(sorter, recording,
