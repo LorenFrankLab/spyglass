@@ -30,6 +30,9 @@ schema = dj.schema('common_position')
 
 @schema
 class PositionInfoParameters(dj.Lookup):
+    """Parameters for extracting the smoothed head position, oriention and
+    velocity."""
+
     definition = """
     position_info_param_name : varchar(80) # name for this set of parameters
     ---
@@ -47,6 +50,10 @@ class PositionInfoParameters(dj.Lookup):
 
 @schema
 class IntervalPositionInfoSelection(dj.Lookup):
+    """Combines the parameters for position extraction and a time interval to
+    extract the smoothed position on.
+    """
+
     definition = """
     -> PositionInfoParameters
     -> IntervalList
@@ -56,6 +63,9 @@ class IntervalPositionInfoSelection(dj.Lookup):
 
 @schema
 class IntervalPositionInfo(dj.Computed):
+    """Computes the smoothed head position, orientation and velocity for a given
+    interval."""
+
     definition = """
     -> IntervalPositionInfoSelection
     ---
@@ -246,9 +256,9 @@ class IntervalPositionInfo(dj.Computed):
             upsampling_start_time = time[0]
             upsampling_end_time = time[-1]
 
-            dt = 1 / upsampling_sampling_rate
             n_samples = int(np.ceil(
-                (upsampling_end_time - upsampling_start_time) / dt)) + 1
+                (upsampling_end_time - upsampling_start_time) *
+                upsampling_sampling_rate)) + 1
             new_time = np.linspace(upsampling_start_time,
                                    upsampling_end_time, n_samples)
             new_index = pd.Index(np.unique(np.concatenate(
@@ -318,6 +328,10 @@ class IntervalPositionInfo(dj.Computed):
 
 @schema
 class LinearizationParameters(dj.Lookup):
+    """Choose whether to use an HMM to linearize position. This can help when
+    the eucledian distances between separate arms are too close and the previous
+    position has some information about which arm the animal is on."""
+
     definition = """
     linearization_param_name : varchar(80)   # name for this set of parameters
     ---
@@ -332,6 +346,9 @@ class LinearizationParameters(dj.Lookup):
 
 @schema
 class TrackGraph(dj.Manual):
+    """Graph representation of track representing the spatial environment.
+    Used for linearizing position."""
+
     definition = """
     track_graph_name : varchar(80)
     ----
@@ -350,6 +367,7 @@ class TrackGraph(dj.Manual):
             edges=track_graph_parameters['edges'])
 
     def plot_track_graph(self, ax=None, draw_edge_labels=False, **kwds):
+        """Plot the track graph in 2D position space."""
         track_graph = self.get_networkx_track_graph()
         plot_track_graph(track_graph,
                          ax=ax,
@@ -360,6 +378,7 @@ class TrackGraph(dj.Manual):
                                ax=None, axis="x", other_axis_start=0.0,
                                draw_edge_labels=False, node_size=300,
                                node_color="#1f77b4"):
+        """Plot the track graph in 1D to see how the linearization is set up."""
         track_graph_parameters = self.fetch1()
         track_graph = self.get_networkx_track_graph(
             track_graph_parameters=track_graph_parameters)
@@ -387,6 +406,8 @@ class IntervalLinearizationSelection(dj.Lookup):
 
 @schema
 class IntervalLinearizedPosition(dj.Computed):
+    """Linearized position for a given interval"""
+
     definition = """
     -> IntervalLinearizationSelection
     ---
@@ -461,6 +482,8 @@ class IntervalLinearizedPosition(dj.Computed):
 
 
 class NodePicker():
+    """Interactive creation of track graph by looking at video frames."""
+
     def __init__(self, ax=None, video_filename=None, node_color="#1f78b4", node_size=100):
         if ax is None:
             ax = plt.gca()
@@ -570,6 +593,11 @@ class NodePicker():
 
 @schema
 class PositionVideo(dj.Computed):
+    """Creates a video of the computed head position and orientation as well as
+    the original LED positions overlayed on the video of the animal.
+
+    Use for debugging the effect of position extraction parameters."""
+
     definition = """
     -> IntervalPositionInfo
     ---

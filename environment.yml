@@ -3,6 +3,7 @@ channels:
   - conda-forge
   - defaults
   - franklab
+  - edeno
 dependencies:
   - python=3.8
   - jupyterlab>=3.*
@@ -11,12 +12,16 @@ dependencies:
   - pip>=20.2.*
   - position_tools
   - track_linearization
+  - replay_trajectory_classification
+  - ripple_detection
+  - trajectory_analysis_tools
+  - matplotlib
+  - seaborn
   - skan
   - bottleneck
   - ipympl
   - tqdm
   - nb_conda
-  - jinja2==3.0.2
   - pip:
     - kachery
     - kachery-client>=1.1.7

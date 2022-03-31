@@ -9,6 +9,7 @@ import datajoint as dj
 import numpy as np
 import spikeinterface as si
 import spikeinterface.sorters as sis
+import spikeinterface.sortingcomponents as scp
 import spikeinterface.toolkit as sit
 
 from ..common.common_lab import LabMember, LabTeam
@@ -40,9 +41,8 @@ class SpikeSorterParameters(dj.Manual):
                          skip_duplicates=True)
 
         # Insert Frank lab defaults
-        sorter = "mountainsort4"
-
         # Hippocampus tetrode default
+        sorter = "mountainsort4"
         sorter_params_name = "franklab_tetrode_hippocampus_30KHz"
         sorter_params = {'detect_sign': -1,
                          'adjacency_radius': 100,
@@ -58,6 +58,7 @@ class SpikeSorterParameters(dj.Manual):
                      skip_duplicates=True)
 
         # Cortical probe default
+        sorter = "mountainsort4"
         sorter_params_name = "franklab_probe_ctx_30KHz"
         sorter_params = {'detect_sign': -1,
                          'adjacency_radius': 100,
@@ -69,6 +70,26 @@ class SpikeSorterParameters(dj.Manual):
                          'clip_size': 40,
                          'detect_threshold': 3,
                          'detect_interval': 10}
+        self.insert1([sorter, sorter_params_name, sorter_params],
+                     skip_duplicates=True)
+
+        # clusterless defaults
+        sorter = 'clusterless_thresholder'
+        sorter_params_name = 'default_clusterless'
+        sorter_params = dict(
+            detect_threshold=100.0,  # uV
+            # Locally exclusive means one unit per spike detected
+            method='locally_exclusive',
+            peak_sign='neg',
+            n_shifts=2,
+            local_radius_um=100,
+            # noise levels needs to be 1.0 so the units are in uV and not MAD
+            noise_levels=np.asarray([1.0]),
+            random_chunk_kwargs={},
+            # output needs to be set to sorting for the rest of the pipeline
+            outputs='sorting',
+            localization_dict=None,
+        )
         self.insert1([sorter, sorter_params_name, sorter_params],
                      skip_duplicates=True)
 
@@ -140,10 +161,14 @@ class SpikeSorting(dj.Computed):
         sorter_temp_dir = tempfile.TemporaryDirectory(
             dir=os.getenv('NWB_DATAJOINT_TEMP_DIR'))
 
-        sorting = sis.run_sorter(sorter, recording,
-                                 output_folder=sorter_temp_dir.name,
-                                 delete_output_folder=True,
-                                 **sorter_params)
+        if sorter == 'clusterless_thresholder':
+            # Detect peaks for clusterless decoding
+            sorting = scp.detect_peaks(recording, **sorter_params)
+        else:
+            sorting = sis.run_sorter(sorter, recording,
+                                     output_folder=sorter_temp_dir.name,
+                                     delete_output_folder=True,
+                                     **sorter_params)
         key['time_of_sort'] = int(time.time())
 
         print('Saving sorting results...')

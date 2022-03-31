@@ -1,6 +1,5 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
 import inspect
-import os
 
 import datajoint as dj
 import numpy as np
