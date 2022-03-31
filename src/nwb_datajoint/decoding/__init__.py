@@ -1,3 +1,4 @@
+# flake8: noqa
 from .clusterless import (ClusterlessClassifierParameters, MarkParameters,
                           MultiunitFiringRate, MultiunitHighSynchronyEvents,
                           MultiunitHighSynchronyEventsParameters,
