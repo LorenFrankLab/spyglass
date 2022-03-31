@@ -38,4 +38,3 @@ dependencies:
     - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
     - pyyaml
     - click
-    - git+https:///github.com/rly/ndx-xarray
