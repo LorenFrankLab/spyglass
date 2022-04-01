@@ -123,7 +123,7 @@ class UnitMarks(dj.Computed):
             f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
             f'{key["curation_id"]}_clusterless_waveforms')
         waveform_extractor_path = str(
-            Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) /
+            Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) /
             Path(waveform_extractor_name))
         if os.path.exists(waveform_extractor_path):
             shutil.rmtree(waveform_extractor_path)
