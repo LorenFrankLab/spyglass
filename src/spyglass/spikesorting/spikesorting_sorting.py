@@ -135,10 +135,10 @@ class SpikeSorting(dj.Computed):
         # load valid times
         artifact_times = (ArtifactRemovedIntervalList &
                           key).fetch1('artifact_times')
-        if artifact_times.ndim == 1:
-            artifact_times = np.expand_dims(artifact_times, 0)
-
         if len(artifact_times):
+            if artifact_times.ndim == 1:
+                artifact_times = np.expand_dims(artifact_times, 0)
+
             # convert valid intervals to indices
             list_triggers = []
             for interval in artifact_times:
