@@ -13,12 +13,12 @@ import pprint
 import datajoint as dj
 import numpy as np
 import pandas as pd
-from nwb_datajoint.common.common_interval import IntervalList
-from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
-from nwb_datajoint.common.dj_helper_fn import fetch_nwb
-from nwb_datajoint.decoding.dj_decoder_conversion import (
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.dj_helper_fn import fetch_nwb
+from spyglass.decoding.dj_decoder_conversion import (
     convert_classes_to_dict, restore_classes)
-from nwb_datajoint.spikesorting.spikesorting_curation import \
+from spyglass.spikesorting.spikesorting_curation import \
     CuratedSpikeSorting
 from replay_trajectory_classification.classifier import (
     _DEFAULT_CONTINUOUS_TRANSITIONS, _DEFAULT_ENVIRONMENT)

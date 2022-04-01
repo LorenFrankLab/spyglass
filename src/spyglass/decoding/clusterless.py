@@ -21,13 +21,13 @@ import pandas as pd
 import pynwb
 import spikeinterface as si
 import xarray as xr
-from nwb_datajoint.common.common_interval import IntervalList
-from nwb_datajoint.common.common_nwbfile import AnalysisNwbfile
-from nwb_datajoint.common.common_position import IntervalPositionInfo
-from nwb_datajoint.common.dj_helper_fn import fetch_nwb
-from nwb_datajoint.decoding.dj_decoder_conversion import (
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_position import IntervalPositionInfo
+from spyglass.common.dj_helper_fn import fetch_nwb
+from spyglass.decoding.dj_decoder_conversion import (
     convert_classes_to_dict, restore_classes)
-from nwb_datajoint.spikesorting.spikesorting_curation import (
+from spyglass.spikesorting.spikesorting_curation import (
     CuratedSpikeSorting, Curation)
 from replay_trajectory_classification.classifier import (
     _DEFAULT_CLUSTERLESS_MODEL_KWARGS, _DEFAULT_CONTINUOUS_TRANSITIONS,
@@ -123,7 +123,7 @@ class UnitMarks(dj.Computed):
             f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
             f'{key["curation_id"]}_clusterless_waveforms')
         waveform_extractor_path = str(
-            Path(os.environ['NWB_DATAJOINT_WAVEFORMS_DIR']) /
+            Path(os.environ['SPYGLASS_WAVEFORMS_DIR']) /
             Path(waveform_extractor_name))
         if os.path.exists(waveform_extractor_path):
             shutil.rmtree(waveform_extractor_path)

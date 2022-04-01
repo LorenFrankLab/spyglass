@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import nwb_datajoint.common as ndc
+import spyglass.common as ndc
 
 nwb_file_name = 'RN2_20191110_.nwb'
 interval_list_name = '01_r1'

@@ -1,5 +1,5 @@
 import numpy as np
-from nwb_datajoint.common.common_interval import interval_list_intersect
+from spyglass.common.common_interval import interval_list_intersect
 
 def test_interval_list_intersect1():
     interval_list1 = np.array([

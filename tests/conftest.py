@@ -56,27 +56,27 @@ def pytest_unconfigure(config):
         # __PROCESS.join()
 
     kill_datajoint_server()
-    shutil.rmtree(os.environ['NWB_DATAJOINT_BASE_DIR'])
+    shutil.rmtree(os.environ['SPYGLASS_BASE_DIR'])
 
 
 def _set_env():
     """Set environment variables."""
     print('Setting datajoint and kachery environment variables.')
 
-    nwb_datajoint_base_dir = pathlib.Path(tempfile.mkdtemp())
+    spyglass_base_dir = pathlib.Path(tempfile.mkdtemp())
 
-    spike_sorting_storage_dir = nwb_datajoint_base_dir / 'spikesorting'
-    kachery_storage_dir = nwb_datajoint_base_dir / 'kachery-storage'
-    tmp_dir = nwb_datajoint_base_dir / 'tmp'
+    spike_sorting_storage_dir = spyglass_base_dir / 'spikesorting'
+    kachery_storage_dir = spyglass_base_dir / 'kachery-storage'
+    tmp_dir = spyglass_base_dir / 'tmp'
 
-    os.environ['NWB_DATAJOINT_BASE_DIR'] = str(nwb_datajoint_base_dir)
-    print('NWB_DATAJOINT_BASE_DIR set to', nwb_datajoint_base_dir)
+    os.environ['SPYGLASS_BASE_DIR'] = str(spyglass_base_dir)
+    print('SPYGLASS_BASE_DIR set to', spyglass_base_dir)
     os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
     os.environ['SPIKE_SORTING_STORAGE_DIR'] = str(spike_sorting_storage_dir)
     # export KACHERY_DAEMON_HOST=...
     # export KACHERY_DAEMON_PORT=...
     os.environ['KACHERY_TEMP_DIR'] = str(tmp_dir)
-    os.environ['NWB_DATAJOINT_TEMP_DIR'] = str(tmp_dir)
+    os.environ['SPYGLASS_TEMP_DIR'] = str(tmp_dir)
     os.environ['KACHERY_STORAGE_DIR'] = str(kachery_storage_dir)
     # os.environ['FIGURL_CHANNEL'] = 'franklab2'
 
@@ -84,8 +84,8 @@ def _set_env():
     os.mkdir(tmp_dir)
     os.mkdir(kachery_storage_dir)
 
-    raw_dir = nwb_datajoint_base_dir / 'raw'
-    analysis_dir = nwb_datajoint_base_dir / 'analysis'
+    raw_dir = spyglass_base_dir / 'raw'
+    analysis_dir = spyglass_base_dir / 'analysis'
 
     os.mkdir(raw_dir)
     os.mkdir(analysis_dir)
