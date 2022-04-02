@@ -145,7 +145,7 @@ class SpikeSorting(dj.Computed):
                 list_triggers.append(
                     np.arange(np.searchsorted(timestamps, interval[0]),
                               np.searchsorted(timestamps, interval[1])))
-            list_triggers = np.asarray(list_triggers).flatten().tolist()
+            list_triggers = [list(np.concatenate(list_triggers))]
 
             if recording.get_num_segments() > 1:
                 recording = si.concatenate_recordings(recording.recording_list)
