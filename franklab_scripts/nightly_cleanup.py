@@ -3,19 +3,19 @@
 import os
 import numpy as np
 
-import nwb_datajoint as nd
+import spyglass as nd
 
 # ignore datajoint+jupyter async warnings
 import warnings
 
-from nwb_datajoint.decoding.clusterless import MarkParameters, UnitMarkParameters, UnitMarks
+from spyglass.decoding.clusterless import MarkParameters, UnitMarkParameters, UnitMarks
 warnings.simplefilter('ignore', category=DeprecationWarning)
 warnings.simplefilter('ignore', category=ResourceWarning)
 os.environ['SPIKE_SORTING_STORAGE_DIR']="/stelmo/nwb/spikesorting"
 
 
 # import tables so that we can call them easily
-from nwb_datajoint.common import (RawPosition, HeadDir, Speed, LinPos, StateScriptFile, VideoFile,
+from spyglass.common import (RawPosition, HeadDir, Speed, LinPos, StateScriptFile, VideoFile,
                                   DataAcquisitionDevice, CameraDevice, Probe,
                                   DIOEvents,
                                   ElectrodeGroup, Electrode, Raw, SampleCount,
@@ -28,7 +28,7 @@ from nwb_datajoint.common import (RawPosition, HeadDir, Speed, LinPos, StateScri
                                   Subject,
                                   Task, TaskEpoch,
                                   Nwbfile, AnalysisNwbfile, NwbfileKachery, AnalysisNwbfileKachery)
-from nwb_datajoint.spikesorting import SortGroup, SortInterval, SpikeSorting, SpikeSorterParameters
+from spyglass.spikesorting import SortGroup, SortInterval, SpikeSorting, SpikeSorterParameters
 
 def main():
     

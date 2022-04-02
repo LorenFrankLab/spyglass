@@ -8,12 +8,12 @@ import uuid
 
 
 def test_1():
-    print("In test_1, os.environ['NWB_DATAJOINT_BASE_DIR'] is", os.environ['NWB_DATAJOINT_BASE_DIR'])
-    raw_dir = pathlib.Path(os.environ['NWB_DATAJOINT_BASE_DIR']) / 'raw'
+    print("In test_1, os.environ['SPYGLASS_BASE_DIR'] is", os.environ['SPYGLASS_BASE_DIR'])
+    raw_dir = pathlib.Path(os.environ['SPYGLASS_BASE_DIR']) / 'raw'
     nwbfile_path = raw_dir / 'test.nwb'
 
-    from nwb_datajoint.common import Session, DataAcquisitionDevice, CameraDevice, Probe
-    from nwb_datajoint.data_import import insert_sessions
+    from spyglass.common import Session, DataAcquisitionDevice, CameraDevice, Probe
+    from spyglass.data_import import insert_sessions
 
     with ka.config(fr='default_readonly'):
         ka.load_file('sha1://8ed68285c327b3766402ee75730d87994ac87e87/beans20190718_no_eseries_no_behavior.nwb',
@@ -58,7 +58,7 @@ def _create_beans20190718_no_eseries_no_behavior():
     # Use: pip install git+https://github.com/flatironinstitute/h5_to_json
     import h5_to_json as h5j
 
-    basepath = '/workspaces/nwb_datajoint/devel/data/nwb_builder_test_data/'
+    basepath = '/workspaces/spyglass/devel/data/nwb_builder_test_data/'
     nwb_path = basepath + '/beans20190718.nwb'
     x = h5j.h5_to_dict(
         nwb_path,
@@ -117,7 +117,7 @@ def _old_method_for_creating_test_file():
             filtering='none',
             group=grp
         )
-    nwb_fname = os.environ['NWB_DATAJOINT_BASE_DIR'] + '/test.nwb'
+    nwb_fname = os.environ['SPYGLASS_BASE_DIR'] + '/test.nwb'
     with pynwb.NWBHDF5IO(path=nwb_fname, mode='w') as io:
         io.write(nwb_content)
         io.close()

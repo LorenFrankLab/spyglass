@@ -15,7 +15,7 @@ def insert_sessions(nwb_file_names):
     Parameters
     ----------
     nwb_file_names : string or List of strings
-        nwb_file_names is a list of relative file paths, relative to $NWB_DATAJOINT_BASE_DIR, pointing to
+        nwb_file_names is a list of relative file paths, relative to $SPYGLASS_BASE_DIR, pointing to
         existing .nwb files. Each file represents a session.
     """
     check_env()

@@ -36,7 +36,7 @@ spyglass list-lab-team-members
 Insert a session from a raw .nwb file.
 
 ```bash
-# First copy the .nwb file to the `$NWB_DATAJOINT_BASE_DIR/raw` directory.
+# First copy the .nwb file to the `$SPYGLASS_BASE_DIR/raw` directory.
 
 # In the following, replace the .nwb file name as appropriate
 # This will populate various tables, including:

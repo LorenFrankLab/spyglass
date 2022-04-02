@@ -4,24 +4,23 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-import nwb_datajoint as nd
 import pandas as pd
 import pynwb
 import pynwb.behavior
 import skimage
 from matplotlib.path import Path
 from matplotlib.widgets import PolygonSelector
-from nwb_datajoint.common.dj_helper_fn import fetch_nwb
 from position_tools import (get_angle, get_centriod, get_distance, get_speed,
                             get_velocity, interpolate_nan)
 from position_tools.core import gaussian_smooth
 from skan import skeleton_to_csgraph
 from skan.draw import _clean_positions_dict
+from spyglass.common.dj_helper_fn import fetch_nwb
 from tqdm import tqdm_notebook as tqdm
 from track_linearization import (get_linearized_position, make_track_graph,
                                  plot_graph_as_1D, plot_track_graph)
 
-from .common_behav import RawPosition
+from .common_behav import RawPosition, VideoFile
 from .common_interval import IntervalList
 from .common_nwbfile import AnalysisNwbfile
 
@@ -623,7 +622,7 @@ class PositionVideo(dj.Computed):
                     .replace('pos ', '')
                     .replace(' valid times', '')
                     ) + 1
-        video_info = (nd.common.common_behav.VideoFile() &
+        video_info = (VideoFile() &
                       {'nwb_file_name': key['nwb_file_name'],
                        'epoch': epoch}).fetch1()
         io = pynwb.NWBHDF5IO('/stelmo/nwb/raw/' +

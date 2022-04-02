@@ -3,7 +3,7 @@
 A session group is a collection of sessions. Each group has a name (primary key) and a description.
 
 ```python
-from nwb_datajoint.common import SessionGroup
+from spyglass.common import SessionGroup
 
 # Create a new session group
 SessionGroup.add_group('test_group_1', 'Description of test group 1')
