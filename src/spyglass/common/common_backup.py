@@ -29,7 +29,7 @@ class SpikeSortingBackUp(dj.Manual):
         self.insert(backup_keys, skip_duplicates=True)
 
 @schema
-class CuratedSpikeSortingBackUp(dj.Manual):
+class CuratedSpikeSortingBackUp(dj.Manual):    
     definition = """
     nwb_file_name: varchar(500)
     sort_group_id: int
