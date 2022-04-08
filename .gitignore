@@ -41,6 +41,8 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+# copied over from ./notebooks, so don't push to git
+docs/web-doc/_copied_over/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

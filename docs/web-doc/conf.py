@@ -12,9 +12,18 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 # Problems with imports? Could try `export PYTHONPATH=$PYTHONPATH:`pwd`` from root project dir...
-import os
+import os, shutil
 import sys
 sys.path.insert(0, os.path.abspath('../../src/'))  # Source code dir relative to this file
+
+# -- Get Jupyter Notebooks ---------------------------------------------------
+def copy_tree(src, tar):
+    if os.path.exists(tar):
+        shutil.rmtree(tar)
+    shutil.copytree(src, tar)
+
+copy_tree("../../notebooks", "./_copied_over/notebooks")
+
 
 # -- Project information -----------------------------------------------------
 
