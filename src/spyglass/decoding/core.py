@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_interval import (IntervalList,
                                              interval_list_intersect)
@@ -33,3 +34,14 @@ def get_valid_ephys_position_times_from_interval(
     return interval_list_intersect(
         interval_list_intersect(interval_valid_times, valid_ephys_times),
         np.concatenate(valid_pos_times))
+
+
+def get_epoch_interval_names(nwb_file_name):
+    interval_list = pd.DataFrame(
+        IntervalList() & {'nwb_file_name': nwb_file_name})
+
+    interval_list = interval_list.loc[
+        interval_list.interval_list_name.str.contains(
+            r'^(\d+)_(\w+)$', regex=True, na=False)]
+
+    return interval_list.interval_list_name.tolist()
