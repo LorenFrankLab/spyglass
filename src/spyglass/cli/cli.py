@@ -351,28 +351,13 @@ def list_spike_sortings(nwb_file_name: str):
     results = nds.SpikeSorting & {'nwb_file_name': nwb_file_name}
     print(results)
 
-@click.command(help="Create a spike sorting view")
-@click.argument('yaml_file_name', required=False)
-@click.option('--replace', is_flag=True)
-def create_spike_sorting_view(yaml_file_name: Union[str, None], replace: bool):
-    if yaml_file_name is None:
-        print('You must specify a yaml file. Sample content:')
-        print('==========================================')
-        print(
-            yaml.safe_dump(sample_spike_sorting_key, sort_keys=False)
-        )
-        return
-
-    import spyglass.spikesorting as nds
-    import spyglass.figurl_views as ndf
-    with open(yaml_file_name, 'r') as f:
-        x = yaml.safe_load(f)
-    x = { k: x[k] for k in sample_spike_sorting_key.keys() }
-    if replace:
-        (ndf.SpikeSortingView & x).delete()
-    ndf.SpikeSortingView.populate([(nds.SpikeSorting & x).proj()])
-    figurl = (ndf.SpikeSortingView & x).fetch1('figurl')
-    print(figurl)
+@click.command(help="Create spyglass view of a session group.")
+@click.argument('session_group_name')
+def create_spyglass_view(session_group_name: str):
+    import nwb_datajoint.common as ndc
+    F = ndc.SessionGroup.create_spyglass_view(session_group_name)
+    url = F.url(label=session_group_name)
+    print(url)
 
 cli.add_command(insert_session)
 cli.add_command(list_sessions)
@@ -397,4 +382,4 @@ cli.add_command(insert_spike_sorter_parameters)
 cli.add_command(list_spike_sorter_parameters)
 cli.add_command(run_spike_sorting)
 cli.add_command(list_spike_sortings)
-cli.add_command(create_spike_sorting_view)
+cli.add_command(create_spyglass_view)

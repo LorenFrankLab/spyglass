@@ -1,3 +1,4 @@
+import os
 import datajoint as dj
 
 from .common_device import CameraDevice, DataAcquisitionDevice, Probe
@@ -128,11 +129,11 @@ class SessionGroup(dj.Manual):
     session_group_description: varchar(2000)
     """
     @staticmethod
-    def add_group(session_group_name: str, session_group_description):
+    def add_group(session_group_name: str, session_group_description: str, *, skip_duplicates: bool=False):
         SessionGroup.insert1({
             'session_group_name': session_group_name,
             'session_group_description': session_group_description
-        })
+        }, skip_duplicates=skip_duplicates)
     @staticmethod
     def update_session_group_description(session_group_name: str, session_group_description):
         SessionGroup.update1({
@@ -140,11 +141,11 @@ class SessionGroup(dj.Manual):
             'session_group_description': session_group_description
         })
     @staticmethod
-    def add_session_to_group(nwb_file_name: str, session_group_name: str):
+    def add_session_to_group(nwb_file_name: str, session_group_name: str, *, skip_duplicates: bool=False):
         SessionGroupSession.insert1({
             'session_group_name': session_group_name,
             'nwb_file_name': nwb_file_name
-        })
+        }, skip_duplicates=skip_duplicates)
     @staticmethod
     def remove_session_from_group(nwb_file_name: str, session_group_name: str):
         query = {'session_group_name': session_group_name, 'nwb_file_name': nwb_file_name}
@@ -160,6 +161,17 @@ class SessionGroup(dj.Manual):
             {'nwb_file_name': result['nwb_file_name']}
             for result in results
         ]
+    @staticmethod
+    def create_spyglass_view(session_group_name: str):
+        import figurl as fig
+        FIGURL_CHANNEL = os.getenv('FIGURL_CHANNEL')
+        assert FIGURL_CHANNEL, 'Environment variable not set: FIGURL_CHANNEL'
+        data = {
+            'type': 'spyglassview',
+            'sessionGroupName': session_group_name
+        }
+        F = fig.Figure(view_url='gs://figurl/spyglassview-1', data=data)
+        return F
 
 # The reason this is not implemented as a dj.Part is that
 # datajoint prohibits deleting from a subtable without
