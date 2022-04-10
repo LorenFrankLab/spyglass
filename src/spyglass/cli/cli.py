@@ -15,8 +15,8 @@ def insert_session(nwb_file_name: str):
 
 @click.command(help="List all sessions")
 def list_sessions():
-    import spyglass.common as ndc
-    results = ndc.Session & {}
+    import spyglass.common as sgc
+    results = sgc.Session & {}
     print(results)
 
 sample_lab_team_key = {
@@ -35,17 +35,17 @@ def insert_lab_team(yaml_file_name: Union[str, None]):
         )
         return
 
-    import spyglass.common as ndc
+    import spyglass.common as sgc
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
     x = { k: x[k] for k in sample_lab_team_key.keys() }
-    ndc.LabTeam.insert1(x)
+    sgc.LabTeam.insert1(x)
 
 @click.command(help="List all lab teams")
 def list_lab_teams():
-    import spyglass.common as ndc
-    results = ndc.LabTeam & {}
+    import spyglass.common as sgc
+    results = sgc.LabTeam & {}
     print(results)
 
 sample_lab_member_key = {
@@ -66,17 +66,17 @@ def insert_lab_member(yaml_file_name: Union[str, None]):
         )
         return
 
-    import spyglass.common as ndc
+    import spyglass.common as sgc
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
     x = { k: x[k] for k in sample_lab_member_key.keys() }
-    ndc.LabMember.insert1(x)
+    sgc.LabMember.insert1(x)
 
 @click.command(help="List all lab members")
 def list_lab_members():
-    import spyglass.common as ndc
-    results = ndc.LabMember & {}
+    import spyglass.common as sgc
+    results = sgc.LabMember & {}
     print(results)
 
 sample_lab_team_member_key = {
@@ -95,18 +95,18 @@ def insert_lab_team_member(yaml_file_name: Union[str, None]):
         )
         return
 
-    import spyglass.common as ndc
+    import spyglass.common as sgc
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     # restrict to relevant keys
     x = { k: x[k] for k in sample_lab_team_member_key.keys() }
-    ndc.LabTeam.LabTeamMember.insert1(x)
+    sgc.LabTeam.LabTeamMember.insert1(x)
 
 @click.command(help="List all lab team members for a team")
 @click.argument('team_name')
 def list_lab_team_members(team_name: str):
-    import spyglass.common as ndc
-    results = ndc.LabTeam.LabTeamMember & {'team_name': team_name}
+    import spyglass.common as sgc
+    results = sgc.LabTeam.LabTeamMember & {'team_name': team_name}
     print(results)
 
 @click.command(help="List sort groups for a session. Note that nwb_file_name should include the trailing underscore.")
@@ -126,8 +126,8 @@ def list_sort_group_electrodes(nwb_file_name: str):
 @click.command(help="List interval lists for a session.")
 @click.argument('nwb_file_name')
 def list_interval_lists(nwb_file_name: str):
-    import spyglass.common as ndc
-    results = ndc.IntervalList & {'nwb_file_name': nwb_file_name}
+    import spyglass.common as sgc
+    results = sgc.IntervalList & {'nwb_file_name': nwb_file_name}
     print(results)
 
 @click.command(help="List sort intervals for a session.")
@@ -354,8 +354,8 @@ def list_spike_sortings(nwb_file_name: str):
 @click.command(help="Create spyglass view of a session group.")
 @click.argument('session_group_name')
 def create_spyglass_view(session_group_name: str):
-    import nwb_datajoint.common as ndc
-    F = ndc.SessionGroup.create_spyglass_view(session_group_name)
+    import nwb_datajoint.common as sgc
+    F = sgc.SessionGroup.create_spyglass_view(session_group_name)
     url = F.url(label=session_group_name)
     print(url)
 
