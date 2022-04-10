@@ -45,3 +45,11 @@ def get_epoch_interval_names(nwb_file_name):
             r'^(\d+)_(\w+)$', regex=True, na=False)]
 
     return interval_list.interval_list_name.tolist()
+
+
+def get_valid_ephys_position_times_by_epoch(nwb_file_name):
+    return {
+        epoch: get_valid_ephys_position_times_from_interval(
+            epoch, nwb_file_name)
+        for epoch in get_epoch_interval_names(nwb_file_name)
+    }
