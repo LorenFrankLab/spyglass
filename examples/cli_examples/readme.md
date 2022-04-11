@@ -107,17 +107,15 @@ spyglass insert-spike-sorter-parameters parameters.yaml
 spyglass list-spike-sorter-parameters
 ```
 
-### Run spike sorting
+### Create a session group
 
-Run spike sorting
+A session group is a collection of sessions that can be viewed via spyglassview.
+
+See [session_groups.md](../../docs/session_groups.md) and [create_session_group.py](./create_session_group.py).
+
+### Create spyglass view
 
 ```bash
-# To see the format of the .yaml file, run without the .yaml argument
-spyglass run-spike-sorting sorting.yaml
-
-spyglass list-spike-sortings RN2_20191110_.nwb
-
-# Create the associated view
-spyglass create-spike-sorting-view sorting.yaml
-# Use --replace to force recreate the view
+# This will print a URL pointing to the view
+create-spyglass-view <groupname> 
 ```
