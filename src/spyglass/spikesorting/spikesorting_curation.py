@@ -355,8 +355,7 @@ class MetricParameters(dj.Manual):
                              'n_components': 7,
                              'radius_um': 100,
                              'seed': 0},
-        'peak_offset': {'peak_sign': 'neg'},
-
+        'peak_offset': {'peak_sign': 'neg'}
     }
     available_metrics = list(metric_default_params.keys())
 
@@ -453,7 +452,7 @@ class QualityMetrics(dj.Computed):
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():
                 metric[str(unit_id)] = metric_func(
-                    waveform_extractor, this_unit_id=unit_id, **metric_params_)
+                    waveform_extractor, this_unit_id=unit_id, **metric_params)
         return metric
 
     def _dump_to_json(self, qm_dict, save_path):
