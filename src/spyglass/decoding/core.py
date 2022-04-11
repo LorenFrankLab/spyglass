@@ -58,3 +58,7 @@ def get_valid_ephys_position_times_by_epoch(nwb_file_name):
 def convert_epoch_interval_name_to_position_interval_name(epoch_interval_name):
     pos_interval_number = int(epoch_interval_name.split('_')[0]) - 1
     return f"pos {pos_interval_number} valid times"
+
+
+def convert_valid_times_to_slice(valid_times):
+    return [slice(times[0], times[1]) for times in valid_times]
