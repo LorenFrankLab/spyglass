@@ -53,3 +53,8 @@ def get_valid_ephys_position_times_by_epoch(nwb_file_name):
             epoch, nwb_file_name)
         for epoch in get_epoch_interval_names(nwb_file_name)
     }
+
+
+def convert_epoch_interval_name_to_position_interval_name(epoch_interval_name):
+    pos_interval_number = int(epoch_interval_name.split('_')[0]) - 1
+    return f"pos {pos_interval_number} valid times"
