@@ -331,7 +331,7 @@ class SpikeSortingRecording(dj.Computed):
     def _get_recording_timestamps(recording):
         if recording.get_num_segments() > 1:
             frames_per_segment = [0]
-            for i in range(len(recording.recording_list)):
+            for i in range(recording.get_num_segments()):
                 frames_per_segment.append(
                     recording.get_num_frames(segment_index=i))
 
@@ -339,7 +339,7 @@ class SpikeSortingRecording(dj.Computed):
             total_frames = np.sum(frames_per_segment)
 
             timestamps = np.zeros((total_frames,))
-            for i in range(len(recording.recording_list)):
+            for i in range(recording.get_num_segments()):
                 timestamps[cumsum_frames[i]:cumsum_frames[i + 1]
                            ] = recording.get_times(segment_index=i)
         else:
