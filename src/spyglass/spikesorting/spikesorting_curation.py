@@ -349,13 +349,16 @@ class MetricParameters(dj.Manual):
                          'n_neighbors': 5,
                          'n_components': 7,
                          'radius_um': 100,
-                         'seed': 0},
+                         'seed': 0,
+                         'min_spike_count': 10,},
         'nn_noise_overlap': {'max_spikes_for_nn': 1000,
                              'n_neighbors': 5,
                              'n_components': 7,
                              'radius_um': 100,
-                             'seed': 0},
-        'peak_offset': {'peak_sign': 'neg'}
+                             'seed': 0,
+                             'min_spike_count': 10,},
+        'peak_offset': {'peak_sign': 'neg'},
+
     }
     available_metrics = list(metric_default_params.keys())
 
@@ -451,8 +454,18 @@ class QualityMetrics(dj.Computed):
         else:
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():
-                metric[str(unit_id)] = metric_func(
-                    waveform_extractor, this_unit_id=unit_id, **metric_params)
+                calculate_metric = True
+                # If minimum spike count defined, return nan if fewer units than minimum spike count
+                if 'min_spike_count' in metric_params:
+                    spike_count = len(waveform_extractor.sorting.get_unit_spike_train(unit_id))
+                    if spike_count < metric_params['min_spike_count']:
+                        print(f'unit {unit_id}: skipping metric calculation')
+                        metric[str(unit_id)] = np.nan
+                        calculate_metric = False
+                if calculate_metric:
+                    metric_params_ = {k:v for k,v in metric_params.items() if k != 'min_spike_count'}
+                    metric[str(unit_id)] = metric_func(
+                        waveform_extractor, this_unit_id=unit_id, **metric_params_)
         return metric
 
     def _dump_to_json(self, qm_dict, save_path):
