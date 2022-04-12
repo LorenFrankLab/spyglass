@@ -21,23 +21,30 @@ import pandas as pd
 import pynwb
 import spikeinterface as si
 import xarray as xr
+from replay_trajectory_classification.classifier import (
+    _DEFAULT_CLUSTERLESS_MODEL_KWARGS, _DEFAULT_CONTINUOUS_TRANSITIONS,
+    _DEFAULT_ENVIRONMENT)
+from replay_trajectory_classification.continuous_state_transitions import (
+    RandomWalk, Uniform)
+from replay_trajectory_classification.discrete_state_transitions import \
+    DiagonalDiscrete
+from replay_trajectory_classification.environments import Environment
+from replay_trajectory_classification.initial_conditions import \
+    UniformInitialConditions
+from replay_trajectory_classification.observation_model import ObservationModel
+from ripple_detection import (get_multiunit_population_firing_rate,
+                              multiunit_HSE_detector)
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.common.dj_helper_fn import fetch_nwb
-from spyglass.decoding.dj_decoder_conversion import (
-    convert_classes_to_dict, restore_classes)
-from spyglass.spikesorting.spikesorting_curation import (
-    CuratedSpikeSorting, Curation)
-from replay_trajectory_classification.classifier import (
-    _DEFAULT_CLUSTERLESS_MODEL_KWARGS, _DEFAULT_CONTINUOUS_TRANSITIONS,
-    _DEFAULT_ENVIRONMENT)
-from replay_trajectory_classification.discrete_state_transitions import \
-    DiagonalDiscrete
-from replay_trajectory_classification.initial_conditions import \
-    UniformInitialConditions
-from ripple_detection import (get_multiunit_population_firing_rate,
-                              multiunit_HSE_detector)
+from spyglass.decoding.core import (
+    convert_epoch_interval_name_to_position_interval_name,
+    convert_valid_times_to_slice, get_valid_ephys_position_times_by_epoch)
+from spyglass.decoding.dj_decoder_conversion import (convert_classes_to_dict,
+                                                     restore_classes)
+from spyglass.spikesorting.spikesorting_curation import (CuratedSpikeSorting,
+                                                         Curation)
 
 schema = dj.schema('decoding_clusterless')
 
@@ -573,3 +580,93 @@ class MultiunitHighSynchronyEvents(dj.Computed):
             analysis_file_name=key['analysis_file_name'])
 
         self.insert1(key)
+
+
+def get_decoding_data_for_epoch(
+    nwb_file_name: str,
+    interval_list_name: str,
+    position_info_param_name='default_decoding'
+):
+    valid_ephys_position_times_by_epoch = get_valid_ephys_position_times_by_epoch(
+        nwb_file_name)
+    valid_ephys_position_times = valid_ephys_position_times_by_epoch[interval_list_name]
+    valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
+    position_interval_name = convert_epoch_interval_name_to_position_interval_name(
+        interval_list_name)
+
+    position_info = (IntervalPositionInfo() &
+                     {'nwb_file_name': nwb_file_name,
+                      'interval_list_name': position_interval_name,
+                      'position_info_param_name': position_info_param_name}
+                     ).fetch1_dataframe()
+
+    position_info = pd.concat(
+        [position_info.loc[times] for times in valid_slices])
+
+    marks = (
+        (UnitMarksIndicator() & {
+            'nwb_file_name': nwb_file_name,
+            'interval_list_name': position_interval_name
+        })).fetch_xarray()
+
+    marks = xr.concat(
+        [marks.sel(time=times) for times in valid_slices], dim='time')
+
+    # temporarily remove the bit where the animal is placed on the track
+    # ideally should use DIOs first poke event?
+    position_info = position_info.iloc[slice(20_000, -1)]
+    marks = marks.isel(time=slice(20_000, -1))
+
+    return position_info, marks, valid_slices
+
+
+def get_data_for_multiple_epochs(
+        nwb_file_name: str,
+        epoch_names: list
+):
+
+    data = []
+    environment_labels = []
+
+    for epoch in epoch_names:
+        data.append(
+            get_decoding_data_for_epoch(
+                nwb_file_name, epoch))
+        n_time = data[-1][0].shape[0]
+        environment_labels.append([epoch] * n_time)
+
+    environment_labels = np.concatenate(environment_labels, axis=0)
+    position_info, marks, valid_slices = list(zip(*data))
+    position_info = pd.concat(position_info, axis=0)
+    marks = xr.concat(marks, dim='time')
+    valid_slices = {epoch: valid_slice for epoch, valid_slice
+                    in zip(epoch_names, valid_slices)}
+
+    assert position_info.shape[0] == marks.shape[0]
+
+    return position_info, marks, valid_slices, environment_labels
+
+
+def create_model_for_multiple_epochs(
+        epoch_names: list,
+        env_kwargs: dict
+):
+    observation_models = []
+    environments = []
+    continuous_transition_types = []
+
+    for epoch in epoch_names:
+        observation_models.append(
+            ObservationModel(epoch)
+        )
+        environments.append(Environment(epoch, **env_kwargs))
+
+    for epoch1 in epoch_names:
+        continuous_transition_types.append([])
+        for epoch2 in epoch_names:
+            if epoch1 == epoch2:
+                continuous_transition_types[-1].append(RandomWalk(epoch1))
+            else:
+                continuous_transition_types[-1].append(Uniform(epoch1, epoch2))
+
+    return observation_models, environments, continuous_transition_types
