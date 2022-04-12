@@ -674,12 +674,18 @@ def create_model_for_multiple_epochs(
     return observation_models, environments, continuous_transition_types
 
 
-def populate_mark_indicators(spikesorting_key):
+def populate_mark_indicators(
+        spikesorting_key: dict,
+        sorter='clusterless_thresholder',
+        sorter_params_name='default_clusterless',
+        mark_param_name='default',
+):
+
     nwb_file_name = spikesorting_key['nwb_file_name']
     sort_key = pd.DataFrame(SpikeSorting & spikesorting_key)
 
-    sort_key['sorter'] = 'clusterless_thresholder'
-    sort_key['sorter_params_name'] = 'default_clusterless'
+    sort_key['sorter'] = sorter
+    sort_key['sorter_params_name'] = sorter_params_name
 
     SpikeSortingSelection().insert(
         sort_key.loc[:, SpikeSortingSelection.primary_key].to_dict('records'),
@@ -696,7 +702,7 @@ def populate_mark_indicators(spikesorting_key):
         (Curation() & select).fetch('KEY'), skip_duplicates=True)
 
     mark_parameters_key = pd.DataFrame(CuratedSpikeSorting() & select)
-    mark_parameters_key['mark_param_name'] = 'default'
+    mark_parameters_key['mark_param_name'] = mark_param_name
 
     UnitMarkParameters().insert(
         mark_parameters_key.loc[:, UnitMarkParameters.primary_key].to_dict(
@@ -714,11 +720,11 @@ def populate_mark_indicators(spikesorting_key):
         [int(name.strip('pos valid time')) for name in position_interval_names])
     position_interval_names = position_interval_names[sort_ind]
 
-    for interval_list_name in position_interval_names:
+    for interval in position_interval_names:
         position_interval = (
             IntervalList() &
             {'nwb_file_name': nwb_file_name,
-             'interval_list_name': interval_list_name})
+             'interval_list_name': interval})
 
         selection = (UnitMarks() & select) * position_interval
 
