@@ -43,8 +43,10 @@ from spyglass.decoding.core import (
     convert_valid_times_to_slice, get_valid_ephys_position_times_by_epoch)
 from spyglass.decoding.dj_decoder_conversion import (convert_classes_to_dict,
                                                      restore_classes)
-from spyglass.spikesorting.spikesorting_curation import (CuratedSpikeSorting,
-                                                         Curation)
+from spyglass.spikesorting.spikesorting_curation import (
+    CuratedSpikeSorting, CuratedSpikeSortingSelection, Curation)
+from spyglass.spikesorting.spikesorting_sorting import (SpikeSorting,
+                                                        SpikeSortingSelection)
 
 schema = dj.schema('decoding_clusterless')
 
@@ -670,3 +672,57 @@ def create_model_for_multiple_epochs(
                 continuous_transition_types[-1].append(Uniform(epoch1, epoch2))
 
     return observation_models, environments, continuous_transition_types
+
+
+def populate_mark_indicators(spikesorting_key):
+    nwb_file_name = spikesorting_key['nwb_file_name']
+    sort_key = pd.DataFrame(SpikeSorting & spikesorting_key)
+
+    sort_key['sorter'] = 'clusterless_thresholder'
+    sort_key['sorter_params_name'] = 'default_clusterless'
+
+    SpikeSortingSelection().insert(
+        sort_key.loc[:, SpikeSortingSelection.primary_key].to_dict('records'),
+        skip_duplicates=True,
+    )
+
+    select = (SpikeSortingSelection() & sort_key).fetch('KEY')
+    SpikeSorting.populate(select)
+
+    for key in (SpikeSorting & select).fetch('KEY'):
+        Curation.insert_curation(key)
+
+    CuratedSpikeSortingSelection().insert(
+        (Curation() & select).fetch('KEY'), skip_duplicates=True)
+
+    mark_parameters_key = pd.DataFrame(CuratedSpikeSorting() & select)
+    mark_parameters_key['mark_param_name'] = 'default'
+
+    UnitMarkParameters().insert(
+        mark_parameters_key.loc[:, UnitMarkParameters.primary_key].to_dict(
+            'records'),
+        skip_duplicates=True
+    )
+
+    UnitMarks.populate(UnitMarkParameters() & mark_parameters_key)
+
+    position_interval_names = (IntervalPositionInfo() & {
+        'nwb_file_name': nwb_file_name,
+        'position_info_param_name': 'default'
+    }).fetch('interval_list_name')
+    sort_ind = np.argsort(
+        [int(name.strip('pos valid time')) for name in position_interval_names])
+    position_interval_names = position_interval_names[sort_ind]
+
+    for interval_list_name in position_interval_names:
+        position_interval = (
+            IntervalList() &
+            {'nwb_file_name': nwb_file_name,
+             'interval_list_name': interval_list_name})
+
+        selection = (UnitMarks() & select) * position_interval
+
+        UnitMarksIndicatorSelection.insert(
+            selection, ignore_extra_fields=True, skip_duplicates=True)
+
+        UnitMarksIndicator.populate()
