@@ -724,6 +724,9 @@ def populate_mark_indicators(
 
         marks_selection = ((UnitMarks & mark_parameters_keys) *
                            position_interval)
+        marks_selection = (pd.DataFrame(marks_selection)
+                           .loc[:, marks_selection.primary_key]
+                           .to_dict('records'))
         UnitMarksIndicatorSelection.insert(
-            marks_selection, ignore_extra_fields=True, skip_duplicates=True)
+            marks_selection, skip_duplicates=True)
         UnitMarksIndicator.populate(marks_selection)
