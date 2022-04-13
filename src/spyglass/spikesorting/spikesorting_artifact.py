@@ -162,9 +162,11 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
 
     valid_timestamps = SpikeSortingRecording._get_recording_timestamps(
         recording)
-    if recording.get_num_segments() > 1:
-        recording = si.concatenate_recordings(recording._recording_segments)
-
+    if recording.get_num_segments() > 1 and isinstance(recording, si.AppendSegmentRecording):
+        recording = si.concatenate_recordings(recording.recording_list)
+    elif recording.get_num_segments() > 1 and isinstance(recording, si.BinaryRecordingExtractor):
+        recording = si.concatenate_recordings([recording])
+        
     # if both thresholds are None, we essentially skip artifract detection and
     # return an array with the times of the first and last samples of the recording
     if (amplitude_thresh is None) and (zscore_thresh is None):
