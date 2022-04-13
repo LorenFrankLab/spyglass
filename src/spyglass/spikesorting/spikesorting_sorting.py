@@ -130,16 +130,27 @@ class SpikeSorting(dj.Computed):
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
         recording = si.load_extractor(recording_path)
 
+        # first, get the timestamps
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
-        # load valid times
+        # then concatenate the recordings
+        # Note: the timestamps are lost upon concatenation,
+        # i.e. concat_recording.get_times() doesn't return true timestamps anymore.
+        # but concat_recording.recoring_list[i].get_times() will return correct
+        # timestamps for ith recording.
+        if recording.get_num_segments() > 1 and isinstance(recording, si.AppendSegmentRecording):
+            recording = si.concatenate_recordings(recording.recording_list)
+        elif recording.get_num_segments() > 1 and isinstance(recording, si.BinaryRecordingExtractor):
+            recording = si.concatenate_recordings([recording])
+
+        # load artifact intervals
         artifact_times = (ArtifactRemovedIntervalList &
                           key).fetch1('artifact_times')
         if len(artifact_times):
             if artifact_times.ndim == 1:
                 artifact_times = np.expand_dims(artifact_times, 0)
 
-            # convert valid intervals to indices
+            # convert artifact intervals to indices
             list_triggers = []
             for interval in artifact_times:
                 list_triggers.append(
@@ -147,10 +158,6 @@ class SpikeSorting(dj.Computed):
                               np.searchsorted(timestamps, interval[1])))
             list_triggers = [list(np.concatenate(list_triggers))]
             
-            if recording.get_num_segments() > 1 and isinstance(recording, si.AppendSegmentRecording):
-                recording = si.concatenate_recordings(recording.recording_list)
-            elif recording.get_num_segments() > 1 and isinstance(recording, si.BinaryRecordingExtractor):
-                recording = si.concatenate_recordings([recording])
             recording = sit.remove_artifacts(
                 recording=recording,
                 list_triggers=list_triggers,
