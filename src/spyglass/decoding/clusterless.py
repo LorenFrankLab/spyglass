@@ -9,7 +9,6 @@ speeds. eLife 10, e64505 (2021).
 """
 
 import os
-import pprint
 import shutil
 import uuid
 from pathlib import Path
@@ -306,7 +305,6 @@ class UnitMarksIndicator(dj.Computed):
     """
 
     def make(self, key):
-        pprint.pprint(key)
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key
                           ).fetch1('valid_times')
