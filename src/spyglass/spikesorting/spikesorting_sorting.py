@@ -146,9 +146,11 @@ class SpikeSorting(dj.Computed):
                     np.arange(np.searchsorted(timestamps, interval[0]),
                               np.searchsorted(timestamps, interval[1])))
             list_triggers = [list(np.concatenate(list_triggers))]
-
-            if recording.get_num_segments() > 1:
+            
+            if recording.get_num_segments() > 1 and isinstance(recording, si.AppendSegmentRecording):
                 recording = si.concatenate_recordings(recording.recording_list)
+            elif recording.get_num_segments() > 1 and isinstance(recording, si.BinaryRecordingExtractor):
+                recording = si.concatenate_recordings([recording])
             recording = sit.remove_artifacts(
                 recording=recording,
                 list_triggers=list_triggers,
