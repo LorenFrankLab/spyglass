@@ -675,62 +675,55 @@ def create_model_for_multiple_epochs(
 
 
 def populate_mark_indicators(
-        spikesorting_key: dict,
-        sorter='clusterless_thresholder',
-        sorter_params_name='default_clusterless',
+        spikesorting_selection_keys: list,
         mark_param_name='default',
+        position_info_param_name='default'
 ):
-
-    nwb_file_name = spikesorting_key['nwb_file_name']
-    sort_key = pd.DataFrame(SpikeSorting & spikesorting_key)
-
-    sort_key['sorter'] = sorter
-    sort_key['sorter_params_name'] = sorter_params_name
-
+    # Populate spike sorting
     SpikeSortingSelection().insert(
-        sort_key.loc[:, SpikeSortingSelection.primary_key].to_dict('records'),
+        spikesorting_selection_keys,
         skip_duplicates=True,
     )
+    SpikeSorting.populate(spikesorting_selection_keys)
 
-    select = (SpikeSortingSelection() & sort_key).fetch('KEY')
-    SpikeSorting.populate(select)
-
-    for key in (SpikeSorting & select).fetch('KEY'):
-        Curation.insert_curation(key)
+    # Skip any curation
+    curation_keys = [Curation.insert_curation(
+        key) for key in spikesorting_selection_keys]
 
     CuratedSpikeSortingSelection().insert(
-        (Curation() & select).fetch('KEY'), skip_duplicates=True)
-
-    CuratedSpikeSorting.populate(CuratedSpikeSortingSelection() & select)
-
-    mark_parameters_key = pd.DataFrame(CuratedSpikeSorting() & select)
-    mark_parameters_key['mark_param_name'] = mark_param_name
-
-    UnitMarkParameters().insert(
-        mark_parameters_key.loc[:, UnitMarkParameters.primary_key].to_dict(
-            'records'),
+        curation_keys,
         skip_duplicates=True
     )
+    CuratedSpikeSorting.populate(
+        CuratedSpikeSortingSelection() & curation_keys)
 
-    UnitMarks.populate(UnitMarkParameters() & mark_parameters_key)
+    # Populate marks
+    mark_parameters_keys = pd.DataFrame(CuratedSpikeSorting & curation_keys)
+    mark_parameters_keys['mark_param_name'] = mark_param_name
+    mark_parameters_keys = (mark_parameters_keys
+                            .loc[:, UnitMarkParameters.primary_key]
+                            .to_dict('records'))
+    UnitMarkParameters().insert(
+        mark_parameters_keys,
+        skip_duplicates=True
+    )
+    UnitMarks.populate(UnitMarkParameters & mark_parameters_keys)
 
+    # Compute mark indicators for each position epoch
+    nwb_file_name = spikesorting_selection_keys[0]['nwb_file_name']
     position_interval_names = (IntervalPositionInfo() & {
         'nwb_file_name': nwb_file_name,
-        'position_info_param_name': 'default'
+        'position_info_param_name': position_info_param_name
     }).fetch('interval_list_name')
-    sort_ind = np.argsort(
-        [int(name.strip('pos valid time')) for name in position_interval_names])
-    position_interval_names = position_interval_names[sort_ind]
 
-    for interval in position_interval_names:
+    for interval_name in position_interval_names:
         position_interval = (
-            IntervalList() &
+            IntervalList &
             {'nwb_file_name': nwb_file_name,
-             'interval_list_name': interval})
+             'interval_list_name': interval_name})
 
-        selection = (UnitMarks() & select) * position_interval
-
+        marks_selection = ((UnitMarks & mark_parameters_keys) *
+                           position_interval)
         UnitMarksIndicatorSelection.insert(
-            selection, ignore_extra_fields=True, skip_duplicates=True)
-
-        UnitMarksIndicator.populate()
+            marks_selection, ignore_extra_fields=True, skip_duplicates=True)
+        UnitMarksIndicator.populate(marks_selection)
