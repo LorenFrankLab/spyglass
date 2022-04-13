@@ -47,6 +47,7 @@ from spyglass.spikesorting.spikesorting_curation import (
     CuratedSpikeSorting, CuratedSpikeSortingSelection, Curation)
 from spyglass.spikesorting.spikesorting_sorting import (SpikeSorting,
                                                         SpikeSortingSelection)
+from tqdm.auto import tqdm
 
 schema = dj.schema('decoding_clusterless')
 
@@ -716,7 +717,7 @@ def populate_mark_indicators(
         'position_info_param_name': position_info_param_name
     }).fetch('interval_list_name')
 
-    for interval_name in position_interval_names:
+    for interval_name in tqdm(position_interval_names):
         position_interval = (
             IntervalList &
             {'nwb_file_name': nwb_file_name,
