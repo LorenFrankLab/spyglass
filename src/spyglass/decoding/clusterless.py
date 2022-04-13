@@ -701,6 +701,8 @@ def populate_mark_indicators(
     CuratedSpikeSortingSelection().insert(
         (Curation() & select).fetch('KEY'), skip_duplicates=True)
 
+    CuratedSpikeSorting.populate(CuratedSpikeSortingSelection() & select)
+
     mark_parameters_key = pd.DataFrame(CuratedSpikeSorting() & select)
     mark_parameters_key['mark_param_name'] = mark_param_name
 
