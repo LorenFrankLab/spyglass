@@ -88,7 +88,6 @@
       python dj_config.py <username> # run the configuration script
    ```
 
-   ..
 
       Again, if you’re using your own MySQL server, then you may need to
       change the other settings as well.

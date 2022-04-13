@@ -6,7 +6,6 @@
 
    Home page <self>
    Installation <installation>
-   Tutorials <tutorials>
    API reference <_autosummary/spyglass>
    Jupyter Lab Examples <jupyter_notebook_examples>
    How to Contribute <how_to_contribute>
