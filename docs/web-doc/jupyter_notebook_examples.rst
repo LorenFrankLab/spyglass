@@ -5,14 +5,14 @@ Jupyter Notebooks Examples
    :maxdepth: 1
    :titlesonly:
 
-   Introduction <./_copied_over/notebooks/0_intro.ipynb>
+   Introduction <_copied_over/notebooks/0_intro.ipynb>
    Spike Sorting <_copied_over/notebooks/1_spikesorting.ipynb>
    Clusterless_Decoding <_copied_over/notebooks/1D_Clusterless_Decoding.ipynb>
    Curation <_copied_over/notebooks/2_curation.ipynb>
-   Curation LFP<_copied_over/notebooks/2_curation_lftest.ipynb>
+   Curation LFP <_copied_over/notebooks/2_curation_lftest.ipynb>
    Another Clusterless Decoding <_copied_over/notebooks/2D_Clusterless_Decoding.ipynb>
    LFP <_copied_over/notebooks/3_lfp.ipynb>
    Position Information <_copied_over/notebooks/4_position_info.ipynb>
    Linearization <_copied_over/notebooks/5_linearization.ipynb>
-   MySQL Docker<_copied_over/notebooks/docker_mysql_tutorial.ipynb>
+   MySQL Docker <_copied_over/notebooks/docker_mysql_tutorial.ipynb>
    Mark Extraction <_copied_over/notebooks/mark_extraction_test.ipynb>
