@@ -82,7 +82,7 @@ def _wait_for_datajoint_server_to_start():
     print('Waiting for DataJoint server to start. Time', timer)
     while True:
         try:
-            from nwb_datajoint.common import Session  # noqa: F401
+            from spyglass.common import Session  # noqa: F401
             return
         except OperationalError as e:  # e.g. Connection Error
             print('DataJoint server not yet started. Time', time.time())

@@ -3,8 +3,8 @@
 ### Spike sorting recording view
 
 ```python
-import nwb_datajoint.common as ndc
-import nwb_datajoint.figurl_views as ndf
+import spyglass.common as ndc
+import spyglass.figurl_views as ndf
 
 query = ...
 
@@ -17,8 +17,8 @@ ndf.SpikeSortingRecordingView.populate([(ndc.SpikeSortingRecording & query).proj
 ### Spike sorting view
 
 ```python
-import nwb_datajoint.common as ndc
-import nwb_datajoint.figurl_views as ndf
+import spyglass.common as ndc
+import spyglass.figurl_views as ndf
 
 query = ...
 
