@@ -586,7 +586,8 @@ class MultiunitHighSynchronyEvents(dj.Computed):
 def get_decoding_data_for_epoch(
     nwb_file_name: str,
     interval_list_name: str,
-    position_info_param_name='default_decoding'
+    position_info_param_name='default_decoding',
+    additional_mark_keys={}
 ):
     valid_ephys_position_times_by_epoch = get_valid_ephys_position_times_by_epoch(
         nwb_file_name)
@@ -607,7 +608,8 @@ def get_decoding_data_for_epoch(
     marks = (
         (UnitMarksIndicator() & {
             'nwb_file_name': nwb_file_name,
-            'interval_list_name': position_interval_name
+            'interval_list_name': position_interval_name,
+            **additional_mark_keys
         })).fetch_xarray()
 
     marks = xr.concat(
