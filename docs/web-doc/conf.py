@@ -122,8 +122,8 @@ nitpick_ignore = [('py:class', 'type')]
 # Pydata theme
 #html_theme = 'sphinx_book_theme'
 #html_theme = "pydata_sphinx_theme"
-html_theme = 'karma_sphinx_theme'
-
+#html_theme = 'karma_sphinx_theme'
+html_theme = 'furo'
  
 #html_logo = "_static/logo-company.png"
 #html_theme_options = { "show_prev_next": False}
