@@ -18,6 +18,9 @@ sys.path.insert(0, os.path.abspath('../../src/'))  # Source code dir relative to
 
 # -- Get Jupyter Notebooks ---------------------------------------------------
 def copy_tree(src, tar):
+    """Copies over notebooks into the documentation folder, so get around an issue where nbsphinx
+    requires notebooks to be in the same folder as the documentation folder
+    """    
     if os.path.exists(tar):
         shutil.rmtree(tar)
     shutil.copytree(src, tar)
@@ -29,7 +32,7 @@ copy_tree("../../notebooks", "./_copied_over/notebooks")
 
 project = 'Spyglass'
 # The full version, including alpha/beta/rc tags
-release = '0.0.6'
+release = '1.0.0'
 author = 'Loren Frank'
 copyright = '2020 - Present, Loren Frank'
 
@@ -57,7 +60,7 @@ intersphinx_mapping = {
 
 autosummary_generate = True  # Turn on sphinx.ext.autosummary
 autoclass_content = "both"  # Add __init__ doc (ie. params) to class summaries
-html_show_sourcelink = False  # Remove 'view source code' from top of page (for html, not python)
+html_show_sourcelink = True  # Remove 'view source code' from top of page (for html, not python)
 autodoc_inherit_docstrings = False  # If no docstring, inherit from base class
 set_type_checking_flag = True  # Enable 'expensive' imports for sphinx_autodoc_typehints
 nbsphinx_allow_errors = True  # Continue through Jupyter errors

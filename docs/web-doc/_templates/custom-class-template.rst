@@ -3,7 +3,6 @@
 .. currentmodule:: {{ module }}
 
 .. autoclass:: {{ objname }}
-   :members:
 
    {% block methods %}
    {% if methods %}
@@ -12,7 +11,7 @@
    .. autosummary::
       :nosignatures:
    {% for item in methods %}
-      {%- if not item.startswith('_') and (item not in inherited_members) %}
+      {%- if (item not in inherited_members) %}
       ~{{ name }}.{{ item }}
       {%- endif -%}
    {%- endfor %}

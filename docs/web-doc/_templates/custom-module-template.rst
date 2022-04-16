@@ -9,7 +9,9 @@
    .. autosummary::
       :toctree:
    {% for item in attributes %}
+      {%- if (item not in inherited_members) %}
       {{ item }}
+      {%- endif -%}
    {%- endfor %}
    {% endif %}
    {% endblock %}
@@ -22,7 +24,9 @@
       :toctree:
       :nosignatures:
    {% for item in functions %}
+      {%- if (item not in inherited_members) %}
       {{ item }}
+      {%- endif -%}
    {%- endfor %}
    {% endif %}
    {% endblock %}
@@ -36,7 +40,9 @@
       :template: custom-class-template.rst
       :nosignatures:
    {% for item in classes %}
+      {%- if (item not in inherited_members) %}
       {{ item }}
+      {%- endif -%}
    {%- endfor %}
    {% endif %}
    {% endblock %}
@@ -48,7 +54,9 @@
    .. autosummary::
       :toctree:
    {% for item in exceptions %}
+      {%- if (item not in inherited_members) %}
       {{ item }}
+      {%- endif -%}
    {%- endfor %}
    {% endif %}
    {% endblock %}
@@ -60,7 +68,9 @@
    :template: custom-module-template.rst
    :recursive:
 {% for item in modules %}
-   {{ item }}
+      {%- if (item not in inherited_members) %}
+      {{ item }}
+      {%- endif -%}
 {%- endfor %}
 {% endif %}
 {% endblock %}

@@ -100,7 +100,7 @@ There are a few places where a name needs to be given to objects. Follow these r
 
 ### Misc
 
-* You may want to create a development/testing environment independent of the lab datajoint server. To do so, run your own datajoint server with Docker. See [example](../notebook/docker_mysql_tutorial.ipynb).
+* You may want to create a development/testing environment independent of the lab datajoint server. To do so, run your own datajoint server with Docker. See [example](../notebooks/docker_mysql_tutorial.ipynb).
 * Datajoint is unable to set delete permissions on a per-table basis. In other words, if a user is able to delete entries in a given table, she can delete entries in any table in the schema. Some tables that hold important data extends the `delete` method to check if the datajoint username matches a list of allowed users when `delete` is called. If you think this would be useful for your table, see examples in `common_spikesorting.py`. 
 * In general, use `numpy` style docstring.
 * Don't overload a single `.py` file. For each pipeline make a new `.py` file and define your schema / tables. 
