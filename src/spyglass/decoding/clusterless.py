@@ -625,7 +625,9 @@ def get_decoding_data_for_epoch(
 
 def get_data_for_multiple_epochs(
         nwb_file_name: str,
-        epoch_names: list
+        epoch_names: list,
+        position_info_param_name='default_decoding',
+        additional_mark_keys={}
 ):
 
     data = []
@@ -634,7 +636,10 @@ def get_data_for_multiple_epochs(
     for epoch in epoch_names:
         data.append(
             get_decoding_data_for_epoch(
-                nwb_file_name, epoch))
+                nwb_file_name,
+                epoch,
+                position_info_param_name=position_info_param_name,
+                additional_mark_keys=additional_mark_keys))
         n_time = data[-1][0].shape[0]
         environment_labels.append([epoch] * n_time)
 
