@@ -145,7 +145,7 @@ class SpikeSorting(dj.Computed):
 
         # load artifact intervals
         artifact_times = (ArtifactRemovedIntervalList &
-                          key['artifact_removed_interval_list_name']).fetch1('artifact_times')
+                          {'artifact_removed_interval_list_name': key['artifact_removed_interval_list_name']}).fetch1('artifact_times')
         if len(artifact_times):
             if artifact_times.ndim == 1:
                 artifact_times = np.expand_dims(artifact_times, 0)
