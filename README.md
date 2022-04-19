@@ -80,3 +80,19 @@ The tutorials for `spyglass` is currently in the form of Jupyter Notebooks and c
 * `0_intro.ipynb`: general introduction to the database
 * `1_spikesorting.ipynb`: how to run spike sorting
 * `2_curation.ipynb`: how to curate spike sorted data
+
+## Documentation
+
+Documentation is generated through Jupyter Books with Sphinx exposed. To generate the documentation, follow these steps -
+
+```bash
+cd doc/web-doc
+pip install -r requirements.txt
+make clean && make html
+```
+
+Open up the generated index.html file in -
+
+```bash
+/docs/web-doc/_build/html/index.html
+```

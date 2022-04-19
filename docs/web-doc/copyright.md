@@ -1,0 +1,5 @@
+License/Copyright
+===============
+
+```{include} ../../LICENSE
+```
