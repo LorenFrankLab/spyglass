@@ -1,6 +1,12 @@
 {{ fullname | escape | underline}}
 
 .. automodule:: {{ fullname }}
+   :members:
+   :undoc-members:
+   :no-inherited-members:
+   :exclude-members: declaration_context, definition, database
+
+   
 
    {% block attributes %}
    {% if attributes %}
@@ -8,22 +14,8 @@
 
    .. autosummary::
       :toctree:
+      .. code-block:: python
    {% for item in attributes %}
-      {%- if (item not in inherited_members) %}
-      {{ item }}
-      {%- endif -%}
-   {%- endfor %}
-   {% endif %}
-   {% endblock %}
-
-   {% block functions %}
-   {% if functions %}
-   .. rubric:: {{ _('Functions') }}
-
-   .. autosummary::
-      :toctree:
-      :nosignatures:
-   {% for item in functions %}
       {%- if (item not in inherited_members) %}
       {{ item }}
       {%- endif -%}
@@ -38,7 +30,7 @@
    .. autosummary::
       :toctree:
       :template: custom-class-template.rst
-      :nosignatures:
+
    {% for item in classes %}
       {%- if (item not in inherited_members) %}
       {{ item }}
@@ -53,6 +45,8 @@
 
    .. autosummary::
       :toctree:
+      .. code-block:: python
+      
    {% for item in exceptions %}
       {%- if (item not in inherited_members) %}
       {{ item }}
@@ -61,12 +55,15 @@
    {% endif %}
    {% endblock %}
 
+
 {% block modules %}
 {% if modules %}
 .. autosummary::
    :toctree:
    :template: custom-module-template.rst
    :recursive:
+   
+
 {% for item in modules %}
       {%- if (item not in inherited_members) %}
       {{ item }}
