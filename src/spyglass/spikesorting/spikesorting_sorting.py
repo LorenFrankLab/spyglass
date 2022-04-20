@@ -9,7 +9,7 @@ import datajoint as dj
 import numpy as np
 import spikeinterface as si
 import spikeinterface.sorters as sis
-import spikeinterface.sortingcomponents as scp
+from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 import spikeinterface.toolkit as sit
 
 from ..common.common_lab import LabMember, LabTeam
@@ -145,7 +145,7 @@ class SpikeSorting(dj.Computed):
 
         # load artifact intervals
         artifact_times = (ArtifactRemovedIntervalList &
-                          key).fetch1('artifact_times')
+                          {'artifact_removed_interval_list_name': key['artifact_removed_interval_list_name']}).fetch1('artifact_times')
         if len(artifact_times):
             if artifact_times.ndim == 1:
                 artifact_times = np.expand_dims(artifact_times, 0)
@@ -172,7 +172,7 @@ class SpikeSorting(dj.Computed):
 
         if sorter == 'clusterless_thresholder':
             # Detect peaks for clusterless decoding
-            sorting = scp.detect_peaks(recording, **sorter_params)
+            sorting = detect_peaks(recording, **sorter_params)
         else:
             sorting = sis.run_sorter(sorter, recording,
                                      output_folder=sorter_temp_dir.name,
