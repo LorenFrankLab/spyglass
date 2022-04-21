@@ -37,7 +37,8 @@ class SortGroup(dj.Manual):
         -> Electrode
         """
 
-    def set_group_by_shank(self, nwb_file_name: str, references: dict = None, omit_ref_electrode_group=False):
+    def set_group_by_shank(self, nwb_file_name: str, references: dict = None, omit_ref_electrode_group=False,
+                           omit_unitrode=True):
         """Divides electrodes into groups based on their shank position.
 
         * Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
@@ -55,6 +56,8 @@ class SortGroup(dj.Manual):
             original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
         omit_ref_electrode_group : bool
             Optional. If True, no sort group is defined for electrode group of reference.
+        omit_unitrode : bool
+            Optional. If True, no sort groups are defined for unitrodes.
         """
         # delete any current groups
         (SortGroup & {'nwb_file_name': nwb_file_name}).delete()
@@ -91,34 +94,31 @@ class SortGroup(dj.Manual):
                             f"electrode group {e_group} not a key in references, so cannot set reference")
                     else:
                         sg_key['sort_reference_electrode_id'] = references[e_group]
-
-                # If not omitting electrode group that reference electrode is a part of, or if doing this but current
-                # electrode group not same as reference electrode group, insert sort group and procceed to define sort
-                # group electrodes
+                # Insert sort group and sort group electrodes
                 reference_electrode_group = \
                     electrodes[electrodes["electrode_id"] == sg_key['sort_reference_electrode_id']][
-                        "electrode_group_name"]
-                # If reference electrode corresponds to a real electrode (and not for example the flag for common
-                # average referencing),
-                # check that exactly one electrode group was found for it, and take that electrode group.
-                if len(reference_electrode_group) == 1:
+                        "electrode_group_name"]  # reference for this electrode group
+                if len(reference_electrode_group) == 1:  # unpack single reference
                     reference_electrode_group = reference_electrode_group[0]
                 elif (int(sg_key['sort_reference_electrode_id']) > 0) and (len(reference_electrode_group) != 1):
                     raise Exception(
                         f"Should have found exactly one electrode group for reference electrode,"
                         f"but found {len(reference_electrode_group)}.")
-                if not omit_ref_electrode_group or (str(e_group) != str(reference_electrode_group)):
-                    self.insert1(sg_key)
-                    shank_elect = electrodes['electrode_id'][
-                        np.logical_and(electrodes['electrode_group_name'] == e_group,
-                                       electrodes['probe_shank'] == shank)]
-                    for elect in shank_elect:
-                        sge_key['electrode_id'] = elect
-                        self.SortGroupElectrode().insert1(sge_key)
-                    sort_group += 1
-                else:
-                    print(
-                        f"Omitting electrode group {e_group} from sort groups because contains reference.")
+                if omit_ref_electrode_group and (str(e_group) == str(reference_electrode_group)):
+                    print(f"Omitting electrode group {e_group} from sort groups because contains reference.")
+                    continue
+                shank_elect = electrodes['electrode_id'][
+                    np.logical_and(electrodes['electrode_group_name'] == e_group,
+                                   electrodes['probe_shank'] == shank)]
+                if omit_unitrode and len(shank_elect) == 1:  # ommit unitrodes if indicated
+                    print(f"Omitting electrode group {e_group}, shank {shank} from sort groups because unitrode.")
+                    continue
+                self.insert1(sg_key)
+                for elect in shank_elect:
+                    sge_key['electrode_id'] = elect
+                    self.SortGroupElectrode().insert1(sge_key)
+                sort_group += 1
+
 
     def set_group_by_electrode_group(self, nwb_file_name: str):
         """Assign groups to all non-bad channel electrodes based on their electrode group
