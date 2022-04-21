@@ -354,10 +354,13 @@ class MetricParameters(dj.Manual):
                              'n_neighbors': 5,
                              'n_components': 7,
                              'radius_um': 100,
-                             'seed': 0},
-        'peak_offset': {'peak_sign': 'neg'}
+                             'seed': 0}
     }
-    available_metrics = list(metric_default_params.keys())
+    # Example of peak_offset parameters 'peak_offset': {'peak_sign': 'neg'}
+    available_metrics = [
+        'snr', 'isi_violation',
+        'nn_isolation', 'nn_noise_overlap', 'peak_offset'
+        ]
 
     def get_metric_default_params(self, metric: str):
         "Returns default params for the given metric"
@@ -366,7 +369,12 @@ class MetricParameters(dj.Manual):
     def insert_default(self):
         self.insert1(
             ['franklab_default', self.metric_default_params], skip_duplicates=True)
-
+    
+    def get_available_metric_functions(self):
+        for metric in _metric_name_to_func:
+            if metric in self.available_metrics:
+                print(f'metric : {_metric_name_to_func[metric]}\n')
+    
     # TODO
     def _validate_metrics_list(self, key):
         """Checks whether a row to be inserted contains only the available metrics
