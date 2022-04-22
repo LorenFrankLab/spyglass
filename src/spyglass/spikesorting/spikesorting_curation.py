@@ -772,6 +772,7 @@ class CuratedSpikeSorting(dj.Computed):
         snr=0: float            # SNR for each unit
         firing_rate=-1: float   # firing rate
         num_spikes=-1: int   # total number of spikes
+        peak_channel=null: int # channel maximum aplitude for each unit
         """
 
     def make(self, key):
