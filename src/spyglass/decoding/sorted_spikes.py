@@ -67,40 +67,41 @@ class SortedSpikesIndicator(dj.Computed):
         time = self.get_time_bins_from_interval(interval_times, sampling_rate)
 
         spikes_nwb = (CuratedSpikeSorting & key).fetch_nwb()
+        spikes_nwb = [entry for entry in spikes_nwb if "units" in entry]  # restrict to cases with units
+        spike_times_list = [np.asarray(n_trode['units']['spike_times']) for n_trode in spikes_nwb]
+        if len(spike_times_list) > 0:  # if units
+            spikes = np.concatenate(spike_times_list)
 
-        spikes = np.concatenate(
-            [np.asarray(n_trode['units']['spike_times']) for n_trode in spikes_nwb])
+            # Bin spikes into time bins
+            spike_indicator = []
+            for spike_times in spikes:
+                spike_times = spike_times[(spike_times > time[0]) & (
+                    spike_times <= time[-1])]
+                spike_indicator.append(np.bincount(np.digitize(
+                    spike_times, time[1:-1]), minlength=time.shape[0]))
 
-        # Bin spikes into time bins
-        spike_indicator = []
-        for spike_times in spikes:
-            spike_times = spike_times[(spike_times > time[0]) & (
-                spike_times <= time[-1])]
-            spike_indicator.append(np.bincount(np.digitize(
-                spike_times, time[1:-1]), minlength=time.shape[0]))
+            column_names = np.concatenate(
+                [[f'{n_trode["sort_group_id"]:04d}_{unit_number:04d}'for unit_number in n_trode['units'].index]
+                 for n_trode in spikes_nwb])
+            spike_indicator = pd.DataFrame(np.stack(spike_indicator, axis=1),
+                                           index=pd.Index(time, name='time'),
+                                           columns=column_names)
 
-        column_names = np.concatenate(
-            [[f'{n_trode["sort_group_id"]:04d}_{unit_number:04d}'for unit_number in n_trode['units'].index]
-             for n_trode in spikes_nwb])
-        spike_indicator = pd.DataFrame(np.stack(spike_indicator, axis=1),
-                                       index=pd.Index(time, name='time'),
-                                       columns=column_names)
+            # Insert into analysis nwb file
+            nwb_analysis_file = AnalysisNwbfile()
+            key['analysis_file_name'] = nwb_analysis_file.create(
+                key['nwb_file_name'])
 
-        # Insert into analysis nwb file
-        nwb_analysis_file = AnalysisNwbfile()
-        key['analysis_file_name'] = nwb_analysis_file.create(
-            key['nwb_file_name'])
+            key['spike_indicator_object_id'] = nwb_analysis_file.add_nwb_object(
+                analysis_file_name=key['analysis_file_name'],
+                nwb_object=spike_indicator.reset_index(),
+            )
 
-        key['spike_indicator_object_id'] = nwb_analysis_file.add_nwb_object(
-            analysis_file_name=key['analysis_file_name'],
-            nwb_object=spike_indicator.reset_index(),
-        )
+            nwb_analysis_file.add(
+                nwb_file_name=key['nwb_file_name'],
+                analysis_file_name=key['analysis_file_name'])
 
-        nwb_analysis_file.add(
-            nwb_file_name=key['nwb_file_name'],
-            analysis_file_name=key['analysis_file_name'])
-
-        self.insert1(key)
+            self.insert1(key)
 
     @staticmethod
     def get_time_bins_from_interval(interval_times, sampling_rate):
