@@ -370,10 +370,14 @@ class MetricParameters(dj.Manual):
         self.insert1(
             ['franklab_default', self.metric_default_params], skip_duplicates=True)
     
-    def get_available_metric_functions(self):
+    def get_available_metrics(self):
         for metric in _metric_name_to_func:
             if metric in self.available_metrics:
-                print(f'metric : {_metric_name_to_func[metric]}\n')
+                metric_string = ("{metric_name} : {metric_doc}").format(
+                metric_name=metric, 
+                metric_doc=_metric_name_to_func[
+                    metric].__doc__.split("\n")[0])
+                print(metric_string+'\n')
     
     # TODO
     def _validate_metrics_list(self, key):
@@ -475,6 +479,8 @@ class QualityMetrics(dj.Computed):
 
 
 def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
+    """Computes the per unit fraction of interspike interval violations to total spikes.
+    """
     isi_threshold_ms = metric_params['isi_threshold_ms']
     min_isi_ms = metric_params['min_isi_ms']
 
@@ -491,6 +497,8 @@ def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
 
 
 def _get_peak_offset(waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params):
+    """Computes the shift of the waveform peak from center of window. 
+    """
     if 'peak_sign' in metric_params:
         del metric_params['peak_sign']
     peak_offset_inds = st.get_template_extremum_channel_peak_shift(
