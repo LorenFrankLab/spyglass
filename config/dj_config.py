@@ -8,21 +8,28 @@ import tempfile
 
 import datajoint as dj
 
-def generate_config_yaml(filename: str):
-    """Generate a default yaml configuration file for the Frank laboratory for the specified user_name
+def generate_config_yaml(filename: str, **kwargs):
+    """Generate a yaml configuration file for the specified user_name. By default this 
 
     Parameters
     ----------
     filename : str
         The name of the file to generate
+    **kwargs: list of parameters names and values that can include
+        database_host : host name of system running mysql (default lmf-db.cin.ucsf.edu)
+        database_port : port number for mysql server (default 3306)
+        database_use_tls : True or False (default True to use tls encryption)
+        raw
     """
     config = {}
-       # define the hostname and port to connect
-    config['database.host'] = 'lmf-db.cin.ucsf.edu'
-    config['database.port'] = 3306
+    # define the hostname and port to connect
+    print('printing kwargs')
+    print(kwargs)
+    config['database.host'] = kwargs['database_host'] if 'database_host' in kwargs else 'lmf-db.cin.ucsf.edu'
+    config['database.port'] = kwargs['database_port'] if 'database_port' in kwargs else 3306
+    config['database.use_tls'] = kwargs['database_use_tls'] if 'database.use_tls' in kwargs else True
     config['enable_python_native_blobs'] = True
-    config['database.use_tls'] = True
-
+    
     # next, set up external stores
     # (read about them here: https://docs.datajoint.io/python/admin/5-blob-config.html)
 
