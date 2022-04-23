@@ -137,7 +137,7 @@ def make_default_decoding_parameters_cpu():
     predict_parameters = {
         'is_compute_acausal': True,
         'use_gpu':  False,
-        'state_names':  ['Continuous', 'Uniform']
+        'state_names':  ['Continuous', 'Fragmented']
     }
     fit_parameters = dict()
 
