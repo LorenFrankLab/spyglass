@@ -8,6 +8,7 @@ import numpy as np
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.toolkit as st
+import probeinterface as pi
 
 from ..common.common_device import Probe
 from ..common.common_ephys import Electrode, ElectrodeGroup
@@ -455,4 +456,21 @@ class SpikeSortingRecording(dj.Computed):
             freq_min=filter_params['frequency_min'],
             freq_max=filter_params['frequency_max'])
 
+        # if the sort group is a tetrode, change the channel location
+        # note that this is a workaround that would be deprecated when spikeinterface uses 3D probe locations
+        probe_type = []
+        electrode_group = []
+        for channel_id in channel_ids:
+            probe_type.append((Electrode & {'nwb_file_name': key['nwb_file_name'],
+                                            'electrode_id': channel_id}).fetch1('probe_type'))
+            electrode_group.append((Electrode & {'nwb_file_name': key['nwb_file_name'],
+                                                 'electrode_id': channel_id}).fetch1('electrode_group_name'))
+        if all(p=='tetrode_12.5' for p in probe_type) and len(probe_type)==4 and all(eg==electrode_group[0] for eg in electrode_group):
+            tetrode = pi.Probe(ndim=2)
+            position = [[0,0],[0,12.5],[12.5,0],[12.5,12.5]]
+            tetrode.set_contacts(position, shapes='circle', shape_params={'radius': 6.25})
+            tetrode.set_contact_ids(channel_ids)
+            tetrode.set_device_channel_indices(np.arange(4))
+            recording = recording.set_probe(tetrode, in_place=True)
+        
         return recording
