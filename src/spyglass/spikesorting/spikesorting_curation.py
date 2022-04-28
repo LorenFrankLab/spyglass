@@ -273,6 +273,9 @@ class Waveforms(dj.Computed):
 
     def make(self, key):
         recording = Curation.get_recording(key)
+        if recording.get_num_segments() > 1:
+            recording = si.concatenate_recordings([recording])
+        
         sorting = Curation.get_curated_sorting(key)
 
         print('Extracting waveforms...')
