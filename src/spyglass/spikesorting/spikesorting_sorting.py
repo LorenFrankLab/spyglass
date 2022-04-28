@@ -225,7 +225,9 @@ class SpikeSorting(dj.Computed):
                             'entries. Not deleting anything.')
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+        raise NotImplementedError
+        return None
+        #return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
     def nightly_cleanup(self):
         """Clean up spike sorting directories that are not in the SpikeSorting table.
