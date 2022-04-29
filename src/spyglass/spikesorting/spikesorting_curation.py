@@ -273,6 +273,9 @@ class Waveforms(dj.Computed):
 
     def make(self, key):
         recording = Curation.get_recording(key)
+        if recording.get_num_segments() > 1:
+            recording = si.concatenate_recordings([recording])
+        
         sorting = Curation.get_curated_sorting(key)
 
         print('Extracting waveforms...')
@@ -356,10 +359,13 @@ class MetricParameters(dj.Manual):
                              'n_neighbors': 5,
                              'n_components': 7,
                              'radius_um': 100,
-                             'seed': 0},
-        'peak_offset': {'peak_sign': 'neg'}
+                             'seed': 0}
     }
-    available_metrics = list(metric_default_params.keys())
+    # Example of peak_offset parameters 'peak_offset': {'peak_sign': 'neg'}
+    available_metrics = [
+        'snr', 'isi_violation',
+        'nn_isolation', 'nn_noise_overlap', 'peak_offset'
+        ]
 
     def get_metric_default_params(self, metric: str):
         "Returns default params for the given metric"
@@ -368,7 +374,16 @@ class MetricParameters(dj.Manual):
     def insert_default(self):
         self.insert1(
             ['franklab_default', self.metric_default_params], skip_duplicates=True)
-
+    
+    def get_available_metrics(self):
+        for metric in _metric_name_to_func:
+            if metric in self.available_metrics:
+                metric_string = ("{metric_name} : {metric_doc}").format(
+                metric_name=metric, 
+                metric_doc=_metric_name_to_func[
+                    metric].__doc__.split("\n")[0])
+                print(metric_string+'\n')
+    
     # TODO
     def _validate_metrics_list(self, key):
         """Checks whether a row to be inserted contains only the available metrics
@@ -469,6 +484,8 @@ class QualityMetrics(dj.Computed):
 
 
 def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
+    """Computes the per unit fraction of interspike interval violations to total spikes.
+    """
     isi_threshold_ms = metric_params['isi_threshold_ms']
     min_isi_ms = metric_params['min_isi_ms']
 
@@ -485,6 +502,8 @@ def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
 
 
 def _get_peak_offset(waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params):
+    """Computes the shift of the waveform peak from center of window. 
+    """
     if 'peak_sign' in metric_params:
         del metric_params['peak_sign']
     peak_offset_inds = st.get_template_extremum_channel_peak_shift(
