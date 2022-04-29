@@ -1,0 +1,560 @@
+<!doctype html>
+<html class="no-js">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+<link rel="index" title="Index" href="../genindex.html" /><link rel="search" title="Search" href="../search.html" /><link rel="copyright" title="Copyright" href="../copyright.html" /><link rel="next" title="spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection" href="spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection.html" /><link rel="prev" title="spyglass.spikesorting.sortingview" href="spyglass.spikesorting.sortingview.html" />
+
+    <link rel="shortcut icon" href="../_static/lorenLabImage.png"/><meta name="generator" content="sphinx-4.5.0, furo 2022.06.21"/>
+        <title>spyglass.spikesorting.sortingview.SortingviewWorkspace - Spyglass 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?digest=40978830699223671f4072448e654b5958f38b89" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?digest=30d1aed668e5c3a91c3e3bf6a60b675221979f0e" />
+    <link rel="stylesheet" type="text/css" href="../_static/css/datajoint_header.css" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f8f8f8;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-half" viewBox="0 0 24 24">
+    <title>Auto light/dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-shadow">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M13 12h5" />
+      <path d="M13 15h4" />
+      <path d="M13 18h1" />
+      <path d="M13 9h4" />
+      <path d="M13 6h1" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">Spyglass 1.0.0 documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand centered" href="../index.html">
+  
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo" src="../_static/lorenLabImage.png" alt="Logo"/>
+  </div>
+  
+  <span class="sidebar-brand-text">Spyglass 1.0.0 documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder=Search name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../index.html">Home page</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../create_figurl.html">FigUrl View</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../tutorials.html">Tutorials</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../_copied_over/notebooks/0_intro.html">Introduction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../_copied_over/notebooks/1_spikesorting.html">Spike Sorting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../_copied_over/notebooks/1D_Clusterless_Decoding.html">Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../_copied_over/notebooks/2_curation.html">Curation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../_copied_over/notebooks/2_curation_lftest.html">Curation LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../_copied_over/notebooks/2D_Clusterless_Decoding.html">Another Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../_copied_over/notebooks/3_lfp.html">LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../_copied_over/notebooks/4_position_info.html">Position Information</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../_copied_over/notebooks/5_linearization.html">Linearization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../_copied_over/notebooks/docker_mysql_tutorial.html">MySQL Docker</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current has-children"><a class="reference internal" href="spyglass.html">API reference</a><input checked="" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul class="current">
+<li class="toctree-l2 has-children"><a class="reference internal" href="spyglass.cli.html">spyglass.cli</a><input class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="spyglass.cli.cli.html">spyglass.cli.cli</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="spyglass.common.html">spyglass.common</a><input class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_backup.html">spyglass.common.common_backup</a><input class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_backup.CuratedSpikeSortingBackUp.html">spyglass.common.common_backup.CuratedSpikeSortingBackUp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_backup.SpikeSortingBackUp.html">spyglass.common.common_backup.SpikeSortingBackUp</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_behav.html">spyglass.common.common_behav</a><input class="toctree-checkbox" id="toctree-checkbox-6" name="toctree-checkbox-6" role="switch" type="checkbox"/><label for="toctree-checkbox-6"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_behav.HeadDir.html">spyglass.common.common_behav.HeadDir</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_behav.LinPos.html">spyglass.common.common_behav.LinPos</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_behav.PositionSource.html">spyglass.common.common_behav.PositionSource</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_behav.RawPosition.html">spyglass.common.common_behav.RawPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_behav.Speed.html">spyglass.common.common_behav.Speed</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_behav.StateScriptFile.html">spyglass.common.common_behav.StateScriptFile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_behav.VideoFile.html">spyglass.common.common_behav.VideoFile</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_device.html">spyglass.common.common_device</a><input class="toctree-checkbox" id="toctree-checkbox-7" name="toctree-checkbox-7" role="switch" type="checkbox"/><label for="toctree-checkbox-7"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_device.CameraDevice.html">spyglass.common.common_device.CameraDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_device.DataAcquisitionDevice.html">spyglass.common.common_device.DataAcquisitionDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_device.Probe.html">spyglass.common.common_device.Probe</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_dio.html">spyglass.common.common_dio</a><input class="toctree-checkbox" id="toctree-checkbox-8" name="toctree-checkbox-8" role="switch" type="checkbox"/><label for="toctree-checkbox-8"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_dio.DIOEvents.html">spyglass.common.common_dio.DIOEvents</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_ephys.html">spyglass.common.common_ephys</a><input class="toctree-checkbox" id="toctree-checkbox-9" name="toctree-checkbox-9" role="switch" type="checkbox"/><label for="toctree-checkbox-9"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_ephys.Electrode.html">spyglass.common.common_ephys.Electrode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_ephys.ElectrodeBrainRegion.html">spyglass.common.common_ephys.ElectrodeBrainRegion</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_ephys.ElectrodeGroup.html">spyglass.common.common_ephys.ElectrodeGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_ephys.LFP.html">spyglass.common.common_ephys.LFP</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_ephys.LFPBand.html">spyglass.common.common_ephys.LFPBand</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_ephys.LFPBandSelection.html">spyglass.common.common_ephys.LFPBandSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_ephys.LFPSelection.html">spyglass.common.common_ephys.LFPSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_ephys.Raw.html">spyglass.common.common_ephys.Raw</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_ephys.SampleCount.html">spyglass.common.common_ephys.SampleCount</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_filter.html">spyglass.common.common_filter</a><input class="toctree-checkbox" id="toctree-checkbox-10" name="toctree-checkbox-10" role="switch" type="checkbox"/><label for="toctree-checkbox-10"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_filter.FirFilter.html">spyglass.common.common_filter.FirFilter</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_interval.html">spyglass.common.common_interval</a><input class="toctree-checkbox" id="toctree-checkbox-11" name="toctree-checkbox-11" role="switch" type="checkbox"/><label for="toctree-checkbox-11"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_interval.IntervalList.html">spyglass.common.common_interval.IntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_lab.html">spyglass.common.common_lab</a><input class="toctree-checkbox" id="toctree-checkbox-12" name="toctree-checkbox-12" role="switch" type="checkbox"/><label for="toctree-checkbox-12"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_lab.Institution.html">spyglass.common.common_lab.Institution</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_lab.Lab.html">spyglass.common.common_lab.Lab</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_lab.LabMember.html">spyglass.common.common_lab.LabMember</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_lab.LabTeam.html">spyglass.common.common_lab.LabTeam</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_nwbfile.html">spyglass.common.common_nwbfile</a><input class="toctree-checkbox" id="toctree-checkbox-13" name="toctree-checkbox-13" role="switch" type="checkbox"/><label for="toctree-checkbox-13"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_nwbfile.AnalysisNwbfile.html">spyglass.common.common_nwbfile.AnalysisNwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_nwbfile.AnalysisNwbfileKachery.html">spyglass.common.common_nwbfile.AnalysisNwbfileKachery</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_nwbfile.Nwbfile.html">spyglass.common.common_nwbfile.Nwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_nwbfile.NwbfileKachery.html">spyglass.common.common_nwbfile.NwbfileKachery</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_position.html">spyglass.common.common_position</a><input class="toctree-checkbox" id="toctree-checkbox-14" name="toctree-checkbox-14" role="switch" type="checkbox"/><label for="toctree-checkbox-14"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_position.IntervalLinearizationSelection.html">spyglass.common.common_position.IntervalLinearizationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_position.IntervalLinearizedPosition.html">spyglass.common.common_position.IntervalLinearizedPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_position.IntervalPositionInfo.html">spyglass.common.common_position.IntervalPositionInfo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_position.IntervalPositionInfoSelection.html">spyglass.common.common_position.IntervalPositionInfoSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_position.LinearizationParameters.html">spyglass.common.common_position.LinearizationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_position.NodePicker.html">spyglass.common.common_position.NodePicker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_position.PositionInfoParameters.html">spyglass.common.common_position.PositionInfoParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_position.PositionVideo.html">spyglass.common.common_position.PositionVideo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_position.SelectFromCollection.html">spyglass.common.common_position.SelectFromCollection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_position.TrackGraph.html">spyglass.common.common_position.TrackGraph</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_region.html">spyglass.common.common_region</a><input class="toctree-checkbox" id="toctree-checkbox-15" name="toctree-checkbox-15" role="switch" type="checkbox"/><label for="toctree-checkbox-15"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_region.BrainRegion.html">spyglass.common.common_region.BrainRegion</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_sensors.html">spyglass.common.common_sensors</a><input class="toctree-checkbox" id="toctree-checkbox-16" name="toctree-checkbox-16" role="switch" type="checkbox"/><label for="toctree-checkbox-16"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_sensors.SensorData.html">spyglass.common.common_sensors.SensorData</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_session.html">spyglass.common.common_session</a><input class="toctree-checkbox" id="toctree-checkbox-17" name="toctree-checkbox-17" role="switch" type="checkbox"/><label for="toctree-checkbox-17"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_session.ExperimenterList.html">spyglass.common.common_session.ExperimenterList</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_session.Session.html">spyglass.common.common_session.Session</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_session.SessionGroup.html">spyglass.common.common_session.SessionGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_session.SessionGroupSession.html">spyglass.common.common_session.SessionGroupSession</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_subject.html">spyglass.common.common_subject</a><input class="toctree-checkbox" id="toctree-checkbox-18" name="toctree-checkbox-18" role="switch" type="checkbox"/><label for="toctree-checkbox-18"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_subject.Subject.html">spyglass.common.common_subject.Subject</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.common.common_task.html">spyglass.common.common_task</a><input class="toctree-checkbox" id="toctree-checkbox-19" name="toctree-checkbox-19" role="switch" type="checkbox"/><label for="toctree-checkbox-19"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_task.Task.html">spyglass.common.common_task.Task</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.common.common_task.TaskEpoch.html">spyglass.common.common_task.TaskEpoch</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="spyglass.common.dj_helper_fn.html">spyglass.common.dj_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="spyglass.common.nwb_helper_fn.html">spyglass.common.nwb_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="spyglass.common.populate_all_common.html">spyglass.common.populate_all_common</a></li>
+<li class="toctree-l3"><a class="reference internal" href="spyglass.common.signal_processing.html">spyglass.common.signal_processing</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="spyglass.data_import.html">spyglass.data_import</a><input class="toctree-checkbox" id="toctree-checkbox-20" name="toctree-checkbox-20" role="switch" type="checkbox"/><label for="toctree-checkbox-20"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="spyglass.data_import.insert_sessions.html">spyglass.data_import.insert_sessions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="spyglass.data_import.storage_dirs.html">spyglass.data_import.storage_dirs</a></li>
+</ul>
+</li>
+<li class="toctree-l2 current has-children"><a class="reference internal" href="spyglass.spikesorting.html">spyglass.spikesorting</a><input checked="" class="toctree-checkbox" id="toctree-checkbox-21" name="toctree-checkbox-21" role="switch" type="checkbox"/><label for="toctree-checkbox-21"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul class="current">
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.spikesorting.merged_sorting_extractor.html">spyglass.spikesorting.merged_sorting_extractor</a><input class="toctree-checkbox" id="toctree-checkbox-22" name="toctree-checkbox-22" role="switch" type="checkbox"/><label for="toctree-checkbox-22"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment</a></li>
+</ul>
+</li>
+<li class="toctree-l3 current has-children"><a class="reference internal" href="spyglass.spikesorting.sortingview.html">spyglass.spikesorting.sortingview</a><input checked="" class="toctree-checkbox" id="toctree-checkbox-23" name="toctree-checkbox-23" role="switch" type="checkbox"/><label for="toctree-checkbox-23"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul class="current">
+<li class="toctree-l4 current current-page"><a class="current reference internal" href="#">spyglass.spikesorting.sortingview.SortingviewWorkspace</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection.html">spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="spyglass.spikesorting.sortingview_helper_fn.html">spyglass.spikesorting.sortingview_helper_fn</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.spikesorting.spikesorting_artifact.html">spyglass.spikesorting.spikesorting_artifact</a><input class="toctree-checkbox" id="toctree-checkbox-24" name="toctree-checkbox-24" role="switch" type="checkbox"/><label for="toctree-checkbox-24"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_artifact.ArtifactDetection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList.html">spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.html">spyglass.spikesorting.spikesorting_curation</a><input class="toctree-checkbox" id="toctree-checkbox-25" name="toctree-checkbox-25" role="switch" type="checkbox"/><label for="toctree-checkbox-25"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html">spyglass.spikesorting.spikesorting_curation.AutomaticCuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.Curation.html">spyglass.spikesorting.spikesorting_curation.Curation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.MetricParameters.html">spyglass.spikesorting.spikesorting_curation.MetricParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.MetricSelection.html">spyglass.spikesorting.spikesorting_curation.MetricSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.QualityMetrics.html">spyglass.spikesorting.spikesorting_curation.QualityMetrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.WaveformParameters.html">spyglass.spikesorting.spikesorting_curation.WaveformParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.WaveformSelection.html">spyglass.spikesorting.spikesorting_curation.WaveformSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_curation.Waveforms.html">spyglass.spikesorting.spikesorting_curation.Waveforms</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.spikesorting.spikesorting_recording.html">spyglass.spikesorting.spikesorting_recording</a><input class="toctree-checkbox" id="toctree-checkbox-26" name="toctree-checkbox-26" role="switch" type="checkbox"/><label for="toctree-checkbox-26"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_recording.SortGroup.html">spyglass.spikesorting.spikesorting_recording.SortGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_recording.SortInterval.html">spyglass.spikesorting.spikesorting_recording.SortInterval</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="spyglass.spikesorting.spikesorting_sorting.html">spyglass.spikesorting.spikesorting_sorting</a><input class="toctree-checkbox" id="toctree-checkbox-27" name="toctree-checkbox-27" role="switch" type="checkbox"/><label for="toctree-checkbox-27"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection.html">spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../how_to_contribute.html">How to Contribute</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../copyright.html">Copyright</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main">
+          <section id="spyglass-spikesorting-sortingview-sortingviewworkspace">
+<h1>spyglass.spikesorting.sortingview.SortingviewWorkspace<a class="headerlink" href="#spyglass-spikesorting-sortingview-sortingviewworkspace" title="Permalink to this headline">#</a></h1>
+<dl class="py class">
+<dt class="sig sig-object py" id="spyglass.spikesorting.sortingview.SortingviewWorkspace">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">SortingviewWorkspace</span></span><a class="reference internal" href="../_modules/spyglass/spikesorting/sortingview.html#SortingviewWorkspace"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace" title="Permalink to this definition">#</a></dt>
+<dd><p>Datajoint Attributes</p>
+<p>-&gt; SortingviewWorkspaceSelection</p>
+<p>—</p>
+<p>workspace_uri: varchar(1000)</p>
+<p>sortingview_recording_id: varchar(30)</p>
+<p>sortingview_sorting_id: varchar(30)</p>
+<p>channel = ‘franklab2’ : varchar(80) # the name of the kachery channel for data sharing</p>
+<p class="rubric">Methods</p>
+<div class="table-wrapper autosummary longtable docutils container">
+<table class="autosummary longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.add_metrics_to_sorting" title="spyglass.spikesorting.sortingview.SortingviewWorkspace.add_metrics_to_sorting"><code class="xref py py-obj docutils literal notranslate"><span class="pre">add_metrics_to_sorting</span></code></a>(key, metrics[, ...])</p></td>
+<td><p>Adds a metrics to the specified sorting.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.insert_manual_curation" title="spyglass.spikesorting.sortingview.SortingviewWorkspace.insert_manual_curation"><code class="xref py py-obj docutils literal notranslate"><span class="pre">insert_manual_curation</span></code></a>(key[, description])</p></td>
+<td><p>Based on information in key for an SortingviewWorkspace, loads the curated sorting from sortingview, saves it (with labels and the optional description) and inserts it to CuratedSorting</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.make" title="spyglass.spikesorting.sortingview.SortingviewWorkspace.make"><code class="xref py py-obj docutils literal notranslate"><span class="pre">make</span></code></a>(key)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.remove_sorting_from_workspace" title="spyglass.spikesorting.sortingview.SortingviewWorkspace.remove_sorting_from_workspace"><code class="xref py py-obj docutils literal notranslate"><span class="pre">remove_sorting_from_workspace</span></code></a>(key)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.set_snippet_len" title="spyglass.spikesorting.sortingview.SortingviewWorkspace.set_snippet_len"><code class="xref py py-obj docutils literal notranslate"><span class="pre">set_snippet_len</span></code></a>(key, snippet_len)</p></td>
+<td><p>Sets the snippet length of a workspace specified by the key</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.url" title="spyglass.spikesorting.sortingview.SortingviewWorkspace.url"><code class="xref py py-obj docutils literal notranslate"><span class="pre">url</span></code></a>(key[, sortingview_sorting_id])</p></td>
+<td><p>Generate a URL for visualizing the sorting on the browser</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="spyglass.spikesorting.sortingview.SortingviewWorkspace.add_metrics_to_sorting">
+<span class="sig-name descname"><span class="pre">add_metrics_to_sorting</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.10)"><span class="pre">dict</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">metrics</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.10)"><span class="pre">dict</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">sortingview_sorting_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><span class="pre">Optional</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/spyglass/spikesorting/sortingview.html#SortingviewWorkspace.add_metrics_to_sorting"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.add_metrics_to_sorting" title="Permalink to this definition">#</a></dt>
+<dd><p>Adds a metrics to the specified sorting.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>key</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.10)"><em>dict</em></a>) – </p></li>
+<li><p><strong>metrics</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.10)"><em>dict</em></a>) – <p>Quality metrics.
+Key: name of quality metric
+Value: another dict in which key: unit ID (must be str),</p>
+<blockquote>
+<div><p>value: metric value (float)</p>
+</div></blockquote>
+</p></li>
+<li><p><strong>sortingview_sorting_id</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><em>str</em></a><em>, </em><em>optional</em>) – if not specified, just uses the first sorting ID of the workspace</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="spyglass.spikesorting.sortingview.SortingviewWorkspace.insert_manual_curation">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">insert_manual_curation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.10)"><span class="pre">dict</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">description</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'manually</span> <span class="pre">curated'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/spyglass/spikesorting/sortingview.html#SortingviewWorkspace.insert_manual_curation"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.insert_manual_curation" title="Permalink to this definition">#</a></dt>
+<dd><p>Based on information in key for an SortingviewWorkspace, loads the
+curated sorting from sortingview, saves it (with labels and the
+optional description) and inserts it to CuratedSorting</p>
+<p>Assumes that the workspace corresponding to the recording and (original) sorting exists</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>key</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.10)"><em>dict</em></a>) – primary key of AutomaticCuration</p></li>
+<li><p><strong>description</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><em>str</em></a>) – optional description of curated sort</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="spyglass.spikesorting.sortingview.SortingviewWorkspace.make">
+<span class="sig-name descname"><span class="pre">make</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.10)"><span class="pre">dict</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/spyglass/spikesorting/sortingview.html#SortingviewWorkspace.make"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.make" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="spyglass.spikesorting.sortingview.SortingviewWorkspace.remove_sorting_from_workspace">
+<span class="sig-name descname"><span class="pre">remove_sorting_from_workspace</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/spyglass/spikesorting/sortingview.html#SortingviewWorkspace.remove_sorting_from_workspace"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.remove_sorting_from_workspace" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="spyglass.spikesorting.sortingview.SortingviewWorkspace.set_snippet_len">
+<span class="sig-name descname"><span class="pre">set_snippet_len</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.10)"><span class="pre">dict</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">snippet_len</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><span class="pre">int</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/spyglass/spikesorting/sortingview.html#SortingviewWorkspace.set_snippet_len"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.set_snippet_len" title="Permalink to this definition">#</a></dt>
+<dd><p>Sets the snippet length of a workspace specified by the key</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>key</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.10)"><em>dict</em></a>) – defines a workspace</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="spyglass.spikesorting.sortingview.SortingviewWorkspace.url">
+<span class="sig-name descname"><span class="pre">url</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sortingview_sorting_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><span class="pre">Optional</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/spyglass/spikesorting/sortingview.html#SortingviewWorkspace.url"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#spyglass.spikesorting.sortingview.SortingviewWorkspace.url" title="Permalink to this definition">#</a></dt>
+<dd><p>Generate a URL for visualizing the sorting on the browser</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>key</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.10)"><em>dict</em></a>) – defines a workspace</p></li>
+<li><p><strong>sortingview_sorting_id</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><em>str</em></a><em>, </em><em>optional</em>) – sortingview sorting ID to visualize; if None then chooses the first one</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>url</strong></p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)">str</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection</div>
+              </div>
+              <svg><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="spyglass.spikesorting.sortingview.html">
+              <svg><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">spyglass.spikesorting.sortingview</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                <a href="../copyright.html">Copyright</a> &#169; 2020 - Present, Loren Frank
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            <div class="icons">
+              
+            </div>
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer no-toc">
+      
+      
+      
+    </aside>
+  </div>
+</div><script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/scripts/furo.js"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    </body>
+</html>

@@ -1,0 +1,1957 @@
+<!doctype html>
+<html class="no-js">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+<link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="copyright" title="Copyright" href="../../copyright.html" /><link rel="next" title="Clusterless Decoding" href="1D_Clusterless_Decoding.html" /><link rel="prev" title="NWB-Datajoint tutorial 0" href="0_intro.html" />
+
+    <link rel="shortcut icon" href="../../_static/lorenLabImage.png"/><meta name="generator" content="sphinx-4.5.0, furo 2022.06.21"/>
+        <title>NWB-Datajoint Spike Sorting Tutorial - Spyglass 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/furo.css?digest=40978830699223671f4072448e654b5958f38b89" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/furo-extensions.css?digest=30d1aed668e5c3a91c3e3bf6a60b675221979f0e" />
+    <link rel="stylesheet" type="text/css" href="../../_static/css/datajoint_header.css" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f8f8f8;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-half" viewBox="0 0 24 24">
+    <title>Auto light/dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-shadow">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M13 12h5" />
+      <path d="M13 15h4" />
+      <path d="M13 18h1" />
+      <path d="M13 9h4" />
+      <path d="M13 6h1" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../../index.html"><div class="brand">Spyglass 1.0.0 documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand centered" href="../../index.html">
+  
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo" src="../../_static/lorenLabImage.png" alt="Logo"/>
+  </div>
+  
+  <span class="sidebar-brand-text">Spyglass 1.0.0 documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../../search.html" role="search">
+  <input class="sidebar-search" placeholder=Search name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../../index.html">Home page</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../create_figurl.html">FigUrl View</a></li>
+<li class="toctree-l1 current has-children"><a class="reference internal" href="../../tutorials.html">Tutorials</a><input checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="0_intro.html">Introduction</a></li>
+<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">Spike Sorting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="1D_Clusterless_Decoding.html">Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="2_curation.html">Curation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="2_curation_lftest.html">Curation LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="2D_Clusterless_Decoding.html">Another Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="3_lfp.html">LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="4_position_info.html">Position Information</a></li>
+<li class="toctree-l2"><a class="reference internal" href="5_linearization.html">Linearization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="docker_mysql_tutorial.html">MySQL Docker</a></li>
+</ul>
+</li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../_autosummary/spyglass.html">API reference</a><input class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../_autosummary/spyglass.cli.html">spyglass.cli</a><input class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../_autosummary/spyglass.cli.cli.html">spyglass.cli.cli</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.html">spyglass.common</a><input class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_backup.html">spyglass.common.common_backup</a><input class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_backup.CuratedSpikeSortingBackUp.html">spyglass.common.common_backup.CuratedSpikeSortingBackUp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_backup.SpikeSortingBackUp.html">spyglass.common.common_backup.SpikeSortingBackUp</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_behav.html">spyglass.common.common_behav</a><input class="toctree-checkbox" id="toctree-checkbox-6" name="toctree-checkbox-6" role="switch" type="checkbox"/><label for="toctree-checkbox-6"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_behav.HeadDir.html">spyglass.common.common_behav.HeadDir</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_behav.LinPos.html">spyglass.common.common_behav.LinPos</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_behav.PositionSource.html">spyglass.common.common_behav.PositionSource</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_behav.RawPosition.html">spyglass.common.common_behav.RawPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_behav.Speed.html">spyglass.common.common_behav.Speed</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_behav.StateScriptFile.html">spyglass.common.common_behav.StateScriptFile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_behav.VideoFile.html">spyglass.common.common_behav.VideoFile</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_device.html">spyglass.common.common_device</a><input class="toctree-checkbox" id="toctree-checkbox-7" name="toctree-checkbox-7" role="switch" type="checkbox"/><label for="toctree-checkbox-7"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_device.CameraDevice.html">spyglass.common.common_device.CameraDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_device.DataAcquisitionDevice.html">spyglass.common.common_device.DataAcquisitionDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_device.Probe.html">spyglass.common.common_device.Probe</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_dio.html">spyglass.common.common_dio</a><input class="toctree-checkbox" id="toctree-checkbox-8" name="toctree-checkbox-8" role="switch" type="checkbox"/><label for="toctree-checkbox-8"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_dio.DIOEvents.html">spyglass.common.common_dio.DIOEvents</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_ephys.html">spyglass.common.common_ephys</a><input class="toctree-checkbox" id="toctree-checkbox-9" name="toctree-checkbox-9" role="switch" type="checkbox"/><label for="toctree-checkbox-9"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_ephys.Electrode.html">spyglass.common.common_ephys.Electrode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_ephys.ElectrodeBrainRegion.html">spyglass.common.common_ephys.ElectrodeBrainRegion</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_ephys.ElectrodeGroup.html">spyglass.common.common_ephys.ElectrodeGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_ephys.LFP.html">spyglass.common.common_ephys.LFP</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_ephys.LFPBand.html">spyglass.common.common_ephys.LFPBand</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_ephys.LFPBandSelection.html">spyglass.common.common_ephys.LFPBandSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_ephys.LFPSelection.html">spyglass.common.common_ephys.LFPSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_ephys.Raw.html">spyglass.common.common_ephys.Raw</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_ephys.SampleCount.html">spyglass.common.common_ephys.SampleCount</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_filter.html">spyglass.common.common_filter</a><input class="toctree-checkbox" id="toctree-checkbox-10" name="toctree-checkbox-10" role="switch" type="checkbox"/><label for="toctree-checkbox-10"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_filter.FirFilter.html">spyglass.common.common_filter.FirFilter</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_interval.html">spyglass.common.common_interval</a><input class="toctree-checkbox" id="toctree-checkbox-11" name="toctree-checkbox-11" role="switch" type="checkbox"/><label for="toctree-checkbox-11"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_interval.IntervalList.html">spyglass.common.common_interval.IntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_lab.html">spyglass.common.common_lab</a><input class="toctree-checkbox" id="toctree-checkbox-12" name="toctree-checkbox-12" role="switch" type="checkbox"/><label for="toctree-checkbox-12"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_lab.Institution.html">spyglass.common.common_lab.Institution</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_lab.Lab.html">spyglass.common.common_lab.Lab</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_lab.LabMember.html">spyglass.common.common_lab.LabMember</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_lab.LabTeam.html">spyglass.common.common_lab.LabTeam</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_nwbfile.html">spyglass.common.common_nwbfile</a><input class="toctree-checkbox" id="toctree-checkbox-13" name="toctree-checkbox-13" role="switch" type="checkbox"/><label for="toctree-checkbox-13"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html">spyglass.common.common_nwbfile.AnalysisNwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfileKachery.html">spyglass.common.common_nwbfile.AnalysisNwbfileKachery</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_nwbfile.Nwbfile.html">spyglass.common.common_nwbfile.Nwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_nwbfile.NwbfileKachery.html">spyglass.common.common_nwbfile.NwbfileKachery</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.html">spyglass.common.common_position</a><input class="toctree-checkbox" id="toctree-checkbox-14" name="toctree-checkbox-14" role="switch" type="checkbox"/><label for="toctree-checkbox-14"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.IntervalLinearizationSelection.html">spyglass.common.common_position.IntervalLinearizationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html">spyglass.common.common_position.IntervalLinearizedPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.IntervalPositionInfo.html">spyglass.common.common_position.IntervalPositionInfo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.IntervalPositionInfoSelection.html">spyglass.common.common_position.IntervalPositionInfoSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.LinearizationParameters.html">spyglass.common.common_position.LinearizationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.NodePicker.html">spyglass.common.common_position.NodePicker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.PositionInfoParameters.html">spyglass.common.common_position.PositionInfoParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.PositionVideo.html">spyglass.common.common_position.PositionVideo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.SelectFromCollection.html">spyglass.common.common_position.SelectFromCollection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_position.TrackGraph.html">spyglass.common.common_position.TrackGraph</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_region.html">spyglass.common.common_region</a><input class="toctree-checkbox" id="toctree-checkbox-15" name="toctree-checkbox-15" role="switch" type="checkbox"/><label for="toctree-checkbox-15"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_region.BrainRegion.html">spyglass.common.common_region.BrainRegion</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_sensors.html">spyglass.common.common_sensors</a><input class="toctree-checkbox" id="toctree-checkbox-16" name="toctree-checkbox-16" role="switch" type="checkbox"/><label for="toctree-checkbox-16"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_sensors.SensorData.html">spyglass.common.common_sensors.SensorData</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_session.html">spyglass.common.common_session</a><input class="toctree-checkbox" id="toctree-checkbox-17" name="toctree-checkbox-17" role="switch" type="checkbox"/><label for="toctree-checkbox-17"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_session.ExperimenterList.html">spyglass.common.common_session.ExperimenterList</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_session.Session.html">spyglass.common.common_session.Session</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_session.SessionGroup.html">spyglass.common.common_session.SessionGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_session.SessionGroupSession.html">spyglass.common.common_session.SessionGroupSession</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_subject.html">spyglass.common.common_subject</a><input class="toctree-checkbox" id="toctree-checkbox-18" name="toctree-checkbox-18" role="switch" type="checkbox"/><label for="toctree-checkbox-18"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_subject.Subject.html">spyglass.common.common_subject.Subject</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.common.common_task.html">spyglass.common.common_task</a><input class="toctree-checkbox" id="toctree-checkbox-19" name="toctree-checkbox-19" role="switch" type="checkbox"/><label for="toctree-checkbox-19"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_task.Task.html">spyglass.common.common_task.Task</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.common.common_task.TaskEpoch.html">spyglass.common.common_task.TaskEpoch</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../_autosummary/spyglass.common.dj_helper_fn.html">spyglass.common.dj_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../_autosummary/spyglass.common.nwb_helper_fn.html">spyglass.common.nwb_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../_autosummary/spyglass.common.populate_all_common.html">spyglass.common.populate_all_common</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../_autosummary/spyglass.common.signal_processing.html">spyglass.common.signal_processing</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../_autosummary/spyglass.data_import.html">spyglass.data_import</a><input class="toctree-checkbox" id="toctree-checkbox-20" name="toctree-checkbox-20" role="switch" type="checkbox"/><label for="toctree-checkbox-20"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../_autosummary/spyglass.data_import.insert_sessions.html">spyglass.data_import.insert_sessions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../_autosummary/spyglass.data_import.storage_dirs.html">spyglass.data_import.storage_dirs</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.html">spyglass.spikesorting</a><input class="toctree-checkbox" id="toctree-checkbox-21" name="toctree-checkbox-21" role="switch" type="checkbox"/><label for="toctree-checkbox-21"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.html">spyglass.spikesorting.merged_sorting_extractor</a><input class="toctree-checkbox" id="toctree-checkbox-22" name="toctree-checkbox-22" role="switch" type="checkbox"/><label for="toctree-checkbox-22"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.sortingview.html">spyglass.spikesorting.sortingview</a><input class="toctree-checkbox" id="toctree-checkbox-23" name="toctree-checkbox-23" role="switch" type="checkbox"/><label for="toctree-checkbox-23"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html">spyglass.spikesorting.sortingview.SortingviewWorkspace</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection.html">spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.sortingview_helper_fn.html">spyglass.spikesorting.sortingview_helper_fn</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_artifact.html">spyglass.spikesorting.spikesorting_artifact</a><input class="toctree-checkbox" id="toctree-checkbox-24" name="toctree-checkbox-24" role="switch" type="checkbox"/><label for="toctree-checkbox-24"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList.html">spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.html">spyglass.spikesorting.spikesorting_curation</a><input class="toctree-checkbox" id="toctree-checkbox-25" name="toctree-checkbox-25" role="switch" type="checkbox"/><label for="toctree-checkbox-25"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html">spyglass.spikesorting.spikesorting_curation.AutomaticCuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html">spyglass.spikesorting.spikesorting_curation.Curation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html">spyglass.spikesorting.spikesorting_curation.MetricParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricSelection.html">spyglass.spikesorting.spikesorting_curation.MetricSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.QualityMetrics.html">spyglass.spikesorting.spikesorting_curation.QualityMetrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformParameters.html">spyglass.spikesorting.spikesorting_curation.WaveformParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformSelection.html">spyglass.spikesorting.spikesorting_curation.WaveformSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html">spyglass.spikesorting.spikesorting_curation.Waveforms</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_recording.html">spyglass.spikesorting.spikesorting_recording</a><input class="toctree-checkbox" id="toctree-checkbox-26" name="toctree-checkbox-26" role="switch" type="checkbox"/><label for="toctree-checkbox-26"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html">spyglass.spikesorting.spikesorting_recording.SortGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_recording.SortInterval.html">spyglass.spikesorting.spikesorting_recording.SortInterval</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_sorting.html">spyglass.spikesorting.spikesorting_sorting</a><input class="toctree-checkbox" id="toctree-checkbox-27" name="toctree-checkbox-27" role="switch" type="checkbox"/><label for="toctree-checkbox-27"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection.html">spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../how_to_contribute.html">How to Contribute</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../copyright.html">Copyright</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main">
+          
+<style>
+/* CSS for nbsphinx extension */
+
+/* remove conflicting styling from Sphinx themes */
+div.nbinput.container div.prompt *,
+div.nboutput.container div.prompt *,
+div.nbinput.container div.input_area pre,
+div.nboutput.container div.output_area pre,
+div.nbinput.container div.input_area .highlight,
+div.nboutput.container div.output_area .highlight {
+    border: none;
+    padding: 0;
+    margin: 0;
+    box-shadow: none;
+}
+
+div.nbinput.container > div[class*=highlight],
+div.nboutput.container > div[class*=highlight] {
+    margin: 0;
+}
+
+div.nbinput.container div.prompt *,
+div.nboutput.container div.prompt * {
+    background: none;
+}
+
+div.nboutput.container div.output_area .highlight,
+div.nboutput.container div.output_area pre {
+    background: unset;
+}
+
+div.nboutput.container div.output_area div.highlight {
+    color: unset;  /* override Pygments text color */
+}
+
+/* avoid gaps between output lines */
+div.nboutput.container div[class*=highlight] pre {
+    line-height: normal;
+}
+
+/* input/output containers */
+div.nbinput.container,
+div.nboutput.container {
+    display: -webkit-flex;
+    display: flex;
+    align-items: flex-start;
+    margin: 0;
+    width: 100%;
+}
+@media (max-width: 540px) {
+    div.nbinput.container,
+    div.nboutput.container {
+        flex-direction: column;
+    }
+}
+
+/* input container */
+div.nbinput.container {
+    padding-top: 5px;
+}
+
+/* last container */
+div.nblast.container {
+    padding-bottom: 5px;
+}
+
+/* input prompt */
+div.nbinput.container div.prompt pre {
+    color: #307FC1;
+}
+
+/* output prompt */
+div.nboutput.container div.prompt pre {
+    color: #BF5B3D;
+}
+
+/* all prompts */
+div.nbinput.container div.prompt,
+div.nboutput.container div.prompt {
+    width: 4.5ex;
+    padding-top: 5px;
+    position: relative;
+    user-select: none;
+}
+
+div.nbinput.container div.prompt > div,
+div.nboutput.container div.prompt > div {
+    position: absolute;
+    right: 0;
+    margin-right: 0.3ex;
+}
+
+@media (max-width: 540px) {
+    div.nbinput.container div.prompt,
+    div.nboutput.container div.prompt {
+        width: unset;
+        text-align: left;
+        padding: 0.4em;
+    }
+    div.nboutput.container div.prompt.empty {
+        padding: 0;
+    }
+
+    div.nbinput.container div.prompt > div,
+    div.nboutput.container div.prompt > div {
+        position: unset;
+    }
+}
+
+/* disable scrollbars on prompts */
+div.nbinput.container div.prompt pre,
+div.nboutput.container div.prompt pre {
+    overflow: hidden;
+}
+
+/* input/output area */
+div.nbinput.container div.input_area,
+div.nboutput.container div.output_area {
+    -webkit-flex: 1;
+    flex: 1;
+    overflow: auto;
+}
+@media (max-width: 540px) {
+    div.nbinput.container div.input_area,
+    div.nboutput.container div.output_area {
+        width: 100%;
+    }
+}
+
+/* input area */
+div.nbinput.container div.input_area {
+    border: 1px solid #e0e0e0;
+    border-radius: 2px;
+    /*background: #f5f5f5;*/
+}
+
+/* override MathJax center alignment in output cells */
+div.nboutput.container div[class*=MathJax] {
+    text-align: left !important;
+}
+
+/* override sphinx.ext.imgmath center alignment in output cells */
+div.nboutput.container div.math p {
+    text-align: left;
+}
+
+/* standard error */
+div.nboutput.container div.output_area.stderr {
+    background: #fdd;
+}
+
+/* ANSI colors */
+.ansi-black-fg { color: #3E424D; }
+.ansi-black-bg { background-color: #3E424D; }
+.ansi-black-intense-fg { color: #282C36; }
+.ansi-black-intense-bg { background-color: #282C36; }
+.ansi-red-fg { color: #E75C58; }
+.ansi-red-bg { background-color: #E75C58; }
+.ansi-red-intense-fg { color: #B22B31; }
+.ansi-red-intense-bg { background-color: #B22B31; }
+.ansi-green-fg { color: #00A250; }
+.ansi-green-bg { background-color: #00A250; }
+.ansi-green-intense-fg { color: #007427; }
+.ansi-green-intense-bg { background-color: #007427; }
+.ansi-yellow-fg { color: #DDB62B; }
+.ansi-yellow-bg { background-color: #DDB62B; }
+.ansi-yellow-intense-fg { color: #B27D12; }
+.ansi-yellow-intense-bg { background-color: #B27D12; }
+.ansi-blue-fg { color: #208FFB; }
+.ansi-blue-bg { background-color: #208FFB; }
+.ansi-blue-intense-fg { color: #0065CA; }
+.ansi-blue-intense-bg { background-color: #0065CA; }
+.ansi-magenta-fg { color: #D160C4; }
+.ansi-magenta-bg { background-color: #D160C4; }
+.ansi-magenta-intense-fg { color: #A03196; }
+.ansi-magenta-intense-bg { background-color: #A03196; }
+.ansi-cyan-fg { color: #60C6C8; }
+.ansi-cyan-bg { background-color: #60C6C8; }
+.ansi-cyan-intense-fg { color: #258F8F; }
+.ansi-cyan-intense-bg { background-color: #258F8F; }
+.ansi-white-fg { color: #C5C1B4; }
+.ansi-white-bg { background-color: #C5C1B4; }
+.ansi-white-intense-fg { color: #A1A6B2; }
+.ansi-white-intense-bg { background-color: #A1A6B2; }
+
+.ansi-default-inverse-fg { color: #FFFFFF; }
+.ansi-default-inverse-bg { background-color: #000000; }
+
+.ansi-bold { font-weight: bold; }
+.ansi-underline { text-decoration: underline; }
+
+
+div.nbinput.container div.input_area div[class*=highlight] > pre,
+div.nboutput.container div.output_area div[class*=highlight] > pre,
+div.nboutput.container div.output_area div[class*=highlight].math,
+div.nboutput.container div.output_area.rendered_html,
+div.nboutput.container div.output_area > div.output_javascript,
+div.nboutput.container div.output_area:not(.rendered_html) > img{
+    padding: 5px;
+    margin: 0;
+}
+
+/* fix copybtn overflow problem in chromium (needed for 'sphinx_copybutton') */
+div.nbinput.container div.input_area > div[class^='highlight'],
+div.nboutput.container div.output_area > div[class^='highlight']{
+    overflow-y: hidden;
+}
+
+/* hide copybtn icon on prompts (needed for 'sphinx_copybutton') */
+.prompt .copybtn {
+    display: none;
+}
+
+/* Some additional styling taken form the Jupyter notebook CSS */
+.jp-RenderedHTMLCommon table,
+div.rendered_html table {
+  border: none;
+  border-collapse: collapse;
+  border-spacing: 0;
+  color: black;
+  font-size: 12px;
+  table-layout: fixed;
+}
+.jp-RenderedHTMLCommon thead,
+div.rendered_html thead {
+  border-bottom: 1px solid black;
+  vertical-align: bottom;
+}
+.jp-RenderedHTMLCommon tr,
+.jp-RenderedHTMLCommon th,
+.jp-RenderedHTMLCommon td,
+div.rendered_html tr,
+div.rendered_html th,
+div.rendered_html td {
+  text-align: right;
+  vertical-align: middle;
+  padding: 0.5em 0.5em;
+  line-height: normal;
+  white-space: normal;
+  max-width: none;
+  border: none;
+}
+.jp-RenderedHTMLCommon th,
+div.rendered_html th {
+  font-weight: bold;
+}
+.jp-RenderedHTMLCommon tbody tr:nth-child(odd),
+div.rendered_html tbody tr:nth-child(odd) {
+  background: #f5f5f5;
+}
+.jp-RenderedHTMLCommon tbody tr:hover,
+div.rendered_html tbody tr:hover {
+  background: rgba(66, 165, 245, 0.2);
+}
+</style>
+<section id="NWB-Datajoint-Spike-Sorting-Tutorial">
+<h1>NWB-Datajoint Spike Sorting Tutorial<a class="headerlink" href="#NWB-Datajoint-Spike-Sorting-Tutorial" title="Permalink to this headline">#</a></h1>
+<p><strong>Note: make a copy of this notebook and run the copy to avoid git conflicts in the future</strong></p>
+<p>This is the second in a multi-part tutorial on the NWB-Datajoint pipeline used in Loren Frank’s lab, UCSF. It demonstrates how to run spike sorting and curate units within the pipeline.</p>
+<p>If you have not done <a class="reference internal" href="0_intro.html"><span class="doc">tutorial 0</span></a> yet, make sure to do so before proceeding. It is also recommended that you complete the <a class="reference external" href="https://tutorials.datajoint.io/">datajoint tutorials</a> before starting this.</p>
+<p><strong>Note 2: Make sure you are running this within the spyglass Conda environment)</strong></p>
+<section id="Spike-Sorting-Overview---With-associated-tables">
+<h2>Spike Sorting Overview - With associated tables<a class="headerlink" href="#Spike-Sorting-Overview---With-associated-tables" title="Permalink to this headline">#</a></h2>
+</section>
+<section id="Extracting-the-recording-from-the-NWB-file">
+<h2><a class="reference external" href="#section1">Extracting the recording from the NWB file</a><a class="headerlink" href="#Extracting-the-recording-from-the-NWB-file" title="Permalink to this headline">#</a></h2>
+<ol class="arabic simple">
+<li><p>Specifying your <a class="reference external" href="#Specifying-your-NWB-filename">NWB</a> file.</p></li>
+<li><p>Specifying which electrodes involved in the recording to sort data from. - <code class="docutils literal notranslate"><span class="pre">`SortGroup</span></code> &lt;#SortGroup&gt;`__</p></li>
+<li><p>Specifying the time segment of the recording we want to sort. - <code class="docutils literal notranslate"><span class="pre">`IntervalList</span></code> &lt;#IntervalList&gt;`__, <code class="docutils literal notranslate"><span class="pre">`SortInterval</span></code> &lt;#SortInterval&gt;`__</p></li>
+<li><p>Specifying the parameters to use for filtering the recording. - <code class="docutils literal notranslate"><span class="pre">`SpikeSortingFilterParameters</span></code> &lt;#SpikeSortingFilterParameters&gt;`__</p></li>
+<li><p>Specifying the parameters to apply for artifact detection/removal. -<code class="docutils literal notranslate"><span class="pre">`SpikeSortingArtifactParameters</span></code> &lt;#SpikeSortingArtifactParameters&gt;`__</p></li>
+<li><p>Combining these parameters. - <code class="docutils literal notranslate"><span class="pre">`SpikeSortingRecordingSelection</span></code> &lt;#SpikeSortingRecordingSelection&gt;`__</p></li>
+<li><p>Extracting the recording. - <code class="docutils literal notranslate"><span class="pre">`SpikeSortingRecording</span></code> &lt;#SpikeSortingRecording&gt;`__</p></li>
+<li><p>Add extracted recording to kachery server. - <code class="docutils literal notranslate"><span class="pre">`SpikeSortingWorkspace</span></code> &lt;#SpikeSortingWorkspace&gt;`__</p></li>
+</ol>
+</section>
+<section id="Spike-sorting-the-extracted-recording">
+<h2><a class="reference external" href="#section2">Spike sorting the extracted recording</a><a class="headerlink" href="#Spike-sorting-the-extracted-recording" title="Permalink to this headline">#</a></h2>
+<ol class="arabic simple">
+<li><p>Choose which spike sorting algorithm to use. - <code class="docutils literal notranslate"><span class="pre">`SpikeSorter</span></code> &lt;#SpikeSorter&gt;`__</p></li>
+<li><p>Specify the parameters for that spike sorter to use. - <code class="docutils literal notranslate"><span class="pre">`SpikeSorterParameters</span></code> &lt;#SpikeSorterParameters&gt;`__</p></li>
+<li><p>Combine these parameters. - <code class="docutils literal notranslate"><span class="pre">`SpikeSortingSelection</span></code> &lt;#SpikeSortingSelection&gt;`__</p></li>
+<li><p>Spike sort the extracted recording according to chose parameter set. - <code class="docutils literal notranslate"><span class="pre">`SpikeSorting</span></code> &lt;#SpikeSorting&gt;`__</p></li>
+<li><p>Visualizing the sort using figurl. - <code class="docutils literal notranslate"><span class="pre">`Visualize</span></code> &lt;#Revisiting-SpikeSortingWorkspace&gt;`__</p></li>
+</ol>
+<p>Let’s start by importing tables from spyglass along with some other useful packages</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">datajoint</span> <span class="k">as</span> <span class="nn">dj</span>
+<span class="kn">import</span> <span class="nn">spyglass</span> <span class="k">as</span> <span class="nn">nd</span>
+<span class="c1"># ignore datajoint+jupyter async warnings</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+<span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s1">&#39;ignore&#39;</span><span class="p">,</span> <span class="n">category</span><span class="o">=</span><span class="ne">DeprecationWarning</span><span class="p">)</span>
+<span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s1">&#39;ignore&#39;</span><span class="p">,</span> <span class="n">category</span><span class="o">=</span><span class="ne">ResourceWarning</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">spyglass.common</span> <span class="kn">import</span> <span class="p">(</span><span class="n">SortGroup</span><span class="p">,</span> <span class="n">SpikeSortingFilterParameters</span><span class="p">,</span>
+                                  <span class="n">SpikeSortingArtifactDetectionParameters</span><span class="p">,</span>
+                                  <span class="n">SpikeSortingRecordingSelection</span><span class="p">,</span> <span class="n">SpikeSortingRecording</span><span class="p">,</span>
+                                  <span class="n">SpikeSortingWorkspace</span><span class="p">,</span> <span class="n">SortingID</span><span class="p">,</span>
+                                  <span class="n">SpikeSorter</span><span class="p">,</span> <span class="n">SpikeSorterParameters</span><span class="p">,</span>
+                                  <span class="n">SpikeSortingSelection</span><span class="p">,</span> <span class="n">SpikeSorting</span><span class="p">,</span>
+                                  <span class="n">SpikeSortingMetricParameters</span><span class="p">,</span>
+                                  <span class="n">AutomaticCurationParameters</span><span class="p">,</span> <span class="n">AutomaticCurationSelection</span><span class="p">,</span>
+                                  <span class="n">AutomaticCuration</span><span class="p">,</span> <span class="n">Nwbfile</span><span class="p">,</span>
+                                  <span class="n">CuratedSpikeSortingSelection</span><span class="p">,</span> <span class="n">CuratedSpikeSorting</span><span class="p">,</span>
+                                  <span class="n">IntervalList</span><span class="p">,</span> <span class="n">SortInterval</span><span class="p">,</span>
+                                  <span class="n">LabMember</span><span class="p">,</span> <span class="n">LabTeam</span><span class="p">,</span> <span class="n">Raw</span><span class="p">,</span> <span class="n">Session</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<p>Now let’s make sure that you’re a part of the LorenLab <code class="docutils literal notranslate"><span class="pre">LabTeam</span></code>, so you’ll have the right permissions for this tutorial.Replace <code class="docutils literal notranslate"><span class="pre">your_name</span></code>, <code class="docutils literal notranslate"><span class="pre">your_email</span></code>, and <code class="docutils literal notranslate"><span class="pre">datajoint_username</span></code>, with your information.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[3]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">your_name</span> <span class="o">=</span> <span class="s1">&#39;FirstName LastName&#39;</span>
+<span class="n">your_email</span> <span class="o">=</span> <span class="s1">&#39;gmail@gmail.com&#39;</span>
+<span class="n">datajoint_username</span> <span class="o">=</span> <span class="s1">&#39;user&#39;</span>
+</pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lorenlab_team_members</span> <span class="o">=</span> <span class="p">(</span><span class="n">LabTeam</span><span class="p">()</span><span class="o">.</span><span class="n">LabTeamMember</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;team_name&#39;</span> <span class="p">:</span> <span class="s1">&#39;LorenLab&#39;</span><span class="p">})</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s1">&#39;lab_member_name&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+<span class="n">LabMember</span><span class="o">.</span><span class="n">insert_from_name</span><span class="p">(</span><span class="n">your_name</span><span class="p">)</span>
+<span class="n">LabMember</span><span class="o">.</span><span class="n">LabMemberInfo</span><span class="o">.</span><span class="n">insert1</span><span class="p">([</span><span class="n">your_name</span><span class="p">,</span> <span class="n">your_email</span><span class="p">,</span> <span class="n">datajoint_username</span><span class="p">],</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">LabTeam</span><span class="o">.</span><span class="n">LabTeamMember</span><span class="o">.</span><span class="n">insert1</span><span class="p">({</span><span class="s1">&#39;team_name&#39;</span> <span class="p">:</span> <span class="s1">&#39;LorenLab&#39;</span><span class="p">,</span>
+                               <span class="s1">&#39;lab_member_name&#39;</span> <span class="p">:</span> <span class="n">your_name</span><span class="p">},</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<p>Now try and use the <code class="docutils literal notranslate"><span class="pre">fetch</span></code> command and the example above to complete the code below and query the <code class="docutils literal notranslate"><span class="pre">LabTeam</span></code> table to double-check that you are a part of the <code class="docutils literal notranslate"><span class="pre">LorenLab</span></code> team.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">if</span> <span class="n">your_name</span> <span class="ow">in</span> <span class="p">(</span><span class="n">LabTeam</span><span class="o">.</span><span class="n">_____</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="n">___</span><span class="p">:</span><span class="n">____</span><span class="p">})</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">______</span><span class="p">)</span><span class="o">.</span><span class="n">tolist</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;You made it in!&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Specifying-your-NWB-filename">
+<h2>Specifying your NWB filename<a class="headerlink" href="#Specifying-your-NWB-filename" title="Permalink to this headline">#</a></h2>
+<p>NWB filenames take the form of an animal name plus the date of the recording.For this tutorial, we will use the nwb file <code class="docutils literal notranslate"><span class="pre">'montague20200802_tutorial_.nwb'</span></code>. The animal name is <code class="docutils literal notranslate"><span class="pre">montague</span></code> and the date of the recording is <code class="docutils literal notranslate"><span class="pre">20200802</span></code>, the <code class="docutils literal notranslate"><span class="pre">tutorial</span></code> is unique to this setting :-).We’ll first re-insert the NWB file that you deleted at the end of <code class="docutils literal notranslate"><span class="pre">0_intro</span></code>. This file may already be in the table, in which case there will be a warning, that’s ok!<strong>Note</strong>: If you’re not on the Frank Lab
+server, this file will be accessible as <code class="docutils literal notranslate"><span class="pre">montague20200802.nwb</span></code> on DANDI through this URL: <strong>insert-url</strong></p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[4]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">nd</span><span class="o">.</span><span class="n">insert_sessions</span><span class="p">(</span><span class="s1">&#39;montague20200802_tutorial.nwb&#39;</span><span class="p">)</span>
+<span class="n">nwb_file_name</span> <span class="o">=</span> <span class="s1">&#39;montague20200802_tutorial_.nwb&#39;</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[4]:
+</pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+    <style type="text/css">
+        .Relation{
+            border-collapse:collapse;
+        }
+        .Relation th{
+            background: #A0A0A0; color: #ffffff; padding:4px; border:#f0e0e0 1px solid;
+            font-weight: normal; font-family: monospace; font-size: 100%;
+        }
+        .Relation td{
+            padding:4px; border:#f0e0e0 1px solid; font-size:100%;
+        }
+        .Relation tr:nth-child(odd){
+            background: #ffffff;
+        }
+        .Relation tr:nth-child(even){
+            background: #f3f1ff;
+        }
+        /* Tooltip container */
+        .djtooltip {
+        }
+        /* Tooltip text */
+        .djtooltip .djtooltiptext {
+            visibility: hidden;
+            width: 120px;
+            background-color: black;
+            color: #fff;
+            text-align: center;
+            padding: 5px 0;
+            border-radius: 6px;
+            /* Position the tooltip text - see examples below! */
+            position: absolute;
+            z-index: 1;
+        }
+        #primary {
+            font-weight: bold;
+            color: black;
+        }
+        #nonprimary {
+            font-weight: normal;
+            color: white;
+        }
+
+        /* Show the tooltip text when you mouse over the tooltip container */
+        .djtooltip:hover .djtooltiptext {
+            visibility: visible;
+        }
+    </style>
+
+    <b></b>
+        <div style="max-height:1000px;max-width:1500px;overflow:auto;">
+        <table border="1" class="Relation">
+            <thead> <tr style="text-align: right;"> <th> <div class="djtooltip">
+                            <p id="primary">nwb_file_name</p>
+                            <span class="djtooltiptext">name of the NWB file</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="primary">electrode_group_name</p>
+                            <span class="djtooltiptext">electrode group name from NWBFile</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="primary">electrode_id</p>
+                            <span class="djtooltiptext">the unique number for this electrode</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">probe_type</p>
+                            <span class="djtooltiptext"></span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">probe_shank</p>
+                            <span class="djtooltiptext">shank number within probe</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">probe_electrode</p>
+                            <span class="djtooltiptext">electrode</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">region_id</p>
+                            <span class="djtooltiptext"></span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">name</p>
+                            <span class="djtooltiptext">unique label for each contact</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">original_reference_electrode</p>
+                            <span class="djtooltiptext">the configured reference electrode for this electrode</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">x</p>
+                            <span class="djtooltiptext">the x coordinate of the electrode position in the brain</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">y</p>
+                            <span class="djtooltiptext">the y coordinate of the electrode position in the brain</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">z</p>
+                            <span class="djtooltiptext">the z coordinate of the electrode position in the brain</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">filtering</p>
+                            <span class="djtooltiptext">description of the signal filtering</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">impedance</p>
+                            <span class="djtooltiptext">electrode impedance</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">bad_channel</p>
+                            <span class="djtooltiptext">if electrode is 'good' or 'bad' as observed during recording</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">x_warped</p>
+                            <span class="djtooltiptext">x coordinate of electrode position warped to common template brain</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">y_warped</p>
+                            <span class="djtooltiptext">y coordinate of electrode position warped to common template brain</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">z_warped</p>
+                            <span class="djtooltiptext">z coordinate of electrode position warped to common template brain</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">contacts</p>
+                            <span class="djtooltiptext">label of electrode contacts used for a bipolar signal -- current workaround</span>
+                        </div> </th> </tr> </thead>
+            <tbody> <tr> <td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>1</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>3</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>3</td>
+<td>1</td>
+<td>3</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>4</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>4</td>
+<td>1</td>
+<td>4</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>5</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>5</td>
+<td>1</td>
+<td>5</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>7</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>7</td>
+<td>1</td>
+<td>7</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>8</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>8</td>
+<td>1</td>
+<td>8</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>9</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>9</td>
+<td>1</td>
+<td>9</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>11</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>11</td>
+<td>1</td>
+<td>11</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>12</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>12</td>
+<td>1</td>
+<td>12</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>13</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>13</td>
+<td>1</td>
+<td>13</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>15</td>
+<td>128c-4s8mm6cm-20um-40um-sl</td>
+<td>0</td>
+<td>15</td>
+<td>1</td>
+<td>15</td>
+<td>1</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>None</td>
+<td>0.0</td>
+<td>False</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0.0</td>
+<td></td> </tr> </tbody>
+        </table>
+        <p>...</p>
+        <p>Total: 192</p></div></div>
+</div>
+<section id="NOTE:-This-is-a-common-file-for-this-tutorial,-table-entries-may-change-during-use-if-others-are-also-working-through.">
+<h3><strong>NOTE</strong>: This is a common file for this tutorial, table entries may change during use if others are also working through.<a class="headerlink" href="#NOTE:-This-is-a-common-file-for-this-tutorial,-table-entries-may-change-during-use-if-others-are-also-working-through." title="Permalink to this headline">#</a></h3>
+</section>
+<section id="id1">
+<h3>Extracting the recording from the NWB file<a class="headerlink" href="#id1" title="Permalink to this headline">#</a></h3>
+</section>
+<section id="SortGroup">
+<h3><code class="docutils literal notranslate"><span class="pre">SortGroup</span></code><a class="headerlink" href="#SortGroup" title="Permalink to this headline">#</a></h3>
+<p>For each NWB file there will be multiple electrodes available to sort spikes from.We commonly sort over multiple electrodes at a time, also referred to as a <code class="docutils literal notranslate"><span class="pre">SortGroup</span></code>.This is accomplished by grouping electrodes according to what tetrode or shank of a probe they were on.<strong>NOTE</strong>: answer ‘yes’ when prompted</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[6]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># answer &#39;yes&#39; when prompted</span>
+<span class="n">SortGroup</span><span class="p">()</span><span class="o">.</span><span class="n">set_group_by_shank</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[6]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+array([0, 1, 2, 3])
+</pre></div></div>
+</div>
+<p>Each electrode will have an <code class="docutils literal notranslate"><span class="pre">electrode_id</span></code> and be associated with an <code class="docutils literal notranslate"><span class="pre">electrode_group_name</span></code>, which will correspond with a <code class="docutils literal notranslate"><span class="pre">sort_group_id</span></code>. In this case, the data was recorded from a 32 tetrode (128 channel) drive, and thus results in 128 unique <code class="docutils literal notranslate"><span class="pre">electrode_id</span></code>, 32 unique <code class="docutils literal notranslate"><span class="pre">electrode_group_name</span></code>, and 32 unique <code class="docutils literal notranslate"><span class="pre">sort_group_id</span></code>.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SortGroup</span><span class="o">.</span><span class="n">SortGroupElectrode</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">}</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="IntervalList">
+<h3><code class="docutils literal notranslate"><span class="pre">IntervalList</span></code><a class="headerlink" href="#IntervalList" title="Permalink to this headline">#</a></h3>
+<p>Next, we make a decision about the time interval for our spike sorting. Let’s re-examine <code class="docutils literal notranslate"><span class="pre">IntervalList</span></code>.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[7]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">IntervalList</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span> <span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Deleting 0 rows from `common_spikesorting`.`sort_group`
+Nothing to delete.
+</pre></div></div>
+</div>
+<p>For our example, let’s choose to start with the first run interval (<code class="docutils literal notranslate"><span class="pre">02_r1</span></code>) as our sort interval. We first fetch <code class="docutils literal notranslate"><span class="pre">valid_times</span></code> for this interval.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[8]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">interval_list_name</span> <span class="o">=</span> <span class="s1">&#39;02_r1&#39;</span>
+<span class="n">interval_list</span> <span class="o">=</span> <span class="p">(</span><span class="n">IntervalList</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span> <span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">,</span>
+                            <span class="s1">&#39;interval_list_name&#39;</span> <span class="p">:</span> <span class="n">interval_list_name</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;valid_times&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;IntervalList begins as a </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">((</span><span class="n">interval_list</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">interval_list</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span> <span class="o">/</span> <span class="mi">60</span><span class="p">,</span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s1">g</span><span class="si">}</span><span class="s1"> min long epoch&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[8]:
+</pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+    <style type="text/css">
+        .Relation{
+            border-collapse:collapse;
+        }
+        .Relation th{
+            background: #A0A0A0; color: #ffffff; padding:4px; border:#f0e0e0 1px solid;
+            font-weight: normal; font-family: monospace; font-size: 100%;
+        }
+        .Relation td{
+            padding:4px; border:#f0e0e0 1px solid; font-size:100%;
+        }
+        .Relation tr:nth-child(odd){
+            background: #ffffff;
+        }
+        .Relation tr:nth-child(even){
+            background: #f3f1ff;
+        }
+        /* Tooltip container */
+        .djtooltip {
+        }
+        /* Tooltip text */
+        .djtooltip .djtooltiptext {
+            visibility: hidden;
+            width: 120px;
+            background-color: black;
+            color: #fff;
+            text-align: center;
+            padding: 5px 0;
+            border-radius: 6px;
+            /* Position the tooltip text - see examples below! */
+            position: absolute;
+            z-index: 1;
+        }
+        #primary {
+            font-weight: bold;
+            color: black;
+        }
+        #nonprimary {
+            font-weight: normal;
+            color: white;
+        }
+
+        /* Show the tooltip text when you mouse over the tooltip container */
+        .djtooltip:hover .djtooltiptext {
+            visibility: visible;
+        }
+    </style>
+
+    <b>Table for holding the set of electrodes that will be sorted together</b>
+        <div style="max-height:1000px;max-width:1500px;overflow:auto;">
+        <table border="1" class="Relation">
+            <thead> <tr style="text-align: right;"> <th> <div class="djtooltip">
+                            <p id="primary">nwb_file_name</p>
+                            <span class="djtooltiptext">name of the NWB file</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="primary">sort_group_id</p>
+                            <span class="djtooltiptext">identifier for a group of electrodes</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">sort_reference_electrode_id</p>
+                            <span class="djtooltiptext">the electrode to use for reference. -1: no reference, -2: common median</span>
+                        </div> </th> </tr> </thead>
+            <tbody> <tr> <td>beans20190718_.nwb</td>
+<td>0</td>
+<td>1</td></tr><tr><td>beans20190718_.nwb</td>
+<td>1</td>
+<td>1</td></tr><tr><td>beans20190718_.nwb</td>
+<td>2</td>
+<td>1</td></tr><tr><td>beans20190718_.nwb</td>
+<td>3</td>
+<td>1</td></tr><tr><td>beans20190718_.nwb</td>
+<td>4</td>
+<td>1</td></tr><tr><td>beans20190718_.nwb</td>
+<td>5</td>
+<td>1</td></tr><tr><td>beans20190718_.nwb</td>
+<td>6</td>
+<td>1</td></tr><tr><td>beans20190718_.nwb</td>
+<td>7</td>
+<td>1</td> </tr> </tbody>
+        </table>
+
+        <p>Total: 8</p></div></div>
+</div>
+</section>
+<section id="SortInterval">
+<h3><code class="docutils literal notranslate"><span class="pre">SortInterval</span></code><a class="headerlink" href="#SortInterval" title="Permalink to this headline">#</a></h3>
+<p>For brevity’s sake, we’ll select only the first 180 seconds of that 90 minute epoch as our sort interval. To do so, we define our new sort interval as the start time of <code class="docutils literal notranslate"><span class="pre">interval_list</span></code> from the previous cell, plus 180 seconds.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[9]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">sort_interval</span> <span class="o">=</span> <span class="n">interval_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">sort_interval_name</span> <span class="o">=</span> <span class="n">interval_list_name</span> <span class="o">+</span> <span class="s1">&#39;_first180&#39;</span>
+<span class="n">sort_interval</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">interval_list</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+<span class="n">sort_interval</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">sort_interval</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">+</span><span class="mi">180</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[9]:
+</pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+    <style type="text/css">
+        .Relation{
+            border-collapse:collapse;
+        }
+        .Relation th{
+            background: #A0A0A0; color: #ffffff; padding:4px; border:#f0e0e0 1px solid;
+            font-weight: normal; font-family: monospace; font-size: 100%;
+        }
+        .Relation td{
+            padding:4px; border:#f0e0e0 1px solid; font-size:100%;
+        }
+        .Relation tr:nth-child(odd){
+            background: #ffffff;
+        }
+        .Relation tr:nth-child(even){
+            background: #f3f1ff;
+        }
+        /* Tooltip container */
+        .djtooltip {
+        }
+        /* Tooltip text */
+        .djtooltip .djtooltiptext {
+            visibility: hidden;
+            width: 120px;
+            background-color: black;
+            color: #fff;
+            text-align: center;
+            padding: 5px 0;
+            border-radius: 6px;
+            /* Position the tooltip text - see examples below! */
+            position: absolute;
+            z-index: 1;
+        }
+        #primary {
+            font-weight: bold;
+            color: black;
+        }
+        #nonprimary {
+            font-weight: normal;
+            color: white;
+        }
+
+        /* Show the tooltip text when you mouse over the tooltip container */
+        .djtooltip:hover .djtooltiptext {
+            visibility: visible;
+        }
+    </style>
+
+    <b></b>
+        <div style="max-height:1000px;max-width:1500px;overflow:auto;">
+        <table border="1" class="Relation">
+            <thead> <tr style="text-align: right;"> <th> <div class="djtooltip">
+                            <p id="primary">nwb_file_name</p>
+                            <span class="djtooltiptext">name of the NWB file</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="primary">sort_group_id</p>
+                            <span class="djtooltiptext">identifier for a group of electrodes</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="primary">electrode_group_name</p>
+                            <span class="djtooltiptext">electrode group name from NWBFile</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="primary">electrode_id</p>
+                            <span class="djtooltiptext">the unique number for this electrode</span>
+                        </div> </th> </tr> </thead>
+            <tbody> <tr> <td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>0</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>1</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>3</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>4</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>5</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>7</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>8</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>9</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>11</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>12</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>13</td></tr><tr><td>beans20190718_.nwb</td>
+<td>0</td>
+<td>0</td>
+<td>15</td> </tr> </tbody>
+        </table>
+        <p>...</p>
+        <p>Total: 192</p></div></div>
+</div>
+<p>We can now add this <code class="docutils literal notranslate"><span class="pre">sort_interval</span></code> with the specified <code class="docutils literal notranslate"><span class="pre">sort_interval_name</span></code> <code class="docutils literal notranslate"><span class="pre">'02_r1_first180'</span></code> to the <code class="docutils literal notranslate"><span class="pre">SortInterval</span></code> table. The <code class="docutils literal notranslate"><span class="pre">SortInterval.insert()</span></code> function requires the arguments input as a dictionary with keys <code class="docutils literal notranslate"><span class="pre">nwb_file_name</span></code>, <code class="docutils literal notranslate"><span class="pre">sort_interval_name</span></code>, and <code class="docutils literal notranslate"><span class="pre">sort_interval</span></code>.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[10]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SortInterval</span><span class="o">.</span><span class="n">insert1</span><span class="p">({</span><span class="s1">&#39;nwb_file_name&#39;</span> <span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">,</span>
+                     <span class="s1">&#39;sort_interval_name&#39;</span> <span class="p">:</span> <span class="n">sort_interval_name</span><span class="p">,</span>
+                     <span class="s1">&#39;sort_interval&#39;</span> <span class="p">:</span> <span class="n">sort_interval</span><span class="p">},</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<p>Now that we’ve inserted the entry into <code class="docutils literal notranslate"><span class="pre">SortInterval</span></code> you can see that entry by querying <code class="docutils literal notranslate"><span class="pre">SortInterval</span></code> using the <code class="docutils literal notranslate"><span class="pre">nwb_file_name</span></code> and <code class="docutils literal notranslate"><span class="pre">sort_interval_name</span></code>.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[12]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SortInterval</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span> <span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">,</span> <span class="s1">&#39;sort_interval_name&#39;</span><span class="p">:</span> <span class="n">sort_interval_name</span><span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[12]:
+</pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+    <style type="text/css">
+        .Relation{
+            border-collapse:collapse;
+        }
+        .Relation th{
+            background: #A0A0A0; color: #ffffff; padding:4px; border:#f0e0e0 1px solid;
+            font-weight: normal; font-family: monospace; font-size: 100%;
+        }
+        .Relation td{
+            padding:4px; border:#f0e0e0 1px solid; font-size:100%;
+        }
+        .Relation tr:nth-child(odd){
+            background: #ffffff;
+        }
+        .Relation tr:nth-child(even){
+            background: #f3f1ff;
+        }
+        /* Tooltip container */
+        .djtooltip {
+        }
+        /* Tooltip text */
+        .djtooltip .djtooltiptext {
+            visibility: hidden;
+            width: 120px;
+            background-color: black;
+            color: #fff;
+            text-align: center;
+            padding: 5px 0;
+            border-radius: 6px;
+            /* Position the tooltip text - see examples below! */
+            position: absolute;
+            z-index: 1;
+        }
+        #primary {
+            font-weight: bold;
+            color: black;
+        }
+        #nonprimary {
+            font-weight: normal;
+            color: white;
+        }
+
+        /* Show the tooltip text when you mouse over the tooltip container */
+        .djtooltip:hover .djtooltiptext {
+            visibility: visible;
+        }
+    </style>
+
+    <b>Table for holding the set of electrodes that will be sorted together</b>
+        <div style="max-height:1000px;max-width:1500px;overflow:auto;">
+        <table border="1" class="Relation">
+            <thead> <tr style="text-align: right;"> <th> <div class="djtooltip">
+                            <p id="primary">nwb_file_name</p>
+                            <span class="djtooltiptext">name of the NWB file</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="primary">sort_group_id</p>
+                            <span class="djtooltiptext">identifier for a group of electrodes</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">sort_reference_electrode_id</p>
+                            <span class="djtooltiptext">the electrode to use for reference. -1: no reference, -2: common median</span>
+                        </div> </th> </tr> </thead>
+            <tbody> <tr> <td>beans20190718_.nwb</td>
+<td>8</td>
+<td>-1</td> </tr> </tbody>
+        </table>
+
+        <p>Total: 1</p></div></div>
+</div>
+<p>Now using the <code class="docutils literal notranslate"><span class="pre">.fetch()</span></code> command, you can retrieve your user-defined sort interval from the <code class="docutils literal notranslate"><span class="pre">SortInterval</span></code> table.A quick double-check will show that it is indeed a 180 second segment.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[14]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fetched_sort_interval</span> <span class="o">=</span> <span class="p">(</span><span class="n">SortInterval</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span> <span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">,</span>
+                                      <span class="s1">&#39;sort_interval_name&#39;</span><span class="p">:</span> <span class="n">sort_interval_name</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;sort_interval&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;The sort interval goes from </span><span class="si">{</span><span class="n">fetched_sort_interval</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s1"> to </span><span class="si">{</span><span class="n">fetched_sort_interval</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s1">, </span><span class="se">\</span>
+<span class="s1">which is </span><span class="si">{</span><span class="p">(</span><span class="n">fetched_sort_interval</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">fetched_sort_interval</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="si">}</span><span class="s1"> seconds. COOL!&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[14]:
+</pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+    <style type="text/css">
+        .Relation{
+            border-collapse:collapse;
+        }
+        .Relation th{
+            background: #A0A0A0; color: #ffffff; padding:4px; border:#f0e0e0 1px solid;
+            font-weight: normal; font-family: monospace; font-size: 100%;
+        }
+        .Relation td{
+            padding:4px; border:#f0e0e0 1px solid; font-size:100%;
+        }
+        .Relation tr:nth-child(odd){
+            background: #ffffff;
+        }
+        .Relation tr:nth-child(even){
+            background: #f3f1ff;
+        }
+        /* Tooltip container */
+        .djtooltip {
+        }
+        /* Tooltip text */
+        .djtooltip .djtooltiptext {
+            visibility: hidden;
+            width: 120px;
+            background-color: black;
+            color: #fff;
+            text-align: center;
+            padding: 5px 0;
+            border-radius: 6px;
+            /* Position the tooltip text - see examples below! */
+            position: absolute;
+            z-index: 1;
+        }
+        #primary {
+            font-weight: bold;
+            color: black;
+        }
+        #nonprimary {
+            font-weight: normal;
+            color: white;
+        }
+
+        /* Show the tooltip text when you mouse over the tooltip container */
+        .djtooltip:hover .djtooltiptext {
+            visibility: visible;
+        }
+    </style>
+
+    <b>Time intervals with data</b>
+        <div style="max-height:1000px;max-width:1500px;overflow:auto;">
+        <table border="1" class="Relation">
+            <thead> <tr style="text-align: right;"> <th> <div class="djtooltip">
+                            <p id="primary">nwb_file_name</p>
+                            <span class="djtooltiptext">name of the NWB file</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="primary">interval_list_name</p>
+                            <span class="djtooltiptext">descriptive name of this interval list</span>
+                        </div></th><th><div class="djtooltip">
+                            <p id="nonprimary">valid_times</p>
+                            <span class="djtooltiptext">numpy array with start and end times for each interval</span>
+                        </div> </th> </tr> </thead>
+            <tbody> <tr> <td>beans20190718_.nwb</td>
+<td>01_s1</td>
+<td>=BLOB=</td></tr><tr><td>beans20190718_.nwb</td>
+<td>02_r1</td>
+<td>=BLOB=</td></tr><tr><td>beans20190718_.nwb</td>
+<td>03_s2</td>
+<td>=BLOB=</td></tr><tr><td>beans20190718_.nwb</td>
+<td>04_r2</td>
+<td>=BLOB=</td></tr><tr><td>beans20190718_.nwb</td>
+<td>pos 0 valid times</td>
+<td>=BLOB=</td></tr><tr><td>beans20190718_.nwb</td>
+<td>pos 1 valid times</td>
+<td>=BLOB=</td></tr><tr><td>beans20190718_.nwb</td>
+<td>pos 2 valid times</td>
+<td>=BLOB=</td></tr><tr><td>beans20190718_.nwb</td>
+<td>pos 3 valid times</td>
+<td>=BLOB=</td></tr><tr><td>beans20190718_.nwb</td>
+<td>raw data valid times</td>
+<td>=BLOB=</td> </tr> </tbody>
+        </table>
+
+        <p>Total: 9</p></div></div>
+</div>
+</section>
+<section id="SpikeSortingFilterParameters">
+<h3><code class="docutils literal notranslate"><span class="pre">SpikeSortingFilterParameters</span></code><a class="headerlink" href="#SpikeSortingFilterParameters" title="Permalink to this headline">#</a></h3>
+<p>Let’s first take a look at the <code class="docutils literal notranslate"><span class="pre">SpikeSortingFilterParameters</span></code> table, which contains the parameters used to filter the recorded data in the spike band prior to spike sorting it.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[15]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSortingFilterParameters</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<p>Now let’s set the filtering parameters. Here we insert the default parameters, and then fetch the default parameter dictionary.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[17]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSortingFilterParameters</span><span class="p">()</span><span class="o">.</span><span class="n">insert_default</span><span class="p">()</span>
+<span class="n">filter_param_dict</span> <span class="o">=</span> <span class="p">(</span><span class="n">SpikeSortingFilterParameters</span><span class="p">()</span> <span class="o">&amp;</span>
+                     <span class="p">{</span><span class="s1">&#39;filter_parameter_set_name&#39;</span><span class="p">:</span> <span class="s1">&#39;default&#39;</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;filter_parameter_dict&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">filter_param_dict</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+[1.56349064e+09 1.56349065e+09]
+</pre></div></div>
+</div>
+<p>Lets first adjust the <code class="docutils literal notranslate"><span class="pre">frequency_min</span></code> parameter to 600, which is the preference for hippocampal data. Now we can insert that into <code class="docutils literal notranslate"><span class="pre">SpikeSortingFilterParameters</span></code> as a new set of filtering parameters for hippocampal data, named <code class="docutils literal notranslate"><span class="pre">'franklab_default_hippocampus'</span></code>.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[19]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">filter_param_dict</span><span class="p">[</span><span class="s1">&#39;frequency_min&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">600</span>
+<span class="n">SpikeSortingFilterParameters</span><span class="p">()</span><span class="o">.</span><span class="n">insert1</span><span class="p">({</span><span class="s1">&#39;filter_parameter_set_name&#39;</span><span class="p">:</span> <span class="s1">&#39;franklab_default_hippocampus&#39;</span><span class="p">,</span>
+                                       <span class="s1">&#39;filter_parameter_dict&#39;</span> <span class="p">:</span> <span class="n">filter_param_dict</span><span class="p">},</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="SpikeSortingArtifactParameters">
+<h3><code class="docutils literal notranslate"><span class="pre">SpikeSortingArtifactParameters</span></code><a class="headerlink" href="#SpikeSortingArtifactParameters" title="Permalink to this headline">#</a></h3>
+<p>Similarly, we set up the <code class="docutils literal notranslate"><span class="pre">SpikeSortingArtifactParameters</span></code>, which can allow us to remove artifacts from the data.Specifically, we want to target artifact signal that is within the frequency band of our filter (600Hz-6KHz), and thus will not get removed by filtering.For the moment we just set up a <code class="docutils literal notranslate"><span class="pre">&quot;none&quot;</span></code> parameter set, which will do nothing when used.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[20]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSortingArtifactDetectionParameters</span><span class="p">()</span><span class="o">.</span><span class="n">insert_default</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="Setting-a-key">
+<h2>Setting a key<a class="headerlink" href="#Setting-a-key" title="Permalink to this headline">#</a></h2>
+<p>Now we set up the parameters of the recording we are interested in, and make a dictionary to hold all these values, which will make querying and inserting into tables all the easier moving forward.We’ll assign this to <code class="docutils literal notranslate"><span class="pre">ssr_key</span></code> as these values are relvant to the recording we’ll use to spike sort, also referred to as the spike sorting recording <strong>(ssr)</strong> :-)The <code class="docutils literal notranslate"><span class="pre">sort_group_id</span></code> refers back to the <code class="docutils literal notranslate"><span class="pre">SortGroup</span></code> table we populated at the beginning of the tutorial. We’ll use <code class="docutils literal notranslate"><span class="pre">sort_group_id</span></code> 10
+here. Our <code class="docutils literal notranslate"><span class="pre">sort_interval_name</span></code> is the same as above: <code class="docutils literal notranslate"><span class="pre">'02_r1_first600'</span></code>.Our <code class="docutils literal notranslate"><span class="pre">filter_param_name</span></code> and <code class="docutils literal notranslate"><span class="pre">artifact_param_name</span></code> are the same ones we just inserted into <code class="docutils literal notranslate"><span class="pre">SpikeSortingFilterParameters</span></code> and <code class="docutils literal notranslate"><span class="pre">SpikeSortingArtifactDetectionParameters</span></code>, respectively.The <code class="docutils literal notranslate"><span class="pre">interval_list</span></code> was also set above as <code class="docutils literal notranslate"><span class="pre">'02_r1'</span></code>. Unlike <code class="docutils literal notranslate"><span class="pre">sort_interval_name</span></code>, which reflects our subsection of the recording, we keep <code class="docutils literal notranslate"><span class="pre">interval_list</span></code> unchanged from the original epoch name.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[22]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">key</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+<span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">nwb_file_name</span>
+<span class="n">key</span><span class="p">[</span><span class="s1">&#39;sort_group_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">10</span>
+<span class="n">key</span><span class="p">[</span><span class="s1">&#39;sort_interval_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;02_r1_first180&#39;</span>
+<span class="n">key</span><span class="p">[</span><span class="s1">&#39;filter_parameter_set_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;franklab_default_hippocampus&#39;</span>
+<span class="n">key</span><span class="p">[</span><span class="s1">&#39;artifact_parameter_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;none&#39;</span>
+<span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;02_r1&#39;</span>
+<span class="n">key</span><span class="p">[</span><span class="s1">&#39;team_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;LorenLab&#39;</span>
+
+<span class="n">ssr_key</span> <span class="o">=</span> <span class="n">key</span>
+</pre></div>
+</div>
+</div>
+<section id="SpikeSortingRecordingSelection">
+<h3><code class="docutils literal notranslate"><span class="pre">SpikeSortingRecordingSelection</span></code><a class="headerlink" href="#SpikeSortingRecordingSelection" title="Permalink to this headline">#</a></h3>
+<p>We now insert all of these parameters into the <code class="docutils literal notranslate"><span class="pre">SpikeSortingRecordingSelection</span></code> table, which we will use to specify what time/tetrode/etc of the recording we want to extract.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[24]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSortingRecordingSelection</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">ssr_key</span><span class="p">,</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">SpikeSortingRecordingSelection</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">ssr_key</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="SpikeSortingRecording">
+<h3><code class="docutils literal notranslate"><span class="pre">SpikeSortingRecording</span></code><a class="headerlink" href="#SpikeSortingRecording" title="Permalink to this headline">#</a></h3>
+<p>And now we’re ready to extract the recording! We use the <code class="docutils literal notranslate"><span class="pre">.proj()</span></code> command to pass along all of the primary keys from the <code class="docutils literal notranslate"><span class="pre">SpikeSortingRecordingSelection</span></code> table to the <code class="docutils literal notranslate"><span class="pre">SpikeSortingRecording</span></code> table, so it knows exactly what to extract.<strong>Note</strong>: This step might take a bit with longer duration sort intervals</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSortingRecording</span><span class="o">.</span><span class="n">populate</span><span class="p">([(</span><span class="n">SpikeSortingRecordingSelection</span> <span class="o">&amp;</span> <span class="n">ssr_key</span><span class="p">)</span><span class="o">.</span><span class="n">proj</span><span class="p">()])</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="Now-we-can-see-our-recording-in-the-table.-E-x-c-i-t-i-n-g-!">
+<h2>Now we can see our recording in the table. <em>E x c i t i n g !</em><a class="headerlink" href="#Now-we-can-see-our-recording-in-the-table.-E-x-c-i-t-i-n-g-!" title="Permalink to this headline">#</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSortingRecording</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">ssr_key</span>
+</pre></div>
+</div>
+</div>
+<section id="SpikeSortingWorkspace">
+<h3><code class="docutils literal notranslate"><span class="pre">SpikeSortingWorkspace</span></code><a class="headerlink" href="#SpikeSortingWorkspace" title="Permalink to this headline">#</a></h3>
+<p>Now we need to populate the <code class="docutils literal notranslate"><span class="pre">SpikeSortingWorkspace</span></code> table to make this recording available via kachery (our server backend).</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSortingWorkspace</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSortingWorkspace</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">ssr_key</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="id2">
+<h3>Spike sorting the extracted recording<a class="headerlink" href="#id2" title="Permalink to this headline">#</a></h3>
+</section>
+<section id="SpikeSorter">
+<h3><code class="docutils literal notranslate"><span class="pre">SpikeSorter</span></code><a class="headerlink" href="#SpikeSorter" title="Permalink to this headline">#</a></h3>
+<p>For our example, we will be using <code class="docutils literal notranslate"><span class="pre">mountainsort4</span></code>. There are already some default parameters in the <code class="docutils literal notranslate"><span class="pre">SpikeSorterParameters</span></code> table we’ll <code class="docutils literal notranslate"><span class="pre">fetch</span></code>.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSorter</span><span class="p">()</span><span class="o">.</span><span class="n">insert_from_spikeinterface</span><span class="p">()</span>
+<span class="n">SpikeSorterParameters</span><span class="p">()</span><span class="o">.</span><span class="n">insert_from_spikeinterface</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[31]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Let&#39;s look at the default params</span>
+<span class="n">sorter_name</span><span class="o">=</span><span class="s1">&#39;mountainsort4&#39;</span>
+<span class="n">ms4_default_params</span> <span class="o">=</span> <span class="p">(</span><span class="n">SpikeSorterParameters</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;sorter_name&#39;</span> <span class="p">:</span> <span class="n">sorter_name</span><span class="p">,</span>
+                                               <span class="s1">&#39;spikesorter_parameter_set_name&#39;</span> <span class="p">:</span> <span class="s1">&#39;default&#39;</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">ms4_default_params</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<p>Now we can change these default parameters to line up more closely with our preferences.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">param_dict</span> <span class="o">=</span> <span class="n">ms4_default_params</span><span class="p">[</span><span class="s1">&#39;parameter_dict&#39;</span><span class="p">]</span>
+<span class="c1"># Detect downward going spikes (1 is for upward, 0 is for both up and down)</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;detect_sign&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+<span class="c1"># We will sort electrodes together that are within 100 microns of each other</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;adjacency_radius&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">100</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;curation&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="c1"># Turn filter off since we will filter it prior to starting sort</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;filter&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;freq_min&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;freq_max&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="c1"># Turn whiten off since we will whiten it prior to starting sort</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;whiten&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="c1"># set num_workers to be the same number as the number of electrodes</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;num_workers&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">4</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;verbose&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="c1"># set clip size as number of samples for 1.33 millisecond based on the sampling rate</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;clip_size&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">int</span><span class="p">(</span><span class="mf">1.33e-3</span> <span class="o">*</span> <span class="p">(</span><span class="n">Raw</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span> <span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;sampling_rate&#39;</span><span class="p">))</span>
+<span class="n">param_dict</span><span class="p">[</span><span class="s1">&#39;noise_overlap_threshold&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">param_dict</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="SpikeSorterParameters">
+<h3><code class="docutils literal notranslate"><span class="pre">SpikeSorterParameters</span></code><a class="headerlink" href="#SpikeSorterParameters" title="Permalink to this headline">#</a></h3>
+<p>Let’s go ahead and insert a new <code class="docutils literal notranslate"><span class="pre">spikesorter_parameter_set_name</span></code> and <code class="docutils literal notranslate"><span class="pre">parameter_dict</span></code> into the <code class="docutils literal notranslate"><span class="pre">SpikeSorterParameters</span></code> table named <code class="docutils literal notranslate"><span class="pre">franklab_hippocampus_tutorial</span></code>.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">parameter_set_name</span> <span class="o">=</span> <span class="s1">&#39;franklab_hippocampus_tutorial&#39;</span>
+</pre></div>
+</div>
+</div>
+<p>Now we insert our parameters for use by the spike sorter into <code class="docutils literal notranslate"><span class="pre">SpikeSorterParameters</span></code> and double-check that it made it in to the table.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSorterParameters</span><span class="o">.</span><span class="n">insert1</span><span class="p">({</span><span class="s1">&#39;sorter_name&#39;</span><span class="p">:</span> <span class="n">sorter_name</span><span class="p">,</span>
+                               <span class="s1">&#39;spikesorter_parameter_set_name&#39;</span><span class="p">:</span> <span class="n">parameter_set_name</span><span class="p">,</span>
+                               <span class="s1">&#39;parameter_dict&#39;</span><span class="p">:</span> <span class="n">param_dict</span><span class="p">},</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="c1"># Check that insert was successful</span>
+<span class="n">p</span> <span class="o">=</span> <span class="p">(</span><span class="n">SpikeSorterParameters</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;sorter_name&#39;</span><span class="p">:</span> <span class="n">sorter_name</span><span class="p">,</span> <span class="s1">&#39;spikesorter_parameter_set_name&#39;</span><span class="p">:</span> <span class="n">parameter_set_name</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">()</span>
+<span class="n">p</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="SpikeSortingSelection">
+<h3><code class="docutils literal notranslate"><span class="pre">SpikeSortingSelection</span></code><a class="headerlink" href="#SpikeSortingSelection" title="Permalink to this headline">#</a></h3>
+<section id="Gearing-up-to-Spike-Sort!">
+<h4>Gearing up to Spike Sort!<a class="headerlink" href="#Gearing-up-to-Spike-Sort!" title="Permalink to this headline">#</a></h4>
+<p>We now collect all the decisions we made up to here and put it into the <code class="docutils literal notranslate"><span class="pre">SpikeSortingSelection</span></code> table, which is specific to this recording and eventual sorting segment.We’ll add in a few parameters to our key and call it <code class="docutils literal notranslate"><span class="pre">ss_key</span></code>.(<strong>note</strong>: the spike <em>sorter</em> parameters defined above are for the sorter, <code class="docutils literal notranslate"><span class="pre">mountainsort4</span></code> in this case.)</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[33]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">key</span> <span class="o">=</span> <span class="p">(</span><span class="n">SpikeSortingWorkspace</span> <span class="o">&amp;</span> <span class="n">ssr_key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s2">&quot;KEY&quot;</span><span class="p">)</span>
+<span class="n">key</span><span class="p">[</span><span class="s1">&#39;sorter_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sorter_name</span>
+<span class="n">key</span><span class="p">[</span><span class="s1">&#39;spikesorter_parameter_set_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">parameter_set_name</span>
+<span class="n">ss_key</span> <span class="o">=</span> <span class="n">key</span>
+<span class="n">SpikeSortingSelection</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">ss_key</span><span class="p">,</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="p">(</span><span class="n">SpikeSortingSelection</span> <span class="o">&amp;</span> <span class="n">ss_key</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="SpikeSorting">
+<h3><code class="docutils literal notranslate"><span class="pre">SpikeSorting</span></code><a class="headerlink" href="#SpikeSorting" title="Permalink to this headline">#</a></h3>
+<p>Now we can run spike sorting. It’s nothing more than populating a table (<code class="docutils literal notranslate"><span class="pre">SpikeSorting</span></code>) based on the entries of <code class="docutils literal notranslate"><span class="pre">SpikeSortingSelection</span></code>.<strong>Note</strong>: This will take a little bit with longer data sets.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSorting</span><span class="o">.</span><span class="n">populate</span><span class="p">([(</span><span class="n">SpikeSortingSelection</span> <span class="o">&amp;</span> <span class="n">ss_key</span><span class="p">)</span><span class="o">.</span><span class="n">proj</span><span class="p">()])</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="Check-to-make-sure-the-table-populated">
+<h2>Check to make sure the table populated<a class="headerlink" href="#Check-to-make-sure-the-table-populated" title="Permalink to this headline">#</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[35]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSorting</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">ss_key</span>
+</pre></div>
+</div>
+</div>
+<section id="Revisiting-SpikeSortingWorkspace">
+<h3>Revisiting <code class="docutils literal notranslate"><span class="pre">SpikeSortingWorkspace</span></code><a class="headerlink" href="#Revisiting-SpikeSortingWorkspace" title="Permalink to this headline">#</a></h3>
+<p>To peform manual curation, we use the <code class="docutils literal notranslate"><span class="pre">figurl</span></code> interface.<code class="docutils literal notranslate"><span class="pre">figurl</span></code> will load more quickly if we run <code class="docutils literal notranslate"><span class="pre">SpikeSortingWorkspace().precalculate()</span></code> beforehand.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[36]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">SpikeSortingWorkspace</span><span class="p">()</span><span class="o">.</span><span class="n">precalculate</span><span class="p">(</span><span class="n">ssr_key</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<p>Here we’ll use the sortingview backend to access the figurl <em>url</em>. We do this by loading the workspace that we set up while populating <code class="docutils literal notranslate"><span class="pre">SpikeSortingWorkspace</span></code>.This workspace, in tandem with the ids of the spike sorting and recording segment we extracted during this tutorial, will allow us to retrieve the url. We’ll also use this opportunity to enable permissions for everyone to curate this sorting.</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[38]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">sortingview</span> <span class="k">as</span> <span class="nn">sv</span>
+<span class="n">workspace</span> <span class="o">=</span> <span class="n">sv</span><span class="o">.</span><span class="n">load_workspace</span><span class="p">((</span><span class="n">SpikeSortingWorkspace</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">ssr_key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;workspace_uri&#39;</span><span class="p">))</span>
+<span class="n">sorting_id</span> <span class="o">=</span> <span class="p">(</span><span class="n">SortingID</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">ssr_key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;sorting_id&#39;</span><span class="p">)</span>
+<span class="n">recording_id</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">recording_ids</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">url</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">experimental_spikesortingview</span><span class="p">(</span><span class="n">recording_id</span><span class="o">=</span><span class="n">recording_id</span><span class="p">,</span> <span class="n">sorting_id</span><span class="o">=</span><span class="n">sorting_id</span><span class="p">,</span>
+                                                  <span class="n">label</span><span class="o">=</span><span class="n">workspace</span><span class="o">.</span><span class="n">label</span><span class="p">,</span> <span class="n">include_curation</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">member_emails</span> <span class="o">=</span> <span class="n">LabMember</span><span class="p">()</span><span class="o">.</span><span class="n">LabMemberInfo</span><span class="p">()</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s1">&#39;lab_member_name&#39;</span><span class="p">,</span><span class="s1">&#39;google_user_name&#39;</span><span class="p">)</span>
+<span class="n">member_dict</span> <span class="o">=</span> <span class="p">[</span><span class="n">email</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">email</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">member_emails</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">member_emails</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">lorenlab_team_members</span><span class="p">]</span>
+<span class="n">workspace</span><span class="o">.</span><span class="n">set_sorting_curation_authorized_users</span><span class="p">(</span><span class="n">sorting_id</span><span class="o">=</span><span class="n">sorting_id</span><span class="p">,</span> <span class="n">user_ids</span><span class="o">=</span><span class="n">member_dict</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">url</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="See-2_curation-for-the-next-tutorial">
+<h3>See 2_curation for the next tutorial<a class="headerlink" href="#See-2_curation-for-the-next-tutorial" title="Permalink to this headline">#</a></h3>
+</section>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="1D_Clusterless_Decoding.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Clusterless Decoding</div>
+              </div>
+              <svg><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="0_intro.html">
+              <svg><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">NWB-Datajoint tutorial 0</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                <a href="../../copyright.html">Copyright</a> &#169; 2020 - Present, Loren Frank
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            <div class="icons">
+              
+            </div>
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            Contents
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">NWB-Datajoint Spike Sorting Tutorial</a><ul>
+<li><a class="reference internal" href="#Spike-Sorting-Overview---With-associated-tables">Spike Sorting Overview - With associated tables</a></li>
+<li><a class="reference internal" href="#Extracting-the-recording-from-the-NWB-file">Extracting the recording from the NWB file</a></li>
+<li><a class="reference internal" href="#Spike-sorting-the-extracted-recording">Spike sorting the extracted recording</a></li>
+<li><a class="reference internal" href="#Specifying-your-NWB-filename">Specifying your NWB filename</a><ul>
+<li><a class="reference internal" href="#NOTE:-This-is-a-common-file-for-this-tutorial,-table-entries-may-change-during-use-if-others-are-also-working-through."><strong>NOTE</strong>: This is a common file for this tutorial, table entries may change during use if others are also working through.</a></li>
+<li><a class="reference internal" href="#id1">Extracting the recording from the NWB file</a></li>
+<li><a class="reference internal" href="#SortGroup"><code class="docutils literal notranslate"><span class="pre">SortGroup</span></code></a></li>
+<li><a class="reference internal" href="#IntervalList"><code class="docutils literal notranslate"><span class="pre">IntervalList</span></code></a></li>
+<li><a class="reference internal" href="#SortInterval"><code class="docutils literal notranslate"><span class="pre">SortInterval</span></code></a></li>
+<li><a class="reference internal" href="#SpikeSortingFilterParameters"><code class="docutils literal notranslate"><span class="pre">SpikeSortingFilterParameters</span></code></a></li>
+<li><a class="reference internal" href="#SpikeSortingArtifactParameters"><code class="docutils literal notranslate"><span class="pre">SpikeSortingArtifactParameters</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Setting-a-key">Setting a key</a><ul>
+<li><a class="reference internal" href="#SpikeSortingRecordingSelection"><code class="docutils literal notranslate"><span class="pre">SpikeSortingRecordingSelection</span></code></a></li>
+<li><a class="reference internal" href="#SpikeSortingRecording"><code class="docutils literal notranslate"><span class="pre">SpikeSortingRecording</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Now-we-can-see-our-recording-in-the-table.-E-x-c-i-t-i-n-g-!">Now we can see our recording in the table. <em>E x c i t i n g !</em></a><ul>
+<li><a class="reference internal" href="#SpikeSortingWorkspace"><code class="docutils literal notranslate"><span class="pre">SpikeSortingWorkspace</span></code></a></li>
+<li><a class="reference internal" href="#id2">Spike sorting the extracted recording</a></li>
+<li><a class="reference internal" href="#SpikeSorter"><code class="docutils literal notranslate"><span class="pre">SpikeSorter</span></code></a></li>
+<li><a class="reference internal" href="#SpikeSorterParameters"><code class="docutils literal notranslate"><span class="pre">SpikeSorterParameters</span></code></a></li>
+<li><a class="reference internal" href="#SpikeSortingSelection"><code class="docutils literal notranslate"><span class="pre">SpikeSortingSelection</span></code></a><ul>
+<li><a class="reference internal" href="#Gearing-up-to-Spike-Sort!">Gearing up to Spike Sort!</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#SpikeSorting"><code class="docutils literal notranslate"><span class="pre">SpikeSorting</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Check-to-make-sure-the-table-populated">Check to make sure the table populated</a><ul>
+<li><a class="reference internal" href="#Revisiting-SpikeSortingWorkspace">Revisiting <code class="docutils literal notranslate"><span class="pre">SpikeSortingWorkspace</span></code></a></li>
+<li><a class="reference internal" href="#See-2_curation-for-the-next-tutorial">See 2_curation for the next tutorial</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script data-url_root="../../" id="documentation_options" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/scripts/furo.js"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    </body>
+</html>

@@ -1,0 +1,15 @@
+sphinx
+sphinx-rtd-theme
+sphinx-book-theme
+pydata-sphinx-theme
+karma-sphinx-theme
+furo
+sphinx-autodoc-typehints
+nbsphinx
+ipython
+jupytext
+jupyter
+matplotlib
+numpy
+myst_parser
+ndx-franklab-novela

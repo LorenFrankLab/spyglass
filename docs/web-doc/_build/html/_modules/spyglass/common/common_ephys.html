@@ -1,0 +1,997 @@
+<!doctype html>
+<html class="no-js">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../../../genindex.html" /><link rel="search" title="Search" href="../../../search.html" /><link rel="copyright" title="Copyright" href="../../../copyright.html" />
+
+    <link rel="shortcut icon" href="../../../_static/lorenLabImage.png"/><meta name="generator" content="sphinx-4.5.0, furo 2022.06.21"/>
+        <title>spyglass.common.common_ephys - Spyglass 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/styles/furo.css?digest=40978830699223671f4072448e654b5958f38b89" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/styles/furo-extensions.css?digest=30d1aed668e5c3a91c3e3bf6a60b675221979f0e" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/css/datajoint_header.css" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f8f8f8;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-half" viewBox="0 0 24 24">
+    <title>Auto light/dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-shadow">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M13 12h5" />
+      <path d="M13 15h4" />
+      <path d="M13 18h1" />
+      <path d="M13 9h4" />
+      <path d="M13 6h1" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../../../index.html"><div class="brand">Spyglass 1.0.0 documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand centered" href="../../../index.html">
+  
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo" src="../../../_static/lorenLabImage.png" alt="Logo"/>
+  </div>
+  
+  <span class="sidebar-brand-text">Spyglass 1.0.0 documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../../../search.html" role="search">
+  <input class="sidebar-search" placeholder=Search name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../index.html">Home page</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../create_figurl.html">FigUrl View</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../tutorials.html">Tutorials</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/0_intro.html">Introduction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/1_spikesorting.html">Spike Sorting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/1D_Clusterless_Decoding.html">Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/2_curation.html">Curation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/2_curation_lftest.html">Curation LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/2D_Clusterless_Decoding.html">Another Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/3_lfp.html">LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/4_position_info.html">Position Information</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/5_linearization.html">Linearization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/docker_mysql_tutorial.html">MySQL Docker</a></li>
+</ul>
+</li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.html">API reference</a><input class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.cli.html">spyglass.cli</a><input class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.cli.cli.html">spyglass.cli.cli</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.html">spyglass.common</a><input class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_backup.html">spyglass.common.common_backup</a><input class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_backup.CuratedSpikeSortingBackUp.html">spyglass.common.common_backup.CuratedSpikeSortingBackUp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_backup.SpikeSortingBackUp.html">spyglass.common.common_backup.SpikeSortingBackUp</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.html">spyglass.common.common_behav</a><input class="toctree-checkbox" id="toctree-checkbox-6" name="toctree-checkbox-6" role="switch" type="checkbox"/><label for="toctree-checkbox-6"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.HeadDir.html">spyglass.common.common_behav.HeadDir</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.LinPos.html">spyglass.common.common_behav.LinPos</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.PositionSource.html">spyglass.common.common_behav.PositionSource</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.RawPosition.html">spyglass.common.common_behav.RawPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.Speed.html">spyglass.common.common_behav.Speed</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.StateScriptFile.html">spyglass.common.common_behav.StateScriptFile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.VideoFile.html">spyglass.common.common_behav.VideoFile</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.html">spyglass.common.common_device</a><input class="toctree-checkbox" id="toctree-checkbox-7" name="toctree-checkbox-7" role="switch" type="checkbox"/><label for="toctree-checkbox-7"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.CameraDevice.html">spyglass.common.common_device.CameraDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.DataAcquisitionDevice.html">spyglass.common.common_device.DataAcquisitionDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.Probe.html">spyglass.common.common_device.Probe</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_dio.html">spyglass.common.common_dio</a><input class="toctree-checkbox" id="toctree-checkbox-8" name="toctree-checkbox-8" role="switch" type="checkbox"/><label for="toctree-checkbox-8"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_dio.DIOEvents.html">spyglass.common.common_dio.DIOEvents</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.html">spyglass.common.common_ephys</a><input class="toctree-checkbox" id="toctree-checkbox-9" name="toctree-checkbox-9" role="switch" type="checkbox"/><label for="toctree-checkbox-9"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.Electrode.html">spyglass.common.common_ephys.Electrode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.ElectrodeBrainRegion.html">spyglass.common.common_ephys.ElectrodeBrainRegion</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.ElectrodeGroup.html">spyglass.common.common_ephys.ElectrodeGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFP.html">spyglass.common.common_ephys.LFP</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFPBand.html">spyglass.common.common_ephys.LFPBand</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFPBandSelection.html">spyglass.common.common_ephys.LFPBandSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFPSelection.html">spyglass.common.common_ephys.LFPSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.Raw.html">spyglass.common.common_ephys.Raw</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.SampleCount.html">spyglass.common.common_ephys.SampleCount</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_filter.html">spyglass.common.common_filter</a><input class="toctree-checkbox" id="toctree-checkbox-10" name="toctree-checkbox-10" role="switch" type="checkbox"/><label for="toctree-checkbox-10"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_filter.FirFilter.html">spyglass.common.common_filter.FirFilter</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_interval.html">spyglass.common.common_interval</a><input class="toctree-checkbox" id="toctree-checkbox-11" name="toctree-checkbox-11" role="switch" type="checkbox"/><label for="toctree-checkbox-11"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_interval.IntervalList.html">spyglass.common.common_interval.IntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.html">spyglass.common.common_lab</a><input class="toctree-checkbox" id="toctree-checkbox-12" name="toctree-checkbox-12" role="switch" type="checkbox"/><label for="toctree-checkbox-12"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.Institution.html">spyglass.common.common_lab.Institution</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.Lab.html">spyglass.common.common_lab.Lab</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.LabMember.html">spyglass.common.common_lab.LabMember</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.LabTeam.html">spyglass.common.common_lab.LabTeam</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.html">spyglass.common.common_nwbfile</a><input class="toctree-checkbox" id="toctree-checkbox-13" name="toctree-checkbox-13" role="switch" type="checkbox"/><label for="toctree-checkbox-13"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html">spyglass.common.common_nwbfile.AnalysisNwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfileKachery.html">spyglass.common.common_nwbfile.AnalysisNwbfileKachery</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.Nwbfile.html">spyglass.common.common_nwbfile.Nwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.NwbfileKachery.html">spyglass.common.common_nwbfile.NwbfileKachery</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.html">spyglass.common.common_position</a><input class="toctree-checkbox" id="toctree-checkbox-14" name="toctree-checkbox-14" role="switch" type="checkbox"/><label for="toctree-checkbox-14"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizationSelection.html">spyglass.common.common_position.IntervalLinearizationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html">spyglass.common.common_position.IntervalLinearizedPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfo.html">spyglass.common.common_position.IntervalPositionInfo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfoSelection.html">spyglass.common.common_position.IntervalPositionInfoSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.LinearizationParameters.html">spyglass.common.common_position.LinearizationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html">spyglass.common.common_position.NodePicker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.PositionInfoParameters.html">spyglass.common.common_position.PositionInfoParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.PositionVideo.html">spyglass.common.common_position.PositionVideo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.SelectFromCollection.html">spyglass.common.common_position.SelectFromCollection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.TrackGraph.html">spyglass.common.common_position.TrackGraph</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_region.html">spyglass.common.common_region</a><input class="toctree-checkbox" id="toctree-checkbox-15" name="toctree-checkbox-15" role="switch" type="checkbox"/><label for="toctree-checkbox-15"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_region.BrainRegion.html">spyglass.common.common_region.BrainRegion</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_sensors.html">spyglass.common.common_sensors</a><input class="toctree-checkbox" id="toctree-checkbox-16" name="toctree-checkbox-16" role="switch" type="checkbox"/><label for="toctree-checkbox-16"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_sensors.SensorData.html">spyglass.common.common_sensors.SensorData</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.html">spyglass.common.common_session</a><input class="toctree-checkbox" id="toctree-checkbox-17" name="toctree-checkbox-17" role="switch" type="checkbox"/><label for="toctree-checkbox-17"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.ExperimenterList.html">spyglass.common.common_session.ExperimenterList</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.Session.html">spyglass.common.common_session.Session</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.SessionGroup.html">spyglass.common.common_session.SessionGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.SessionGroupSession.html">spyglass.common.common_session.SessionGroupSession</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_subject.html">spyglass.common.common_subject</a><input class="toctree-checkbox" id="toctree-checkbox-18" name="toctree-checkbox-18" role="switch" type="checkbox"/><label for="toctree-checkbox-18"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_subject.Subject.html">spyglass.common.common_subject.Subject</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_task.html">spyglass.common.common_task</a><input class="toctree-checkbox" id="toctree-checkbox-19" name="toctree-checkbox-19" role="switch" type="checkbox"/><label for="toctree-checkbox-19"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_task.Task.html">spyglass.common.common_task.Task</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_task.TaskEpoch.html">spyglass.common.common_task.TaskEpoch</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.dj_helper_fn.html">spyglass.common.dj_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.nwb_helper_fn.html">spyglass.common.nwb_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.populate_all_common.html">spyglass.common.populate_all_common</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.signal_processing.html">spyglass.common.signal_processing</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.data_import.html">spyglass.data_import</a><input class="toctree-checkbox" id="toctree-checkbox-20" name="toctree-checkbox-20" role="switch" type="checkbox"/><label for="toctree-checkbox-20"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.data_import.insert_sessions.html">spyglass.data_import.insert_sessions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.data_import.storage_dirs.html">spyglass.data_import.storage_dirs</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.html">spyglass.spikesorting</a><input class="toctree-checkbox" id="toctree-checkbox-21" name="toctree-checkbox-21" role="switch" type="checkbox"/><label for="toctree-checkbox-21"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.html">spyglass.spikesorting.merged_sorting_extractor</a><input class="toctree-checkbox" id="toctree-checkbox-22" name="toctree-checkbox-22" role="switch" type="checkbox"/><label for="toctree-checkbox-22"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview.html">spyglass.spikesorting.sortingview</a><input class="toctree-checkbox" id="toctree-checkbox-23" name="toctree-checkbox-23" role="switch" type="checkbox"/><label for="toctree-checkbox-23"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html">spyglass.spikesorting.sortingview.SortingviewWorkspace</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection.html">spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview_helper_fn.html">spyglass.spikesorting.sortingview_helper_fn</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.html">spyglass.spikesorting.spikesorting_artifact</a><input class="toctree-checkbox" id="toctree-checkbox-24" name="toctree-checkbox-24" role="switch" type="checkbox"/><label for="toctree-checkbox-24"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList.html">spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.html">spyglass.spikesorting.spikesorting_curation</a><input class="toctree-checkbox" id="toctree-checkbox-25" name="toctree-checkbox-25" role="switch" type="checkbox"/><label for="toctree-checkbox-25"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html">spyglass.spikesorting.spikesorting_curation.AutomaticCuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html">spyglass.spikesorting.spikesorting_curation.Curation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html">spyglass.spikesorting.spikesorting_curation.MetricParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricSelection.html">spyglass.spikesorting.spikesorting_curation.MetricSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.QualityMetrics.html">spyglass.spikesorting.spikesorting_curation.QualityMetrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformParameters.html">spyglass.spikesorting.spikesorting_curation.WaveformParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformSelection.html">spyglass.spikesorting.spikesorting_curation.WaveformSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html">spyglass.spikesorting.spikesorting_curation.Waveforms</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.html">spyglass.spikesorting.spikesorting_recording</a><input class="toctree-checkbox" id="toctree-checkbox-26" name="toctree-checkbox-26" role="switch" type="checkbox"/><label for="toctree-checkbox-26"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html">spyglass.spikesorting.spikesorting_recording.SortGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SortInterval.html">spyglass.spikesorting.spikesorting_recording.SortInterval</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.html">spyglass.spikesorting.spikesorting_sorting</a><input class="toctree-checkbox" id="toctree-checkbox-27" name="toctree-checkbox-27" role="switch" type="checkbox"/><label for="toctree-checkbox-27"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection.html">spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../how_to_contribute.html">How to Contribute</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../copyright.html">Copyright</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main">
+          <h1>Source code for spyglass.common.common_ephys</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">warnings</span>
+
+<span class="kn">import</span> <span class="nn">datajoint</span> <span class="k">as</span> <span class="nn">dj</span>
+<span class="kn">import</span> <span class="nn">ndx_franklab_novela</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pynwb</span>
+
+<span class="kn">from</span> <span class="nn">.common_device</span> <span class="kn">import</span> <span class="n">Probe</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span> <span class="nn">.common_filter</span> <span class="kn">import</span> <span class="n">FirFilter</span>
+<span class="kn">from</span> <span class="nn">.common_interval</span> <span class="kn">import</span> <span class="n">IntervalList</span><span class="p">,</span> <span class="n">interval_list_censor</span><span class="p">,</span> <span class="n">interval_list_contains_ind</span><span class="p">,</span> <span class="n">interval_list_intersect</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span> <span class="nn">.common_nwbfile</span> <span class="kn">import</span> <span class="n">AnalysisNwbfile</span><span class="p">,</span> <span class="n">Nwbfile</span>
+<span class="kn">from</span> <span class="nn">.common_region</span> <span class="kn">import</span> <span class="n">BrainRegion</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span> <span class="nn">.common_session</span> <span class="kn">import</span> <span class="n">Session</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span> <span class="nn">.dj_helper_fn</span> <span class="kn">import</span> <span class="n">fetch_nwb</span>  <span class="c1"># dj_replace</span>
+<span class="kn">from</span> <span class="nn">.nwb_helper_fn</span> <span class="kn">import</span> <span class="p">(</span><span class="n">estimate_sampling_rate</span><span class="p">,</span> <span class="n">get_data_interface</span><span class="p">,</span>
+                            <span class="n">get_electrode_indices</span><span class="p">,</span> <span class="n">get_nwb_file</span><span class="p">,</span>
+                            <span class="n">get_valid_intervals</span><span class="p">,</span> <span class="n">invalid_electrode_index</span><span class="p">)</span>
+
+<span class="n">schema</span> <span class="o">=</span> <span class="n">dj</span><span class="o">.</span><span class="n">schema</span><span class="p">(</span><span class="s1">&#39;common_ephys&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="ElectrodeGroup"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.ElectrodeGroup.html#spyglass.common.common_ephys.ElectrodeGroup">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">ElectrodeGroup</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Imported</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    # Grouping of electrodes corresponding to a physical probe.</span>
+<span class="s2">    -&gt; Session</span>
+<span class="s2">    electrode_group_name: varchar(80)  # electrode group name from NWBFile</span>
+<span class="s2">    ---</span>
+<span class="s2">    -&gt; BrainRegion</span>
+<span class="s2">    -&gt; [nullable] Probe</span>
+<span class="s2">    description: varchar(2000)  # description of electrode group</span>
+<span class="s2">    target_hemisphere = &quot;Unknown&quot;: enum(&quot;Right&quot;, &quot;Left&quot;, &quot;Unknown&quot;)</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="ElectrodeGroup.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.ElectrodeGroup.html#spyglass.common.common_ephys.ElectrodeGroup.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">nwb_file_name</span> <span class="o">=</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]</span>
+        <span class="n">nwb_file_abspath</span> <span class="o">=</span> <span class="n">Nwbfile</span><span class="o">.</span><span class="n">get_abs_path</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
+        <span class="n">nwbf</span> <span class="o">=</span> <span class="n">get_nwb_file</span><span class="p">(</span><span class="n">nwb_file_abspath</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">electrode_group</span> <span class="ow">in</span> <span class="n">nwbf</span><span class="o">.</span><span class="n">electrode_groups</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;electrode_group_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">electrode_group</span><span class="o">.</span><span class="n">name</span>
+            <span class="c1"># add electrode group location if it does not exist, and fetch the row</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;region_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">BrainRegion</span><span class="o">.</span><span class="n">fetch_add</span><span class="p">(</span><span class="n">region_name</span><span class="o">=</span><span class="n">electrode_group</span><span class="o">.</span><span class="n">location</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">electrode_group</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">ndx_franklab_novela</span><span class="o">.</span><span class="n">Probe</span><span class="p">):</span>
+                <span class="n">key</span><span class="p">[</span><span class="s1">&#39;probe_type&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">electrode_group</span><span class="o">.</span><span class="n">device</span><span class="o">.</span><span class="n">probe_type</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">electrode_group</span><span class="o">.</span><span class="n">description</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">electrode_group</span><span class="p">,</span> <span class="n">ndx_franklab_novela</span><span class="o">.</span><span class="n">NwbElectrodeGroup</span><span class="p">):</span>
+                <span class="c1"># Define target_hemisphere based on targeted x coordinate</span>
+                <span class="k">if</span> <span class="n">electrode_group</span><span class="o">.</span><span class="n">targeted_x</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># if positive or zero x coordinate</span>
+                    <span class="n">key</span><span class="p">[</span><span class="s2">&quot;target_hemisphere&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;Right&quot;</span>  <span class="c1"># define target location as right hemisphere</span>
+                <span class="k">else</span><span class="p">:</span>  <span class="c1"># if negative x coordinate</span>
+                    <span class="n">key</span><span class="p">[</span><span class="s2">&quot;target_hemisphere&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;Left&quot;</span>  <span class="c1"># define target location as left hemisphere</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="Electrode"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.Electrode.html#spyglass.common.common_ephys.Electrode">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">Electrode</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Imported</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; ElectrodeGroup</span>
+<span class="s2">    electrode_id: int                      # the unique number for this electrode</span>
+<span class="s2">    ---</span>
+<span class="s2">    -&gt; [nullable] Probe.Electrode</span>
+<span class="s2">    -&gt; BrainRegion</span>
+<span class="s2">    name = &quot;&quot;: varchar(200)                 # unique label for each contact</span>
+<span class="s2">    original_reference_electrode = -1: int  # the configured reference electrode for this electrode</span>
+<span class="s2">    x = NULL: float                         # the x coordinate of the electrode position in the brain</span>
+<span class="s2">    y = NULL: float                         # the y coordinate of the electrode position in the brain</span>
+<span class="s2">    z = NULL: float                         # the z coordinate of the electrode position in the brain</span>
+<span class="s2">    filtering: varchar(2000)                # description of the signal filtering</span>
+<span class="s2">    impedance = NULL: float                 # electrode impedance</span>
+<span class="s2">    bad_channel = &quot;False&quot;: enum(&quot;True&quot;, &quot;False&quot;)  # if electrode is &quot;good&quot; or &quot;bad&quot; as observed during recording</span>
+<span class="s2">    x_warped = NULL: float                  # x coordinate of electrode position warped to common template brain</span>
+<span class="s2">    y_warped = NULL: float                  # y coordinate of electrode position warped to common template brain</span>
+<span class="s2">    z_warped = NULL: float                  # z coordinate of electrode position warped to common template brain</span>
+<span class="s2">    contacts: varchar(200)                  # label of electrode contacts used for a bipolar signal - current workaround</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="Electrode.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.Electrode.html#spyglass.common.common_ephys.Electrode.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">nwb_file_name</span> <span class="o">=</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]</span>
+        <span class="n">nwb_file_abspath</span> <span class="o">=</span> <span class="n">Nwbfile</span><span class="o">.</span><span class="n">get_abs_path</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
+        <span class="n">nwbf</span> <span class="o">=</span> <span class="n">get_nwb_file</span><span class="p">(</span><span class="n">nwb_file_abspath</span><span class="p">)</span>
+        <span class="n">electrodes</span> <span class="o">=</span> <span class="n">nwbf</span><span class="o">.</span><span class="n">electrodes</span><span class="o">.</span><span class="n">to_dataframe</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">elect_id</span><span class="p">,</span> <span class="n">elect_data</span> <span class="ow">in</span> <span class="n">electrodes</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;electrode_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_id</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">elect_id</span><span class="p">)</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;electrode_group_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">group_name</span>
+            <span class="c1"># rough check of whether the electrodes table was created by rec_to_nwb and has</span>
+            <span class="c1"># the appropriate custom columns used by rec_to_nwb</span>
+            <span class="c1"># TODO this could be better resolved by making an extension for the electrodes table</span>
+            <span class="k">if</span> <span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">elect_data</span><span class="o">.</span><span class="n">group</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">ndx_franklab_novela</span><span class="o">.</span><span class="n">Probe</span><span class="p">)</span> <span class="ow">and</span>
+                    <span class="s1">&#39;probe_shank&#39;</span> <span class="ow">in</span> <span class="n">elect_data</span> <span class="ow">and</span>
+                    <span class="s1">&#39;probe_electrode&#39;</span> <span class="ow">in</span> <span class="n">elect_data</span> <span class="ow">and</span>
+                    <span class="s1">&#39;bad_channel&#39;</span> <span class="ow">in</span> <span class="n">elect_data</span> <span class="ow">and</span>
+                    <span class="s1">&#39;ref_elect_id&#39;</span> <span class="ow">in</span> <span class="n">elect_data</span><span class="p">):</span>
+                <span class="n">key</span><span class="p">[</span><span class="s1">&#39;probe_type&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">group</span><span class="o">.</span><span class="n">device</span><span class="o">.</span><span class="n">probe_type</span>
+                <span class="n">key</span><span class="p">[</span><span class="s1">&#39;probe_shank&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">probe_shank</span>
+                <span class="n">key</span><span class="p">[</span><span class="s1">&#39;probe_electrode&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">probe_electrode</span>
+                <span class="n">key</span><span class="p">[</span><span class="s1">&#39;bad_channel&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;True&#39;</span> <span class="k">if</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">bad_channel</span> <span class="k">else</span> <span class="s1">&#39;False&#39;</span>
+                <span class="n">key</span><span class="p">[</span><span class="s1">&#39;original_reference_electrode&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">ref_elect_id</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;region_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">BrainRegion</span><span class="o">.</span><span class="n">fetch_add</span><span class="p">(</span><span class="n">region_name</span><span class="o">=</span><span class="n">elect_data</span><span class="o">.</span><span class="n">group</span><span class="o">.</span><span class="n">location</span><span class="p">)</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;x&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">x</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;y&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">y</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;z&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">z</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;x_warped&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;y_warped&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;z_warped&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;contacts&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;filtering&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">filtering</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;impedance&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">elect_data</span><span class="o">.</span><span class="n">imp</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="Raw"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.Raw.html#spyglass.common.common_ephys.Raw">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">Raw</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Imported</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    # Raw voltage timeseries data, ElectricalSeries in NWB.</span>
+<span class="s2">    -&gt; Session</span>
+<span class="s2">    ---</span>
+<span class="s2">    -&gt; IntervalList</span>
+<span class="s2">    raw_object_id: varchar(40)      # the NWB object ID for loading this object from the file</span>
+<span class="s2">    sampling_rate: float            # Sampling rate calculated from data, in Hz</span>
+<span class="s2">    comments: varchar(2000)</span>
+<span class="s2">    description: varchar(2000)</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="Raw.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.Raw.html#spyglass.common.common_ephys.Raw.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">nwb_file_name</span> <span class="o">=</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]</span>
+        <span class="n">nwb_file_abspath</span> <span class="o">=</span> <span class="n">Nwbfile</span><span class="o">.</span><span class="n">get_abs_path</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
+        <span class="n">nwbf</span> <span class="o">=</span> <span class="n">get_nwb_file</span><span class="p">(</span><span class="n">nwb_file_abspath</span><span class="p">)</span>
+        <span class="n">raw_interval_name</span> <span class="o">=</span> <span class="s2">&quot;raw data valid times&quot;</span>
+        <span class="c1"># get the acquisition object</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># TODO this assumes there is a single item in NWBFile.acquisition</span>
+            <span class="n">rawdata</span> <span class="o">=</span> <span class="n">nwbf</span><span class="o">.</span><span class="n">get_acquisition</span><span class="p">()</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">rawdata</span><span class="p">,</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">ecephys</span><span class="o">.</span><span class="n">ElectricalSeries</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="ne">AssertionError</span><span class="p">):</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Unable to get acquisition object in: </span><span class="si">{</span><span class="n">nwb_file_abspath</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="n">rawdata</span><span class="o">.</span><span class="n">rate</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">sampling_rate</span> <span class="o">=</span> <span class="n">rawdata</span><span class="o">.</span><span class="n">rate</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Estimating sampling rate...&#39;</span><span class="p">)</span>
+            <span class="c1"># NOTE: Only use first 1e6 timepoints to save time</span>
+            <span class="n">sampling_rate</span> <span class="o">=</span> <span class="n">estimate_sampling_rate</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rawdata</span><span class="o">.</span><span class="n">timestamps</span><span class="p">[:</span><span class="nb">int</span><span class="p">(</span><span class="mf">1e6</span><span class="p">)]),</span> <span class="mf">1.5</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Estimated sampling rate: </span><span class="si">{</span><span class="n">sampling_rate</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;sampling_rate&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sampling_rate</span>
+
+        <span class="n">interval_dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+        <span class="n">interval_dict</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]</span>
+        <span class="n">interval_dict</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw_interval_name</span>
+        <span class="k">if</span> <span class="n">rawdata</span><span class="o">.</span><span class="n">rate</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">interval_dict</span><span class="p">[</span><span class="s1">&#39;valid_times&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">rawdata</span><span class="o">.</span><span class="n">data</span><span class="p">)</span><span class="o">*</span><span class="n">rawdata</span><span class="o">.</span><span class="n">rate</span><span class="p">]])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># get the list of valid times given the specified sampling rate.</span>
+            <span class="n">interval_dict</span><span class="p">[</span><span class="s1">&#39;valid_times&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">get_valid_intervals</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rawdata</span><span class="o">.</span><span class="n">timestamps</span><span class="p">),</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;sampling_rate&#39;</span><span class="p">],</span>
+                                                               <span class="mf">1.75</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">IntervalList</span><span class="p">()</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">interval_dict</span><span class="p">,</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># now insert each of the electrodes as an individual row, but with the same nwb_object_id</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;raw_object_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">rawdata</span><span class="o">.</span><span class="n">object_id</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;sampling_rate&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sampling_rate</span>
+        <span class="nb">print</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;Importing raw data: Estimated sampling rate:</span><span class="se">\t</span><span class="si">{</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;sampling_rate&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1"> Hz&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;Number of valid intervals:</span><span class="se">\t</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">interval_dict</span><span class="p">[</span><span class="s2">&quot;valid_times&quot;</span><span class="p">])</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw_interval_name</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;comments&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">rawdata</span><span class="o">.</span><span class="n">comments</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">rawdata</span><span class="o">.</span><span class="n">description</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Raw.nwb_object"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.Raw.html#spyglass.common.common_ephys.Raw.nwb_object">[docs]</a>    <span class="k">def</span> <span class="nf">nwb_object</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="c1"># TODO return the nwb_object; FIX: this should be replaced with a fetch call. Note that we&#39;re using the raw file</span>
+        <span class="c1"># so we can modify the other one.</span>
+        <span class="n">nwb_file_name</span> <span class="o">=</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]</span>
+        <span class="n">nwb_file_abspath</span> <span class="o">=</span> <span class="n">Nwbfile</span><span class="o">.</span><span class="n">get_abs_path</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
+        <span class="n">nwbf</span> <span class="o">=</span> <span class="n">get_nwb_file</span><span class="p">(</span><span class="n">nwb_file_abspath</span><span class="p">)</span>
+        <span class="n">raw_object_id</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;raw_object_id&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">nwbf</span><span class="o">.</span><span class="n">objects</span><span class="p">[</span><span class="n">raw_object_id</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="Raw.fetch_nwb"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.Raw.html#spyglass.common.common_ephys.Raw.fetch_nwb">[docs]</a>    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="p">(</span><span class="n">Nwbfile</span><span class="p">,</span> <span class="s1">&#39;nwb_file_abs_path&#39;</span><span class="p">),</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="SampleCount"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.SampleCount.html#spyglass.common.common_ephys.SampleCount">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">SampleCount</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Imported</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    # Sample count :s timestamp timeseries</span>
+<span class="s2">    -&gt; Session</span>
+<span class="s2">    ---</span>
+<span class="s2">    sample_count_object_id: varchar(40)      # the NWB object ID for loading this object from the file</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SampleCount.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.SampleCount.html#spyglass.common.common_ephys.SampleCount.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">nwb_file_name</span> <span class="o">=</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]</span>
+        <span class="n">nwb_file_abspath</span> <span class="o">=</span> <span class="n">Nwbfile</span><span class="o">.</span><span class="n">get_abs_path</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
+        <span class="n">nwbf</span> <span class="o">=</span> <span class="n">get_nwb_file</span><span class="p">(</span><span class="n">nwb_file_abspath</span><span class="p">)</span>
+        <span class="c1"># get the sample count object</span>
+        <span class="c1"># TODO: change name when nwb file is changed</span>
+        <span class="n">sample_count</span> <span class="o">=</span> <span class="n">get_data_interface</span><span class="p">(</span><span class="n">nwbf</span><span class="p">,</span> <span class="s1">&#39;sample_count&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">sample_count</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Unable to import SampleCount: no data interface named &quot;sample_count&quot; found in </span><span class="si">{</span><span class="n">nwb_file_name</span><span class="si">}</span><span class="s1">.&#39;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;sample_count_object_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sample_count</span><span class="o">.</span><span class="n">object_id</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SampleCount.fetch_nwb"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.SampleCount.html#spyglass.common.common_ephys.SampleCount.fetch_nwb">[docs]</a>    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="p">(</span><span class="n">Nwbfile</span><span class="p">,</span> <span class="s1">&#39;nwb_file_abs_path&#39;</span><span class="p">),</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="LFPSelection"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFPSelection.html#spyglass.common.common_ephys.LFPSelection">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">LFPSelection</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">     -&gt; Session</span>
+<span class="s2">     &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="LFPSelection.LFPElectrode"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFPSelection.html#spyglass.common.common_ephys.LFPSelection.LFPElectrode">[docs]</a>    <span class="k">class</span> <span class="nc">LFPElectrode</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
+        <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">        -&gt; LFPSelection</span>
+<span class="s2">        -&gt; Electrode</span>
+<span class="s2">        &quot;&quot;&quot;</span></div>
+
+<div class="viewcode-block" id="LFPSelection.set_lfp_electrodes"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFPSelection.html#spyglass.common.common_ephys.LFPSelection.set_lfp_electrodes">[docs]</a>    <span class="k">def</span> <span class="nf">set_lfp_electrodes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">nwb_file_name</span><span class="p">,</span> <span class="n">electrode_list</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Removes all electrodes for the specified nwb file and then adds back the electrodes in the list</span>
+<span class="sd">        :param nwb_file_name: string - the name of the nwb file for the desired session</span>
+<span class="sd">        :param electrode_list: list of electrodes to be used for LFP</span>
+<span class="sd">        :return:</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="c1"># remove the session and then recreate the session and Electrode list</span>
+        <span class="p">(</span><span class="n">LFPSelection</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">})</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span>
+        <span class="c1"># check to see if the user allowed the deletion</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">((</span><span class="n">LFPSelection</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">})</span><span class="o">.</span><span class="n">fetch</span><span class="p">())</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">LFPSelection</span><span class="p">()</span><span class="o">.</span><span class="n">insert1</span><span class="p">({</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">})</span>
+
+            <span class="c1"># TODO: do this in a better way</span>
+            <span class="n">all_electrodes</span> <span class="o">=</span> <span class="p">(</span><span class="n">Electrode</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">})</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">as_dict</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">primary_key</span> <span class="o">=</span> <span class="n">Electrode</span><span class="o">.</span><span class="n">primary_key</span>
+            <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">all_electrodes</span><span class="p">:</span>
+                <span class="c1"># create a dictionary so we can insert new elects</span>
+                <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s1">&#39;electrode_id&#39;</span><span class="p">]</span> <span class="ow">in</span> <span class="n">electrode_list</span><span class="p">:</span>
+                    <span class="n">lfpelectdict</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span>
+                                    <span class="n">v</span> <span class="ow">in</span> <span class="n">e</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">primary_key</span><span class="p">}</span>
+                    <span class="n">LFPSelection</span><span class="p">()</span><span class="o">.</span><span class="n">LFPElectrode</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">lfpelectdict</span><span class="p">,</span> <span class="n">replace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="LFP"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFP.html#spyglass.common.common_ephys.LFP">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">LFP</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Imported</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; LFPSelection</span>
+<span class="s2">    ---</span>
+<span class="s2">    -&gt; IntervalList             # the valid intervals for the data</span>
+<span class="s2">    -&gt; FirFilter                # the filter used for the data</span>
+<span class="s2">    -&gt; AnalysisNwbfile          # the name of the nwb file with the lfp data</span>
+<span class="s2">    lfp_object_id: varchar(40)  # the NWB object ID for loading this object from the file</span>
+<span class="s2">    lfp_sampling_rate: float    # the sampling rate, in HZ</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="LFP.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFP.html#spyglass.common.common_ephys.LFP.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="c1"># get the NWB object with the data; FIX: change to fetch with additional infrastructure</span>
+        <span class="n">rawdata</span> <span class="o">=</span> <span class="n">Raw</span><span class="p">()</span><span class="o">.</span><span class="n">nwb_object</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="n">sampling_rate</span><span class="p">,</span> <span class="n">interval_list_name</span> <span class="o">=</span> <span class="p">(</span><span class="n">Raw</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;sampling_rate&#39;</span><span class="p">,</span> <span class="s1">&#39;interval_list_name&#39;</span><span class="p">)</span>
+        <span class="n">sampling_rate</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">sampling_rate</span><span class="p">))</span>
+
+        <span class="n">valid_times</span> <span class="o">=</span> <span class="p">(</span><span class="n">IntervalList</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+                                         <span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;valid_times&#39;</span><span class="p">)</span>
+        <span class="c1"># keep only the intervals &gt; 1 second long</span>
+        <span class="n">min_interval_length</span> <span class="o">=</span> <span class="mf">1.0</span>
+        <span class="n">valid</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">count</span><span class="p">,</span> <span class="n">interval</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">valid_times</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">interval</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">interval</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">min_interval_length</span><span class="p">:</span>
+                <span class="n">valid</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">count</span><span class="p">)</span>
+        <span class="n">valid_times</span> <span class="o">=</span> <span class="n">valid_times</span><span class="p">[</span><span class="n">valid</span><span class="p">]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;LFP: found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">valid</span><span class="p">)</span><span class="si">}</span><span class="s1"> of </span><span class="si">{</span><span class="n">count</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s1"> intervals &gt; </span><span class="si">{</span><span class="n">min_interval_length</span><span class="si">}</span><span class="s1"> sec long.&#39;</span><span class="p">)</span>
+
+        <span class="c1"># target 1 KHz sampling rate</span>
+        <span class="n">decimation</span> <span class="o">=</span> <span class="n">sampling_rate</span> <span class="o">//</span> <span class="mi">1000</span>
+
+        <span class="c1"># get the LFP filter that matches the raw data</span>
+        <span class="nb">filter</span> <span class="o">=</span> <span class="p">(</span><span class="n">FirFilter</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;filter_name&#39;</span><span class="p">:</span> <span class="s1">&#39;LFP 0-400 Hz&#39;</span><span class="p">}</span> <span class="o">&amp;</span>
+                  <span class="p">{</span><span class="s1">&#39;filter_sampling_rate&#39;</span><span class="p">:</span> <span class="n">sampling_rate</span><span class="p">})</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">as_dict</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># there should only be one filter that matches, so we take the first of the dictionaries</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;filter_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">filter</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;filter_name&#39;</span><span class="p">]</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;filter_sampling_rate&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">filter</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;filter_sampling_rate&#39;</span><span class="p">]</span>
+
+        <span class="n">filter_coeff</span> <span class="o">=</span> <span class="nb">filter</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;filter_coeff&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">filter_coeff</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s1">&#39;Error in LFP: no filter found with data sampling rate of </span><span class="si">{</span><span class="n">sampling_rate</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="c1"># get the list of selected LFP Channels from LFPElectrode</span>
+        <span class="n">electrode_keys</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFPSelection</span><span class="o">.</span><span class="n">LFPElectrode</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s1">&#39;KEY&#39;</span><span class="p">)</span>
+        <span class="n">electrode_id_list</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">k</span><span class="p">[</span><span class="s1">&#39;electrode_id&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">electrode_keys</span><span class="p">)</span>
+        <span class="n">electrode_id_list</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+
+        <span class="n">lfp_file_name</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">])</span>
+
+        <span class="n">lfp_file_abspath</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">get_abs_path</span><span class="p">(</span><span class="n">lfp_file_name</span><span class="p">)</span>
+        <span class="n">lfp_object_id</span><span class="p">,</span> <span class="n">timestamp_interval</span> <span class="o">=</span> <span class="n">FirFilter</span><span class="p">()</span><span class="o">.</span><span class="n">filter_data_nwb</span><span class="p">(</span><span class="n">lfp_file_abspath</span><span class="p">,</span> <span class="n">rawdata</span><span class="p">,</span>
+                                                                        <span class="n">filter_coeff</span><span class="p">,</span> <span class="n">valid_times</span><span class="p">,</span>
+                                                                        <span class="n">electrode_id_list</span><span class="p">,</span> <span class="n">decimation</span><span class="p">)</span>
+
+        <span class="c1"># now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table</span>
+        <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span> <span class="n">lfp_file_name</span><span class="p">)</span>
+
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lfp_file_name</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;lfp_object_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lfp_object_id</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;lfp_sampling_rate&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sampling_rate</span> <span class="o">//</span> <span class="n">decimation</span>
+
+        <span class="c1"># finally, we need to censor the valid times to account for the downsampling</span>
+        <span class="n">lfp_valid_times</span> <span class="o">=</span> <span class="n">interval_list_censor</span><span class="p">(</span><span class="n">valid_times</span><span class="p">,</span> <span class="n">timestamp_interval</span><span class="p">)</span>
+        <span class="c1"># add an interval list for the LFP valid times, skipping duplicates</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;lfp valid times&#39;</span>
+        <span class="n">IntervalList</span><span class="o">.</span><span class="n">insert1</span><span class="p">({</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+                              <span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">],</span>
+                              <span class="s1">&#39;valid_times&#39;</span><span class="p">:</span> <span class="n">lfp_valid_times</span><span class="p">},</span> <span class="n">replace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="LFP.nwb_object"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFP.html#spyglass.common.common_ephys.LFP.nwb_object">[docs]</a>    <span class="k">def</span> <span class="nf">nwb_object</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="c1"># return the NWB object in the raw NWB file</span>
+        <span class="n">lfp_file_name</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFP</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;analysis_file_name&#39;</span><span class="p">)</span>
+        <span class="n">lfp_file_abspath</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">get_abs_path</span><span class="p">(</span><span class="n">lfp_file_name</span><span class="p">)</span>
+        <span class="n">lfp_nwbf</span> <span class="o">=</span> <span class="n">get_nwb_file</span><span class="p">(</span><span class="n">lfp_file_abspath</span><span class="p">)</span>
+        <span class="c1"># get the object id</span>
+        <span class="n">nwb_object_id</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">:</span> <span class="n">lfp_file_name</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;lfp_object_id&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">lfp_nwbf</span><span class="o">.</span><span class="n">objects</span><span class="p">[</span><span class="n">nwb_object_id</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="LFP.fetch_nwb"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFP.html#spyglass.common.common_ephys.LFP.fetch_nwb">[docs]</a>    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="p">(</span><span class="n">AnalysisNwbfile</span><span class="p">,</span> <span class="s1">&#39;analysis_file_abs_path&#39;</span><span class="p">),</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="LFPBandSelection"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFPBandSelection.html#spyglass.common.common_ephys.LFPBandSelection">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">LFPBandSelection</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; LFP</span>
+<span class="s2">    -&gt; FirFilter                   # the filter to use for the data</span>
+<span class="s2">    -&gt; IntervalList.proj(target_interval_list_name=&#39;interval_list_name&#39;)  # the original set of times to be filtered</span>
+<span class="s2">    lfp_band_sampling_rate: int    # the sampling rate for this band</span>
+<span class="s2">    ---</span>
+<span class="s2">    min_interval_len = 1: float  # the minimum length of a valid interval to filter</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="LFPBandSelection.LFPBandElectrode"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFPBandSelection.html#spyglass.common.common_ephys.LFPBandSelection.LFPBandElectrode">[docs]</a>    <span class="k">class</span> <span class="nc">LFPBandElectrode</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
+        <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">        -&gt; LFPBandSelection</span>
+<span class="s2">        -&gt; LFPSelection.LFPElectrode  # the LFP electrode to be filtered</span>
+<span class="s2">        reference_elect_id = -1: int  # the reference electrode to use; -1 for no reference</span>
+<span class="s2">        ---</span>
+<span class="s2">        &quot;&quot;&quot;</span></div>
+
+<div class="viewcode-block" id="LFPBandSelection.set_lfp_band_electrodes"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFPBandSelection.html#spyglass.common.common_ephys.LFPBandSelection.set_lfp_band_electrodes">[docs]</a>    <span class="k">def</span> <span class="nf">set_lfp_band_electrodes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">nwb_file_name</span><span class="p">,</span> <span class="n">electrode_list</span><span class="p">,</span> <span class="n">filter_name</span><span class="p">,</span> <span class="n">interval_list_name</span><span class="p">,</span>
+                                <span class="n">reference_electrode_list</span><span class="p">,</span> <span class="n">lfp_band_sampling_rate</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Adds an entry for each electrode in the electrode_list with the specified filter, interval_list, and</span>
+<span class="sd">        reference electrode.</span>
+<span class="sd">        Also removes any entries that have the same filter, interval list and reference electrode but are not</span>
+<span class="sd">        in the electrode_list.</span>
+<span class="sd">        :param nwb_file_name: string - the name of the nwb file for the desired session</span>
+<span class="sd">        :param electrode_list: list of LFP electrodes to be filtered</span>
+<span class="sd">        :param filter_name: the name of the filter (from the FirFilter schema)</span>
+<span class="sd">        :param interval_name: the name of the interval list (from the IntervalList schema)</span>
+<span class="sd">        :param reference_electrode_list: A single electrode id corresponding to the reference to use for all</span>
+<span class="sd">        electrodes or a list with one element per entry in the electrode_list</span>
+<span class="sd">        :param lfp_band_sampling_rate: The output sampling rate to be used for the filtered data; must be an</span>
+<span class="sd">        integer divisor of the LFP sampling rate</span>
+<span class="sd">        :return: none</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="c1"># Error checks on parameters</span>
+        <span class="c1"># electrode_list</span>
+        <span class="n">query</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFPSelection</span><span class="p">()</span><span class="o">.</span><span class="n">LFPElectrode</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">})</span>
+        <span class="n">available_electrodes</span> <span class="o">=</span> <span class="n">query</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s1">&#39;electrode_id&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">electrode_list</span><span class="p">,</span> <span class="n">available_electrodes</span><span class="p">)):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s1">&#39;All elements in electrode_list must be valid electrode_ids in the LFPSelection table&#39;</span><span class="p">)</span>
+        <span class="c1"># sampling rate</span>
+        <span class="n">lfp_sampling_rate</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFP</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;lfp_sampling_rate&#39;</span><span class="p">)</span>
+        <span class="n">decimation</span> <span class="o">=</span> <span class="n">lfp_sampling_rate</span> <span class="o">//</span> <span class="n">lfp_band_sampling_rate</span>
+        <span class="k">if</span> <span class="n">lfp_sampling_rate</span> <span class="o">//</span> <span class="n">decimation</span> <span class="o">!=</span> <span class="n">lfp_band_sampling_rate</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;lfp_band_sampling rate </span><span class="si">{</span><span class="n">lfp_band_sampling_rate</span><span class="si">}</span><span class="s1"> is not an integer divisor of lfp &#39;</span>
+                             <span class="sa">f</span><span class="s1">&#39;samping rate </span><span class="si">{</span><span class="n">lfp_sampling_rate</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="c1"># filter</span>
+        <span class="n">query</span> <span class="o">=</span> <span class="p">(</span><span class="n">FirFilter</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;filter_name&#39;</span><span class="p">:</span> <span class="n">filter_name</span><span class="p">,</span> <span class="s1">&#39;filter_sampling_rate&#39;</span><span class="p">:</span> <span class="n">lfp_sampling_rate</span><span class="p">})</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">query</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;filter </span><span class="si">{</span><span class="n">filter_name</span><span class="si">}</span><span class="s1">, sampling rate </span><span class="si">{</span><span class="n">lfp_sampling_rate</span><span class="si">}</span><span class="s1"> is not in the FirFilter table&#39;</span><span class="p">)</span>
+        <span class="c1"># interval_list</span>
+        <span class="n">query</span> <span class="o">=</span> <span class="p">(</span><span class="n">IntervalList</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">,</span> <span class="s1">&#39;interval_name&#39;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">})</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">query</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;interval list </span><span class="si">{</span><span class="n">interval_list_name</span><span class="si">}</span><span class="s1"> is not in the IntervalList table; the list must be &#39;</span>
+                             <span class="s1">&#39;added before this function is called&#39;</span><span class="p">)</span>
+        <span class="c1"># reference_electrode_list</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">reference_electrode_list</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">reference_electrode_list</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">electrode_list</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s1">&#39;reference_electrode_list must contain either 1 or len(electrode_list) elements&#39;</span><span class="p">)</span>
+        <span class="c1"># add a -1 element to the list to allow for the no reference option</span>
+        <span class="n">available_electrodes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">available_electrodes</span><span class="p">,</span> <span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">reference_electrode_list</span><span class="p">,</span> <span class="n">available_electrodes</span><span class="p">)):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;All elements in reference_electrode_list must be valid electrode_ids in the LFPSelection &#39;</span>
+                             <span class="s1">&#39;table&#39;</span><span class="p">)</span>
+
+        <span class="c1"># make a list of all the references</span>
+        <span class="n">ref_list</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">electrode_list</span><span class="p">),))</span>
+        <span class="n">ref_list</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">reference_electrode_list</span>
+
+        <span class="n">key</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">nwb_file_name</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;filter_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">filter_name</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;filter_sampling_rate&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lfp_sampling_rate</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;target_interval_list_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">interval_list_name</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;lfp_band_sampling_rate&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lfp_sampling_rate</span> <span class="o">//</span> <span class="n">decimation</span>
+        <span class="c1"># insert an entry into the main LFPBandSelectionTable</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># get all of the current entries and delete any that are not in the list</span>
+        <span class="n">elect_id</span><span class="p">,</span> <span class="n">ref_id</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">LFPBandElectrode</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span>
+            <span class="s1">&#39;electrode_id&#39;</span><span class="p">,</span> <span class="s1">&#39;reference_elect_id&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">e</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">elect_id</span><span class="p">,</span> <span class="n">ref_id</span><span class="p">):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">((</span><span class="n">electrode_list</span> <span class="o">==</span> <span class="n">e</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">ref_list</span> <span class="o">==</span> <span class="n">r</span><span class="p">))[</span><span class="mi">0</span><span class="p">]):</span>
+                <span class="n">key</span><span class="p">[</span><span class="s1">&#39;electrode_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">e</span>
+                <span class="n">key</span><span class="p">[</span><span class="s1">&#39;reference_elect_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">r</span>
+                <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">LFPBandElectrode</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span>
+
+        <span class="c1"># iterate through all of the new elements and add them</span>
+        <span class="k">for</span> <span class="n">e</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">electrode_list</span><span class="p">,</span> <span class="n">ref_list</span><span class="p">):</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;electrode_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">e</span>
+            <span class="n">query</span> <span class="o">=</span> <span class="n">Electrode</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">nwb_file_name</span><span class="p">,</span> <span class="s1">&#39;electrode_id&#39;</span><span class="p">:</span> <span class="n">e</span><span class="p">}</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;electrode_group_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">query</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;electrode_group_name&#39;</span><span class="p">)</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;reference_elect_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">r</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">LFPBandElectrode</span><span class="p">()</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="LFPBand"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFPBand.html#spyglass.common.common_ephys.LFPBand">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">LFPBand</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; LFPBandSelection</span>
+<span class="s2">    ---</span>
+<span class="s2">    -&gt; AnalysisNwbfile</span>
+<span class="s2">    -&gt; IntervalList</span>
+<span class="s2">    filtered_data_object_id: varchar(40)  # the NWB object ID for loading this object from the file</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="LFPBand.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFPBand.html#spyglass.common.common_ephys.LFPBand.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="c1"># get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure</span>
+        <span class="n">lfp_object</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFP</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]})</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span>
+            <span class="mi">0</span><span class="p">][</span><span class="s1">&#39;lfp&#39;</span><span class="p">]</span>
+
+        <span class="c1"># get the electrodes to be filtered and their references</span>
+        <span class="n">lfp_band_elect_id</span><span class="p">,</span> <span class="n">lfp_band_ref_id</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFPBandSelection</span><span class="p">()</span><span class="o">.</span><span class="n">LFPBandElectrode</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s1">&#39;electrode_id&#39;</span><span class="p">,</span> <span class="s1">&#39;reference_elect_id&#39;</span><span class="p">)</span>
+
+        <span class="c1"># sort the electrodes to make sure they are in ascending order</span>
+        <span class="n">lfp_band_elect_id</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">lfp_band_elect_id</span><span class="p">)</span>
+        <span class="n">lfp_band_ref_id</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">lfp_band_ref_id</span><span class="p">)</span>
+        <span class="n">lfp_sort_order</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">lfp_band_elect_id</span><span class="p">)</span>
+        <span class="n">lfp_band_elect_id</span> <span class="o">=</span> <span class="n">lfp_band_elect_id</span><span class="p">[</span><span class="n">lfp_sort_order</span><span class="p">]</span>
+        <span class="n">lfp_band_ref_id</span> <span class="o">=</span> <span class="n">lfp_band_ref_id</span><span class="p">[</span><span class="n">lfp_sort_order</span><span class="p">]</span>
+
+        <span class="n">lfp_sampling_rate</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFP</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;lfp_sampling_rate&#39;</span><span class="p">)</span>
+        <span class="n">interval_list_name</span><span class="p">,</span> <span class="n">lfp_band_sampling_rate</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFPBandSelection</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;target_interval_list_name&#39;</span><span class="p">,</span>
+                                                                                       <span class="s1">&#39;lfp_band_sampling_rate&#39;</span><span class="p">)</span>
+        <span class="n">valid_times</span> <span class="o">=</span> <span class="p">(</span><span class="n">IntervalList</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+                       <span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;valid_times&#39;</span><span class="p">)</span>
+        <span class="c1"># the valid_times for this interval may be slightly beyond the valid times for the lfp itself,</span>
+        <span class="c1"># so we have to intersect the two</span>
+        <span class="n">lfp_interval_list</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFP</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">)</span>
+        <span class="n">lfp_valid_times</span> <span class="o">=</span> <span class="p">(</span><span class="n">IntervalList</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+                                             <span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">lfp_interval_list</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;valid_times&#39;</span><span class="p">)</span>
+        <span class="n">min_length</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFPBandSelection</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;min_interval_len&#39;</span><span class="p">)</span>
+        <span class="n">lfp_band_valid_times</span> <span class="o">=</span> <span class="n">interval_list_intersect</span><span class="p">(</span><span class="n">valid_times</span><span class="p">,</span> <span class="n">lfp_valid_times</span><span class="p">,</span> <span class="n">min_length</span><span class="o">=</span><span class="n">min_length</span><span class="p">)</span>
+
+        <span class="n">filter_name</span><span class="p">,</span> <span class="n">filter_sampling_rate</span><span class="p">,</span> <span class="n">lfp_band_sampling_rate</span> <span class="o">=</span> <span class="p">(</span><span class="n">LFPBandSelection</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;filter_name&#39;</span><span class="p">,</span> <span class="s1">&#39;filter_sampling_rate&#39;</span><span class="p">,</span> <span class="s1">&#39;lfp_band_sampling_rate&#39;</span><span class="p">)</span>
+
+        <span class="n">decimation</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">lfp_sampling_rate</span><span class="p">)</span> <span class="o">//</span> <span class="n">lfp_band_sampling_rate</span>
+
+        <span class="c1"># load in the timestamps</span>
+        <span class="n">timestamps</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">lfp_object</span><span class="o">.</span><span class="n">timestamps</span><span class="p">)</span>
+        <span class="c1"># get the indices of the first timestamp and the last timestamp that are within the valid times</span>
+        <span class="n">included_indices</span> <span class="o">=</span> <span class="n">interval_list_contains_ind</span><span class="p">(</span><span class="n">lfp_band_valid_times</span><span class="p">,</span> <span class="n">timestamps</span><span class="p">)</span>
+        <span class="c1"># pad the indices by 1 on each side to avoid message in filter_data</span>
+        <span class="k">if</span> <span class="n">included_indices</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">included_indices</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-=</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="n">included_indices</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">timestamps</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">included_indices</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="n">timestamps</span> <span class="o">=</span> <span class="n">timestamps</span><span class="p">[</span><span class="n">included_indices</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span><span class="n">included_indices</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]]</span>
+
+        <span class="c1"># load all the data to speed filtering</span>
+        <span class="n">lfp_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">lfp_object</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="n">included_indices</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span><span class="n">included_indices</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],:],</span>
+                              <span class="n">dtype</span><span class="o">=</span><span class="nb">type</span><span class="p">(</span><span class="n">lfp_object</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]))</span>
+
+        <span class="c1"># get the indices of the electrodes to be filtered and the references</span>
+        <span class="n">lfp_band_elect_index</span> <span class="o">=</span> <span class="n">get_electrode_indices</span><span class="p">(</span>
+            <span class="n">lfp_object</span><span class="p">,</span> <span class="n">lfp_band_elect_id</span><span class="p">)</span>
+        <span class="n">lfp_band_ref_index</span> <span class="o">=</span> <span class="n">get_electrode_indices</span><span class="p">(</span><span class="n">lfp_object</span><span class="p">,</span> <span class="n">lfp_band_ref_id</span><span class="p">)</span>
+
+        <span class="c1"># subtract off the references for the selected channels</span>
+        <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">elect_index</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">lfp_band_elect_index</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">lfp_band_ref_id</span><span class="p">[</span><span class="n">index</span><span class="p">]</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+                <span class="n">lfp_data</span><span class="p">[:,</span> <span class="n">elect_index</span><span class="p">]</span> <span class="o">=</span> <span class="n">lfp_data</span><span class="p">[:,</span> <span class="n">elect_index</span><span class="p">]</span> <span class="o">-</span> \
+                    <span class="n">lfp_data</span><span class="p">[:,</span> <span class="n">lfp_band_ref_index</span><span class="p">[</span><span class="n">index</span><span class="p">]]</span>
+
+        <span class="c1"># get the LFP filter that matches the raw data</span>
+        <span class="nb">filter</span> <span class="o">=</span> <span class="p">(</span><span class="n">FirFilter</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;filter_name&#39;</span><span class="p">:</span> <span class="n">filter_name</span><span class="p">}</span> <span class="o">&amp;</span>
+                                <span class="p">{</span><span class="s1">&#39;filter_sampling_rate&#39;</span><span class="p">:</span> <span class="n">filter_sampling_rate</span><span class="p">})</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">as_dict</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">filter</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Filter </span><span class="si">{</span><span class="n">filter_name</span><span class="si">}</span><span class="s1"> and sampling_rate </span><span class="si">{</span><span class="n">lfp_band_sampling_rate</span><span class="si">}</span><span class="s1"> does not exit in the &#39;</span>
+                             <span class="s1">&#39;FirFilter table&#39;</span><span class="p">)</span>
+
+        <span class="n">filter_coeff</span> <span class="o">=</span> <span class="nb">filter</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;filter_coeff&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">filter_coeff</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s1">&#39;Error in LFPBand: no filter found with data sampling rate of </span><span class="si">{</span><span class="n">lfp_band_sampling_rate</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="c1"># create the analysis nwb file to store the results.</span>
+        <span class="n">lfp_band_file_name</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">])</span>
+        <span class="n">lfp_band_file_abspath</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">get_abs_path</span><span class="p">(</span><span class="n">lfp_band_file_name</span><span class="p">)</span>
+        <span class="c1"># filter the data and write to an the nwb file</span>
+        <span class="n">filtered_data</span><span class="p">,</span> <span class="n">new_timestamps</span> <span class="o">=</span> <span class="n">FirFilter</span><span class="p">()</span><span class="o">.</span><span class="n">filter_data</span><span class="p">(</span><span class="n">timestamps</span><span class="p">,</span> <span class="n">lfp_data</span><span class="p">,</span> <span class="n">filter_coeff</span><span class="p">,</span>
+                                                              <span class="n">lfp_band_valid_times</span><span class="p">,</span> <span class="n">lfp_band_elect_index</span><span class="p">,</span> <span class="n">decimation</span><span class="p">)</span>
+
+        <span class="c1"># now that the LFP is filtered, we create an electrical series for it and add it to the file</span>
+        <span class="k">with</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">NWBHDF5IO</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="n">lfp_band_file_abspath</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;a&quot;</span><span class="p">,</span> <span class="n">load_namespaces</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">io</span><span class="p">:</span>
+            <span class="n">nwbf</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+            <span class="c1"># get the indices of the electrodes in the electrode table of the file to get the right values</span>
+            <span class="n">elect_index</span> <span class="o">=</span> <span class="n">get_electrode_indices</span><span class="p">(</span><span class="n">nwbf</span><span class="p">,</span> <span class="n">lfp_band_elect_id</span><span class="p">)</span>
+            <span class="n">electrode_table_region</span> <span class="o">=</span> <span class="n">nwbf</span><span class="o">.</span><span class="n">create_electrode_table_region</span><span class="p">(</span>
+                <span class="n">elect_index</span><span class="p">,</span> <span class="s1">&#39;filtered electrode table&#39;</span><span class="p">)</span>
+            <span class="n">eseries_name</span> <span class="o">=</span> <span class="s1">&#39;filtered data&#39;</span>
+            <span class="c1"># TODO: use datatype of data</span>
+            <span class="n">es</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">ecephys</span><span class="o">.</span><span class="n">ElectricalSeries</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">eseries_name</span><span class="p">,</span>
+                                                <span class="n">data</span><span class="o">=</span><span class="n">filtered_data</span><span class="p">,</span>
+                                                <span class="n">electrodes</span><span class="o">=</span><span class="n">electrode_table_region</span><span class="p">,</span>
+                                                <span class="n">timestamps</span><span class="o">=</span><span class="n">new_timestamps</span><span class="p">)</span>
+            <span class="c1"># Add the electrical series to the scratch area</span>
+            <span class="n">nwbf</span><span class="o">.</span><span class="n">add_scratch</span><span class="p">(</span><span class="n">es</span><span class="p">)</span>
+            <span class="n">io</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">nwbf</span><span class="p">)</span>
+            <span class="n">filtered_data_object_id</span> <span class="o">=</span> <span class="n">es</span><span class="o">.</span><span class="n">object_id</span>
+        <span class="c1">#</span>
+        <span class="c1"># add the file to the AnalysisNwbfile table</span>
+        <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span> <span class="n">lfp_band_file_name</span><span class="p">)</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lfp_band_file_name</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;filtered_data_object_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">filtered_data_object_id</span>
+
+        <span class="c1"># finally, we need to censor the valid times to account for the downsampling if this is the first time we&#39;ve</span>
+        <span class="c1"># downsampled these data</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">interval_list_name</span> <span class="o">+</span> <span class="s1">&#39; lfp band &#39;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">lfp_band_sampling_rate</span><span class="p">)</span> <span class="o">+</span> <span class="s1">&#39;Hz&#39;</span>
+        <span class="n">tmp_valid_times</span> <span class="o">=</span> <span class="p">(</span><span class="n">IntervalList</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+                                           <span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">]})</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s1">&#39;valid_times&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">tmp_valid_times</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">lfp_band_valid_times</span> <span class="o">=</span> <span class="n">interval_list_censor</span><span class="p">(</span><span class="n">lfp_band_valid_times</span><span class="p">,</span> <span class="n">new_timestamps</span><span class="p">)</span>
+            <span class="c1"># add an interval list for the LFP valid times</span>
+            <span class="n">IntervalList</span><span class="o">.</span><span class="n">insert1</span><span class="p">({</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+                                  <span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">],</span>
+                                  <span class="s1">&#39;valid_times&#39;</span><span class="p">:</span> <span class="n">lfp_band_valid_times</span><span class="p">})</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># check that the valid times are the same</span>
+            <span class="k">assert</span> <span class="n">np</span><span class="o">.</span><span class="n">isclose</span><span class="p">(</span><span class="n">tmp_valid_times</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">lfp_band_valid_times</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> \
+                <span class="s1">&#39;previously saved lfp band times do not match current times&#39;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="LFPBand.fetch_nwb"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.LFPBand.html#spyglass.common.common_ephys.LFPBand.fetch_nwb">[docs]</a>    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="p">(</span><span class="n">AnalysisNwbfile</span><span class="p">,</span> <span class="s1">&#39;analysis_file_abs_path&#39;</span><span class="p">),</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="ElectrodeBrainRegion"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_ephys.ElectrodeBrainRegion.html#spyglass.common.common_ephys.ElectrodeBrainRegion">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">ElectrodeBrainRegion</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    # Table with brain region of electrodes determined post-experiment e.g. via histological analysis or CT</span>
+<span class="s2">    -&gt; Electrode</span>
+<span class="s2">    ---</span>
+<span class="s2">    -&gt; BrainRegion</span>
+<span class="s2">    &quot;&quot;&quot;</span></div>
+</pre></div>
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          
+          
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                <a href="../../../copyright.html">Copyright</a> &#169; 2020 - Present, Loren Frank
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            <div class="icons">
+              
+            </div>
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer no-toc">
+      
+      
+      
+    </aside>
+  </div>
+</div><script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/scripts/furo.js"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    </body>
+</html>

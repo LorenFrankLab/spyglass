@@ -1,0 +1,1295 @@
+<!doctype html>
+<html class="no-js">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../../../genindex.html" /><link rel="search" title="Search" href="../../../search.html" /><link rel="copyright" title="Copyright" href="../../../copyright.html" />
+
+    <link rel="shortcut icon" href="../../../_static/lorenLabImage.png"/><meta name="generator" content="sphinx-4.5.0, furo 2022.06.21"/>
+        <title>spyglass.common.common_position - Spyglass 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/styles/furo.css?digest=40978830699223671f4072448e654b5958f38b89" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/styles/furo-extensions.css?digest=30d1aed668e5c3a91c3e3bf6a60b675221979f0e" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/css/datajoint_header.css" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f8f8f8;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-half" viewBox="0 0 24 24">
+    <title>Auto light/dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-shadow">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M13 12h5" />
+      <path d="M13 15h4" />
+      <path d="M13 18h1" />
+      <path d="M13 9h4" />
+      <path d="M13 6h1" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../../../index.html"><div class="brand">Spyglass 1.0.0 documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand centered" href="../../../index.html">
+  
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo" src="../../../_static/lorenLabImage.png" alt="Logo"/>
+  </div>
+  
+  <span class="sidebar-brand-text">Spyglass 1.0.0 documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../../../search.html" role="search">
+  <input class="sidebar-search" placeholder=Search name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../index.html">Home page</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../create_figurl.html">FigUrl View</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../tutorials.html">Tutorials</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/0_intro.html">Introduction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/1_spikesorting.html">Spike Sorting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/1D_Clusterless_Decoding.html">Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/2_curation.html">Curation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/2_curation_lftest.html">Curation LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/2D_Clusterless_Decoding.html">Another Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/3_lfp.html">LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/4_position_info.html">Position Information</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/5_linearization.html">Linearization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/docker_mysql_tutorial.html">MySQL Docker</a></li>
+</ul>
+</li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.html">API reference</a><input class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.cli.html">spyglass.cli</a><input class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.cli.cli.html">spyglass.cli.cli</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.html">spyglass.common</a><input class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_backup.html">spyglass.common.common_backup</a><input class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_backup.CuratedSpikeSortingBackUp.html">spyglass.common.common_backup.CuratedSpikeSortingBackUp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_backup.SpikeSortingBackUp.html">spyglass.common.common_backup.SpikeSortingBackUp</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.html">spyglass.common.common_behav</a><input class="toctree-checkbox" id="toctree-checkbox-6" name="toctree-checkbox-6" role="switch" type="checkbox"/><label for="toctree-checkbox-6"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.HeadDir.html">spyglass.common.common_behav.HeadDir</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.LinPos.html">spyglass.common.common_behav.LinPos</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.PositionSource.html">spyglass.common.common_behav.PositionSource</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.RawPosition.html">spyglass.common.common_behav.RawPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.Speed.html">spyglass.common.common_behav.Speed</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.StateScriptFile.html">spyglass.common.common_behav.StateScriptFile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.VideoFile.html">spyglass.common.common_behav.VideoFile</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.html">spyglass.common.common_device</a><input class="toctree-checkbox" id="toctree-checkbox-7" name="toctree-checkbox-7" role="switch" type="checkbox"/><label for="toctree-checkbox-7"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.CameraDevice.html">spyglass.common.common_device.CameraDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.DataAcquisitionDevice.html">spyglass.common.common_device.DataAcquisitionDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.Probe.html">spyglass.common.common_device.Probe</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_dio.html">spyglass.common.common_dio</a><input class="toctree-checkbox" id="toctree-checkbox-8" name="toctree-checkbox-8" role="switch" type="checkbox"/><label for="toctree-checkbox-8"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_dio.DIOEvents.html">spyglass.common.common_dio.DIOEvents</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.html">spyglass.common.common_ephys</a><input class="toctree-checkbox" id="toctree-checkbox-9" name="toctree-checkbox-9" role="switch" type="checkbox"/><label for="toctree-checkbox-9"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.Electrode.html">spyglass.common.common_ephys.Electrode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.ElectrodeBrainRegion.html">spyglass.common.common_ephys.ElectrodeBrainRegion</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.ElectrodeGroup.html">spyglass.common.common_ephys.ElectrodeGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFP.html">spyglass.common.common_ephys.LFP</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFPBand.html">spyglass.common.common_ephys.LFPBand</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFPBandSelection.html">spyglass.common.common_ephys.LFPBandSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFPSelection.html">spyglass.common.common_ephys.LFPSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.Raw.html">spyglass.common.common_ephys.Raw</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.SampleCount.html">spyglass.common.common_ephys.SampleCount</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_filter.html">spyglass.common.common_filter</a><input class="toctree-checkbox" id="toctree-checkbox-10" name="toctree-checkbox-10" role="switch" type="checkbox"/><label for="toctree-checkbox-10"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_filter.FirFilter.html">spyglass.common.common_filter.FirFilter</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_interval.html">spyglass.common.common_interval</a><input class="toctree-checkbox" id="toctree-checkbox-11" name="toctree-checkbox-11" role="switch" type="checkbox"/><label for="toctree-checkbox-11"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_interval.IntervalList.html">spyglass.common.common_interval.IntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.html">spyglass.common.common_lab</a><input class="toctree-checkbox" id="toctree-checkbox-12" name="toctree-checkbox-12" role="switch" type="checkbox"/><label for="toctree-checkbox-12"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.Institution.html">spyglass.common.common_lab.Institution</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.Lab.html">spyglass.common.common_lab.Lab</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.LabMember.html">spyglass.common.common_lab.LabMember</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.LabTeam.html">spyglass.common.common_lab.LabTeam</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.html">spyglass.common.common_nwbfile</a><input class="toctree-checkbox" id="toctree-checkbox-13" name="toctree-checkbox-13" role="switch" type="checkbox"/><label for="toctree-checkbox-13"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html">spyglass.common.common_nwbfile.AnalysisNwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfileKachery.html">spyglass.common.common_nwbfile.AnalysisNwbfileKachery</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.Nwbfile.html">spyglass.common.common_nwbfile.Nwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.NwbfileKachery.html">spyglass.common.common_nwbfile.NwbfileKachery</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.html">spyglass.common.common_position</a><input class="toctree-checkbox" id="toctree-checkbox-14" name="toctree-checkbox-14" role="switch" type="checkbox"/><label for="toctree-checkbox-14"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizationSelection.html">spyglass.common.common_position.IntervalLinearizationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html">spyglass.common.common_position.IntervalLinearizedPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfo.html">spyglass.common.common_position.IntervalPositionInfo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfoSelection.html">spyglass.common.common_position.IntervalPositionInfoSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.LinearizationParameters.html">spyglass.common.common_position.LinearizationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html">spyglass.common.common_position.NodePicker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.PositionInfoParameters.html">spyglass.common.common_position.PositionInfoParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.PositionVideo.html">spyglass.common.common_position.PositionVideo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.SelectFromCollection.html">spyglass.common.common_position.SelectFromCollection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.TrackGraph.html">spyglass.common.common_position.TrackGraph</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_region.html">spyglass.common.common_region</a><input class="toctree-checkbox" id="toctree-checkbox-15" name="toctree-checkbox-15" role="switch" type="checkbox"/><label for="toctree-checkbox-15"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_region.BrainRegion.html">spyglass.common.common_region.BrainRegion</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_sensors.html">spyglass.common.common_sensors</a><input class="toctree-checkbox" id="toctree-checkbox-16" name="toctree-checkbox-16" role="switch" type="checkbox"/><label for="toctree-checkbox-16"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_sensors.SensorData.html">spyglass.common.common_sensors.SensorData</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.html">spyglass.common.common_session</a><input class="toctree-checkbox" id="toctree-checkbox-17" name="toctree-checkbox-17" role="switch" type="checkbox"/><label for="toctree-checkbox-17"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.ExperimenterList.html">spyglass.common.common_session.ExperimenterList</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.Session.html">spyglass.common.common_session.Session</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.SessionGroup.html">spyglass.common.common_session.SessionGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.SessionGroupSession.html">spyglass.common.common_session.SessionGroupSession</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_subject.html">spyglass.common.common_subject</a><input class="toctree-checkbox" id="toctree-checkbox-18" name="toctree-checkbox-18" role="switch" type="checkbox"/><label for="toctree-checkbox-18"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_subject.Subject.html">spyglass.common.common_subject.Subject</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_task.html">spyglass.common.common_task</a><input class="toctree-checkbox" id="toctree-checkbox-19" name="toctree-checkbox-19" role="switch" type="checkbox"/><label for="toctree-checkbox-19"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_task.Task.html">spyglass.common.common_task.Task</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_task.TaskEpoch.html">spyglass.common.common_task.TaskEpoch</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.dj_helper_fn.html">spyglass.common.dj_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.nwb_helper_fn.html">spyglass.common.nwb_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.populate_all_common.html">spyglass.common.populate_all_common</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.signal_processing.html">spyglass.common.signal_processing</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.data_import.html">spyglass.data_import</a><input class="toctree-checkbox" id="toctree-checkbox-20" name="toctree-checkbox-20" role="switch" type="checkbox"/><label for="toctree-checkbox-20"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.data_import.insert_sessions.html">spyglass.data_import.insert_sessions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.data_import.storage_dirs.html">spyglass.data_import.storage_dirs</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.html">spyglass.spikesorting</a><input class="toctree-checkbox" id="toctree-checkbox-21" name="toctree-checkbox-21" role="switch" type="checkbox"/><label for="toctree-checkbox-21"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.html">spyglass.spikesorting.merged_sorting_extractor</a><input class="toctree-checkbox" id="toctree-checkbox-22" name="toctree-checkbox-22" role="switch" type="checkbox"/><label for="toctree-checkbox-22"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview.html">spyglass.spikesorting.sortingview</a><input class="toctree-checkbox" id="toctree-checkbox-23" name="toctree-checkbox-23" role="switch" type="checkbox"/><label for="toctree-checkbox-23"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html">spyglass.spikesorting.sortingview.SortingviewWorkspace</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection.html">spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview_helper_fn.html">spyglass.spikesorting.sortingview_helper_fn</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.html">spyglass.spikesorting.spikesorting_artifact</a><input class="toctree-checkbox" id="toctree-checkbox-24" name="toctree-checkbox-24" role="switch" type="checkbox"/><label for="toctree-checkbox-24"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList.html">spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.html">spyglass.spikesorting.spikesorting_curation</a><input class="toctree-checkbox" id="toctree-checkbox-25" name="toctree-checkbox-25" role="switch" type="checkbox"/><label for="toctree-checkbox-25"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html">spyglass.spikesorting.spikesorting_curation.AutomaticCuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html">spyglass.spikesorting.spikesorting_curation.Curation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html">spyglass.spikesorting.spikesorting_curation.MetricParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricSelection.html">spyglass.spikesorting.spikesorting_curation.MetricSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.QualityMetrics.html">spyglass.spikesorting.spikesorting_curation.QualityMetrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformParameters.html">spyglass.spikesorting.spikesorting_curation.WaveformParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformSelection.html">spyglass.spikesorting.spikesorting_curation.WaveformSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html">spyglass.spikesorting.spikesorting_curation.Waveforms</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.html">spyglass.spikesorting.spikesorting_recording</a><input class="toctree-checkbox" id="toctree-checkbox-26" name="toctree-checkbox-26" role="switch" type="checkbox"/><label for="toctree-checkbox-26"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html">spyglass.spikesorting.spikesorting_recording.SortGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SortInterval.html">spyglass.spikesorting.spikesorting_recording.SortInterval</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.html">spyglass.spikesorting.spikesorting_sorting</a><input class="toctree-checkbox" id="toctree-checkbox-27" name="toctree-checkbox-27" role="switch" type="checkbox"/><label for="toctree-checkbox-27"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection.html">spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../how_to_contribute.html">How to Contribute</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../copyright.html">Copyright</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main">
+          <h1>Source code for spyglass.common.common_position</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">bottleneck</span>
+<span class="kn">import</span> <span class="nn">cv2</span>
+<span class="kn">import</span> <span class="nn">datajoint</span> <span class="k">as</span> <span class="nn">dj</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">networkx</span> <span class="k">as</span> <span class="nn">nx</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">pynwb</span>
+<span class="kn">import</span> <span class="nn">pynwb.behavior</span>
+<span class="kn">import</span> <span class="nn">skimage</span>
+<span class="kn">from</span> <span class="nn">matplotlib.path</span> <span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span> <span class="nn">matplotlib.widgets</span> <span class="kn">import</span> <span class="n">PolygonSelector</span>
+<span class="kn">from</span> <span class="nn">position_tools</span> <span class="kn">import</span> <span class="p">(</span><span class="n">get_angle</span><span class="p">,</span> <span class="n">get_centriod</span><span class="p">,</span> <span class="n">get_distance</span><span class="p">,</span> <span class="n">get_speed</span><span class="p">,</span>
+                            <span class="n">get_velocity</span><span class="p">,</span> <span class="n">interpolate_nan</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">position_tools.core</span> <span class="kn">import</span> <span class="n">gaussian_smooth</span>
+<span class="kn">from</span> <span class="nn">skan</span> <span class="kn">import</span> <span class="n">skeleton_to_csgraph</span>
+<span class="kn">from</span> <span class="nn">skan.draw</span> <span class="kn">import</span> <span class="n">_clean_positions_dict</span>
+<span class="kn">from</span> <span class="nn">spyglass.common.dj_helper_fn</span> <span class="kn">import</span> <span class="n">fetch_nwb</span>
+<span class="kn">from</span> <span class="nn">tqdm</span> <span class="kn">import</span> <span class="n">tqdm_notebook</span> <span class="k">as</span> <span class="n">tqdm</span>
+<span class="kn">from</span> <span class="nn">track_linearization</span> <span class="kn">import</span> <span class="p">(</span><span class="n">get_linearized_position</span><span class="p">,</span> <span class="n">make_track_graph</span><span class="p">,</span>
+                                 <span class="n">plot_graph_as_1D</span><span class="p">,</span> <span class="n">plot_track_graph</span><span class="p">)</span>
+
+<span class="kn">from</span> <span class="nn">.common_behav</span> <span class="kn">import</span> <span class="n">RawPosition</span><span class="p">,</span> <span class="n">VideoFile</span>
+<span class="kn">from</span> <span class="nn">.common_interval</span> <span class="kn">import</span> <span class="n">IntervalList</span>
+<span class="kn">from</span> <span class="nn">.common_nwbfile</span> <span class="kn">import</span> <span class="n">AnalysisNwbfile</span>
+
+<span class="n">schema</span> <span class="o">=</span> <span class="n">dj</span><span class="o">.</span><span class="n">schema</span><span class="p">(</span><span class="s1">&#39;common_position&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="PositionInfoParameters"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.PositionInfoParameters.html#spyglass.common.common_position.PositionInfoParameters">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">PositionInfoParameters</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Lookup</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Parameters for extracting the smoothed head position, oriention and</span>
+<span class="sd">    velocity.&quot;&quot;&quot;</span>
+
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    position_info_param_name : varchar(80) # name for this set of parameters</span>
+<span class="s2">    ---</span>
+<span class="s2">    max_separation = 9.0  : float   # max distance (in cm) between head LEDs</span>
+<span class="s2">    max_speed = 300.0     : float   # max speed (in cm / s) of animal</span>
+<span class="s2">    position_smoothing_duration = 0.125 : float # size of moving window (in seconds)</span>
+<span class="s2">    speed_smoothing_std_dev = 0.100 : float # smoothing standard deviation (in seconds)</span>
+<span class="s2">    head_orient_smoothing_std_dev = 0.001 : float # smoothing std deviation (in seconds)</span>
+<span class="s2">    led1_is_front = 1 : int # first LED is front LED and second is back LED, else first LED is back</span>
+<span class="s2">    is_upsampled = 0 : int # upsample the position to higher sampling rate</span>
+<span class="s2">    upsampling_sampling_rate = NULL : float # The rate to be upsampled to</span>
+<span class="s2">    upsampling_interpolation_method = linear : varchar(80) # see pandas.DataFrame.interpolation for list of methods</span>
+<span class="s2">    &quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="IntervalPositionInfoSelection"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfoSelection.html#spyglass.common.common_position.IntervalPositionInfoSelection">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">IntervalPositionInfoSelection</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Lookup</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Combines the parameters for position extraction and a time interval to</span>
+<span class="sd">    extract the smoothed position on.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; PositionInfoParameters</span>
+<span class="s2">    -&gt; IntervalList</span>
+<span class="s2">    ---</span>
+<span class="s2">    &quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="IntervalPositionInfo"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfo.html#spyglass.common.common_position.IntervalPositionInfo">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">IntervalPositionInfo</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Computes the smoothed head position, orientation and velocity for a given</span>
+<span class="sd">    interval.&quot;&quot;&quot;</span>
+
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; IntervalPositionInfoSelection</span>
+<span class="s2">    ---</span>
+<span class="s2">    -&gt; AnalysisNwbfile</span>
+<span class="s2">    head_position_object_id : varchar(40)</span>
+<span class="s2">    head_orientation_object_id : varchar(40)</span>
+<span class="s2">    head_velocity_object_id : varchar(40)</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="IntervalPositionInfo.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfo.html#spyglass.common.common_position.IntervalPositionInfo.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Computing position for: </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">])</span>
+        <span class="n">raw_position</span> <span class="o">=</span> <span class="p">(</span><span class="n">RawPosition</span><span class="p">()</span> <span class="o">&amp;</span>
+                        <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+                         <span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">]</span>
+                         <span class="p">})</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">position_info_parameters</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">PositionInfoParameters</span><span class="p">()</span> <span class="o">&amp;</span>
+            <span class="p">{</span><span class="s1">&#39;position_info_param_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;position_info_param_name&#39;</span><span class="p">]</span>
+             <span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">()</span>
+
+        <span class="n">head_position</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">Position</span><span class="p">()</span>
+        <span class="n">head_orientation</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">CompassDirection</span><span class="p">()</span>
+        <span class="n">head_velocity</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">BehavioralTimeSeries</span><span class="p">()</span>
+
+        <span class="n">METERS_PER_CM</span> <span class="o">=</span> <span class="mf">0.01</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># calculate the processed position</span>
+            <span class="n">spatial_series</span> <span class="o">=</span> <span class="n">raw_position</span><span class="p">[</span><span class="s1">&#39;raw_position&#39;</span><span class="p">]</span>
+            <span class="n">position_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">calculate_position_info_from_spatial_series</span><span class="p">(</span>
+                <span class="n">spatial_series</span><span class="p">,</span>
+                <span class="n">position_info_parameters</span><span class="p">[</span><span class="s1">&#39;max_separation&#39;</span><span class="p">],</span>
+                <span class="n">position_info_parameters</span><span class="p">[</span><span class="s1">&#39;max_speed&#39;</span><span class="p">],</span>
+                <span class="n">position_info_parameters</span><span class="p">[</span><span class="s1">&#39;speed_smoothing_std_dev&#39;</span><span class="p">],</span>
+                <span class="n">position_info_parameters</span><span class="p">[</span><span class="s1">&#39;position_smoothing_duration&#39;</span><span class="p">],</span>
+                <span class="n">position_info_parameters</span><span class="p">[</span><span class="s1">&#39;head_orient_smoothing_std_dev&#39;</span><span class="p">],</span>
+                <span class="n">position_info_parameters</span><span class="p">[</span><span class="s1">&#39;led1_is_front&#39;</span><span class="p">],</span>
+                <span class="n">position_info_parameters</span><span class="p">[</span><span class="s1">&#39;is_upsampled&#39;</span><span class="p">],</span>
+                <span class="n">position_info_parameters</span><span class="p">[</span><span class="s1">&#39;upsampling_sampling_rate&#39;</span><span class="p">],</span>
+                <span class="n">position_info_parameters</span><span class="p">[</span><span class="s1">&#39;upsampling_interpolation_method&#39;</span><span class="p">],</span>
+            <span class="p">)</span>
+
+            <span class="c1"># create nwb objects for insertion into analysis nwb file</span>
+            <span class="n">head_position</span><span class="o">.</span><span class="n">create_spatial_series</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;head_position&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">position_info</span><span class="p">[</span><span class="s1">&#39;time&#39;</span><span class="p">],</span>
+                <span class="n">conversion</span><span class="o">=</span><span class="n">METERS_PER_CM</span><span class="p">,</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">position_info</span><span class="p">[</span><span class="s1">&#39;head_position&#39;</span><span class="p">],</span>
+                <span class="n">reference_frame</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">reference_frame</span><span class="p">,</span>
+                <span class="n">comments</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">comments</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s1">&#39;head_x_position, head_y_position&#39;</span>
+            <span class="p">)</span>
+
+            <span class="n">head_orientation</span><span class="o">.</span><span class="n">create_spatial_series</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;head_orientation&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">position_info</span><span class="p">[</span><span class="s1">&#39;time&#39;</span><span class="p">],</span>
+                <span class="n">conversion</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">position_info</span><span class="p">[</span><span class="s1">&#39;head_orientation&#39;</span><span class="p">],</span>
+                <span class="n">reference_frame</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">reference_frame</span><span class="p">,</span>
+                <span class="n">comments</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">comments</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s1">&#39;head_orientation&#39;</span>
+            <span class="p">)</span>
+
+            <span class="n">head_velocity</span><span class="o">.</span><span class="n">create_timeseries</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;head_velocity&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">position_info</span><span class="p">[</span><span class="s1">&#39;time&#39;</span><span class="p">],</span>
+                <span class="n">conversion</span><span class="o">=</span><span class="n">METERS_PER_CM</span><span class="p">,</span>
+                <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;m/s&quot;</span><span class="p">,</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">((</span><span class="n">position_info</span><span class="p">[</span><span class="s1">&#39;velocity&#39;</span><span class="p">],</span>
+                                     <span class="n">position_info</span><span class="p">[</span><span class="s1">&#39;speed&#39;</span><span class="p">][:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]),</span>
+                                    <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+                <span class="n">comments</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">comments</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s1">&#39;head_x_velocity, head_y_velocity, head_speed&#39;</span>
+            <span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="k">pass</span>
+
+        <span class="c1"># Insert into analysis nwb file</span>
+        <span class="n">nwb_analysis_file</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span>
+
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;head_position_object_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">],</span> <span class="n">head_position</span><span class="p">)</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;head_orientation_object_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">],</span> <span class="n">head_orientation</span><span class="p">)</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;head_velocity_object_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">],</span> <span class="n">head_velocity</span><span class="p">)</span>
+
+        <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">])</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="IntervalPositionInfo.calculate_position_info_from_spatial_series"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfo.html#spyglass.common.common_position.IntervalPositionInfo.calculate_position_info_from_spatial_series">[docs]</a>    <span class="k">def</span> <span class="nf">calculate_position_info_from_spatial_series</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">spatial_series</span><span class="p">,</span>
+        <span class="n">max_LED_separation</span><span class="p">,</span>
+        <span class="n">max_plausible_speed</span><span class="p">,</span>
+        <span class="n">speed_smoothing_std_dev</span><span class="p">,</span>
+        <span class="n">position_smoothing_duration</span><span class="p">,</span>
+        <span class="n">head_orient_smoothing_std_dev</span><span class="p">,</span>
+        <span class="n">led1_is_front</span><span class="p">,</span>
+        <span class="n">is_upsampled</span><span class="p">,</span>
+        <span class="n">upsampling_sampling_rate</span><span class="p">,</span>
+        <span class="n">upsampling_interpolation_method</span><span class="p">,</span>
+    <span class="p">):</span>
+
+        <span class="n">CM_TO_METERS</span> <span class="o">=</span> <span class="mi">100</span>
+
+        <span class="c1"># Get spatial series properties</span>
+        <span class="n">time</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">timestamps</span><span class="p">)</span>  <span class="c1"># seconds</span>
+        <span class="n">position</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>  <span class="c1"># meters</span>
+
+        <span class="c1"># remove NaN times</span>
+        <span class="n">is_nan_time</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">time</span><span class="p">)</span>
+        <span class="n">position</span> <span class="o">=</span> <span class="n">position</span><span class="p">[</span><span class="o">~</span><span class="n">is_nan_time</span><span class="p">]</span>
+        <span class="n">time</span> <span class="o">=</span> <span class="n">time</span><span class="p">[</span><span class="o">~</span><span class="n">is_nan_time</span><span class="p">]</span>
+
+        <span class="n">dt</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">diff</span><span class="p">(</span><span class="n">time</span><span class="p">))</span>
+        <span class="n">sampling_rate</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">/</span> <span class="n">dt</span>
+        <span class="n">meters_to_pixels</span> <span class="o">=</span> <span class="n">spatial_series</span><span class="o">.</span><span class="n">conversion</span>
+
+        <span class="c1"># Define LEDs</span>
+        <span class="k">if</span> <span class="n">led1_is_front</span><span class="p">:</span>
+            <span class="n">front_LED</span> <span class="o">=</span> <span class="n">position</span><span class="p">[:,</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+            <span class="n">back_LED</span> <span class="o">=</span> <span class="n">position</span><span class="p">[:,</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">]]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">back_LED</span> <span class="o">=</span> <span class="n">position</span><span class="p">[:,</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+            <span class="n">front_LED</span> <span class="o">=</span> <span class="n">position</span><span class="p">[:,</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">]]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+
+        <span class="c1"># Convert to cm</span>
+        <span class="n">back_LED</span> <span class="o">*=</span> <span class="n">meters_to_pixels</span> <span class="o">*</span> <span class="n">CM_TO_METERS</span>
+        <span class="n">front_LED</span> <span class="o">*=</span> <span class="n">meters_to_pixels</span> <span class="o">*</span> <span class="n">CM_TO_METERS</span>
+
+        <span class="c1"># Set points to NaN where the front and back LEDs are too separated</span>
+        <span class="n">dist_between_LEDs</span> <span class="o">=</span> <span class="n">get_distance</span><span class="p">(</span><span class="n">back_LED</span><span class="p">,</span> <span class="n">front_LED</span><span class="p">)</span>
+        <span class="n">is_too_separated</span> <span class="o">=</span> <span class="n">dist_between_LEDs</span> <span class="o">&gt;=</span> <span class="n">max_LED_separation</span>
+
+        <span class="n">back_LED</span><span class="p">[</span><span class="n">is_too_separated</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+        <span class="n">front_LED</span><span class="p">[</span><span class="n">is_too_separated</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+
+        <span class="c1"># Calculate speed</span>
+        <span class="n">front_LED_speed</span> <span class="o">=</span> <span class="n">get_speed</span><span class="p">(</span>
+            <span class="n">front_LED</span><span class="p">,</span>
+            <span class="n">time</span><span class="p">,</span>
+            <span class="n">sigma</span><span class="o">=</span><span class="n">speed_smoothing_std_dev</span><span class="p">,</span>
+            <span class="n">sampling_frequency</span><span class="o">=</span><span class="n">sampling_rate</span><span class="p">)</span>
+        <span class="n">back_LED_speed</span> <span class="o">=</span> <span class="n">get_speed</span><span class="p">(</span>
+            <span class="n">back_LED</span><span class="p">,</span>
+            <span class="n">time</span><span class="p">,</span>
+            <span class="n">sigma</span><span class="o">=</span><span class="n">speed_smoothing_std_dev</span><span class="p">,</span>
+            <span class="n">sampling_frequency</span><span class="o">=</span><span class="n">sampling_rate</span><span class="p">)</span>
+
+        <span class="c1"># Set to points to NaN where the speed is too fast</span>
+        <span class="n">is_too_fast</span> <span class="o">=</span> <span class="p">(</span><span class="n">front_LED_speed</span> <span class="o">&gt;</span> <span class="n">max_plausible_speed</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span>
+            <span class="n">back_LED_speed</span> <span class="o">&gt;</span> <span class="n">max_plausible_speed</span><span class="p">)</span>
+        <span class="n">back_LED</span><span class="p">[</span><span class="n">is_too_fast</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+        <span class="n">front_LED</span><span class="p">[</span><span class="n">is_too_fast</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+
+        <span class="c1"># Interpolate the NaN points</span>
+        <span class="n">back_LED</span> <span class="o">=</span> <span class="n">interpolate_nan</span><span class="p">(</span><span class="n">back_LED</span><span class="p">)</span>
+        <span class="n">front_LED</span> <span class="o">=</span> <span class="n">interpolate_nan</span><span class="p">(</span><span class="n">front_LED</span><span class="p">)</span>
+
+        <span class="c1"># Smooth</span>
+        <span class="n">moving_average_window</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span>
+            <span class="n">position_smoothing_duration</span> <span class="o">*</span> <span class="n">sampling_rate</span><span class="p">)</span>
+        <span class="n">back_LED</span> <span class="o">=</span> <span class="n">bottleneck</span><span class="o">.</span><span class="n">move_mean</span><span class="p">(</span>
+            <span class="n">back_LED</span><span class="p">,</span>
+            <span class="n">window</span><span class="o">=</span><span class="n">moving_average_window</span><span class="p">,</span>
+            <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">front_LED</span> <span class="o">=</span> <span class="n">bottleneck</span><span class="o">.</span><span class="n">move_mean</span><span class="p">(</span>
+            <span class="n">front_LED</span><span class="p">,</span>
+            <span class="n">window</span><span class="o">=</span><span class="n">moving_average_window</span><span class="p">,</span>
+            <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">is_upsampled</span><span class="p">:</span>
+            <span class="n">position_df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+                <span class="p">{</span><span class="s1">&#39;time&#39;</span><span class="p">:</span> <span class="n">time</span><span class="p">,</span>
+                 <span class="s1">&#39;back_LED_x&#39;</span><span class="p">:</span> <span class="n">back_LED</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span>
+                 <span class="s1">&#39;back_LED_y&#39;</span><span class="p">:</span> <span class="n">back_LED</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span>
+                 <span class="s1">&#39;front_LED_x&#39;</span><span class="p">:</span> <span class="n">front_LED</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span>
+                 <span class="s1">&#39;front_LED_y&#39;</span><span class="p">:</span> <span class="n">front_LED</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span>
+                 <span class="p">}</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s1">&#39;time&#39;</span><span class="p">)</span>
+
+            <span class="n">upsampling_start_time</span> <span class="o">=</span> <span class="n">time</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">upsampling_end_time</span> <span class="o">=</span> <span class="n">time</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+            <span class="n">n_samples</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">upsampling_end_time</span> <span class="o">-</span> <span class="n">upsampling_start_time</span><span class="p">)</span> <span class="o">*</span>
+                <span class="n">upsampling_sampling_rate</span><span class="p">))</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="n">new_time</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="n">upsampling_start_time</span><span class="p">,</span>
+                                   <span class="n">upsampling_end_time</span><span class="p">,</span> <span class="n">n_samples</span><span class="p">)</span>
+            <span class="n">new_index</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">position_df</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">new_time</span><span class="p">))),</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;time&#39;</span><span class="p">)</span>
+            <span class="n">position_df</span> <span class="o">=</span> <span class="p">(</span><span class="n">position_df</span>
+                           <span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">new_index</span><span class="p">)</span>
+                           <span class="o">.</span><span class="n">interpolate</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="n">upsampling_interpolation_method</span><span class="p">)</span>
+                           <span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">new_time</span><span class="p">))</span>
+
+            <span class="n">time</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">position_df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+            <span class="n">back_LED</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                <span class="n">position_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="p">[</span><span class="s1">&#39;back_LED_x&#39;</span><span class="p">,</span> <span class="s1">&#39;back_LED_y&#39;</span><span class="p">]])</span>
+            <span class="n">front_LED</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                <span class="n">position_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="p">[</span><span class="s1">&#39;front_LED_x&#39;</span><span class="p">,</span> <span class="s1">&#39;front_LED_y&#39;</span><span class="p">]])</span>
+
+            <span class="n">sampling_rate</span> <span class="o">=</span> <span class="n">upsampling_sampling_rate</span>
+
+        <span class="c1"># Calculate head position, head orientation, velocity, speed</span>
+        <span class="n">head_position</span> <span class="o">=</span> <span class="n">get_centriod</span><span class="p">(</span><span class="n">back_LED</span><span class="p">,</span> <span class="n">front_LED</span><span class="p">)</span>  <span class="c1"># cm</span>
+
+        <span class="n">head_orientation</span> <span class="o">=</span> <span class="n">get_angle</span><span class="p">(</span><span class="n">back_LED</span><span class="p">,</span> <span class="n">front_LED</span><span class="p">)</span>  <span class="c1"># radians</span>
+        <span class="n">is_nan</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">head_orientation</span><span class="p">)</span>
+
+        <span class="c1"># Unwrap orientation before smoothing</span>
+        <span class="n">head_orientation</span><span class="p">[</span><span class="o">~</span><span class="n">is_nan</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unwrap</span><span class="p">(</span><span class="n">head_orientation</span><span class="p">[</span><span class="o">~</span><span class="n">is_nan</span><span class="p">])</span>
+        <span class="n">head_orientation</span><span class="p">[</span><span class="o">~</span><span class="n">is_nan</span><span class="p">]</span> <span class="o">=</span> <span class="n">gaussian_smooth</span><span class="p">(</span>
+            <span class="n">head_orientation</span><span class="p">[</span><span class="o">~</span><span class="n">is_nan</span><span class="p">],</span> <span class="n">head_orient_smoothing_std_dev</span><span class="p">,</span>
+            <span class="n">sampling_rate</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">truncate</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
+        <span class="c1"># convert back to between -pi and pi</span>
+        <span class="n">head_orientation</span><span class="p">[</span><span class="o">~</span><span class="n">is_nan</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">angle</span><span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="mi">1</span><span class="n">j</span> <span class="o">*</span> <span class="n">head_orientation</span><span class="p">[</span><span class="o">~</span><span class="n">is_nan</span><span class="p">]))</span>
+
+        <span class="n">velocity</span> <span class="o">=</span> <span class="n">get_velocity</span><span class="p">(</span>
+            <span class="n">head_position</span><span class="p">,</span>
+            <span class="n">time</span><span class="o">=</span><span class="n">time</span><span class="p">,</span>
+            <span class="n">sigma</span><span class="o">=</span><span class="n">speed_smoothing_std_dev</span><span class="p">,</span>
+            <span class="n">sampling_frequency</span><span class="o">=</span><span class="n">sampling_rate</span><span class="p">)</span>  <span class="c1"># cm/s</span>
+        <span class="n">speed</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">velocity</span> <span class="o">**</span> <span class="mi">2</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">))</span>  <span class="c1"># cm/s</span>
+
+        <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;time&#39;</span><span class="p">:</span> <span class="n">time</span><span class="p">,</span>
+                <span class="s1">&#39;head_position&#39;</span><span class="p">:</span> <span class="n">head_position</span><span class="p">,</span>
+                <span class="s1">&#39;head_orientation&#39;</span><span class="p">:</span> <span class="n">head_orientation</span><span class="p">,</span>
+                <span class="s1">&#39;velocity&#39;</span><span class="p">:</span> <span class="n">velocity</span><span class="p">,</span>
+                <span class="s1">&#39;speed&#39;</span><span class="p">:</span> <span class="n">speed</span><span class="p">,</span>
+                <span class="p">}</span></div>
+
+<div class="viewcode-block" id="IntervalPositionInfo.fetch_nwb"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfo.html#spyglass.common.common_position.IntervalPositionInfo.fetch_nwb">[docs]</a>    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                         <span class="p">(</span><span class="n">AnalysisNwbfile</span><span class="p">,</span>
+                          <span class="s1">&#39;analysis_file_abs_path&#39;</span><span class="p">),</span>
+                         <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="IntervalPositionInfo.fetch1_dataframe"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfo.html#spyglass.common.common_position.IntervalPositionInfo.fetch1_dataframe">[docs]</a>    <span class="k">def</span> <span class="nf">fetch1_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">nwb_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+            <span class="n">nwb_data</span><span class="p">[</span><span class="s1">&#39;head_position&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span><span class="o">.</span><span class="n">timestamps</span><span class="p">),</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;time&#39;</span><span class="p">)</span>
+        <span class="n">COLUMNS</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;head_position_x&#39;</span><span class="p">,</span> <span class="s1">&#39;head_position_y&#39;</span><span class="p">,</span> <span class="s1">&#39;head_orientation&#39;</span><span class="p">,</span>
+                   <span class="s1">&#39;head_velocity_x&#39;</span><span class="p">,</span> <span class="s1">&#39;head_velocity_y&#39;</span><span class="p">,</span> <span class="s1">&#39;head_speed&#39;</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">nwb_data</span><span class="p">[</span><span class="s1">&#39;head_position&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span><span class="o">.</span><span class="n">data</span><span class="p">),</span>
+             <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">nwb_data</span><span class="p">[</span><span class="s1">&#39;head_orientation&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span><span class="o">.</span><span class="n">data</span><span class="p">)[</span>
+                <span class="p">:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span>
+             <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">nwb_data</span><span class="p">[</span><span class="s1">&#39;head_velocity&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">time_series</span><span class="p">[</span><span class="s1">&#39;head_velocity&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">)),</span>
+            <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="n">columns</span><span class="o">=</span><span class="n">COLUMNS</span><span class="p">,</span>
+            <span class="n">index</span><span class="o">=</span><span class="n">index</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="LinearizationParameters"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.LinearizationParameters.html#spyglass.common.common_position.LinearizationParameters">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">LinearizationParameters</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Lookup</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Choose whether to use an HMM to linearize position. This can help when</span>
+<span class="sd">    the eucledian distances between separate arms are too close and the previous</span>
+<span class="sd">    position has some information about which arm the animal is on.&quot;&quot;&quot;</span>
+
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    linearization_param_name : varchar(80)   # name for this set of parameters</span>
+<span class="s2">    ---</span>
+<span class="s2">    use_hmm = 0 : int   # use HMM to determine linearization</span>
+<span class="s2">    # How much to prefer route distances between successive time points that are closer to the euclidean distance. Smaller numbers mean the route distance is more likely to be close to the euclidean distance.</span>
+<span class="s2">    route_euclidean_distance_scaling = 1.0 : float</span>
+<span class="s2">    sensor_std_dev = 5.0 : float   # Uncertainty of position sensor (in cm).</span>
+<span class="s2">    # Biases the transition matrix to prefer the current track segment.</span>
+<span class="s2">    diagonal_bias = 0.5 : float</span>
+<span class="s2">    &quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="TrackGraph"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.TrackGraph.html#spyglass.common.common_position.TrackGraph">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">TrackGraph</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Graph representation of track representing the spatial environment.</span>
+<span class="sd">    Used for linearizing position.&quot;&quot;&quot;</span>
+
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    track_graph_name : varchar(80)</span>
+<span class="s2">    ----</span>
+<span class="s2">    environment : varchar(80)    # Type of Environment</span>
+<span class="s2">    node_positions : blob  # 2D position of track_graph nodes, shape (n_nodes, 2)</span>
+<span class="s2">    edges: blob                  # shape (n_edges, 2)</span>
+<span class="s2">    linear_edge_order : blob  # order of track graph edges in the linear space, shape (n_edges, 2)</span>
+<span class="s2">    linear_edge_spacing : blob  # amount of space between edges in the linear space, shape (n_edges,)</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="TrackGraph.get_networkx_track_graph"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.TrackGraph.html#spyglass.common.common_position.TrackGraph.get_networkx_track_graph">[docs]</a>    <span class="k">def</span> <span class="nf">get_networkx_track_graph</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">track_graph_parameters</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">track_graph_parameters</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">track_graph_parameters</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch1</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">make_track_graph</span><span class="p">(</span>
+            <span class="n">node_positions</span><span class="o">=</span><span class="n">track_graph_parameters</span><span class="p">[</span><span class="s1">&#39;node_positions&#39;</span><span class="p">],</span>
+            <span class="n">edges</span><span class="o">=</span><span class="n">track_graph_parameters</span><span class="p">[</span><span class="s1">&#39;edges&#39;</span><span class="p">])</span></div>
+
+<div class="viewcode-block" id="TrackGraph.plot_track_graph"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.TrackGraph.html#spyglass.common.common_position.TrackGraph.plot_track_graph">[docs]</a>    <span class="k">def</span> <span class="nf">plot_track_graph</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">draw_edge_labels</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kwds</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Plot the track graph in 2D position space.&quot;&quot;&quot;</span>
+        <span class="n">track_graph</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_networkx_track_graph</span><span class="p">()</span>
+        <span class="n">plot_track_graph</span><span class="p">(</span><span class="n">track_graph</span><span class="p">,</span>
+                         <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span>
+                         <span class="n">draw_edge_labels</span><span class="o">=</span><span class="n">draw_edge_labels</span><span class="p">,</span>
+                         <span class="o">**</span><span class="n">kwds</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="TrackGraph.plot_track_graph_as_1D"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.TrackGraph.html#spyglass.common.common_position.TrackGraph.plot_track_graph_as_1D">[docs]</a>    <span class="k">def</span> <span class="nf">plot_track_graph_as_1D</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                               <span class="n">ax</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="n">other_axis_start</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+                               <span class="n">draw_edge_labels</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">node_size</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span>
+                               <span class="n">node_color</span><span class="o">=</span><span class="s2">&quot;#1f77b4&quot;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Plot the track graph in 1D to see how the linearization is set up.&quot;&quot;&quot;</span>
+        <span class="n">track_graph_parameters</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch1</span><span class="p">()</span>
+        <span class="n">track_graph</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_networkx_track_graph</span><span class="p">(</span>
+            <span class="n">track_graph_parameters</span><span class="o">=</span><span class="n">track_graph_parameters</span><span class="p">)</span>
+        <span class="n">plot_graph_as_1D</span><span class="p">(</span>
+            <span class="n">track_graph</span><span class="p">,</span>
+            <span class="n">edge_order</span><span class="o">=</span><span class="n">track_graph_parameters</span><span class="p">[</span><span class="s1">&#39;linear_edge_order&#39;</span><span class="p">],</span>
+            <span class="n">edge_spacing</span><span class="o">=</span><span class="n">track_graph_parameters</span><span class="p">[</span><span class="s1">&#39;linear_edge_spacing&#39;</span><span class="p">],</span>
+            <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span>
+            <span class="n">axis</span><span class="o">=</span><span class="n">axis</span><span class="p">,</span>
+            <span class="n">other_axis_start</span><span class="o">=</span><span class="n">other_axis_start</span><span class="p">,</span>
+            <span class="n">draw_edge_labels</span><span class="o">=</span><span class="n">draw_edge_labels</span><span class="p">,</span>
+            <span class="n">node_size</span><span class="o">=</span><span class="n">node_size</span><span class="p">,</span>
+            <span class="n">node_color</span><span class="o">=</span><span class="n">node_color</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="IntervalLinearizationSelection"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizationSelection.html#spyglass.common.common_position.IntervalLinearizationSelection">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">IntervalLinearizationSelection</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Lookup</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; IntervalPositionInfo</span>
+<span class="s2">    -&gt; TrackGraph</span>
+<span class="s2">    -&gt; LinearizationParameters</span>
+<span class="s2">    ---</span>
+<span class="s2">    &quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="IntervalLinearizedPosition"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html#spyglass.common.common_position.IntervalLinearizedPosition">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">IntervalLinearizedPosition</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Linearized position for a given interval&quot;&quot;&quot;</span>
+
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; IntervalLinearizationSelection</span>
+<span class="s2">    ---</span>
+<span class="s2">    -&gt; AnalysisNwbfile</span>
+<span class="s2">    linearized_position_object_id : varchar(40)</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="IntervalLinearizedPosition.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html#spyglass.common.common_position.IntervalLinearizedPosition.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Computing linear position for: </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">])</span>
+
+        <span class="n">position_nwb</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">IntervalPositionInfo</span> <span class="o">&amp;</span>
+            <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+             <span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">],</span>
+             <span class="s1">&#39;position_info_param_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;position_info_param_name&#39;</span><span class="p">]</span>
+             <span class="p">})</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="n">position</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+            <span class="n">position_nwb</span><span class="p">[</span><span class="s1">&#39;head_position&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>
+        <span class="n">time</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+            <span class="n">position_nwb</span><span class="p">[</span><span class="s1">&#39;head_position&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span><span class="o">.</span><span class="n">timestamps</span><span class="p">)</span>
+
+        <span class="n">linearization_parameters</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">LinearizationParameters</span><span class="p">()</span> <span class="o">&amp;</span>
+            <span class="p">{</span><span class="s1">&#39;linearization_param_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;linearization_param_name&#39;</span><span class="p">]</span>
+             <span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">()</span>
+        <span class="n">track_graph_info</span> <span class="o">=</span> <span class="p">(</span><span class="n">TrackGraph</span><span class="p">()</span> <span class="o">&amp;</span>
+                            <span class="p">{</span><span class="s1">&#39;track_graph_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;track_graph_name&#39;</span><span class="p">]}</span>
+                            <span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">()</span>
+
+        <span class="n">track_graph</span> <span class="o">=</span> <span class="n">make_track_graph</span><span class="p">(</span>
+            <span class="n">node_positions</span><span class="o">=</span><span class="n">track_graph_info</span><span class="p">[</span><span class="s1">&#39;node_positions&#39;</span><span class="p">],</span>
+            <span class="n">edges</span><span class="o">=</span><span class="n">track_graph_info</span><span class="p">[</span><span class="s1">&#39;edges&#39;</span><span class="p">])</span>
+
+        <span class="n">linear_position_df</span> <span class="o">=</span> <span class="n">get_linearized_position</span><span class="p">(</span>
+            <span class="n">position</span><span class="o">=</span><span class="n">position</span><span class="p">,</span>
+            <span class="n">track_graph</span><span class="o">=</span><span class="n">track_graph</span><span class="p">,</span>
+            <span class="n">edge_spacing</span><span class="o">=</span><span class="n">track_graph_info</span><span class="p">[</span><span class="s1">&#39;linear_edge_spacing&#39;</span><span class="p">],</span>
+            <span class="n">edge_order</span><span class="o">=</span><span class="n">track_graph_info</span><span class="p">[</span><span class="s1">&#39;linear_edge_order&#39;</span><span class="p">],</span>
+            <span class="n">use_HMM</span><span class="o">=</span><span class="n">linearization_parameters</span><span class="p">[</span><span class="s1">&#39;use_hmm&#39;</span><span class="p">],</span>
+            <span class="n">route_euclidean_distance_scaling</span><span class="o">=</span><span class="n">linearization_parameters</span><span class="p">[</span>
+                <span class="s1">&#39;route_euclidean_distance_scaling&#39;</span><span class="p">],</span>
+            <span class="n">sensor_std_dev</span><span class="o">=</span><span class="n">linearization_parameters</span><span class="p">[</span><span class="s1">&#39;sensor_std_dev&#39;</span><span class="p">],</span>
+            <span class="n">diagonal_bias</span><span class="o">=</span><span class="n">linearization_parameters</span><span class="p">[</span><span class="s1">&#39;diagonal_bias&#39;</span><span class="p">],</span>
+        <span class="p">)</span>
+
+        <span class="n">linear_position_df</span><span class="p">[</span><span class="s1">&#39;time&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">time</span>
+
+        <span class="c1"># Insert into analysis nwb file</span>
+        <span class="n">nwb_analysis_file</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span>
+
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;linearized_position_object_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
+            <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">],</span>
+            <span class="n">nwb_object</span><span class="o">=</span><span class="n">linear_position_df</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+            <span class="n">nwb_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+            <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">])</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="IntervalLinearizedPosition.fetch_nwb"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html#spyglass.common.common_position.IntervalLinearizedPosition.fetch_nwb">[docs]</a>    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="p">(</span><span class="n">AnalysisNwbfile</span><span class="p">,</span> <span class="s1">&#39;analysis_file_abs_path&#39;</span><span class="p">),</span>
+                         <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="IntervalLinearizedPosition.fetch1_dataframe"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html#spyglass.common.common_position.IntervalLinearizedPosition.fetch1_dataframe">[docs]</a>    <span class="k">def</span> <span class="nf">fetch1_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;linearized_position&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s1">&#39;time&#39;</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="NodePicker"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker">[docs]</a><span class="k">class</span> <span class="nc">NodePicker</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Interactive creation of track graph by looking at video frames.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">video_filename</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">node_color</span><span class="o">=</span><span class="s2">&quot;#1f78b4&quot;</span><span class="p">,</span> <span class="n">node_size</span><span class="o">=</span><span class="mi">100</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">ax</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">gca</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ax</span> <span class="o">=</span> <span class="n">ax</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">canvas</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">get_figure</span><span class="p">()</span><span class="o">.</span><span class="n">canvas</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cid</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">node_color</span> <span class="o">=</span> <span class="n">node_color</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_nodes_plot</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span>
+            <span class="p">[],</span> <span class="p">[],</span>
+            <span class="n">zorder</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="n">node_size</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="n">node_color</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">edges</span> <span class="o">=</span> <span class="p">[[]]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">video_filename</span> <span class="o">=</span> <span class="n">video_filename</span>
+
+        <span class="k">if</span> <span class="n">video_filename</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">video</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoCapture</span><span class="p">(</span><span class="n">video_filename</span><span class="p">)</span>
+            <span class="n">frame</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_video_frame</span><span class="p">()</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">picker</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Left click to place node.</span><span class="se">\n</span><span class="s1">Right click to remove node.&#39;</span>
+                         <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">Shift+Left click to clear nodes.</span><span class="se">\n</span><span class="s1">Cntrl+Left click two nodes to place an edge&#39;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">node_positions</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="p">)</span>
+
+<div class="viewcode-block" id="NodePicker.connect"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.connect">[docs]</a>    <span class="k">def</span> <span class="nf">connect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cid</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cid</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">canvas</span><span class="o">.</span><span class="n">mpl_connect</span><span class="p">(</span>
+                <span class="s1">&#39;button_press_event&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">click_event</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="NodePicker.disconnect"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.disconnect">[docs]</a>    <span class="k">def</span> <span class="nf">disconnect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cid</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">canvas</span><span class="o">.</span><span class="n">mpl_disconnect</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cid</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cid</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+<div class="viewcode-block" id="NodePicker.click_event"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.click_event">[docs]</a>    <span class="k">def</span> <span class="nf">click_event</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">event</span><span class="o">.</span><span class="n">inaxes</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;control&#39;</span><span class="p">,</span> <span class="s1">&#39;shift&#39;</span><span class="p">])</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">button</span> <span class="o">==</span> <span class="mi">1</span><span class="p">):</span>  <span class="c1"># left click</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">event</span><span class="o">.</span><span class="n">xdata</span><span class="p">,</span> <span class="n">event</span><span class="o">.</span><span class="n">ydata</span><span class="p">))</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;control&#39;</span><span class="p">,</span> <span class="s1">&#39;shift&#39;</span><span class="p">])</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">button</span> <span class="o">==</span> <span class="mi">3</span><span class="p">):</span>  <span class="c1"># right click</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">remove_point</span><span class="p">((</span><span class="n">event</span><span class="o">.</span><span class="n">xdata</span><span class="p">,</span> <span class="n">event</span><span class="o">.</span><span class="n">ydata</span><span class="p">))</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="s1">&#39;shift&#39;</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">button</span> <span class="o">==</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="s1">&#39;control&#39;</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">button</span> <span class="o">==</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="n">point</span> <span class="o">=</span> <span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">xdata</span><span class="p">,</span> <span class="n">event</span><span class="o">.</span><span class="n">ydata</span><span class="p">)</span>
+            <span class="n">distance_to_nodes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">node_positions</span> <span class="o">-</span> <span class="n">point</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">closest_node_ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">distance_to_nodes</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">edges</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">edges</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">closest_node_ind</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">edges</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">closest_node_ind</span><span class="p">])</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">redraw</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="NodePicker.redraw"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.redraw">[docs]</a>    <span class="k">def</span> <span class="nf">redraw</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Draw Node Circles</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">node_positions</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_nodes_plot</span><span class="o">.</span><span class="n">set_offsets</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">node_positions</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_nodes_plot</span><span class="o">.</span><span class="n">set_offsets</span><span class="p">([])</span>
+
+        <span class="c1"># Draw Node Numbers</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ax</span><span class="o">.</span><span class="n">texts</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">ind</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">node_positions</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">ind</span><span class="p">,</span>
+                         <span class="n">zorder</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span>
+                         <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span>
+                         <span class="n">horizontalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span>
+                         <span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span>
+                         <span class="n">clip_on</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                         <span class="n">bbox</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                         <span class="n">transform</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">ax</span><span class="o">.</span><span class="n">transData</span><span class="p">,</span>
+                         <span class="p">)</span>
+        <span class="c1"># Draw Edges</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ax</span><span class="o">.</span><span class="n">lines</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># clears the existing lines</span>
+        <span class="k">for</span> <span class="n">edge</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">edges</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">edge</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_positions</span><span class="p">[</span><span class="n">edge</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+                <span class="n">x2</span><span class="p">,</span> <span class="n">y2</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">node_positions</span><span class="p">[</span><span class="n">edge</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">([</span><span class="n">x1</span><span class="p">,</span> <span class="n">x2</span><span class="p">],</span> <span class="p">[</span><span class="n">y1</span><span class="p">,</span> <span class="n">y2</span><span class="p">],</span>
+                             <span class="n">color</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">node_color</span><span class="p">,</span>
+                             <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">canvas</span><span class="o">.</span><span class="n">draw_idle</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="NodePicker.remove_point"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.remove_point">[docs]</a>    <span class="k">def</span> <span class="nf">remove_point</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">point</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">distance_to_nodes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">node_positions</span> <span class="o">-</span> <span class="n">point</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">closest_node_ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmin</span><span class="p">(</span><span class="n">distance_to_nodes</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">closest_node_ind</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="NodePicker.clear"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.clear">[docs]</a>    <span class="k">def</span> <span class="nf">clear</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_nodes</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">edges</span> <span class="o">=</span> <span class="p">[[]]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">redraw</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="NodePicker.get_video_frame"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.get_video_frame">[docs]</a>    <span class="k">def</span> <span class="nf">get_video_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">is_grabbed</span><span class="p">,</span> <span class="n">frame</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">video</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">is_grabbed</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_BGR2RGB</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="PositionVideo"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.PositionVideo.html#spyglass.common.common_position.PositionVideo">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">PositionVideo</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Creates a video of the computed head position and orientation as well as</span>
+<span class="sd">    the original LED positions overlayed on the video of the animal.</span>
+
+<span class="sd">    Use for debugging the effect of position extraction parameters.&quot;&quot;&quot;</span>
+
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; IntervalPositionInfo</span>
+<span class="s2">    ---</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="PositionVideo.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.PositionVideo.html#spyglass.common.common_position.PositionVideo.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">M_TO_CM</span> <span class="o">=</span> <span class="mi">100</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Loading position data...&#39;</span><span class="p">)</span>
+        <span class="n">raw_position_df</span> <span class="o">=</span> <span class="p">(</span><span class="n">RawPosition</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span>
+                           <span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+                           <span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">]}</span>
+                           <span class="p">)</span><span class="o">.</span><span class="n">fetch1_dataframe</span><span class="p">()</span>
+        <span class="n">position_info_df</span> <span class="o">=</span> <span class="p">(</span><span class="n">IntervalPositionInfo</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">{</span>
+            <span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+            <span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">],</span>
+            <span class="s1">&#39;position_info_param_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;position_info_param_name&#39;</span><span class="p">],</span>
+        <span class="p">}</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">fetch1_dataframe</span><span class="p">()</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Loading video data...&#39;</span><span class="p">)</span>
+        <span class="n">epoch</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">]</span>
+                    <span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;pos &#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+                    <span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39; valid times&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+                    <span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">video_info</span> <span class="o">=</span> <span class="p">(</span><span class="n">VideoFile</span><span class="p">()</span> <span class="o">&amp;</span>
+                      <span class="p">{</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span>
+                       <span class="s1">&#39;epoch&#39;</span><span class="p">:</span> <span class="n">epoch</span><span class="p">})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">()</span>
+        <span class="n">io</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">NWBHDF5IO</span><span class="p">(</span><span class="s1">&#39;/stelmo/nwb/raw/&#39;</span> <span class="o">+</span>
+                             <span class="n">video_info</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span>
+        <span class="n">nwb_file</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+        <span class="n">nwb_video</span> <span class="o">=</span> <span class="n">nwb_file</span><span class="o">.</span><span class="n">objects</span><span class="p">[</span><span class="n">video_info</span><span class="p">[</span><span class="s1">&#39;video_file_object_id&#39;</span><span class="p">]]</span>
+        <span class="n">video_filename</span> <span class="o">=</span> <span class="n">nwb_video</span><span class="o">.</span><span class="n">external_file</span><span class="o">.</span><span class="n">value</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="n">nwb_base_filename</span> <span class="o">=</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.nwb&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="n">output_video_filename</span> <span class="o">=</span> <span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">nwb_base_filename</span><span class="si">}</span><span class="s1">_</span><span class="si">{</span><span class="n">epoch</span><span class="si">:</span><span class="s1">02d</span><span class="si">}</span><span class="s1">_&#39;</span>
+                                 <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;position_info_param_name&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1">.mp4&#39;</span><span class="p">)</span>
+
+        <span class="n">centroids</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;red&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">raw_position_df</span><span class="p">[[</span><span class="s1">&#39;xloc&#39;</span><span class="p">,</span> <span class="s1">&#39;yloc&#39;</span><span class="p">]]),</span>
+                     <span class="s1">&#39;green&#39;</span><span class="p">:</span>  <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">raw_position_df</span><span class="p">[[</span><span class="s1">&#39;xloc2&#39;</span><span class="p">,</span> <span class="s1">&#39;yloc2&#39;</span><span class="p">]])}</span>
+        <span class="n">head_position_mean</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+            <span class="n">position_info_df</span><span class="p">[[</span><span class="s1">&#39;head_position_x&#39;</span><span class="p">,</span> <span class="s1">&#39;head_position_y&#39;</span><span class="p">]])</span>
+        <span class="n">head_orientation_mean</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+            <span class="n">position_info_df</span><span class="p">[[</span><span class="s1">&#39;head_orientation&#39;</span><span class="p">]])</span>
+        <span class="n">video_time</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">nwb_video</span><span class="o">.</span><span class="n">timestamps</span><span class="p">)</span>
+        <span class="n">position_time</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">position_info_df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+        <span class="n">cm_per_pixel</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">nwb_video</span><span class="o">.</span><span class="n">device</span><span class="o">.</span><span class="n">meters_per_pixel</span>
+            <span class="o">*</span> <span class="n">M_TO_CM</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Making video...&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">make_video</span><span class="p">(</span><span class="n">video_filename</span><span class="p">,</span> <span class="n">centroids</span><span class="p">,</span> <span class="n">head_position_mean</span><span class="p">,</span>
+                        <span class="n">head_orientation_mean</span><span class="p">,</span> <span class="n">video_time</span><span class="p">,</span> <span class="n">position_time</span><span class="p">,</span>
+                        <span class="n">output_video_filename</span><span class="o">=</span><span class="n">output_video_filename</span><span class="p">,</span>
+                        <span class="n">cm_to_pixels</span><span class="o">=</span><span class="n">cm_per_pixel</span><span class="p">,</span> <span class="n">disable_progressbar</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="PositionVideo.convert_to_pixels"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.PositionVideo.html#spyglass.common.common_position.PositionVideo.convert_to_pixels">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">convert_to_pixels</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">,</span> <span class="n">cm_to_pixels</span><span class="o">=</span><span class="mf">1.0</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;Converts from cm to pixels and flips the y-axis.</span>
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        data : ndarray, shape (n_time, 2)</span>
+<span class="sd">        frame_size : array_like, shape (2,)</span>
+<span class="sd">        cm_to_pixels : float</span>
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        converted_data : ndarray, shape (n_time, 2)</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="k">return</span> <span class="n">data</span> <span class="o">/</span> <span class="n">cm_to_pixels</span></div>
+
+<div class="viewcode-block" id="PositionVideo.fill_nan"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.PositionVideo.html#spyglass.common.common_position.PositionVideo.fill_nan">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">fill_nan</span><span class="p">(</span><span class="n">variable</span><span class="p">,</span> <span class="n">video_time</span><span class="p">,</span> <span class="n">variable_time</span><span class="p">):</span>
+        <span class="n">video_ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">digitize</span><span class="p">(</span><span class="n">variable_time</span><span class="p">,</span> <span class="n">video_time</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+
+        <span class="n">n_video_time</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">video_time</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">n_variable_dims</span> <span class="o">=</span> <span class="n">variable</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">filled_variable</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="n">n_video_time</span><span class="p">,</span> <span class="n">n_variable_dims</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">IndexError</span><span class="p">:</span>
+            <span class="n">filled_variable</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="n">n_video_time</span><span class="p">,),</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+        <span class="n">filled_variable</span><span class="p">[</span><span class="n">video_ind</span><span class="p">]</span> <span class="o">=</span> <span class="n">variable</span>
+
+        <span class="k">return</span> <span class="n">filled_variable</span></div>
+
+<div class="viewcode-block" id="PositionVideo.make_video"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.PositionVideo.html#spyglass.common.common_position.PositionVideo.make_video">[docs]</a>    <span class="k">def</span> <span class="nf">make_video</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">video_filename</span><span class="p">,</span> <span class="n">centroids</span><span class="p">,</span> <span class="n">head_position_mean</span><span class="p">,</span>
+                   <span class="n">head_orientation_mean</span><span class="p">,</span> <span class="n">video_time</span><span class="p">,</span> <span class="n">position_time</span><span class="p">,</span>
+                   <span class="n">output_video_filename</span><span class="o">=</span><span class="s1">&#39;output.mp4&#39;</span><span class="p">,</span>
+                   <span class="n">cm_to_pixels</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">disable_progressbar</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                   <span class="n">arrow_radius</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span> <span class="n">circle_radius</span><span class="o">=</span><span class="mi">8</span><span class="p">):</span>
+        <span class="n">RGB_PINK</span> <span class="o">=</span> <span class="p">(</span><span class="mi">234</span><span class="p">,</span> <span class="mi">82</span><span class="p">,</span> <span class="mi">111</span><span class="p">)</span>
+        <span class="n">RGB_YELLOW</span> <span class="o">=</span> <span class="p">(</span><span class="mi">253</span><span class="p">,</span> <span class="mi">231</span><span class="p">,</span> <span class="mi">76</span><span class="p">)</span>
+        <span class="n">RGB_WHITE</span> <span class="o">=</span> <span class="p">(</span><span class="mi">255</span><span class="p">,</span> <span class="mi">255</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+
+        <span class="n">video</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoCapture</span><span class="p">(</span><span class="n">video_filename</span><span class="p">)</span>
+        <span class="n">fourcc</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoWriter_fourcc</span><span class="p">(</span><span class="o">*</span><span class="s1">&#39;mp4v&#39;</span><span class="p">)</span>
+        <span class="n">frame_size</span> <span class="o">=</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">video</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="mi">3</span><span class="p">)),</span> <span class="nb">int</span><span class="p">(</span><span class="n">video</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="mi">4</span><span class="p">)))</span>
+        <span class="n">frame_rate</span> <span class="o">=</span> <span class="n">video</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+        <span class="n">n_frames</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">head_orientation_mean</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+        <span class="n">out</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoWriter</span><span class="p">(</span><span class="n">output_video_filename</span><span class="p">,</span> <span class="n">fourcc</span><span class="p">,</span> <span class="n">frame_rate</span><span class="p">,</span>
+                              <span class="n">frame_size</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+
+        <span class="n">centroids</span> <span class="o">=</span> <span class="p">{</span><span class="n">color</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">fill_nan</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">video_time</span><span class="p">,</span> <span class="n">position_time</span><span class="p">)</span>
+                     <span class="k">for</span> <span class="n">color</span><span class="p">,</span> <span class="n">data</span> <span class="ow">in</span> <span class="n">centroids</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+        <span class="n">head_position_mean</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fill_nan</span><span class="p">(</span>
+            <span class="n">head_position_mean</span><span class="p">,</span> <span class="n">video_time</span><span class="p">,</span> <span class="n">position_time</span><span class="p">)</span>
+        <span class="n">head_orientation_mean</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fill_nan</span><span class="p">(</span>
+            <span class="n">head_orientation_mean</span><span class="p">,</span> <span class="n">video_time</span><span class="p">,</span> <span class="n">position_time</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">time_ind</span> <span class="ow">in</span> <span class="n">tqdm</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">n_frames</span> <span class="o">-</span> <span class="mi">1</span><span class="p">),</span> <span class="n">desc</span><span class="o">=</span><span class="s1">&#39;frames&#39;</span><span class="p">,</span>
+                             <span class="n">disable</span><span class="o">=</span><span class="n">disable_progressbar</span><span class="p">):</span>
+            <span class="n">is_grabbed</span><span class="p">,</span> <span class="n">frame</span> <span class="o">=</span> <span class="n">video</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">is_grabbed</span><span class="p">:</span>
+                <span class="n">frame</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_BGR2RGB</span><span class="p">)</span>
+
+                <span class="n">red_centroid</span> <span class="o">=</span> <span class="n">centroids</span><span class="p">[</span><span class="s1">&#39;red&#39;</span><span class="p">][</span><span class="n">time_ind</span><span class="p">]</span>
+                <span class="n">green_centroid</span> <span class="o">=</span> <span class="n">centroids</span><span class="p">[</span><span class="s1">&#39;green&#39;</span><span class="p">][</span><span class="n">time_ind</span><span class="p">]</span>
+
+                <span class="n">head_position</span> <span class="o">=</span> <span class="n">head_position_mean</span><span class="p">[</span><span class="n">time_ind</span><span class="p">]</span>
+                <span class="n">head_position</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">convert_to_pixels</span><span class="p">(</span>
+                    <span class="n">head_position</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">,</span> <span class="n">cm_to_pixels</span><span class="p">)</span>
+                <span class="n">head_orientation</span> <span class="o">=</span> <span class="n">head_orientation_mean</span><span class="p">[</span><span class="n">time_ind</span><span class="p">]</span>
+
+                <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">red_centroid</span><span class="p">)):</span>
+                    <span class="n">cv2</span><span class="o">.</span><span class="n">circle</span><span class="p">(</span><span class="n">img</span><span class="o">=</span><span class="n">frame</span><span class="p">,</span>
+                               <span class="n">center</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">red_centroid</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)),</span>
+                               <span class="n">radius</span><span class="o">=</span><span class="n">circle_radius</span><span class="p">,</span>
+                               <span class="n">color</span><span class="o">=</span><span class="n">RGB_YELLOW</span><span class="p">,</span>
+                               <span class="n">thickness</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+                               <span class="n">shift</span><span class="o">=</span><span class="n">cv2</span><span class="o">.</span><span class="n">CV_8U</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">green_centroid</span><span class="p">)):</span>
+                    <span class="n">cv2</span><span class="o">.</span><span class="n">circle</span><span class="p">(</span><span class="n">img</span><span class="o">=</span><span class="n">frame</span><span class="p">,</span>
+                               <span class="n">center</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">green_centroid</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)),</span>
+                               <span class="n">radius</span><span class="o">=</span><span class="n">circle_radius</span><span class="p">,</span>
+                               <span class="n">color</span><span class="o">=</span><span class="n">RGB_PINK</span><span class="p">,</span>
+                               <span class="n">thickness</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+                               <span class="n">shift</span><span class="o">=</span><span class="n">cv2</span><span class="o">.</span><span class="n">CV_8U</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">head_position</span><span class="p">))</span> <span class="o">&amp;</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">head_orientation</span><span class="p">)):</span>
+                    <span class="n">arrow_tip</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="nb">int</span><span class="p">(</span><span class="n">head_position</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">arrow_radius</span> <span class="o">*</span>
+                            <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">head_orientation</span><span class="p">)),</span>
+                        <span class="nb">int</span><span class="p">(</span><span class="n">head_position</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">arrow_radius</span> <span class="o">*</span>
+                            <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">head_orientation</span><span class="p">)))</span>
+                    <span class="n">cv2</span><span class="o">.</span><span class="n">arrowedLine</span><span class="p">(</span><span class="n">img</span><span class="o">=</span><span class="n">frame</span><span class="p">,</span>
+                                    <span class="n">pt1</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">head_position</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)),</span>
+                                    <span class="n">pt2</span><span class="o">=</span><span class="n">arrow_tip</span><span class="p">,</span>
+                                    <span class="n">color</span><span class="o">=</span><span class="n">RGB_WHITE</span><span class="p">,</span>
+                                    <span class="n">thickness</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+                                    <span class="n">line_type</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+                                    <span class="n">shift</span><span class="o">=</span><span class="n">cv2</span><span class="o">.</span><span class="n">CV_8U</span><span class="p">,</span>
+                                    <span class="n">tipLength</span><span class="o">=</span><span class="mf">0.25</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">head_position</span><span class="p">)):</span>
+                    <span class="n">cv2</span><span class="o">.</span><span class="n">circle</span><span class="p">(</span><span class="n">img</span><span class="o">=</span><span class="n">frame</span><span class="p">,</span>
+                               <span class="n">center</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">head_position</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)),</span>
+                               <span class="n">radius</span><span class="o">=</span><span class="n">circle_radius</span><span class="p">,</span>
+                               <span class="n">color</span><span class="o">=</span><span class="n">RGB_WHITE</span><span class="p">,</span>
+                               <span class="n">thickness</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>
+                               <span class="n">shift</span><span class="o">=</span><span class="n">cv2</span><span class="o">.</span><span class="n">CV_8U</span><span class="p">)</span>
+
+                <span class="n">frame</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_RGB2BGR</span><span class="p">)</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">break</span>
+
+        <span class="n">video</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+        <span class="n">cv2</span><span class="o">.</span><span class="n">destroyAllWindows</span><span class="p">()</span></div></div>
+
+
+<div class="viewcode-block" id="SelectFromCollection"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection">[docs]</a><span class="k">class</span> <span class="nc">SelectFromCollection</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Select indices from a matplotlib collection using `PolygonSelector`.</span>
+
+<span class="sd">    Selected indices are saved in the `ind` attribute. This tool fades out the</span>
+<span class="sd">    points that are not part of the selection (i.e., reduces their alpha</span>
+<span class="sd">    values). If your collection has alpha &lt; 1, this tool will permanently</span>
+<span class="sd">    alter the alpha values.</span>
+
+<span class="sd">    Note that this tool selects collection objects based on their *origins*</span>
+<span class="sd">    (i.e., `offsets`).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    ax : `~matplotlib.axes.Axes`</span>
+<span class="sd">        Axes to interact with.</span>
+<span class="sd">    collection : `matplotlib.collections.Collection` subclass</span>
+<span class="sd">        Collection you want to select from.</span>
+<span class="sd">    alpha_other : 0 &lt;= float &lt;= 1</span>
+<span class="sd">        To highlight a selection, this tool sets all selected points to an</span>
+<span class="sd">        alpha value of 1 and non-selected points to *alpha_other*.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">video_filename</span><span class="p">,</span> <span class="n">alpha_other</span><span class="o">=</span><span class="mf">0.3</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ax</span> <span class="o">=</span> <span class="n">ax</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">canvas</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">figure</span><span class="o">.</span><span class="n">canvas</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">poly</span> <span class="o">=</span> <span class="n">PolygonSelector</span><span class="p">(</span>
+            <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">,</span>
+            <span class="n">onselect</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">onselect</span><span class="p">,</span>
+            <span class="n">lineprops</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span><span class="n">color</span><span class="o">=</span><span class="s1">&#39;white&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;-&#39;</span><span class="p">,</span>
+                           <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mi">10</span><span class="p">),</span>
+            <span class="n">markerprops</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span><span class="n">marker</span><span class="o">=</span><span class="s1">&#39;o&#39;</span><span class="p">,</span> <span class="n">markersize</span><span class="o">=</span><span class="mi">7</span><span class="p">,</span>
+                             <span class="n">mec</span><span class="o">=</span><span class="s1">&#39;white&#39;</span><span class="p">,</span> <span class="n">mfc</span><span class="o">=</span><span class="s1">&#39;white&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mi">10</span><span class="p">),</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ind</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">video_filename</span> <span class="o">=</span> <span class="n">video_filename</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">video</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoCapture</span><span class="p">(</span><span class="n">video_filename</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_video_frame</span><span class="p">()</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="p">,</span> <span class="n">picker</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]),</span>
+                           <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">collection</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">alpha_other</span> <span class="o">=</span> <span class="n">alpha_other</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">xys</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">collection</span><span class="o">.</span><span class="n">get_offsets</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">Npts</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">xys</span><span class="p">)</span>
+
+        <span class="c1"># Ensure that we have separate colors for each object</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">collection</span><span class="o">.</span><span class="n">get_facecolors</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">fc</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Collection must have a facecolor&#39;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">fc</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fc</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">tile</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">fc</span><span class="p">,</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">Npts</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+
+<div class="viewcode-block" id="SelectFromCollection.onselect"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection.onselect">[docs]</a>    <span class="k">def</span> <span class="nf">onselect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">verts</span><span class="p">):</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">verts</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">is_in</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">contains_points</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">xys</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nonzero</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">contains_points</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">xys</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fc</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">alpha_other</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fc</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">ind</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">collection</span><span class="o">.</span><span class="n">set_facecolors</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">fc</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">canvas</span><span class="o">.</span><span class="n">draw_idle</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="SelectFromCollection.disconnect"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection.disconnect">[docs]</a>    <span class="k">def</span> <span class="nf">disconnect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">poly</span><span class="o">.</span><span class="n">disconnect_events</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fc</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">collection</span><span class="o">.</span><span class="n">set_facecolors</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">fc</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">canvas</span><span class="o">.</span><span class="n">draw_idle</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="SelectFromCollection.get_video_frame"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection.get_video_frame">[docs]</a>    <span class="k">def</span> <span class="nf">get_video_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">is_grabbed</span><span class="p">,</span> <span class="n">frame</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">video</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">is_grabbed</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">cv2</span><span class="o">.</span><span class="n">cvtColor</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLOR_BGR2RGB</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SelectFromCollection.get_polygon_mask"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection.get_polygon_mask">[docs]</a>    <span class="k">def</span> <span class="nf">get_polygon_mask</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">plot_mask</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="n">frame_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span>
+        <span class="n">is_in_polygon</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">frame_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+        <span class="n">ind2D</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unravel_index</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ind</span><span class="p">,</span> <span class="n">frame_shape</span><span class="p">)</span>
+        <span class="n">is_in_polygon</span><span class="p">[</span><span class="n">ind2D</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="k">if</span> <span class="n">plot_mask</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">ax</span><span class="o">.</span><span class="n">pcolormesh</span><span class="p">(</span><span class="n">is_in_polygon</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">is_in_polygon</span></div>
+
+<div class="viewcode-block" id="SelectFromCollection.get_graph"><a class="viewcode-back" href="../../../_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection.get_graph">[docs]</a>    <span class="k">def</span> <span class="nf">get_graph</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_polygon_mask</span><span class="p">()</span>
+        <span class="n">skeleton</span> <span class="o">=</span> <span class="n">skimage</span><span class="o">.</span><span class="n">morphology</span><span class="o">.</span><span class="n">skeletonize</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span>
+        <span class="n">csr_graph</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">skeleton_to_csgraph</span><span class="p">(</span><span class="n">skeleton</span><span class="p">)</span>
+        <span class="n">nx_graph</span> <span class="o">=</span> <span class="n">nx</span><span class="o">.</span><span class="n">from_scipy_sparse_matrix</span><span class="p">(</span><span class="n">csr_graph</span><span class="p">)</span>
+        <span class="n">node_positions</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+            <span class="nb">zip</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">coordinates</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">coordinates</span><span class="p">[:,</span> <span class="p">::</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
+        <span class="n">_clean_positions_dict</span><span class="p">(</span><span class="n">node_positions</span><span class="p">,</span> <span class="n">nx_graph</span><span class="p">)</span>
+        <span class="n">node_ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">node_positions</span><span class="o">.</span><span class="n">keys</span><span class="p">()))</span>
+        <span class="n">temp_node_positions</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="n">node_ind</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+        <span class="n">temp_node_positions</span><span class="p">[</span><span class="n">node_ind</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+            <span class="nb">list</span><span class="p">(</span><span class="n">node_positions</span><span class="o">.</span><span class="n">values</span><span class="p">()))</span>
+        <span class="n">node_positions</span> <span class="o">=</span> <span class="n">temp_node_positions</span>
+        <span class="n">edges</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">nx_graph</span><span class="o">.</span><span class="n">edges</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">node_positions</span> <span class="o">=</span> <span class="n">node_positions</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">edges</span> <span class="o">=</span> <span class="n">edges</span>
+
+        <span class="k">return</span> <span class="n">node_positions</span><span class="p">,</span> <span class="n">edges</span></div></div>
+</pre></div>
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          
+          
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                <a href="../../../copyright.html">Copyright</a> &#169; 2020 - Present, Loren Frank
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            <div class="icons">
+              
+            </div>
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer no-toc">
+      
+      
+      
+    </aside>
+  </div>
+</div><script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/scripts/furo.js"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    </body>
+</html>

@@ -1,0 +1,1527 @@
+<!doctype html>
+<html class="no-js">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="#" /><link rel="search" title="Search" href="search.html" /><link rel="copyright" title="Copyright" href="copyright.html" />
+
+    <link rel="shortcut icon" href="_static/lorenLabImage.png"/><meta name="generator" content="sphinx-4.5.0, furo 2022.06.21"/><title>Index - Spyglass 1.0.0 documentation</title>
+<link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?digest=40978830699223671f4072448e654b5958f38b89" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?digest=30d1aed668e5c3a91c3e3bf6a60b675221979f0e" />
+    <link rel="stylesheet" type="text/css" href="_static/css/datajoint_header.css" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f8f8f8;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-half" viewBox="0 0 24 24">
+    <title>Auto light/dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-shadow">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M13 12h5" />
+      <path d="M13 15h4" />
+      <path d="M13 18h1" />
+      <path d="M13 9h4" />
+      <path d="M13 6h1" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="index.html"><div class="brand">Spyglass 1.0.0 documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand centered" href="index.html">
+  
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo" src="_static/lorenLabImage.png" alt="Logo"/>
+  </div>
+  
+  <span class="sidebar-brand-text">Spyglass 1.0.0 documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="search.html" role="search">
+  <input class="sidebar-search" placeholder=Search name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <ul>
+<li class="toctree-l1"><a class="reference internal" href="index.html">Home page</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="create_figurl.html">FigUrl View</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="tutorials.html">Tutorials</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="_copied_over/notebooks/0_intro.html">Introduction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="_copied_over/notebooks/1_spikesorting.html">Spike Sorting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="_copied_over/notebooks/1D_Clusterless_Decoding.html">Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="_copied_over/notebooks/2_curation.html">Curation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="_copied_over/notebooks/2_curation_lftest.html">Curation LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="_copied_over/notebooks/2D_Clusterless_Decoding.html">Another Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="_copied_over/notebooks/3_lfp.html">LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="_copied_over/notebooks/4_position_info.html">Position Information</a></li>
+<li class="toctree-l2"><a class="reference internal" href="_copied_over/notebooks/5_linearization.html">Linearization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="_copied_over/notebooks/docker_mysql_tutorial.html">MySQL Docker</a></li>
+</ul>
+</li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="_autosummary/spyglass.html">API reference</a><input class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="_autosummary/spyglass.cli.html">spyglass.cli</a><input class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="_autosummary/spyglass.cli.cli.html">spyglass.cli.cli</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="_autosummary/spyglass.common.html">spyglass.common</a><input class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_backup.html">spyglass.common.common_backup</a><input class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_backup.CuratedSpikeSortingBackUp.html">spyglass.common.common_backup.CuratedSpikeSortingBackUp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_backup.SpikeSortingBackUp.html">spyglass.common.common_backup.SpikeSortingBackUp</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_behav.html">spyglass.common.common_behav</a><input class="toctree-checkbox" id="toctree-checkbox-6" name="toctree-checkbox-6" role="switch" type="checkbox"/><label for="toctree-checkbox-6"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_behav.HeadDir.html">spyglass.common.common_behav.HeadDir</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_behav.LinPos.html">spyglass.common.common_behav.LinPos</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_behav.PositionSource.html">spyglass.common.common_behav.PositionSource</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_behav.RawPosition.html">spyglass.common.common_behav.RawPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_behav.Speed.html">spyglass.common.common_behav.Speed</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_behav.StateScriptFile.html">spyglass.common.common_behav.StateScriptFile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_behav.VideoFile.html">spyglass.common.common_behav.VideoFile</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_device.html">spyglass.common.common_device</a><input class="toctree-checkbox" id="toctree-checkbox-7" name="toctree-checkbox-7" role="switch" type="checkbox"/><label for="toctree-checkbox-7"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_device.CameraDevice.html">spyglass.common.common_device.CameraDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_device.DataAcquisitionDevice.html">spyglass.common.common_device.DataAcquisitionDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_device.Probe.html">spyglass.common.common_device.Probe</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_dio.html">spyglass.common.common_dio</a><input class="toctree-checkbox" id="toctree-checkbox-8" name="toctree-checkbox-8" role="switch" type="checkbox"/><label for="toctree-checkbox-8"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_dio.DIOEvents.html">spyglass.common.common_dio.DIOEvents</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_ephys.html">spyglass.common.common_ephys</a><input class="toctree-checkbox" id="toctree-checkbox-9" name="toctree-checkbox-9" role="switch" type="checkbox"/><label for="toctree-checkbox-9"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_ephys.Electrode.html">spyglass.common.common_ephys.Electrode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_ephys.ElectrodeBrainRegion.html">spyglass.common.common_ephys.ElectrodeBrainRegion</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_ephys.ElectrodeGroup.html">spyglass.common.common_ephys.ElectrodeGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_ephys.LFP.html">spyglass.common.common_ephys.LFP</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_ephys.LFPBand.html">spyglass.common.common_ephys.LFPBand</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_ephys.LFPBandSelection.html">spyglass.common.common_ephys.LFPBandSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_ephys.LFPSelection.html">spyglass.common.common_ephys.LFPSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_ephys.Raw.html">spyglass.common.common_ephys.Raw</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_ephys.SampleCount.html">spyglass.common.common_ephys.SampleCount</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_filter.html">spyglass.common.common_filter</a><input class="toctree-checkbox" id="toctree-checkbox-10" name="toctree-checkbox-10" role="switch" type="checkbox"/><label for="toctree-checkbox-10"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_filter.FirFilter.html">spyglass.common.common_filter.FirFilter</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_interval.html">spyglass.common.common_interval</a><input class="toctree-checkbox" id="toctree-checkbox-11" name="toctree-checkbox-11" role="switch" type="checkbox"/><label for="toctree-checkbox-11"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_interval.IntervalList.html">spyglass.common.common_interval.IntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_lab.html">spyglass.common.common_lab</a><input class="toctree-checkbox" id="toctree-checkbox-12" name="toctree-checkbox-12" role="switch" type="checkbox"/><label for="toctree-checkbox-12"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_lab.Institution.html">spyglass.common.common_lab.Institution</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_lab.Lab.html">spyglass.common.common_lab.Lab</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_lab.LabMember.html">spyglass.common.common_lab.LabMember</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_lab.LabTeam.html">spyglass.common.common_lab.LabTeam</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_nwbfile.html">spyglass.common.common_nwbfile</a><input class="toctree-checkbox" id="toctree-checkbox-13" name="toctree-checkbox-13" role="switch" type="checkbox"/><label for="toctree-checkbox-13"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html">spyglass.common.common_nwbfile.AnalysisNwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfileKachery.html">spyglass.common.common_nwbfile.AnalysisNwbfileKachery</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_nwbfile.Nwbfile.html">spyglass.common.common_nwbfile.Nwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_nwbfile.NwbfileKachery.html">spyglass.common.common_nwbfile.NwbfileKachery</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_position.html">spyglass.common.common_position</a><input class="toctree-checkbox" id="toctree-checkbox-14" name="toctree-checkbox-14" role="switch" type="checkbox"/><label for="toctree-checkbox-14"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_position.IntervalLinearizationSelection.html">spyglass.common.common_position.IntervalLinearizationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html">spyglass.common.common_position.IntervalLinearizedPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_position.IntervalPositionInfo.html">spyglass.common.common_position.IntervalPositionInfo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_position.IntervalPositionInfoSelection.html">spyglass.common.common_position.IntervalPositionInfoSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_position.LinearizationParameters.html">spyglass.common.common_position.LinearizationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_position.NodePicker.html">spyglass.common.common_position.NodePicker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_position.PositionInfoParameters.html">spyglass.common.common_position.PositionInfoParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_position.PositionVideo.html">spyglass.common.common_position.PositionVideo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_position.SelectFromCollection.html">spyglass.common.common_position.SelectFromCollection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_position.TrackGraph.html">spyglass.common.common_position.TrackGraph</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_region.html">spyglass.common.common_region</a><input class="toctree-checkbox" id="toctree-checkbox-15" name="toctree-checkbox-15" role="switch" type="checkbox"/><label for="toctree-checkbox-15"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_region.BrainRegion.html">spyglass.common.common_region.BrainRegion</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_sensors.html">spyglass.common.common_sensors</a><input class="toctree-checkbox" id="toctree-checkbox-16" name="toctree-checkbox-16" role="switch" type="checkbox"/><label for="toctree-checkbox-16"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_sensors.SensorData.html">spyglass.common.common_sensors.SensorData</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_session.html">spyglass.common.common_session</a><input class="toctree-checkbox" id="toctree-checkbox-17" name="toctree-checkbox-17" role="switch" type="checkbox"/><label for="toctree-checkbox-17"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_session.ExperimenterList.html">spyglass.common.common_session.ExperimenterList</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_session.Session.html">spyglass.common.common_session.Session</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_session.SessionGroup.html">spyglass.common.common_session.SessionGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_session.SessionGroupSession.html">spyglass.common.common_session.SessionGroupSession</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_subject.html">spyglass.common.common_subject</a><input class="toctree-checkbox" id="toctree-checkbox-18" name="toctree-checkbox-18" role="switch" type="checkbox"/><label for="toctree-checkbox-18"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_subject.Subject.html">spyglass.common.common_subject.Subject</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.common.common_task.html">spyglass.common.common_task</a><input class="toctree-checkbox" id="toctree-checkbox-19" name="toctree-checkbox-19" role="switch" type="checkbox"/><label for="toctree-checkbox-19"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_task.Task.html">spyglass.common.common_task.Task</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.common.common_task.TaskEpoch.html">spyglass.common.common_task.TaskEpoch</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="_autosummary/spyglass.common.dj_helper_fn.html">spyglass.common.dj_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="_autosummary/spyglass.common.nwb_helper_fn.html">spyglass.common.nwb_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="_autosummary/spyglass.common.populate_all_common.html">spyglass.common.populate_all_common</a></li>
+<li class="toctree-l3"><a class="reference internal" href="_autosummary/spyglass.common.signal_processing.html">spyglass.common.signal_processing</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="_autosummary/spyglass.data_import.html">spyglass.data_import</a><input class="toctree-checkbox" id="toctree-checkbox-20" name="toctree-checkbox-20" role="switch" type="checkbox"/><label for="toctree-checkbox-20"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="_autosummary/spyglass.data_import.insert_sessions.html">spyglass.data_import.insert_sessions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="_autosummary/spyglass.data_import.storage_dirs.html">spyglass.data_import.storage_dirs</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="_autosummary/spyglass.spikesorting.html">spyglass.spikesorting</a><input class="toctree-checkbox" id="toctree-checkbox-21" name="toctree-checkbox-21" role="switch" type="checkbox"/><label for="toctree-checkbox-21"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html">spyglass.spikesorting.merged_sorting_extractor</a><input class="toctree-checkbox" id="toctree-checkbox-22" name="toctree-checkbox-22" role="switch" type="checkbox"/><label for="toctree-checkbox-22"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.spikesorting.sortingview.html">spyglass.spikesorting.sortingview</a><input class="toctree-checkbox" id="toctree-checkbox-23" name="toctree-checkbox-23" role="switch" type="checkbox"/><label for="toctree-checkbox-23"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html">spyglass.spikesorting.sortingview.SortingviewWorkspace</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection.html">spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="_autosummary/spyglass.spikesorting.sortingview_helper_fn.html">spyglass.spikesorting.sortingview_helper_fn</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_artifact.html">spyglass.spikesorting.spikesorting_artifact</a><input class="toctree-checkbox" id="toctree-checkbox-24" name="toctree-checkbox-24" role="switch" type="checkbox"/><label for="toctree-checkbox-24"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList.html">spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.html">spyglass.spikesorting.spikesorting_curation</a><input class="toctree-checkbox" id="toctree-checkbox-25" name="toctree-checkbox-25" role="switch" type="checkbox"/><label for="toctree-checkbox-25"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html">spyglass.spikesorting.spikesorting_curation.AutomaticCuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html">spyglass.spikesorting.spikesorting_curation.Curation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html">spyglass.spikesorting.spikesorting_curation.MetricParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.MetricSelection.html">spyglass.spikesorting.spikesorting_curation.MetricSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.QualityMetrics.html">spyglass.spikesorting.spikesorting_curation.QualityMetrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformParameters.html">spyglass.spikesorting.spikesorting_curation.WaveformParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformSelection.html">spyglass.spikesorting.spikesorting_curation.WaveformSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html">spyglass.spikesorting.spikesorting_curation.Waveforms</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_recording.html">spyglass.spikesorting.spikesorting_recording</a><input class="toctree-checkbox" id="toctree-checkbox-26" name="toctree-checkbox-26" role="switch" type="checkbox"/><label for="toctree-checkbox-26"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html">spyglass.spikesorting.spikesorting_recording.SortGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_recording.SortInterval.html">spyglass.spikesorting.spikesorting_recording.SortInterval</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html">spyglass.spikesorting.spikesorting_sorting</a><input class="toctree-checkbox" id="toctree-checkbox-27" name="toctree-checkbox-27" role="switch" type="checkbox"/><label for="toctree-checkbox-27"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection.html">spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="how_to_contribute.html">How to Contribute</a></li>
+<li class="toctree-l1"><a class="reference internal" href="copyright.html">Copyright</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main">
+          
+<section class="genindex-section">
+  <h1 id="index">Index</h1>
+  <div class="genindex-jumpbox"><a href="#A"><strong>A</strong></a> | <a href="#B"><strong>B</strong></a> | <a href="#C"><strong>C</strong></a> | <a href="#D"><strong>D</strong></a> | <a href="#E"><strong>E</strong></a> | <a href="#F"><strong>F</strong></a> | <a href="#G"><strong>G</strong></a> | <a href="#H"><strong>H</strong></a> | <a href="#I"><strong>I</strong></a> | <a href="#K"><strong>K</strong></a> | <a href="#L"><strong>L</strong></a> | <a href="#M"><strong>M</strong></a> | <a href="#N"><strong>N</strong></a> | <a href="#O"><strong>O</strong></a> | <a href="#P"><strong>P</strong></a> | <a href="#Q"><strong>Q</strong></a> | <a href="#R"><strong>R</strong></a> | <a href="#S"><strong>S</strong></a> | <a href="#T"><strong>T</strong></a> | <a href="#U"><strong>U</strong></a> | <a href="#V"><strong>V</strong></a> | <a href="#W"><strong>W</strong></a></div>
+</section>
+<section id="A" class="genindex-section">
+  <h2>A</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.add">add() (AnalysisNwbfile method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.add">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_filter.FirFilter.html#spyglass.common.common_filter.FirFilter.add_filter">add_filter() (FirFilter method)</a>, <a href="_autosummary/spyglass.common.common_filter.html#spyglass.common.common_filter.FirFilter.add_filter">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.SessionGroup.html#spyglass.common.common_session.SessionGroup.add_group">add_group() (SessionGroup static method)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.SessionGroup.add_group">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.add_metrics_to_sorting">add_metrics_to_sorting() (SortingviewWorkspace method)</a>, <a href="_autosummary/spyglass.spikesorting.sortingview.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.add_metrics_to_sorting">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.add_nwb_object">add_nwb_object() (AnalysisNwbfile method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.add_nwb_object">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.SessionGroup.html#spyglass.common.common_session.SessionGroup.add_session_to_group">add_session_to_group() (SessionGroup static method)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.SessionGroup.add_session_to_group">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.Nwbfile.html#spyglass.common.common_nwbfile.Nwbfile.add_to_lock">add_to_lock() (Nwbfile static method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.Nwbfile.add_to_lock">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.add_unit">add_unit() (MergedSortingSegment method)</a>, <a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.add_unit">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.add_units">add_units() (AnalysisNwbfile method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.add_units">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.add_units_metrics">add_units_metrics() (AnalysisNwbfile method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.add_units_metrics">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.add_units_waveforms">add_units_waveforms() (AnalysisNwbfile method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.add_units_waveforms">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile">AnalysisNwbfile (class in spyglass.common.common_nwbfile)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfileKachery.html#spyglass.common.common_nwbfile.AnalysisNwbfileKachery">AnalysisNwbfileKachery (class in spyglass.common.common_nwbfile)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfileKachery">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.apply_merge_groups_to_sorting">apply_merge_groups_to_sorting() (in module spyglass.spikesorting.spikesorting_curation)</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetection.html#spyglass.spikesorting.spikesorting_artifact.ArtifactDetection">ArtifactDetection (class in spyglass.spikesorting.spikesorting_artifact)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.html#spyglass.spikesorting.spikesorting_artifact.ArtifactDetection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters.html#spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters">ArtifactDetectionParameters (class in spyglass.spikesorting.spikesorting_artifact)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.html#spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection.html#spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection">ArtifactDetectionSelection (class in spyglass.spikesorting.spikesorting_artifact)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.html#spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList.html#spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList">ArtifactRemovedIntervalList (class in spyglass.spikesorting.spikesorting_artifact)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.html#spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration">AutomaticCuration (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters">AutomaticCurationParameters (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection">AutomaticCurationSelection (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.available_metrics">available_metrics (MetricParameters attribute)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.available_metrics">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="B" class="genindex-section">
+  <h2>B</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.data_import.storage_dirs.html#spyglass.data_import.storage_dirs.base_dir">base_dir() (in module spyglass.data_import.storage_dirs)</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_region.BrainRegion.html#spyglass.common.common_region.BrainRegion">BrainRegion (class in spyglass.common.common_region)</a>, <a href="_autosummary/spyglass.common.common_region.html#spyglass.common.common_region.BrainRegion">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="C" class="genindex-section">
+  <h2>C</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_filter.FirFilter.html#spyglass.common.common_filter.FirFilter.calc_filter_delay">calc_filter_delay() (FirFilter method)</a>, <a href="_autosummary/spyglass.common.common_filter.html#spyglass.common.common_filter.FirFilter.calc_filter_delay">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.IntervalPositionInfo.html#spyglass.common.common_position.IntervalPositionInfo.calculate_position_info_from_spatial_series">calculate_position_info_from_spatial_series() (IntervalPositionInfo method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalPositionInfo.calculate_position_info_from_spatial_series">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_device.CameraDevice.html#spyglass.common.common_device.CameraDevice">CameraDevice (class in spyglass.common.common_device)</a>, <a href="_autosummary/spyglass.common.common_device.html#spyglass.common.common_device.CameraDevice">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.data_import.storage_dirs.html#spyglass.data_import.storage_dirs.check_env">check_env() (in module spyglass.data_import.storage_dirs)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_task.Task.html#spyglass.common.common_task.Task.check_task_table">check_task_table() (Task class method)</a>, <a href="_autosummary/spyglass.common.common_task.html#spyglass.common.common_task.Task.check_task_table">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_task.TaskEpoch.html#spyglass.common.common_task.TaskEpoch.check_task_table">(TaskEpoch class method)</a>, <a href="_autosummary/spyglass.common.common_task.html#spyglass.common.common_task.TaskEpoch.check_task_table">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.cleanup">cleanup() (AnalysisNwbfile static method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.cleanup">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_nwbfile.Nwbfile.html#spyglass.common.common_nwbfile.Nwbfile.cleanup">(Nwbfile static method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.Nwbfile.cleanup">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.clear">clear() (NodePicker method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.NodePicker.clear">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.click_event">click_event() (NodePicker method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.NodePicker.click_event">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#spyglass.common.nwb_helper_fn.close_nwb_files">close_nwb_files() (in module spyglass.common.nwb_helper_fn)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.connect">connect() (NodePicker method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.NodePicker.connect">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_position.PositionVideo.html#spyglass.common.common_position.PositionVideo.convert_to_pixels">convert_to_pixels() (PositionVideo static method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.PositionVideo.convert_to_pixels">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.copy">copy() (AnalysisNwbfile class method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.copy">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.data_import.insert_sessions.html#spyglass.data_import.insert_sessions.copy_nwb_link_raw_ephys">copy_nwb_link_raw_ephys() (in module spyglass.data_import.insert_sessions)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.create">create() (AnalysisNwbfile method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.create">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_lab.LabTeam.html#spyglass.common.common_lab.LabTeam.create_new_team">create_new_team() (LabTeam class method)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.LabTeam.create_new_team">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.SessionGroup.html#spyglass.common.common_session.SessionGroup.create_spyglass_view">create_spyglass_view() (SessionGroup static method)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.SessionGroup.create_spyglass_view">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_filter.FirFilter.html#spyglass.common.common_filter.FirFilter.create_standard_filters">create_standard_filters() (FirFilter method)</a>, <a href="_autosummary/spyglass.common.common_filter.html#spyglass.common.common_filter.FirFilter.create_standard_filters">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting">CuratedSpikeSorting (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.Unit">CuratedSpikeSorting.Unit (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.Unit">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_backup.CuratedSpikeSortingBackUp.html#spyglass.common.common_backup.CuratedSpikeSortingBackUp">CuratedSpikeSortingBackUp (class in spyglass.common.common_backup)</a>, <a href="_autosummary/spyglass.common.common_backup.html#spyglass.common.common_backup.CuratedSpikeSortingBackUp">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection">CuratedSpikeSortingSelection (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation">Curation (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.Curation">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="D" class="genindex-section">
+  <h2>D</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_device.DataAcquisitionDevice.html#spyglass.common.common_device.DataAcquisitionDevice">DataAcquisitionDevice (class in spyglass.common.common_device)</a>, <a href="_autosummary/spyglass.common.common_device.html#spyglass.common.common_device.DataAcquisitionDevice">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorting.delete">delete() (SpikeSorting method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorting.delete">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.SessionGroup.html#spyglass.common.common_session.SessionGroup.delete_group">delete_group() (SessionGroup static method)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.SessionGroup.delete_group">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_dio.DIOEvents.html#spyglass.common.common_dio.DIOEvents">DIOEvents (class in spyglass.common.common_dio)</a>, <a href="_autosummary/spyglass.common.common_dio.html#spyglass.common.common_dio.DIOEvents">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.disconnect">disconnect() (NodePicker method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.NodePicker.disconnect">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection.disconnect">(SelectFromCollection method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.SelectFromCollection.disconnect">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.dj_helper_fn.html#spyglass.common.dj_helper_fn.dj_replace">dj_replace() (in module spyglass.common.dj_helper_fn)</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="E" class="genindex-section">
+  <h2>E</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_ephys.Electrode.html#spyglass.common.common_ephys.Electrode">Electrode (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.Electrode">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_ephys.ElectrodeBrainRegion.html#spyglass.common.common_ephys.ElectrodeBrainRegion">ElectrodeBrainRegion (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.ElectrodeBrainRegion">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_ephys.ElectrodeGroup.html#spyglass.common.common_ephys.ElectrodeGroup">ElectrodeGroup (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.ElectrodeGroup">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#spyglass.common.nwb_helper_fn.estimate_sampling_rate">estimate_sampling_rate() (in module spyglass.common.nwb_helper_fn)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.ExperimenterList.html#spyglass.common.common_session.ExperimenterList">ExperimenterList (class in spyglass.common.common_session)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.ExperimenterList">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.ExperimenterList.html#spyglass.common.common_session.ExperimenterList.Experimenter">ExperimenterList.Experimenter (class in spyglass.common.common_session)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.ExperimenterList.Experimenter">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.extractor_name">extractor_name (MergedSortingExtractor attribute)</a>, <a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.extractor_name">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="F" class="genindex-section">
+  <h2>F</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html#spyglass.common.common_position.IntervalLinearizedPosition.fetch1_dataframe">fetch1_dataframe() (IntervalLinearizedPosition method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalLinearizedPosition.fetch1_dataframe">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_position.IntervalPositionInfo.html#spyglass.common.common_position.IntervalPositionInfo.fetch1_dataframe">(IntervalPositionInfo method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalPositionInfo.fetch1_dataframe">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.RawPosition.html#spyglass.common.common_behav.RawPosition.fetch1_dataframe">(RawPosition method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.RawPosition.fetch1_dataframe">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.common_region.BrainRegion.html#spyglass.common.common_region.BrainRegion.fetch_add">fetch_add() (BrainRegion class method)</a>, <a href="_autosummary/spyglass.common.common_region.html#spyglass.common.common_region.BrainRegion.fetch_add">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.fetch_nwb">fetch_nwb() (CuratedSpikeSorting method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.fetch_nwb">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation.fetch_nwb">(Curation method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.Curation.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_dio.DIOEvents.html#spyglass.common.common_dio.DIOEvents.fetch_nwb">(DIOEvents method)</a>, <a href="_autosummary/spyglass.common.common_dio.html#spyglass.common.common_dio.DIOEvents.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.dj_helper_fn.html#spyglass.common.dj_helper_fn.fetch_nwb">(in module spyglass.common.dj_helper_fn)</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html#spyglass.common.common_position.IntervalLinearizedPosition.fetch_nwb">(IntervalLinearizedPosition method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalLinearizedPosition.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_position.IntervalPositionInfo.html#spyglass.common.common_position.IntervalPositionInfo.fetch_nwb">(IntervalPositionInfo method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalPositionInfo.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.LFP.html#spyglass.common.common_ephys.LFP.fetch_nwb">(LFP method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFP.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.LFPBand.html#spyglass.common.common_ephys.LFPBand.fetch_nwb">(LFPBand method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFPBand.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.Raw.html#spyglass.common.common_ephys.Raw.fetch_nwb">(Raw method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.Raw.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.RawPosition.html#spyglass.common.common_behav.RawPosition.fetch_nwb">(RawPosition method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.RawPosition.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.SampleCount.html#spyglass.common.common_ephys.SampleCount.fetch_nwb">(SampleCount method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.SampleCount.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_sensors.SensorData.html#spyglass.common.common_sensors.SensorData.fetch_nwb">(SensorData method)</a>, <a href="_autosummary/spyglass.common.common_sensors.html#spyglass.common.common_sensors.SensorData.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorting.fetch_nwb">(SpikeSorting method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorting.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.StateScriptFile.html#spyglass.common.common_behav.StateScriptFile.fetch_nwb">(StateScriptFile method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.StateScriptFile.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.VideoFile.html#spyglass.common.common_behav.VideoFile.fetch_nwb">(VideoFile method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.VideoFile.fetch_nwb">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html#spyglass.spikesorting.spikesorting_curation.Waveforms.fetch_nwb">(Waveforms method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.Waveforms.fetch_nwb">[1]</a>
+</li>
+        </ul></li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_position.PositionVideo.html#spyglass.common.common_position.PositionVideo.fill_nan">fill_nan() (PositionVideo static method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.PositionVideo.fill_nan">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_filter.FirFilter.html#spyglass.common.common_filter.FirFilter.filter_data">filter_data() (FirFilter method)</a>, <a href="_autosummary/spyglass.common.common_filter.html#spyglass.common.common_filter.FirFilter.filter_data">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_filter.FirFilter.html#spyglass.common.common_filter.FirFilter.filter_data_nwb">filter_data_nwb() (FirFilter method)</a>, <a href="_autosummary/spyglass.common.common_filter.html#spyglass.common.common_filter.FirFilter.filter_data_nwb">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_filter.FirFilter.html#spyglass.common.common_filter.FirFilter.filter_delay">filter_delay() (FirFilter method)</a>, <a href="_autosummary/spyglass.common.common_filter.html#spyglass.common.common_filter.FirFilter.filter_delay">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_filter.FirFilter.html#spyglass.common.common_filter.FirFilter">FirFilter (class in spyglass.common.common_filter)</a>, <a href="_autosummary/spyglass.common.common_filter.html#spyglass.common.common_filter.FirFilter">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="G" class="genindex-section">
+  <h2>G</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.get_abs_path">get_abs_path() (AnalysisNwbfile static method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.get_abs_path">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_nwbfile.Nwbfile.html#spyglass.common.common_nwbfile.Nwbfile.get_abs_path">(Nwbfile static method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.Nwbfile.get_abs_path">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#spyglass.common.nwb_helper_fn.get_all_spatial_series">get_all_spatial_series() (in module spyglass.common.nwb_helper_fn)</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.get_available_metrics">get_available_metrics() (MetricParameters method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.get_available_metrics">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.dj_helper_fn.html#spyglass.common.dj_helper_fn.get_child_tables">get_child_tables() (in module spyglass.common.dj_helper_fn)</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation.get_curated_sorting">get_curated_sorting() (Curation static method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.Curation.get_curated_sorting">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#spyglass.common.nwb_helper_fn.get_data_interface">get_data_interface() (in module spyglass.common.nwb_helper_fn)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.get_electrode_indices">get_electrode_indices() (AnalysisNwbfile class method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.get_electrode_indices">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#spyglass.common.nwb_helper_fn.get_electrode_indices">(in module spyglass.common.nwb_helper_fn)</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html#spyglass.spikesorting.spikesorting_recording.SortGroup.get_geometry">get_geometry() (SortGroup method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SortGroup.get_geometry">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection.get_graph">get_graph() (SelectFromCollection method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.SelectFromCollection.get_graph">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.SessionGroup.html#spyglass.common.common_session.SessionGroup.get_group_sessions">get_group_sessions() (SessionGroup static method)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.SessionGroup.get_group_sessions">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration.get_labels">get_labels() (AutomaticCuration static method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration.get_labels">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration.get_merge_groups">get_merge_groups() (AutomaticCuration static method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration.get_merge_groups">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.get_metric_default_params">get_metric_default_params() (MetricParameters method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.get_metric_default_params">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.TrackGraph.html#spyglass.common.common_position.TrackGraph.get_networkx_track_graph">get_networkx_track_graph() (TrackGraph method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.TrackGraph.get_networkx_track_graph">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#spyglass.common.nwb_helper_fn.get_nwb_copy_filename">get_nwb_copy_filename() (in module spyglass.common.nwb_helper_fn)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#spyglass.common.nwb_helper_fn.get_nwb_file">get_nwb_file() (in module spyglass.common.nwb_helper_fn)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection.get_polygon_mask">get_polygon_mask() (SelectFromCollection method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.SelectFromCollection.get_polygon_mask">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_behav.PositionSource.html#spyglass.common.common_behav.PositionSource.get_pos_interval_name">get_pos_interval_name() (PositionSource static method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.PositionSource.get_pos_interval_name">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#spyglass.common.nwb_helper_fn.get_raw_eseries">get_raw_eseries() (in module spyglass.common.nwb_helper_fn)</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation.get_recording">get_recording() (Curation static method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.Curation.get_recording">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.get_unit_spike_train">get_unit_spike_train() (MergedSortingSegment method)</a>, <a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.get_unit_spike_train">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#spyglass.common.nwb_helper_fn.get_valid_intervals">get_valid_intervals() (in module spyglass.common.nwb_helper_fn)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.get_video_frame">get_video_frame() (NodePicker method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.NodePicker.get_video_frame">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection.get_video_frame">(SelectFromCollection method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.SelectFromCollection.get_video_frame">[1]</a>
+</li>
+        </ul></li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="H" class="genindex-section">
+  <h2>H</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_behav.HeadDir.html#spyglass.common.common_behav.HeadDir">HeadDir (class in spyglass.common.common_behav)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.HeadDir">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.signal_processing.html#spyglass.common.signal_processing.hilbert_decomp">hilbert_decomp() (in module spyglass.common.signal_processing)</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="I" class="genindex-section">
+  <h2>I</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.insert1">insert1() (AutomaticCurationParameters method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.insert1">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.MetricSelection.html#spyglass.spikesorting.spikesorting_curation.MetricSelection.insert1">(MetricSelection method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.MetricSelection.insert1">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation.insert_curation">insert_curation() (Curation static method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.Curation.insert_curation">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters.html#spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters.insert_default">insert_default() (ArtifactDetectionParameters method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.html#spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters.insert_default">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.insert_default">(AutomaticCurationParameters method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.insert_default">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.insert_default">(MetricParameters method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.insert_default">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters.insert_default">(SpikeSorterParameters method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters.insert_default">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters.html#spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters.insert_default">(SpikeSortingPreprocessingParameters method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters.insert_default">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformParameters.html#spyglass.spikesorting.spikesorting_curation.WaveformParameters.insert_default">(WaveformParameters method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.WaveformParameters.insert_default">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.common_backup.CuratedSpikeSortingBackUp.html#spyglass.common.common_backup.CuratedSpikeSortingBackUp.insert_from_backup">insert_from_backup() (CuratedSpikeSortingBackUp method)</a>, <a href="_autosummary/spyglass.common.common_backup.html#spyglass.common.common_backup.CuratedSpikeSortingBackUp.insert_from_backup">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_backup.SpikeSortingBackUp.html#spyglass.common.common_backup.SpikeSortingBackUp.insert_from_backup">(SpikeSortingBackUp method)</a>, <a href="_autosummary/spyglass.common.common_backup.html#spyglass.common.common_backup.SpikeSortingBackUp.insert_from_backup">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.common_lab.LabMember.html#spyglass.common.common_lab.LabMember.insert_from_name">insert_from_name() (LabMember class method)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.LabMember.insert_from_name">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_device.CameraDevice.html#spyglass.common.common_device.CameraDevice.insert_from_nwbfile">insert_from_nwbfile() (CameraDevice class method)</a>, <a href="_autosummary/spyglass.common.common_device.html#spyglass.common.common_device.CameraDevice.insert_from_nwbfile">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_device.DataAcquisitionDevice.html#spyglass.common.common_device.DataAcquisitionDevice.insert_from_nwbfile">(DataAcquisitionDevice class method)</a>, <a href="_autosummary/spyglass.common.common_device.html#spyglass.common.common_device.DataAcquisitionDevice.insert_from_nwbfile">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_lab.Institution.html#spyglass.common.common_lab.Institution.insert_from_nwbfile">(Institution class method)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.Institution.insert_from_nwbfile">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_interval.IntervalList.html#spyglass.common.common_interval.IntervalList.insert_from_nwbfile">(IntervalList class method)</a>, <a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.IntervalList.insert_from_nwbfile">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_lab.Lab.html#spyglass.common.common_lab.Lab.insert_from_nwbfile">(Lab class method)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.Lab.insert_from_nwbfile">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_lab.LabMember.html#spyglass.common.common_lab.LabMember.insert_from_nwbfile">(LabMember class method)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.LabMember.insert_from_nwbfile">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.PositionSource.html#spyglass.common.common_behav.PositionSource.insert_from_nwbfile">(PositionSource class method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.PositionSource.insert_from_nwbfile">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_device.Probe.html#spyglass.common.common_device.Probe.insert_from_nwbfile">(Probe class method)</a>, <a href="_autosummary/spyglass.common.common_device.html#spyglass.common.common_device.Probe.insert_from_nwbfile">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_subject.Subject.html#spyglass.common.common_subject.Subject.insert_from_nwbfile">(Subject class method)</a>, <a href="_autosummary/spyglass.common.common_subject.html#spyglass.common.common_subject.Subject.insert_from_nwbfile">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_task.Task.html#spyglass.common.common_task.Task.insert_from_nwbfile">(Task class method)</a>, <a href="_autosummary/spyglass.common.common_task.html#spyglass.common.common_task.Task.insert_from_nwbfile">[1]</a>
+</li>
+        </ul></li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.Nwbfile.html#spyglass.common.common_nwbfile.Nwbfile.insert_from_relative_file_name">insert_from_relative_file_name() (Nwbfile class method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.Nwbfile.insert_from_relative_file_name">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_task.Task.html#spyglass.common.common_task.Task.insert_from_task_table">insert_from_task_table() (Task class method)</a>, <a href="_autosummary/spyglass.common.common_task.html#spyglass.common.common_task.Task.insert_from_task_table">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.insert_manual_curation">insert_manual_curation() (SortingviewWorkspace static method)</a>, <a href="_autosummary/spyglass.spikesorting.sortingview.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.insert_manual_curation">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.data_import.insert_sessions.html#spyglass.data_import.insert_sessions.insert_sessions">insert_sessions() (in module spyglass.data_import.insert_sessions)</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.installation_mesg">installation_mesg (MergedSortingExtractor attribute)</a>, <a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.installation_mesg">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.installed">installed (MergedSortingExtractor attribute)</a>, <a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.installed">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_lab.Institution.html#spyglass.common.common_lab.Institution">Institution (class in spyglass.common.common_lab)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.Institution">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.interval_list_censor">interval_list_censor() (in module spyglass.common.common_interval)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.interval_list_contains">interval_list_contains() (in module spyglass.common.common_interval)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.interval_list_contains_ind">interval_list_contains_ind() (in module spyglass.common.common_interval)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.interval_list_excludes">interval_list_excludes() (in module spyglass.common.common_interval)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.interval_list_excludes_ind">interval_list_excludes_ind() (in module spyglass.common.common_interval)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.interval_list_intersect">interval_list_intersect() (in module spyglass.common.common_interval)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.interval_list_union">interval_list_union() (in module spyglass.common.common_interval)</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.IntervalLinearizationSelection.html#spyglass.common.common_position.IntervalLinearizationSelection">IntervalLinearizationSelection (class in spyglass.common.common_position)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalLinearizationSelection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html#spyglass.common.common_position.IntervalLinearizedPosition">IntervalLinearizedPosition (class in spyglass.common.common_position)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalLinearizedPosition">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_interval.IntervalList.html#spyglass.common.common_interval.IntervalList">IntervalList (class in spyglass.common.common_interval)</a>, <a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.IntervalList">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.IntervalPositionInfo.html#spyglass.common.common_position.IntervalPositionInfo">IntervalPositionInfo (class in spyglass.common.common_position)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalPositionInfo">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.IntervalPositionInfoSelection.html#spyglass.common.common_position.IntervalPositionInfoSelection">IntervalPositionInfoSelection (class in spyglass.common.common_position)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalPositionInfoSelection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.intervals_by_length">intervals_by_length() (in module spyglass.common.common_interval)</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.is_writable">is_writable (MergedSortingExtractor attribute)</a>, <a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.is_writable">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="K" class="genindex-section">
+  <h2>K</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.data_import.storage_dirs.html#spyglass.data_import.storage_dirs.kachery_storage_dir">kachery_storage_dir() (in module spyglass.data_import.storage_dirs)</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="L" class="genindex-section">
+  <h2>L</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_lab.Lab.html#spyglass.common.common_lab.Lab">Lab (class in spyglass.common.common_lab)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.Lab">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_lab.LabMember.html#spyglass.common.common_lab.LabMember">LabMember (class in spyglass.common.common_lab)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.LabMember">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_lab.LabMember.html#spyglass.common.common_lab.LabMember.LabMemberInfo">LabMember.LabMemberInfo (class in spyglass.common.common_lab)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.LabMember.LabMemberInfo">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_lab.LabTeam.html#spyglass.common.common_lab.LabTeam">LabTeam (class in spyglass.common.common_lab)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.LabTeam">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_lab.LabTeam.html#spyglass.common.common_lab.LabTeam.LabTeamMember">LabTeam.LabTeamMember (class in spyglass.common.common_lab)</a>, <a href="_autosummary/spyglass.common.common_lab.html#spyglass.common.common_lab.LabTeam.LabTeamMember">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_ephys.LFP.html#spyglass.common.common_ephys.LFP">LFP (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFP">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_ephys.LFPBand.html#spyglass.common.common_ephys.LFPBand">LFPBand (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFPBand">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_ephys.LFPBandSelection.html#spyglass.common.common_ephys.LFPBandSelection">LFPBandSelection (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFPBandSelection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_ephys.LFPBandSelection.html#spyglass.common.common_ephys.LFPBandSelection.LFPBandElectrode">LFPBandSelection.LFPBandElectrode (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFPBandSelection.LFPBandElectrode">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_ephys.LFPSelection.html#spyglass.common.common_ephys.LFPSelection">LFPSelection (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFPSelection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_ephys.LFPSelection.html#spyglass.common.common_ephys.LFPSelection.LFPElectrode">LFPSelection.LFPElectrode (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFPSelection.LFPElectrode">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.LinearizationParameters.html#spyglass.common.common_position.LinearizationParameters">LinearizationParameters (class in spyglass.common.common_position)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.LinearizationParameters">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_behav.LinPos.html#spyglass.common.common_behav.LinPos">LinPos (class in spyglass.common.common_behav)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.LinPos">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html#spyglass.spikesorting.spikesorting_curation.Waveforms.load_waveforms">load_waveforms() (Waveforms method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.Waveforms.load_waveforms">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="M" class="genindex-section">
+  <h2>M</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfileKachery.html#spyglass.common.common_nwbfile.AnalysisNwbfileKachery.make">make() (AnalysisNwbfileKachery method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfileKachery.make">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetection.html#spyglass.spikesorting.spikesorting_artifact.ArtifactDetection.make">(ArtifactDetection method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.html#spyglass.spikesorting.spikesorting_artifact.ArtifactDetection.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration.make">(AutomaticCuration method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.make">(CuratedSpikeSorting method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_dio.DIOEvents.html#spyglass.common.common_dio.DIOEvents.make">(DIOEvents method)</a>, <a href="_autosummary/spyglass.common.common_dio.html#spyglass.common.common_dio.DIOEvents.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.Electrode.html#spyglass.common.common_ephys.Electrode.make">(Electrode method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.Electrode.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.ElectrodeGroup.html#spyglass.common.common_ephys.ElectrodeGroup.make">(ElectrodeGroup method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.ElectrodeGroup.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_session.ExperimenterList.html#spyglass.common.common_session.ExperimenterList.make">(ExperimenterList method)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.ExperimenterList.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.HeadDir.html#spyglass.common.common_behav.HeadDir.make">(HeadDir method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.HeadDir.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html#spyglass.common.common_position.IntervalLinearizedPosition.make">(IntervalLinearizedPosition method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalLinearizedPosition.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_position.IntervalPositionInfo.html#spyglass.common.common_position.IntervalPositionInfo.make">(IntervalPositionInfo method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.IntervalPositionInfo.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.LFP.html#spyglass.common.common_ephys.LFP.make">(LFP method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFP.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.LFPBand.html#spyglass.common.common_ephys.LFPBand.make">(LFPBand method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFPBand.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.LinPos.html#spyglass.common.common_behav.LinPos.make">(LinPos method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.LinPos.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_nwbfile.NwbfileKachery.html#spyglass.common.common_nwbfile.NwbfileKachery.make">(NwbfileKachery method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.NwbfileKachery.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_position.PositionVideo.html#spyglass.common.common_position.PositionVideo.make">(PositionVideo method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.PositionVideo.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.QualityMetrics.html#spyglass.spikesorting.spikesorting_curation.QualityMetrics.make">(QualityMetrics method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.QualityMetrics.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.Raw.html#spyglass.common.common_ephys.Raw.make">(Raw method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.Raw.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.RawPosition.html#spyglass.common.common_behav.RawPosition.make">(RawPosition method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.RawPosition.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.SampleCount.html#spyglass.common.common_ephys.SampleCount.make">(SampleCount method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.SampleCount.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_sensors.SensorData.html#spyglass.common.common_sensors.SensorData.make">(SensorData method)</a>, <a href="_autosummary/spyglass.common.common_sensors.html#spyglass.common.common_sensors.SensorData.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_session.Session.html#spyglass.common.common_session.Session.make">(Session method)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.Session.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.make">(SortingviewWorkspace method)</a>, <a href="_autosummary/spyglass.spikesorting.sortingview.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.Speed.html#spyglass.common.common_behav.Speed.make">(Speed method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.Speed.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorting.make">(SpikeSorting method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorting.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording.html#spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording.make">(SpikeSortingRecording method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.StateScriptFile.html#spyglass.common.common_behav.StateScriptFile.make">(StateScriptFile method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.StateScriptFile.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_task.TaskEpoch.html#spyglass.common.common_task.TaskEpoch.make">(TaskEpoch method)</a>, <a href="_autosummary/spyglass.common.common_task.html#spyglass.common.common_task.TaskEpoch.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.VideoFile.html#spyglass.common.common_behav.VideoFile.make">(VideoFile method)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.VideoFile.make">[1]</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html#spyglass.spikesorting.spikesorting_curation.Waveforms.make">(Waveforms method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.Waveforms.make">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.common_position.PositionVideo.html#spyglass.common.common_position.PositionVideo.make_video">make_video() (PositionVideo method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.PositionVideo.make_video">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor">MergedSortingExtractor (class in spyglass.spikesorting.merged_sorting_extractor)</a>, <a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment">MergedSortingSegment (class in spyglass.spikesorting.merged_sorting_extractor)</a>, <a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html#spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.metric_default_params">metric_default_params (MetricParameters attribute)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.metric_default_params">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html#spyglass.spikesorting.spikesorting_curation.MetricParameters">MetricParameters (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.MetricParameters">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.metrics_fields">metrics_fields() (CuratedSpikeSorting method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.metrics_fields">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.MetricSelection.html#spyglass.spikesorting.spikesorting_curation.MetricSelection">MetricSelection (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.MetricSelection">[1]</a>
+</li>
+        <li>
+    module
+
+        <ul>
+          <li><a href="_autosummary/spyglass.html#module-spyglass">spyglass</a>
+</li>
+          <li><a href="_autosummary/spyglass.cli.html#module-spyglass.cli">spyglass.cli</a>
+</li>
+          <li><a href="_autosummary/spyglass.cli.cli.html#module-spyglass.cli.cli">spyglass.cli.cli</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.html#module-spyglass.common">spyglass.common</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_backup.html#module-spyglass.common.common_backup">spyglass.common.common_backup</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_behav.html#module-spyglass.common.common_behav">spyglass.common.common_behav</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_device.html#module-spyglass.common.common_device">spyglass.common.common_device</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_dio.html#module-spyglass.common.common_dio">spyglass.common.common_dio</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_ephys.html#module-spyglass.common.common_ephys">spyglass.common.common_ephys</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_filter.html#module-spyglass.common.common_filter">spyglass.common.common_filter</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_interval.html#module-spyglass.common.common_interval">spyglass.common.common_interval</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_lab.html#module-spyglass.common.common_lab">spyglass.common.common_lab</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_nwbfile.html#module-spyglass.common.common_nwbfile">spyglass.common.common_nwbfile</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_position.html#module-spyglass.common.common_position">spyglass.common.common_position</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_region.html#module-spyglass.common.common_region">spyglass.common.common_region</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_sensors.html#module-spyglass.common.common_sensors">spyglass.common.common_sensors</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_session.html#module-spyglass.common.common_session">spyglass.common.common_session</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_subject.html#module-spyglass.common.common_subject">spyglass.common.common_subject</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.common_task.html#module-spyglass.common.common_task">spyglass.common.common_task</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.dj_helper_fn.html#module-spyglass.common.dj_helper_fn">spyglass.common.dj_helper_fn</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#module-spyglass.common.nwb_helper_fn">spyglass.common.nwb_helper_fn</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.populate_all_common.html#module-spyglass.common.populate_all_common">spyglass.common.populate_all_common</a>
+</li>
+          <li><a href="_autosummary/spyglass.common.signal_processing.html#module-spyglass.common.signal_processing">spyglass.common.signal_processing</a>
+</li>
+          <li><a href="_autosummary/spyglass.data_import.html#module-spyglass.data_import">spyglass.data_import</a>
+</li>
+          <li><a href="_autosummary/spyglass.data_import.insert_sessions.html#module-spyglass.data_import.insert_sessions">spyglass.data_import.insert_sessions</a>
+</li>
+          <li><a href="_autosummary/spyglass.data_import.storage_dirs.html#module-spyglass.data_import.storage_dirs">spyglass.data_import.storage_dirs</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.html#module-spyglass.spikesorting">spyglass.spikesorting</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html#module-spyglass.spikesorting.merged_sorting_extractor">spyglass.spikesorting.merged_sorting_extractor</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.sortingview.html#module-spyglass.spikesorting.sortingview">spyglass.spikesorting.sortingview</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.sortingview_helper_fn.html#module-spyglass.spikesorting.sortingview_helper_fn">spyglass.spikesorting.sortingview_helper_fn</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.html#module-spyglass.spikesorting.spikesorting_artifact">spyglass.spikesorting.spikesorting_artifact</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#module-spyglass.spikesorting.spikesorting_curation">spyglass.spikesorting.spikesorting_curation</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#module-spyglass.spikesorting.spikesorting_recording">spyglass.spikesorting.spikesorting_recording</a>
+</li>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html#module-spyglass.spikesorting.spikesorting_sorting">spyglass.spikesorting.spikesorting_sorting</a>
+</li>
+        </ul></li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="N" class="genindex-section">
+  <h2>N</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.nightly_cleanup">nightly_cleanup() (AnalysisNwbfile static method)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.AnalysisNwbfile.nightly_cleanup">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorting.nightly_cleanup">(SpikeSorting method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorting.nightly_cleanup">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.node_positions">node_positions (NodePicker property)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.NodePicker.node_positions">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker">NodePicker (class in spyglass.common.common_position)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.NodePicker">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_ephys.LFP.html#spyglass.common.common_ephys.LFP.nwb_object">nwb_object() (LFP method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFP.nwb_object">[1]</a>
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_ephys.Raw.html#spyglass.common.common_ephys.Raw.nwb_object">(Raw method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.Raw.nwb_object">[1]</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.Nwbfile.html#spyglass.common.common_nwbfile.Nwbfile">Nwbfile (class in spyglass.common.common_nwbfile)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.Nwbfile">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_nwbfile.NwbfileKachery.html#spyglass.common.common_nwbfile.NwbfileKachery">NwbfileKachery (class in spyglass.common.common_nwbfile)</a>, <a href="_autosummary/spyglass.common.common_nwbfile.html#spyglass.common.common_nwbfile.NwbfileKachery">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="O" class="genindex-section">
+  <h2>O</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection.onselect">onselect() (SelectFromCollection method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.SelectFromCollection.onselect">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="P" class="genindex-section">
+  <h2>P</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_filter.FirFilter.html#spyglass.common.common_filter.FirFilter.plot_fir_filter">plot_fir_filter() (FirFilter method)</a>, <a href="_autosummary/spyglass.common.common_filter.html#spyglass.common.common_filter.FirFilter.plot_fir_filter">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_filter.FirFilter.html#spyglass.common.common_filter.FirFilter.plot_magnitude">plot_magnitude() (FirFilter method)</a>, <a href="_autosummary/spyglass.common.common_filter.html#spyglass.common.common_filter.FirFilter.plot_magnitude">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.TrackGraph.html#spyglass.common.common_position.TrackGraph.plot_track_graph">plot_track_graph() (TrackGraph method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.TrackGraph.plot_track_graph">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.TrackGraph.html#spyglass.common.common_position.TrackGraph.plot_track_graph_as_1D">plot_track_graph_as_1D() (TrackGraph method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.TrackGraph.plot_track_graph_as_1D">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.populate_all_common.html#spyglass.common.populate_all_common.populate_all_common">populate_all_common() (in module spyglass.common.populate_all_common)</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_position.PositionInfoParameters.html#spyglass.common.common_position.PositionInfoParameters">PositionInfoParameters (class in spyglass.common.common_position)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.PositionInfoParameters">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_behav.PositionSource.html#spyglass.common.common_behav.PositionSource">PositionSource (class in spyglass.common.common_behav)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.PositionSource">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.PositionVideo.html#spyglass.common.common_position.PositionVideo">PositionVideo (class in spyglass.common.common_position)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.PositionVideo">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_device.Probe.html#spyglass.common.common_device.Probe">Probe (class in spyglass.common.common_device)</a>, <a href="_autosummary/spyglass.common.common_device.html#spyglass.common.common_device.Probe">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_device.Probe.html#spyglass.common.common_device.Probe.Electrode">Probe.Electrode (class in spyglass.common.common_device)</a>, <a href="_autosummary/spyglass.common.common_device.html#spyglass.common.common_device.Probe.Electrode">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_device.Probe.html#spyglass.common.common_device.Probe.Shank">Probe.Shank (class in spyglass.common.common_device)</a>, <a href="_autosummary/spyglass.common.common_device.html#spyglass.common.common_device.Probe.Shank">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="Q" class="genindex-section">
+  <h2>Q</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.QualityMetrics.html#spyglass.spikesorting.spikesorting_curation.QualityMetrics">QualityMetrics (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.QualityMetrics">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="R" class="genindex-section">
+  <h2>R</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_ephys.Raw.html#spyglass.common.common_ephys.Raw">Raw (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.Raw">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_behav.RawPosition.html#spyglass.common.common_behav.RawPosition">RawPosition (class in spyglass.common.common_behav)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.RawPosition">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.redraw">redraw() (NodePicker method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.NodePicker.redraw">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_position.NodePicker.html#spyglass.common.common_position.NodePicker.remove_point">remove_point() (NodePicker method)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.NodePicker.remove_point">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.SessionGroup.html#spyglass.common.common_session.SessionGroup.remove_session_from_group">remove_session_from_group() (SessionGroup static method)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.SessionGroup.remove_session_from_group">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.remove_sorting_from_workspace">remove_sorting_from_workspace() (SortingviewWorkspace method)</a>, <a href="_autosummary/spyglass.spikesorting.sortingview.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.remove_sorting_from_workspace">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="S" class="genindex-section">
+  <h2>S</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_ephys.SampleCount.html#spyglass.common.common_ephys.SampleCount">SampleCount (class in spyglass.common.common_ephys)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.SampleCount">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation.save_sorting_nwb">save_sorting_nwb() (Curation static method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.Curation.save_sorting_nwb">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.SelectFromCollection.html#spyglass.common.common_position.SelectFromCollection">SelectFromCollection (class in spyglass.common.common_position)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.SelectFromCollection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_sensors.SensorData.html#spyglass.common.common_sensors.SensorData">SensorData (class in spyglass.common.common_sensors)</a>, <a href="_autosummary/spyglass.common.common_sensors.html#spyglass.common.common_sensors.SensorData">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.Session.html#spyglass.common.common_session.Session">Session (class in spyglass.common.common_session)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.Session">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.SessionGroup.html#spyglass.common.common_session.SessionGroup">SessionGroup (class in spyglass.common.common_session)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.SessionGroup">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_session.SessionGroupSession.html#spyglass.common.common_session.SessionGroupSession">SessionGroupSession (class in spyglass.common.common_session)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.SessionGroupSession">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html#spyglass.spikesorting.spikesorting_recording.SortGroup.set_group_by_electrode_group">set_group_by_electrode_group() (SortGroup method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SortGroup.set_group_by_electrode_group">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html#spyglass.spikesorting.spikesorting_recording.SortGroup.set_group_by_shank">set_group_by_shank() (SortGroup method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SortGroup.set_group_by_shank">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_ephys.LFPBandSelection.html#spyglass.common.common_ephys.LFPBandSelection.set_lfp_band_electrodes">set_lfp_band_electrodes() (LFPBandSelection method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFPBandSelection.set_lfp_band_electrodes">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_ephys.LFPSelection.html#spyglass.common.common_ephys.LFPSelection.set_lfp_electrodes">set_lfp_electrodes() (LFPSelection method)</a>, <a href="_autosummary/spyglass.common.common_ephys.html#spyglass.common.common_ephys.LFPSelection.set_lfp_electrodes">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html#spyglass.spikesorting.spikesorting_recording.SortGroup.set_reference_from_list">set_reference_from_list() (SortGroup method)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SortGroup.set_reference_from_list">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.set_snippet_len">set_snippet_len() (SortingviewWorkspace method)</a>, <a href="_autosummary/spyglass.spikesorting.sortingview.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.set_snippet_len">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.sortingview_helper_fn.html#spyglass.spikesorting.sortingview_helper_fn.set_workspace_permission">set_workspace_permission() (in module spyglass.spikesorting.sortingview_helper_fn)</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html#spyglass.spikesorting.spikesorting_recording.SortGroup">SortGroup (class in spyglass.spikesorting.spikesorting_recording)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SortGroup">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html#spyglass.spikesorting.spikesorting_recording.SortGroup.SortGroupElectrode">SortGroup.SortGroupElectrode (class in spyglass.spikesorting.spikesorting_recording)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SortGroup.SortGroupElectrode">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html#spyglass.spikesorting.sortingview.SortingviewWorkspace">SortingviewWorkspace (class in spyglass.spikesorting.sortingview)</a>, <a href="_autosummary/spyglass.spikesorting.sortingview.html#spyglass.spikesorting.sortingview.SortingviewWorkspace">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection.html#spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection">SortingviewWorkspaceSelection (class in spyglass.spikesorting.sortingview)</a>, <a href="_autosummary/spyglass.spikesorting.sortingview.html#spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SortInterval.html#spyglass.spikesorting.spikesorting_recording.SortInterval">SortInterval (class in spyglass.spikesorting.spikesorting_recording)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SortInterval">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_behav.Speed.html#spyglass.common.common_behav.Speed">Speed (class in spyglass.common.common_behav)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.Speed">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters">SpikeSorterParameters (class in spyglass.spikesorting.spikesorting_sorting)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorting">SpikeSorting (class in spyglass.spikesorting.spikesorting_sorting)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSorting">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_backup.SpikeSortingBackUp.html#spyglass.common.common_backup.SpikeSortingBackUp">SpikeSortingBackUp (class in spyglass.common.common_backup)</a>, <a href="_autosummary/spyglass.common.common_backup.html#spyglass.common.common_backup.SpikeSortingBackUp">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters.html#spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters">SpikeSortingPreprocessingParameters (class in spyglass.spikesorting.spikesorting_recording)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording.html#spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording">SpikeSortingRecording (class in spyglass.spikesorting.spikesorting_recording)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection.html#spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection">SpikeSortingRecordingSelection (class in spyglass.spikesorting.spikesorting_recording)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection.html#spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection">SpikeSortingSelection (class in spyglass.spikesorting.spikesorting_sorting)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html#spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection">[1]</a>
+</li>
+        <li>
+    spyglass
+
+        <ul>
+          <li><a href="_autosummary/spyglass.html#module-spyglass">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.cli
+
+        <ul>
+          <li><a href="_autosummary/spyglass.cli.html#module-spyglass.cli">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.cli.cli
+
+        <ul>
+          <li><a href="_autosummary/spyglass.cli.cli.html#module-spyglass.cli.cli">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.html#module-spyglass.common">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_backup
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_backup.html#module-spyglass.common.common_backup">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_behav
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_behav.html#module-spyglass.common.common_behav">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_device
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_device.html#module-spyglass.common.common_device">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_dio
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_dio.html#module-spyglass.common.common_dio">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_ephys
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_ephys.html#module-spyglass.common.common_ephys">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_filter
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_filter.html#module-spyglass.common.common_filter">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_interval
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_interval.html#module-spyglass.common.common_interval">module</a>
+</li>
+        </ul></li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li>
+    spyglass.common.common_lab
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_lab.html#module-spyglass.common.common_lab">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_nwbfile
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_nwbfile.html#module-spyglass.common.common_nwbfile">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_position
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_position.html#module-spyglass.common.common_position">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_region
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_region.html#module-spyglass.common.common_region">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_sensors
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_sensors.html#module-spyglass.common.common_sensors">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_session
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_session.html#module-spyglass.common.common_session">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_subject
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_subject.html#module-spyglass.common.common_subject">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.common_task
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.common_task.html#module-spyglass.common.common_task">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.dj_helper_fn
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.dj_helper_fn.html#module-spyglass.common.dj_helper_fn">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.nwb_helper_fn
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.nwb_helper_fn.html#module-spyglass.common.nwb_helper_fn">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.populate_all_common
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.populate_all_common.html#module-spyglass.common.populate_all_common">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.common.signal_processing
+
+        <ul>
+          <li><a href="_autosummary/spyglass.common.signal_processing.html#module-spyglass.common.signal_processing">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.data_import
+
+        <ul>
+          <li><a href="_autosummary/spyglass.data_import.html#module-spyglass.data_import">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.data_import.insert_sessions
+
+        <ul>
+          <li><a href="_autosummary/spyglass.data_import.insert_sessions.html#module-spyglass.data_import.insert_sessions">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.data_import.storage_dirs
+
+        <ul>
+          <li><a href="_autosummary/spyglass.data_import.storage_dirs.html#module-spyglass.data_import.storage_dirs">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.spikesorting
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.html#module-spyglass.spikesorting">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.spikesorting.merged_sorting_extractor
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.merged_sorting_extractor.html#module-spyglass.spikesorting.merged_sorting_extractor">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.spikesorting.sortingview
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.sortingview.html#module-spyglass.spikesorting.sortingview">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.spikesorting.sortingview_helper_fn
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.sortingview_helper_fn.html#module-spyglass.spikesorting.sortingview_helper_fn">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.spikesorting.spikesorting_artifact
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_artifact.html#module-spyglass.spikesorting.spikesorting_artifact">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.spikesorting.spikesorting_curation
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#module-spyglass.spikesorting.spikesorting_curation">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.spikesorting.spikesorting_recording
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_recording.html#module-spyglass.spikesorting.spikesorting_recording">module</a>
+</li>
+        </ul></li>
+        <li>
+    spyglass.spikesorting.spikesorting_sorting
+
+        <ul>
+          <li><a href="_autosummary/spyglass.spikesorting.spikesorting_sorting.html#module-spyglass.spikesorting.spikesorting_sorting">module</a>
+</li>
+        </ul></li>
+        <li><a href="_autosummary/spyglass.common.common_behav.StateScriptFile.html#spyglass.common.common_behav.StateScriptFile">StateScriptFile (class in spyglass.common.common_behav)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.StateScriptFile">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_subject.Subject.html#spyglass.common.common_subject.Subject">Subject (class in spyglass.common.common_subject)</a>, <a href="_autosummary/spyglass.common.common_subject.html#spyglass.common.common_subject.Subject">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="T" class="genindex-section">
+  <h2>T</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_task.Task.html#spyglass.common.common_task.Task">Task (class in spyglass.common.common_task)</a>, <a href="_autosummary/spyglass.common.common_task.html#spyglass.common.common_task.Task">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_task.TaskEpoch.html#spyglass.common.common_task.TaskEpoch">TaskEpoch (class in spyglass.common.common_task)</a>, <a href="_autosummary/spyglass.common.common_task.html#spyglass.common.common_task.TaskEpoch">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.common.common_position.TrackGraph.html#spyglass.common.common_position.TrackGraph">TrackGraph (class in spyglass.common.common_position)</a>, <a href="_autosummary/spyglass.common.common_position.html#spyglass.common.common_position.TrackGraph">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="U" class="genindex-section">
+  <h2>U</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_interval.html#spyglass.common.common_interval.union_adjacent_index">union_adjacent_index() (in module spyglass.common.common_interval)</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_session.SessionGroup.html#spyglass.common.common_session.SessionGroup.update_session_group_description">update_session_group_description() (SessionGroup static method)</a>, <a href="_autosummary/spyglass.common.common_session.html#spyglass.common.common_session.SessionGroup.update_session_group_description">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.url">url() (SortingviewWorkspace method)</a>, <a href="_autosummary/spyglass.spikesorting.sortingview.html#spyglass.spikesorting.sortingview.SortingviewWorkspace.url">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="V" class="genindex-section">
+  <h2>V</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.common.common_behav.VideoFile.html#spyglass.common.common_behav.VideoFile">VideoFile (class in spyglass.common.common_behav)</a>, <a href="_autosummary/spyglass.common.common_behav.html#spyglass.common.common_behav.VideoFile">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+<section id="W" class="genindex-section">
+  <h2>W</h2>
+  <table style="width: 100%" class="indextable genindextable"><tr>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformParameters.html#spyglass.spikesorting.spikesorting_curation.WaveformParameters">WaveformParameters (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.WaveformParameters">[1]</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html#spyglass.spikesorting.spikesorting_curation.Waveforms">Waveforms (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.Waveforms">[1]</a>
+</li>
+        <li><a href="_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformSelection.html#spyglass.spikesorting.spikesorting_curation.WaveformSelection">WaveformSelection (class in spyglass.spikesorting.spikesorting_curation)</a>, <a href="_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.WaveformSelection">[1]</a>
+</li>
+    </ul></td>
+  </tr></table>
+</section>
+
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          
+          
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                <a href="copyright.html">Copyright</a> &#169; 2020 - Present, Loren Frank
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            <div class="icons">
+              
+            </div>
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer no-toc">
+      
+      
+      
+    </aside>
+  </div>
+</div><script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/scripts/furo.js"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    </body>
+</html>

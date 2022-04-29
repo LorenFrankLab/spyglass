@@ -1,0 +1,1282 @@
+<!doctype html>
+<html class="no-js">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../../../genindex.html" /><link rel="search" title="Search" href="../../../search.html" /><link rel="copyright" title="Copyright" href="../../../copyright.html" />
+
+    <link rel="shortcut icon" href="../../../_static/lorenLabImage.png"/><meta name="generator" content="sphinx-4.5.0, furo 2022.06.21"/>
+        <title>spyglass.spikesorting.spikesorting_curation - Spyglass 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/styles/furo.css?digest=40978830699223671f4072448e654b5958f38b89" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/styles/furo-extensions.css?digest=30d1aed668e5c3a91c3e3bf6a60b675221979f0e" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/css/datajoint_header.css" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f8f8f8;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-half" viewBox="0 0 24 24">
+    <title>Auto light/dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-shadow">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M13 12h5" />
+      <path d="M13 15h4" />
+      <path d="M13 18h1" />
+      <path d="M13 9h4" />
+      <path d="M13 6h1" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../../../index.html"><div class="brand">Spyglass 1.0.0 documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand centered" href="../../../index.html">
+  
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo" src="../../../_static/lorenLabImage.png" alt="Logo"/>
+  </div>
+  
+  <span class="sidebar-brand-text">Spyglass 1.0.0 documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../../../search.html" role="search">
+  <input class="sidebar-search" placeholder=Search name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../index.html">Home page</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../create_figurl.html">FigUrl View</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../tutorials.html">Tutorials</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/0_intro.html">Introduction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/1_spikesorting.html">Spike Sorting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/1D_Clusterless_Decoding.html">Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/2_curation.html">Curation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/2_curation_lftest.html">Curation LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/2D_Clusterless_Decoding.html">Another Clusterless Decoding</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/3_lfp.html">LFP</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/4_position_info.html">Position Information</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/5_linearization.html">Linearization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../_copied_over/notebooks/docker_mysql_tutorial.html">MySQL Docker</a></li>
+</ul>
+</li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.html">API reference</a><input class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.cli.html">spyglass.cli</a><input class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.cli.cli.html">spyglass.cli.cli</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.html">spyglass.common</a><input class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_backup.html">spyglass.common.common_backup</a><input class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_backup.CuratedSpikeSortingBackUp.html">spyglass.common.common_backup.CuratedSpikeSortingBackUp</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_backup.SpikeSortingBackUp.html">spyglass.common.common_backup.SpikeSortingBackUp</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.html">spyglass.common.common_behav</a><input class="toctree-checkbox" id="toctree-checkbox-6" name="toctree-checkbox-6" role="switch" type="checkbox"/><label for="toctree-checkbox-6"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.HeadDir.html">spyglass.common.common_behav.HeadDir</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.LinPos.html">spyglass.common.common_behav.LinPos</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.PositionSource.html">spyglass.common.common_behav.PositionSource</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.RawPosition.html">spyglass.common.common_behav.RawPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.Speed.html">spyglass.common.common_behav.Speed</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.StateScriptFile.html">spyglass.common.common_behav.StateScriptFile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_behav.VideoFile.html">spyglass.common.common_behav.VideoFile</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.html">spyglass.common.common_device</a><input class="toctree-checkbox" id="toctree-checkbox-7" name="toctree-checkbox-7" role="switch" type="checkbox"/><label for="toctree-checkbox-7"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.CameraDevice.html">spyglass.common.common_device.CameraDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.DataAcquisitionDevice.html">spyglass.common.common_device.DataAcquisitionDevice</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_device.Probe.html">spyglass.common.common_device.Probe</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_dio.html">spyglass.common.common_dio</a><input class="toctree-checkbox" id="toctree-checkbox-8" name="toctree-checkbox-8" role="switch" type="checkbox"/><label for="toctree-checkbox-8"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_dio.DIOEvents.html">spyglass.common.common_dio.DIOEvents</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.html">spyglass.common.common_ephys</a><input class="toctree-checkbox" id="toctree-checkbox-9" name="toctree-checkbox-9" role="switch" type="checkbox"/><label for="toctree-checkbox-9"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.Electrode.html">spyglass.common.common_ephys.Electrode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.ElectrodeBrainRegion.html">spyglass.common.common_ephys.ElectrodeBrainRegion</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.ElectrodeGroup.html">spyglass.common.common_ephys.ElectrodeGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFP.html">spyglass.common.common_ephys.LFP</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFPBand.html">spyglass.common.common_ephys.LFPBand</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFPBandSelection.html">spyglass.common.common_ephys.LFPBandSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.LFPSelection.html">spyglass.common.common_ephys.LFPSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.Raw.html">spyglass.common.common_ephys.Raw</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_ephys.SampleCount.html">spyglass.common.common_ephys.SampleCount</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_filter.html">spyglass.common.common_filter</a><input class="toctree-checkbox" id="toctree-checkbox-10" name="toctree-checkbox-10" role="switch" type="checkbox"/><label for="toctree-checkbox-10"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_filter.FirFilter.html">spyglass.common.common_filter.FirFilter</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_interval.html">spyglass.common.common_interval</a><input class="toctree-checkbox" id="toctree-checkbox-11" name="toctree-checkbox-11" role="switch" type="checkbox"/><label for="toctree-checkbox-11"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_interval.IntervalList.html">spyglass.common.common_interval.IntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.html">spyglass.common.common_lab</a><input class="toctree-checkbox" id="toctree-checkbox-12" name="toctree-checkbox-12" role="switch" type="checkbox"/><label for="toctree-checkbox-12"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.Institution.html">spyglass.common.common_lab.Institution</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.Lab.html">spyglass.common.common_lab.Lab</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.LabMember.html">spyglass.common.common_lab.LabMember</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_lab.LabTeam.html">spyglass.common.common_lab.LabTeam</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.html">spyglass.common.common_nwbfile</a><input class="toctree-checkbox" id="toctree-checkbox-13" name="toctree-checkbox-13" role="switch" type="checkbox"/><label for="toctree-checkbox-13"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfile.html">spyglass.common.common_nwbfile.AnalysisNwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.AnalysisNwbfileKachery.html">spyglass.common.common_nwbfile.AnalysisNwbfileKachery</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.Nwbfile.html">spyglass.common.common_nwbfile.Nwbfile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_nwbfile.NwbfileKachery.html">spyglass.common.common_nwbfile.NwbfileKachery</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.html">spyglass.common.common_position</a><input class="toctree-checkbox" id="toctree-checkbox-14" name="toctree-checkbox-14" role="switch" type="checkbox"/><label for="toctree-checkbox-14"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizationSelection.html">spyglass.common.common_position.IntervalLinearizationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalLinearizedPosition.html">spyglass.common.common_position.IntervalLinearizedPosition</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfo.html">spyglass.common.common_position.IntervalPositionInfo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.IntervalPositionInfoSelection.html">spyglass.common.common_position.IntervalPositionInfoSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.LinearizationParameters.html">spyglass.common.common_position.LinearizationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.NodePicker.html">spyglass.common.common_position.NodePicker</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.PositionInfoParameters.html">spyglass.common.common_position.PositionInfoParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.PositionVideo.html">spyglass.common.common_position.PositionVideo</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.SelectFromCollection.html">spyglass.common.common_position.SelectFromCollection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_position.TrackGraph.html">spyglass.common.common_position.TrackGraph</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_region.html">spyglass.common.common_region</a><input class="toctree-checkbox" id="toctree-checkbox-15" name="toctree-checkbox-15" role="switch" type="checkbox"/><label for="toctree-checkbox-15"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_region.BrainRegion.html">spyglass.common.common_region.BrainRegion</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_sensors.html">spyglass.common.common_sensors</a><input class="toctree-checkbox" id="toctree-checkbox-16" name="toctree-checkbox-16" role="switch" type="checkbox"/><label for="toctree-checkbox-16"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_sensors.SensorData.html">spyglass.common.common_sensors.SensorData</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.html">spyglass.common.common_session</a><input class="toctree-checkbox" id="toctree-checkbox-17" name="toctree-checkbox-17" role="switch" type="checkbox"/><label for="toctree-checkbox-17"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.ExperimenterList.html">spyglass.common.common_session.ExperimenterList</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.Session.html">spyglass.common.common_session.Session</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.SessionGroup.html">spyglass.common.common_session.SessionGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_session.SessionGroupSession.html">spyglass.common.common_session.SessionGroupSession</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_subject.html">spyglass.common.common_subject</a><input class="toctree-checkbox" id="toctree-checkbox-18" name="toctree-checkbox-18" role="switch" type="checkbox"/><label for="toctree-checkbox-18"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_subject.Subject.html">spyglass.common.common_subject.Subject</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_task.html">spyglass.common.common_task</a><input class="toctree-checkbox" id="toctree-checkbox-19" name="toctree-checkbox-19" role="switch" type="checkbox"/><label for="toctree-checkbox-19"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_task.Task.html">spyglass.common.common_task.Task</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.common.common_task.TaskEpoch.html">spyglass.common.common_task.TaskEpoch</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.dj_helper_fn.html">spyglass.common.dj_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.nwb_helper_fn.html">spyglass.common.nwb_helper_fn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.populate_all_common.html">spyglass.common.populate_all_common</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.common.signal_processing.html">spyglass.common.signal_processing</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.data_import.html">spyglass.data_import</a><input class="toctree-checkbox" id="toctree-checkbox-20" name="toctree-checkbox-20" role="switch" type="checkbox"/><label for="toctree-checkbox-20"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.data_import.insert_sessions.html">spyglass.data_import.insert_sessions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.data_import.storage_dirs.html">spyglass.data_import.storage_dirs</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.html">spyglass.spikesorting</a><input class="toctree-checkbox" id="toctree-checkbox-21" name="toctree-checkbox-21" role="switch" type="checkbox"/><label for="toctree-checkbox-21"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.html">spyglass.spikesorting.merged_sorting_extractor</a><input class="toctree-checkbox" id="toctree-checkbox-22" name="toctree-checkbox-22" role="switch" type="checkbox"/><label for="toctree-checkbox-22"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingExtractor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment.html">spyglass.spikesorting.merged_sorting_extractor.MergedSortingSegment</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview.html">spyglass.spikesorting.sortingview</a><input class="toctree-checkbox" id="toctree-checkbox-23" name="toctree-checkbox-23" role="switch" type="checkbox"/><label for="toctree-checkbox-23"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspace.html">spyglass.spikesorting.sortingview.SortingviewWorkspace</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection.html">spyglass.spikesorting.sortingview.SortingviewWorkspaceSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.sortingview_helper_fn.html">spyglass.spikesorting.sortingview_helper_fn</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.html">spyglass.spikesorting.spikesorting_artifact</a><input class="toctree-checkbox" id="toctree-checkbox-24" name="toctree-checkbox-24" role="switch" type="checkbox"/><label for="toctree-checkbox-24"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection.html">spyglass.spikesorting.spikesorting_artifact.ArtifactDetectionSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList.html">spyglass.spikesorting.spikesorting_artifact.ArtifactRemovedIntervalList</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.html">spyglass.spikesorting.spikesorting_curation</a><input class="toctree-checkbox" id="toctree-checkbox-25" name="toctree-checkbox-25" role="switch" type="checkbox"/><label for="toctree-checkbox-25"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html">spyglass.spikesorting.spikesorting_curation.AutomaticCuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection.html">spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection.html">spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html">spyglass.spikesorting.spikesorting_curation.Curation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html">spyglass.spikesorting.spikesorting_curation.MetricParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricSelection.html">spyglass.spikesorting.spikesorting_curation.MetricSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.QualityMetrics.html">spyglass.spikesorting.spikesorting_curation.QualityMetrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformParameters.html">spyglass.spikesorting.spikesorting_curation.WaveformParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformSelection.html">spyglass.spikesorting.spikesorting_curation.WaveformSelection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html">spyglass.spikesorting.spikesorting_curation.Waveforms</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.html">spyglass.spikesorting.spikesorting_recording</a><input class="toctree-checkbox" id="toctree-checkbox-26" name="toctree-checkbox-26" role="switch" type="checkbox"/><label for="toctree-checkbox-26"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SortGroup.html">spyglass.spikesorting.spikesorting_recording.SortGroup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SortInterval.html">spyglass.spikesorting.spikesorting_recording.SortInterval</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingPreprocessingParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecording</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection.html">spyglass.spikesorting.spikesorting_recording.SpikeSortingRecordingSelection</a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.html">spyglass.spikesorting.spikesorting_sorting</a><input class="toctree-checkbox" id="toctree-checkbox-27" name="toctree-checkbox-27" role="switch" type="checkbox"/><label for="toctree-checkbox-27"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorterParameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSorting.html">spyglass.spikesorting.spikesorting_sorting.SpikeSorting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../_autosummary/spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection.html">spyglass.spikesorting.spikesorting_sorting.SpikeSortingSelection</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../how_to_contribute.html">How to Contribute</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../copyright.html">Copyright</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main">
+          <h1>Source code for spyglass.spikesorting.spikesorting_curation</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">shutil</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">import</span> <span class="nn">uuid</span>
+<span class="kn">from</span> <span class="nn">pathlib</span> <span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span>
+
+<span class="kn">import</span> <span class="nn">datajoint</span> <span class="k">as</span> <span class="nn">dj</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">spikeinterface</span> <span class="k">as</span> <span class="nn">si</span>
+<span class="kn">import</span> <span class="nn">spikeinterface.toolkit</span> <span class="k">as</span> <span class="nn">st</span>
+
+<span class="kn">from</span> <span class="nn">..common.common_interval</span> <span class="kn">import</span> <span class="n">IntervalList</span>
+<span class="kn">from</span> <span class="nn">..common.common_nwbfile</span> <span class="kn">import</span> <span class="n">AnalysisNwbfile</span>
+<span class="kn">from</span> <span class="nn">..common.dj_helper_fn</span> <span class="kn">import</span> <span class="n">fetch_nwb</span>
+<span class="kn">from</span> <span class="nn">.merged_sorting_extractor</span> <span class="kn">import</span> <span class="n">MergedSortingExtractor</span>
+<span class="kn">from</span> <span class="nn">.spikesorting_recording</span> <span class="kn">import</span> <span class="n">SortInterval</span><span class="p">,</span> <span class="n">SpikeSortingRecording</span>
+<span class="kn">from</span> <span class="nn">.spikesorting_sorting</span> <span class="kn">import</span> <span class="n">SpikeSorting</span>
+
+<span class="n">schema</span> <span class="o">=</span> <span class="n">dj</span><span class="o">.</span><span class="n">schema</span><span class="p">(</span><span class="s1">&#39;spikesorting_curation&#39;</span><span class="p">)</span>
+
+<span class="n">valid_labels</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;reject&#39;</span><span class="p">,</span> <span class="s1">&#39;noise&#39;</span><span class="p">,</span> <span class="s1">&#39;artifact&#39;</span><span class="p">,</span> <span class="s1">&#39;mua&#39;</span><span class="p">,</span> <span class="s1">&#39;accept&#39;</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="apply_merge_groups_to_sorting"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.html#spyglass.spikesorting.spikesorting_curation.apply_merge_groups_to_sorting">[docs]</a><span class="k">def</span> <span class="nf">apply_merge_groups_to_sorting</span><span class="p">(</span><span class="n">sorting</span><span class="p">:</span> <span class="n">si</span><span class="o">.</span><span class="n">BaseSorting</span><span class="p">,</span> <span class="n">merge_groups</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]]):</span>
+    <span class="c1"># return a new sorting where the units are merged according to merge_groups</span>
+    <span class="c1"># merge_groups is a list of lists of unit_ids.</span>
+    <span class="c1"># for example: merge_groups = [[1, 2], [5, 8, 4]]]</span>
+
+    <span class="k">return</span> <span class="n">MergedSortingExtractor</span><span class="p">(</span><span class="n">parent_sorting</span><span class="o">=</span><span class="n">sorting</span><span class="p">,</span> <span class="n">merge_groups</span><span class="o">=</span><span class="n">merge_groups</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Curation"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">Curation</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    # Stores each spike sorting; similar to IntervalList</span>
+<span class="s2">    curation_id: int # a number correponding to the index of this curation</span>
+<span class="s2">    -&gt; SpikeSorting</span>
+<span class="s2">    ---</span>
+<span class="s2">    parent_curation_id=-1: int</span>
+<span class="s2">    curation_labels: blob # a dictionary of labels for the units</span>
+<span class="s2">    merge_groups: blob # a list of merge groups for the units</span>
+<span class="s2">    quality_metrics: blob # a list of quality metrics for the units (if available)</span>
+<span class="s2">    description=&#39;&#39;: varchar(1000) #optional description for this curated sort</span>
+<span class="s2">    time_of_creation: int   # in Unix time, to the nearest second</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="Curation.insert_curation"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation.insert_curation">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">insert_curation</span><span class="p">(</span>
+            <span class="n">sorting_key</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+            <span class="n">parent_curation_id</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span>
+            <span class="n">labels</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">merge_groups</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">metrics</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">description</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Given a SpikeSorting key and the parent_sorting_id (and optional</span>
+<span class="sd">        arguments) insert an entry into Curation.</span>
+
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        sorting_key : dict</span>
+<span class="sd">            The key for the original SpikeSorting</span>
+<span class="sd">        parent_curation_id : int, optional</span>
+<span class="sd">            The id of the parent sorting</span>
+<span class="sd">        labels : dict or None, optional</span>
+<span class="sd">        merge_groups : dict or None, optional</span>
+<span class="sd">        metrics : dict or None, optional</span>
+<span class="sd">            Computed metrics for sorting</span>
+<span class="sd">        description : str, optional</span>
+<span class="sd">            text description of this sort</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        curation_key : dict</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">parent_curation_id</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+            <span class="c1"># check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user</span>
+            <span class="n">inserted_curation</span> <span class="o">=</span> <span class="p">(</span><span class="n">Curation</span> <span class="o">&amp;</span> <span class="n">sorting_key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s2">&quot;KEY&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">inserted_curation</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="ne">Warning</span><span class="p">(</span>
+                    <span class="s1">&#39;Sorting has already been inserted, returning key to previously&#39;</span>
+                    <span class="s1">&#39;inserted curation&#39;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">inserted_curation</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">labels</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">labels</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="n">merge_groups</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">merge_groups</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">metrics</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">metrics</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="c1"># generate a unique number for this curation</span>
+        <span class="nb">id</span> <span class="o">=</span> <span class="p">(</span><span class="n">Curation</span> <span class="o">&amp;</span> <span class="n">sorting_key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s1">&#39;curation_id&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">id</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">curation_id</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">id</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">curation_id</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># convert unit_ids in labels to integers for labels from sortingview.</span>
+        <span class="n">new_labels</span> <span class="o">=</span> <span class="p">{</span><span class="nb">int</span><span class="p">(</span><span class="n">unit_id</span><span class="p">):</span> <span class="n">labels</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]</span> <span class="k">for</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">labels</span><span class="p">}</span>
+
+        <span class="n">sorting_key</span><span class="p">[</span><span class="s1">&#39;curation_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">curation_id</span>
+        <span class="n">sorting_key</span><span class="p">[</span><span class="s1">&#39;parent_curation_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">parent_curation_id</span>
+        <span class="n">sorting_key</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">description</span>
+        <span class="n">sorting_key</span><span class="p">[</span><span class="s1">&#39;curation_labels&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">new_labels</span>
+        <span class="n">sorting_key</span><span class="p">[</span><span class="s1">&#39;merge_groups&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">merge_groups</span>
+        <span class="n">sorting_key</span><span class="p">[</span><span class="s1">&#39;quality_metrics&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">metrics</span>
+        <span class="n">sorting_key</span><span class="p">[</span><span class="s1">&#39;time_of_creation&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">())</span>
+
+        <span class="n">Curation</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">sorting_key</span><span class="p">)</span>
+
+        <span class="c1"># get the primary key for this curation</span>
+        <span class="n">c_key</span> <span class="o">=</span> <span class="n">Curation</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s2">&quot;KEY&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">curation_key</span> <span class="o">=</span> <span class="p">{</span><span class="n">item</span><span class="p">:</span> <span class="n">sorting_key</span><span class="p">[</span><span class="n">item</span><span class="p">]</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">c_key</span><span class="p">}</span>
+
+        <span class="k">return</span> <span class="n">curation_key</span></div>
+
+<div class="viewcode-block" id="Curation.get_recording"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation.get_recording">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">get_recording</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns the recording extractor for the recording related to this curation</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        key : dict</span>
+<span class="sd">            SpikeSortingRecording key</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        recording_extractor : spike interface recording extractor</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">recording_path</span> <span class="o">=</span> <span class="p">(</span><span class="n">SpikeSortingRecording</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;recording_path&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">si</span><span class="o">.</span><span class="n">load_extractor</span><span class="p">(</span><span class="n">recording_path</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Curation.get_curated_sorting"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation.get_curated_sorting">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">get_curated_sorting</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns the sorting extractor related to this curation,</span>
+<span class="sd">        with merges applied.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        key : dict</span>
+<span class="sd">            Curation key</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        sorting_extractor: spike interface sorting extractor</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">sorting_path</span> <span class="o">=</span> <span class="p">(</span><span class="n">SpikeSorting</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;sorting_path&#39;</span><span class="p">)</span>
+        <span class="n">sorting</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">load_extractor</span><span class="p">(</span><span class="n">sorting_path</span><span class="p">)</span>
+        <span class="n">merge_groups</span> <span class="o">=</span> <span class="p">(</span><span class="n">Curation</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;merge_groups&#39;</span><span class="p">)</span>
+        <span class="c1"># TODO: write code to get merged sorting extractor</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">merge_groups</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">MergedSortingExtractor</span><span class="p">(</span><span class="n">parent_sorting</span><span class="o">=</span><span class="n">sorting</span><span class="p">,</span> <span class="n">merge_groups</span><span class="o">=</span><span class="n">merge_groups</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">sorting</span></div>
+
+<div class="viewcode-block" id="Curation.save_sorting_nwb"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation.save_sorting_nwb">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">save_sorting_nwb</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">sorting</span><span class="p">,</span> <span class="n">timestamps</span><span class="p">,</span> <span class="n">sort_interval_list_name</span><span class="p">,</span>
+                         <span class="n">sort_interval</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">metrics</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                         <span class="n">unit_ids</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Store a sorting in a new AnalysisNwbfile</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        key : dict</span>
+<span class="sd">            key to SpikeSorting table</span>
+<span class="sd">        sorting : si.Sorting</span>
+<span class="sd">            sorting</span>
+<span class="sd">        timestamps : array_like</span>
+<span class="sd">            Time stamps of the sorted recoridng;</span>
+<span class="sd">            used to convert the spike timings from index to real time</span>
+<span class="sd">        sort_interval_list_name : str</span>
+<span class="sd">            name of sort interval</span>
+<span class="sd">        sort_interval : list</span>
+<span class="sd">            interval for start and end of sort</span>
+<span class="sd">        labels : dict, optional</span>
+<span class="sd">            curation labels, by default None</span>
+<span class="sd">        metrics : dict, optional</span>
+<span class="sd">            quality metrics, by default None</span>
+<span class="sd">        unit_ids : list, optional</span>
+<span class="sd">            IDs of units whose spiketrains to save, by default None</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        analysis_file_name : str</span>
+<span class="sd">        units_object_id : str</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">sort_interval_valid_times</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">IntervalList</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s1">&#39;interval_list_name&#39;</span><span class="p">:</span> <span class="n">sort_interval_list_name</span><span class="p">}</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;valid_times&#39;</span><span class="p">)</span>
+
+        <span class="n">units</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+        <span class="n">units_valid_times</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+        <span class="n">units_sort_interval</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">unit_ids</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">unit_ids</span> <span class="o">=</span> <span class="n">sorting</span><span class="o">.</span><span class="n">get_unit_ids</span><span class="p">()</span>
+
+        <span class="k">for</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">unit_ids</span><span class="p">:</span>
+            <span class="n">spike_times_in_samples</span> <span class="o">=</span> <span class="n">sorting</span><span class="o">.</span><span class="n">get_unit_spike_train</span><span class="p">(</span>
+                <span class="n">unit_id</span><span class="o">=</span><span class="n">unit_id</span><span class="p">)</span>
+            <span class="n">units</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">timestamps</span><span class="p">[</span><span class="n">spike_times_in_samples</span><span class="p">]</span>
+            <span class="n">units_valid_times</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">sort_interval_valid_times</span>
+            <span class="n">units_sort_interval</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">sort_interval</span><span class="p">]</span>
+
+        <span class="n">analysis_file_name</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">])</span>
+        <span class="n">object_ids</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">add_units</span><span class="p">(</span><span class="n">analysis_file_name</span><span class="p">,</span>
+                                                 <span class="n">units</span><span class="p">,</span> <span class="n">units_valid_times</span><span class="p">,</span>
+                                                 <span class="n">units_sort_interval</span><span class="p">,</span>
+                                                 <span class="n">metrics</span><span class="o">=</span><span class="n">metrics</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="n">labels</span><span class="p">)</span>
+        <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span> <span class="n">analysis_file_name</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">object_ids</span> <span class="o">==</span> <span class="s1">&#39;&#39;</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Sorting contains no units.&#39;</span>
+                  <span class="s1">&#39;Created an empty analysis nwb file anyway.&#39;</span><span class="p">)</span>
+            <span class="n">units_object_id</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">units_object_id</span> <span class="o">=</span> <span class="n">object_ids</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">analysis_file_name</span><span class="p">,</span>  <span class="n">units_object_id</span></div>
+
+<div class="viewcode-block" id="Curation.fetch_nwb"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Curation.html#spyglass.spikesorting.spikesorting_curation.Curation.fetch_nwb">[docs]</a>    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="p">(</span><span class="n">AnalysisNwbfile</span><span class="p">,</span> <span class="s1">&#39;analysis_file_abs_path&#39;</span><span class="p">),</span>
+                         <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="WaveformParameters"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformParameters.html#spyglass.spikesorting.spikesorting_curation.WaveformParameters">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">WaveformParameters</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    waveform_params_name: varchar(80) # name of waveform extraction parameters</span>
+<span class="s2">    ---</span>
+<span class="s2">    waveform_params: blob # a dict of waveform extraction parameters</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="WaveformParameters.insert_default"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformParameters.html#spyglass.spikesorting.spikesorting_curation.WaveformParameters.insert_default">[docs]</a>    <span class="k">def</span> <span class="nf">insert_default</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">waveform_params_name</span> <span class="o">=</span> <span class="s1">&#39;default_not_whitened&#39;</span>
+        <span class="n">waveform_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;ms_before&#39;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s1">&#39;ms_after&#39;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s1">&#39;max_spikes_per_unit&#39;</span><span class="p">:</span> <span class="mi">5000</span><span class="p">,</span>
+                           <span class="s1">&#39;n_jobs&#39;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="s1">&#39;total_memory&#39;</span><span class="p">:</span> <span class="s1">&#39;5G&#39;</span><span class="p">,</span> <span class="s1">&#39;whiten&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">([</span><span class="n">waveform_params_name</span><span class="p">,</span> <span class="n">waveform_params</span><span class="p">],</span>
+                     <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">waveform_params_name</span> <span class="o">=</span> <span class="s1">&#39;default_whitened&#39;</span>
+        <span class="n">waveform_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;ms_before&#39;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s1">&#39;ms_after&#39;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s1">&#39;max_spikes_per_unit&#39;</span><span class="p">:</span> <span class="mi">5000</span><span class="p">,</span>
+                           <span class="s1">&#39;n_jobs&#39;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="s1">&#39;total_memory&#39;</span><span class="p">:</span> <span class="s1">&#39;5G&#39;</span><span class="p">,</span> <span class="s1">&#39;whiten&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">([</span><span class="n">waveform_params_name</span><span class="p">,</span> <span class="n">waveform_params</span><span class="p">],</span>
+                     <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="WaveformSelection"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.WaveformSelection.html#spyglass.spikesorting.spikesorting_curation.WaveformSelection">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">WaveformSelection</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; Curation</span>
+<span class="s2">    -&gt; WaveformParameters</span>
+<span class="s2">    ---</span>
+<span class="s2">    &quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="Waveforms"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html#spyglass.spikesorting.spikesorting_curation.Waveforms">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">Waveforms</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; WaveformSelection</span>
+<span class="s2">    ---</span>
+<span class="s2">    waveform_extractor_path: varchar(400)</span>
+<span class="s2">    -&gt; AnalysisNwbfile</span>
+<span class="s2">    waveforms_object_id: varchar(40)   # Object ID for the waveforms in NWB file</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="Waveforms.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html#spyglass.spikesorting.spikesorting_curation.Waveforms.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">recording</span> <span class="o">=</span> <span class="n">Curation</span><span class="o">.</span><span class="n">get_recording</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">recording</span><span class="o">.</span><span class="n">get_num_segments</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">recording</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">concatenate_recordings</span><span class="p">([</span><span class="n">recording</span><span class="p">])</span>
+        
+        <span class="n">sorting</span> <span class="o">=</span> <span class="n">Curation</span><span class="o">.</span><span class="n">get_curated_sorting</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Extracting waveforms...&#39;</span><span class="p">)</span>
+        <span class="n">waveform_params</span> <span class="o">=</span> <span class="p">(</span><span class="n">WaveformParameters</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;waveform_params&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;whiten&#39;</span> <span class="ow">in</span> <span class="n">waveform_params</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">waveform_params</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;whiten&#39;</span><span class="p">):</span>
+                <span class="n">recording</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">preprocessing</span><span class="o">.</span><span class="n">whiten</span><span class="p">(</span><span class="n">recording</span><span class="p">)</span>
+
+        <span class="n">waveform_extractor_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_waveform_extractor_name</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;waveform_extractor_path&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span>
+            <span class="n">Path</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;SPYGLASS_WAVEFORMS_DIR&#39;</span><span class="p">])</span> <span class="o">/</span>
+            <span class="n">Path</span><span class="p">(</span><span class="n">waveform_extractor_name</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;waveform_extractor_path&#39;</span><span class="p">]):</span>
+            <span class="n">shutil</span><span class="o">.</span><span class="n">rmtree</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;waveform_extractor_path&#39;</span><span class="p">])</span>
+        <span class="n">waveforms</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">extract_waveforms</span><span class="p">(</span><span class="n">recording</span><span class="o">=</span><span class="n">recording</span><span class="p">,</span>
+                                         <span class="n">sorting</span><span class="o">=</span><span class="n">sorting</span><span class="p">,</span>
+                                         <span class="n">folder</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;waveform_extractor_path&#39;</span><span class="p">],</span>
+                                         <span class="o">**</span><span class="n">waveform_params</span><span class="p">)</span>
+
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">])</span>
+        <span class="n">object_id</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">add_units_waveforms</span><span class="p">(</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">],</span>
+            <span class="n">waveform_extractor</span><span class="o">=</span><span class="n">waveforms</span><span class="p">)</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;waveforms_object_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">object_id</span>
+        <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">])</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Waveforms.load_waveforms"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html#spyglass.spikesorting.spikesorting_curation.Waveforms.load_waveforms">[docs]</a>    <span class="k">def</span> <span class="nf">load_waveforms</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns a spikeinterface waveform extractor specified by key</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        key : dict</span>
+<span class="sd">            Could be an entry in Waveforms, or some other key that uniquely defines</span>
+<span class="sd">            an entry in Waveforms</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        we : spikeinterface.WaveformExtractor</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">we_path</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;waveform_extractor_path&#39;</span><span class="p">)</span>
+        <span class="n">we</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">WaveformExtractor</span><span class="o">.</span><span class="n">load_from_folder</span><span class="p">(</span><span class="n">we_path</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">we</span></div>
+
+<div class="viewcode-block" id="Waveforms.fetch_nwb"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.Waveforms.html#spyglass.spikesorting.spikesorting_curation.Waveforms.fetch_nwb">[docs]</a>    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="c1"># TODO: implement fetching waveforms from NWB</span>
+        <span class="k">return</span> <span class="ne">NotImplementedError</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_waveform_extractor_name</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">waveform_params_name</span> <span class="o">=</span> <span class="p">(</span><span class="n">WaveformParameters</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;waveform_params_name&#39;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1">_</span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">())[</span><span class="mi">0</span><span class="p">:</span><span class="mi">8</span><span class="p">]</span><span class="si">}</span><span class="s1">_&#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;curation_id&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1">_</span><span class="si">{</span><span class="n">waveform_params_name</span><span class="si">}</span><span class="s1">_waveforms&#39;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="MetricParameters"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html#spyglass.spikesorting.spikesorting_curation.MetricParameters">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">MetricParameters</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    # Parameters for computing quality metrics of sorted units</span>
+<span class="s2">    metric_params_name: varchar(200)</span>
+<span class="s2">    ---</span>
+<span class="s2">    metric_params: blob</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+    <span class="n">metric_default_params</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;snr&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;peak_sign&#39;</span><span class="p">:</span> <span class="s1">&#39;neg&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;num_chunks_per_segment&#39;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span>
+                <span class="s1">&#39;chunk_size&#39;</span><span class="p">:</span> <span class="mi">10000</span><span class="p">,</span>
+                <span class="s1">&#39;seed&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">},</span>
+        <span class="s1">&#39;isi_violation&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;isi_threshold_ms&#39;</span><span class="p">:</span> <span class="mf">1.5</span><span class="p">,</span>
+                          <span class="s1">&#39;min_isi_ms&#39;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">},</span>
+        <span class="s1">&#39;nn_isolation&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;max_spikes_for_nn&#39;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">,</span>
+                         <span class="s1">&#39;min_spikes_for_nn&#39;</span><span class="p">:</span><span class="mi">10</span><span class="p">,</span>
+                         <span class="s1">&#39;n_neighbors&#39;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
+                         <span class="s1">&#39;n_components&#39;</span><span class="p">:</span> <span class="mi">7</span><span class="p">,</span>
+                         <span class="s1">&#39;radius_um&#39;</span><span class="p">:</span> <span class="mi">100</span><span class="p">,</span>
+                         <span class="s1">&#39;seed&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">},</span>
+        <span class="s1">&#39;nn_noise_overlap&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;max_spikes_for_nn&#39;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">,</span>
+                             <span class="s1">&#39;min_spikes_for_nn&#39;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
+                             <span class="s1">&#39;n_neighbors&#39;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
+                             <span class="s1">&#39;n_components&#39;</span><span class="p">:</span> <span class="mi">7</span><span class="p">,</span>
+                             <span class="s1">&#39;radius_um&#39;</span><span class="p">:</span> <span class="mi">100</span><span class="p">,</span>
+                             <span class="s1">&#39;seed&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">},</span>
+        <span class="s1">&#39;peak_channel&#39;</span> <span class="p">:</span> <span class="p">{</span><span class="s1">&#39;peak_sign&#39;</span> <span class="p">:</span> <span class="s1">&#39;neg&#39;</span><span class="p">}</span>
+    <span class="p">}</span>
+    <span class="c1"># Example of peak_offset parameters &#39;peak_offset&#39;: {&#39;peak_sign&#39;: &#39;neg&#39;}</span>
+    <span class="n">available_metrics</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s1">&#39;snr&#39;</span><span class="p">,</span> <span class="s1">&#39;isi_violation&#39;</span><span class="p">,</span> <span class="s1">&#39;nn_isolation&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;nn_noise_overlap&#39;</span><span class="p">,</span> <span class="s1">&#39;peak_offset&#39;</span><span class="p">,</span> <span class="s1">&#39;peak_channel&#39;</span>
+        <span class="p">]</span>
+
+<div class="viewcode-block" id="MetricParameters.get_metric_default_params"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.get_metric_default_params">[docs]</a>    <span class="k">def</span> <span class="nf">get_metric_default_params</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">metric</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="s2">&quot;Returns default params for the given metric&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">metric_default_params</span><span class="p">(</span><span class="n">metric</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MetricParameters.insert_default"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.insert_default">[docs]</a>    <span class="k">def</span> <span class="nf">insert_default</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span>
+            <span class="p">[</span><span class="s1">&#39;franklab_default&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">metric_default_params</span><span class="p">],</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+    
+<div class="viewcode-block" id="MetricParameters.get_available_metrics"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricParameters.html#spyglass.spikesorting.spikesorting_curation.MetricParameters.get_available_metrics">[docs]</a>    <span class="k">def</span> <span class="nf">get_available_metrics</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">metric</span> <span class="ow">in</span> <span class="n">_metric_name_to_func</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">metric</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">available_metrics</span><span class="p">:</span>
+                <span class="n">metric_doc</span> <span class="o">=</span> <span class="n">_metric_name_to_func</span><span class="p">[</span>
+                    <span class="n">metric</span><span class="p">]</span><span class="o">.</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">metric_string</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;</span><span class="si">{metric_name}</span><span class="s2"> : </span><span class="si">{metric_doc}</span><span class="s2">&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                <span class="n">metric_name</span><span class="o">=</span><span class="n">metric</span><span class="p">,</span>
+                <span class="n">metric_doc</span><span class="o">=</span><span class="n">metric_doc</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="n">metric_string</span><span class="o">+</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span></div>
+    
+    <span class="c1"># TODO</span>
+    <span class="k">def</span> <span class="nf">_validate_metrics_list</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Checks whether a row to be inserted contains only the available metrics</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># get available metrics list</span>
+        <span class="c1"># get metric list from key</span>
+        <span class="c1"># compare</span>
+        <span class="k">return</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="MetricSelection"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricSelection.html#spyglass.spikesorting.spikesorting_curation.MetricSelection">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">MetricSelection</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; Waveforms</span>
+<span class="s2">    -&gt; MetricParameters</span>
+<span class="s2">    ---</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="MetricSelection.insert1"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.MetricSelection.html#spyglass.spikesorting.spikesorting_curation.MetricSelection.insert1">[docs]</a>    <span class="k">def</span> <span class="nf">insert1</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">waveform_params</span> <span class="o">=</span> <span class="p">(</span><span class="n">WaveformParameters</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;waveform_params&#39;</span><span class="p">)</span>
+        <span class="n">metric_params</span> <span class="o">=</span> <span class="p">(</span><span class="n">MetricParameters</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;metric_params&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;peak_offset&#39;</span> <span class="ow">in</span> <span class="n">metric_params</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">waveform_params</span><span class="p">[</span><span class="s1">&#39;whiten&#39;</span><span class="p">]:</span>
+                <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;metric &#39;peak_offset&#39; needs to be &quot;</span>
+                                <span class="s2">&quot;calculated on unwhitened waveforms&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;peak_channel&#39;</span> <span class="ow">in</span> <span class="n">metric_params</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">waveform_params</span><span class="p">[</span><span class="s1">&#39;whiten&#39;</span><span class="p">]:</span>
+                <span class="ne">Warning</span><span class="p">(</span><span class="s2">&quot;Calculating &#39;peak_channel&#39; metric on &quot;</span>
+                            <span class="s2">&quot;whitened waveforms may result in slight &quot;</span>
+                            <span class="s2">&quot;discrepancies&quot;</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="QualityMetrics"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.QualityMetrics.html#spyglass.spikesorting.spikesorting_curation.QualityMetrics">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">QualityMetrics</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; MetricSelection</span>
+<span class="s2">    ---</span>
+<span class="s2">    quality_metrics_path: varchar(500)</span>
+<span class="s2">    -&gt; AnalysisNwbfile</span>
+<span class="s2">    object_id: varchar(40) # Object ID for the metrics in NWB file</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="QualityMetrics.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.QualityMetrics.html#spyglass.spikesorting.spikesorting_curation.QualityMetrics.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">waveform_extractor</span> <span class="o">=</span> <span class="n">Waveforms</span><span class="p">()</span><span class="o">.</span><span class="n">load_waveforms</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="n">qm</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="p">(</span><span class="n">MetricParameters</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;metric_params&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">metric_name</span><span class="p">,</span> <span class="n">metric_params</span> <span class="ow">in</span> <span class="n">params</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">metric</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compute_metric</span><span class="p">(</span>
+                <span class="n">waveform_extractor</span><span class="p">,</span> <span class="n">metric_name</span><span class="p">,</span> <span class="o">**</span><span class="n">metric_params</span><span class="p">)</span>
+            <span class="n">qm</span><span class="p">[</span><span class="n">metric_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">metric</span>
+        <span class="n">qm_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_quality_metrics_name</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;quality_metrics_path&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span>
+            <span class="n">Path</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;SPYGLASS_WAVEFORMS_DIR&#39;</span><span class="p">])</span> <span class="o">/</span> <span class="n">Path</span><span class="p">(</span><span class="n">qm_name</span> <span class="o">+</span> <span class="s1">&#39;.json&#39;</span><span class="p">))</span>
+        <span class="c1"># save metrics dict as json</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Computed all metrics: </span><span class="si">{</span><span class="n">qm</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dump_to_json</span><span class="p">(</span><span class="n">qm</span><span class="p">,</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;quality_metrics_path&#39;</span><span class="p">])</span>
+
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">])</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;object_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">add_units_metrics</span><span class="p">(</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">],</span> <span class="n">metrics</span><span class="o">=</span><span class="n">qm</span><span class="p">)</span>
+        <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;nwb_file_name&#39;</span><span class="p">],</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">])</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_quality_metrics_name</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">wf_name</span> <span class="o">=</span> <span class="n">Waveforms</span><span class="p">()</span><span class="o">.</span><span class="n">_get_waveform_extractor_name</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="n">qm_name</span> <span class="o">=</span> <span class="n">wf_name</span> <span class="o">+</span> <span class="s1">&#39;_qm&#39;</span>
+        <span class="k">return</span> <span class="n">qm_name</span>
+
+    <span class="k">def</span> <span class="nf">_compute_metric</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">waveform_extractor</span><span class="p">,</span> <span class="n">metric_name</span><span class="p">,</span> <span class="o">**</span><span class="n">metric_params</span><span class="p">):</span>
+        <span class="n">peak_sign_metrics</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;snr&#39;</span><span class="p">,</span> <span class="s1">&#39;peak_offset&#39;</span><span class="p">,</span> <span class="s1">&#39;peak_channel&#39;</span><span class="p">]</span>
+        <span class="n">metric_func</span> <span class="o">=</span> <span class="n">_metric_name_to_func</span><span class="p">[</span><span class="n">metric_name</span><span class="p">]</span>
+        <span class="c1"># TODO clean up code below</span>
+        <span class="k">if</span> <span class="n">metric_name</span> <span class="o">==</span> <span class="s1">&#39;isi_violation&#39;</span><span class="p">:</span>
+            <span class="n">metric</span> <span class="o">=</span> <span class="n">metric_func</span><span class="p">(</span><span class="n">waveform_extractor</span><span class="p">,</span> <span class="o">**</span><span class="n">metric_params</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">metric_name</span> <span class="ow">in</span> <span class="n">peak_sign_metrics</span><span class="p">:</span>
+            <span class="k">if</span> <span class="s1">&#39;peak_sign&#39;</span> <span class="ow">in</span> <span class="n">metric_params</span><span class="p">:</span>
+                <span class="n">metric</span> <span class="o">=</span> <span class="n">metric_func</span><span class="p">(</span><span class="n">waveform_extractor</span><span class="p">,</span>
+                                     <span class="n">peak_sign</span><span class="o">=</span><span class="n">metric_params</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;peak_sign&#39;</span><span class="p">),</span>
+                                     <span class="o">**</span><span class="n">metric_params</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">peak_sign_metrics</span><span class="si">}</span><span class="s1"> metrics require peak_sign&#39;</span><span class="p">,</span>
+                    <span class="sa">f</span><span class="s1">&#39;to be defined in the metric parameters&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">metric</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">for</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">waveform_extractor</span><span class="o">.</span><span class="n">sorting</span><span class="o">.</span><span class="n">get_unit_ids</span><span class="p">():</span>
+                <span class="n">metric</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">unit_id</span><span class="p">)]</span> <span class="o">=</span> <span class="n">metric_func</span><span class="p">(</span>
+                    <span class="n">waveform_extractor</span><span class="p">,</span> <span class="n">this_unit_id</span><span class="o">=</span><span class="n">unit_id</span><span class="p">,</span> <span class="o">**</span><span class="n">metric_params</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">metric</span>
+
+    <span class="k">def</span> <span class="nf">_dump_to_json</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">qm_dict</span><span class="p">,</span> <span class="n">save_path</span><span class="p">):</span>
+        <span class="n">new_qm</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">qm_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">for</span> <span class="n">unit_id</span><span class="p">,</span> <span class="n">metric_val</span> <span class="ow">in</span> <span class="n">value</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">m</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">unit_id</span><span class="p">)]</span> <span class="o">=</span> <span class="n">metric_val</span>
+            <span class="n">new_qm</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">key</span><span class="p">)]</span> <span class="o">=</span> <span class="n">m</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">save_path</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">new_qm</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span></div>
+
+
+<span class="k">def</span> <span class="nf">_compute_isi_violation_fractions</span><span class="p">(</span><span class="n">waveform_extractor</span><span class="p">,</span> <span class="o">**</span><span class="n">metric_params</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Computes the per unit fraction of interspike interval violations to total spikes.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">isi_threshold_ms</span> <span class="o">=</span> <span class="n">metric_params</span><span class="p">[</span><span class="s1">&#39;isi_threshold_ms&#39;</span><span class="p">]</span>
+    <span class="n">min_isi_ms</span> <span class="o">=</span> <span class="n">metric_params</span><span class="p">[</span><span class="s1">&#39;min_isi_ms&#39;</span><span class="p">]</span>
+
+    <span class="c1"># Extract the total number of spikes that violated the isi_threshold for each unit</span>
+    <span class="n">isi_violation_counts</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">qualitymetrics</span><span class="o">.</span><span class="n">compute_isi_violations</span><span class="p">(</span>
+        <span class="n">waveform_extractor</span><span class="p">,</span> <span class="n">isi_threshold_ms</span><span class="o">=</span><span class="n">isi_threshold_ms</span><span class="p">,</span>
+        <span class="n">min_isi_ms</span><span class="o">=</span><span class="n">min_isi_ms</span><span class="p">)</span><span class="o">.</span><span class="n">isi_violations_count</span>
+
+    <span class="c1"># Extract the total number of spikes from each unit</span>
+    <span class="n">num_spikes</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">qualitymetrics</span><span class="o">.</span><span class="n">compute_num_spikes</span><span class="p">(</span><span class="n">waveform_extractor</span><span class="p">)</span>
+    <span class="n">isi_viol_frac_metric</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">unit_id</span><span class="p">):</span> <span class="n">isi_violation_counts</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]</span> <span class="o">/</span>
+                            <span class="n">num_spikes</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]</span> <span class="k">for</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">waveform_extractor</span><span class="o">.</span><span class="n">sorting</span><span class="o">.</span><span class="n">get_unit_ids</span><span class="p">()}</span>
+    <span class="k">return</span> <span class="n">isi_viol_frac_metric</span>
+
+
+<span class="k">def</span> <span class="nf">_get_peak_offset</span><span class="p">(</span><span class="n">waveform_extractor</span><span class="p">:</span> <span class="n">si</span><span class="o">.</span><span class="n">WaveformExtractor</span><span class="p">,</span> <span class="n">peak_sign</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">**</span><span class="n">metric_params</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Computes the shift of the waveform peak from center of window. </span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="s1">&#39;peak_sign&#39;</span> <span class="ow">in</span> <span class="n">metric_params</span><span class="p">:</span>
+        <span class="k">del</span> <span class="n">metric_params</span><span class="p">[</span><span class="s1">&#39;peak_sign&#39;</span><span class="p">]</span>
+    <span class="n">peak_offset_inds</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">get_template_extremum_channel_peak_shift</span><span class="p">(</span>
+        <span class="n">waveform_extractor</span><span class="o">=</span><span class="n">waveform_extractor</span><span class="p">,</span>
+        <span class="n">peak_sign</span><span class="o">=</span><span class="n">peak_sign</span><span class="p">,</span> <span class="o">**</span><span class="n">metric_params</span><span class="p">)</span>
+    <span class="n">peak_offset</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="nb">abs</span><span class="p">(</span><span class="n">val</span><span class="p">))</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">peak_offset_inds</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">return</span> <span class="n">peak_offset</span>
+
+<span class="k">def</span> <span class="nf">_get_peak_channel</span><span class="p">(</span><span class="n">waveform_extractor</span><span class="p">:</span> <span class="n">si</span><span class="o">.</span><span class="n">WaveformExtractor</span><span class="p">,</span> <span class="n">peak_sign</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">**</span><span class="n">metric_params</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Computes the electrode_id of the channel with the extremum peak for each unit.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="s1">&#39;peak_sign&#39;</span> <span class="ow">in</span> <span class="n">metric_params</span><span class="p">:</span>
+        <span class="k">del</span> <span class="n">metric_params</span><span class="p">[</span><span class="s1">&#39;peak_sign&#39;</span><span class="p">]</span>
+    <span class="n">peak_channel_dict</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">get_template_extremum_channel</span><span class="p">(</span>
+        <span class="n">waveform_extractor</span><span class="o">=</span><span class="n">waveform_extractor</span><span class="p">,</span>
+        <span class="n">peak_sign</span><span class="o">=</span><span class="n">peak_sign</span><span class="p">,</span> <span class="o">**</span><span class="n">metric_params</span><span class="p">)</span>
+    <span class="n">peak_channel</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span> <span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">val</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">peak_channel_dict</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">return</span> <span class="n">peak_channel</span>
+
+<span class="n">_metric_name_to_func</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;snr&quot;</span><span class="p">:</span> <span class="n">st</span><span class="o">.</span><span class="n">qualitymetrics</span><span class="o">.</span><span class="n">compute_snrs</span><span class="p">,</span>
+    <span class="s2">&quot;isi_violation&quot;</span><span class="p">:</span> <span class="n">_compute_isi_violation_fractions</span><span class="p">,</span>
+    <span class="s1">&#39;nn_isolation&#39;</span><span class="p">:</span> <span class="n">st</span><span class="o">.</span><span class="n">qualitymetrics</span><span class="o">.</span><span class="n">nearest_neighbors_isolation</span><span class="p">,</span>
+    <span class="s1">&#39;nn_noise_overlap&#39;</span><span class="p">:</span> <span class="n">st</span><span class="o">.</span><span class="n">qualitymetrics</span><span class="o">.</span><span class="n">nearest_neighbors_noise_overlap</span><span class="p">,</span>
+    <span class="s1">&#39;peak_offset&#39;</span><span class="p">:</span> <span class="n">_get_peak_offset</span><span class="p">,</span>
+    <span class="s1">&#39;peak_channel&#39;</span><span class="p">:</span> <span class="n">_get_peak_channel</span>
+<span class="p">}</span>
+
+
+<div class="viewcode-block" id="AutomaticCurationParameters"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">AutomaticCurationParameters</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    auto_curation_params_name: varchar(200)   # name of this parameter set</span>
+<span class="s2">    ---</span>
+<span class="s2">    merge_params: blob   # dictionary of params to merge units</span>
+<span class="s2">    label_params: blob   # dictionary params to label units</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="AutomaticCurationParameters.insert1"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.insert1">[docs]</a>    <span class="k">def</span> <span class="nf">insert1</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="c1"># validate the labels and then insert</span>
+        <span class="c1"># TODO: add validation for merge_params</span>
+        <span class="k">for</span> <span class="n">metric</span> <span class="ow">in</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;label_params&#39;</span><span class="p">]:</span>
+            <span class="k">if</span> <span class="n">metric</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_metric_name_to_func</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">metric</span><span class="si">}</span><span class="s1"> not in list of available metrics&#39;</span><span class="p">)</span>
+            <span class="n">comparison_list</span> <span class="o">=</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;label_params&#39;</span><span class="p">][</span><span class="n">metric</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">comparison_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_comparison_to_function</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">metric</span><span class="si">}</span><span class="s1">: &quot;</span><span class="si">{</span><span class="n">comparison_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s1">&quot; &#39;</span>
+                    <span class="sa">f</span><span class="s1">&#39;not in list of available comparisons&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">comparison_list</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="nb">float</span><span class="p">)):</span>
+                <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">metric</span><span class="si">}</span><span class="s1">: </span><span class="si">{</span><span class="n">comparison_list</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s1"> is of type &#39;</span>
+                                <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">comparison_list</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="si">}</span><span class="s1"> and not a number&#39;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">label</span> <span class="ow">in</span> <span class="n">comparison_list</span><span class="p">[</span><span class="mi">2</span><span class="p">]:</span>
+                <span class="k">if</span> <span class="n">label</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">valid_labels</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">metric</span><span class="si">}</span><span class="s1">: &quot;</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s1">&quot; &#39;</span>
+                        <span class="sa">f</span><span class="s1">&#39;not in list of valid labels: </span><span class="si">{</span><span class="n">valid_labels</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AutomaticCurationParameters.insert_default"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationParameters.insert_default">[docs]</a>    <span class="k">def</span> <span class="nf">insert_default</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># label_params parsing: Each key is the name of a metric,</span>
+        <span class="c1"># the contents are a three value list with the comparison, a value,</span>
+        <span class="c1"># and a list of labels to apply if the comparison is true</span>
+        <span class="n">default_params</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;auto_curation_params_name&#39;</span><span class="p">:</span> <span class="s1">&#39;default&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;merge_params&#39;</span><span class="p">:</span> <span class="p">{},</span>
+            <span class="s1">&#39;label_params&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;nn_noise_overlap&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;&gt;&#39;</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">,</span> <span class="p">[</span><span class="s1">&#39;noise&#39;</span><span class="p">,</span> <span class="s1">&#39;reject&#39;</span><span class="p">]]</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">default_params</span><span class="p">,</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Second default parameter set for not applying any labels,</span>
+        <span class="c1"># or merges, but adding metrics</span>
+        <span class="n">no_label_params</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;auto_curation_params_name&#39;</span><span class="p">:</span> <span class="s1">&#39;none&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;merge_params&#39;</span><span class="p">:</span> <span class="p">{},</span>
+            <span class="s1">&#39;label_params&#39;</span><span class="p">:</span> <span class="p">{},</span>
+        <span class="p">}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">no_label_params</span><span class="p">,</span> <span class="n">skip_duplicates</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="AutomaticCurationSelection"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection.html#spyglass.spikesorting.spikesorting_curation.AutomaticCurationSelection">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">AutomaticCurationSelection</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; QualityMetrics</span>
+<span class="s2">    -&gt; AutomaticCurationParameters</span>
+<span class="s2">    &quot;&quot;&quot;</span></div>
+
+
+<span class="n">_comparison_to_function</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;&lt;&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">less</span><span class="p">,</span>
+    <span class="s2">&quot;&lt;=&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">less_equal</span><span class="p">,</span>
+    <span class="s2">&quot;&gt;&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">greater</span><span class="p">,</span>
+    <span class="s2">&quot;&gt;=&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">greater_equal</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<div class="viewcode-block" id="AutomaticCuration"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">AutomaticCuration</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; AutomaticCurationSelection</span>
+<span class="s2">    ---</span>
+<span class="s2">    auto_curation_key: blob # the key to the curation inserted by make</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="AutomaticCuration.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">metrics_path</span> <span class="o">=</span> <span class="p">(</span><span class="n">QualityMetrics</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;quality_metrics_path&#39;</span><span class="p">)</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">metrics_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">quality_metrics</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1"># get the curation information and the curated sorting</span>
+        <span class="n">parent_curation</span> <span class="o">=</span> <span class="p">(</span><span class="n">Curation</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">as_dict</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">parent_merge_groups</span> <span class="o">=</span> <span class="n">parent_curation</span><span class="p">[</span><span class="s1">&#39;merge_groups&#39;</span><span class="p">]</span>
+        <span class="n">parent_labels</span> <span class="o">=</span> <span class="n">parent_curation</span><span class="p">[</span><span class="s1">&#39;curation_labels&#39;</span><span class="p">]</span>
+        <span class="n">parent_curation_id</span> <span class="o">=</span> <span class="n">parent_curation</span><span class="p">[</span><span class="s1">&#39;curation_id&#39;</span><span class="p">]</span>
+        <span class="n">parent_sorting</span> <span class="o">=</span> <span class="n">Curation</span><span class="o">.</span><span class="n">get_curated_sorting</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+
+        <span class="n">merge_params</span> <span class="o">=</span> <span class="p">(</span><span class="n">AutomaticCurationParameters</span> <span class="o">&amp;</span>
+                        <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;merge_params&#39;</span><span class="p">)</span>
+        <span class="n">merge_groups</span><span class="p">,</span> <span class="n">units_merged</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_merge_groups</span><span class="p">(</span>
+            <span class="n">parent_sorting</span><span class="p">,</span> <span class="n">parent_merge_groups</span><span class="p">,</span> <span class="n">quality_metrics</span><span class="p">,</span> <span class="n">merge_params</span><span class="p">)</span>
+
+        <span class="n">label_params</span> <span class="o">=</span> <span class="p">(</span><span class="n">AutomaticCurationParameters</span> <span class="o">&amp;</span>
+                        <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;label_params&#39;</span><span class="p">)</span>
+        <span class="n">labels</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_labels</span><span class="p">(</span>
+            <span class="n">parent_sorting</span><span class="p">,</span> <span class="n">parent_labels</span><span class="p">,</span> <span class="n">quality_metrics</span><span class="p">,</span> <span class="n">label_params</span><span class="p">)</span>
+
+        <span class="c1"># keep the quality metrics only if no merging occurred.</span>
+        <span class="n">metrics</span> <span class="o">=</span> <span class="n">quality_metrics</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">units_merged</span> <span class="k">else</span> <span class="kc">None</span>
+
+        <span class="c1"># insert this sorting into the CuratedSpikeSorting Table</span>
+        <span class="c1"># first remove keys that aren&#39;t part of the Sorting (the primary key of curation)</span>
+        <span class="n">c_key</span> <span class="o">=</span> <span class="p">(</span><span class="n">SpikeSorting</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s2">&quot;KEY&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">curation_key</span> <span class="o">=</span> <span class="p">{</span><span class="n">item</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="n">item</span><span class="p">]</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">key</span> <span class="k">if</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">c_key</span><span class="p">}</span>
+        <span class="n">key</span><span class="p">[</span><span class="s1">&#39;auto_curation_key&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">Curation</span><span class="o">.</span><span class="n">insert_curation</span><span class="p">(</span>
+            <span class="n">curation_key</span><span class="p">,</span> <span class="n">parent_curation_id</span><span class="o">=</span><span class="n">parent_curation_id</span><span class="p">,</span>
+            <span class="n">labels</span><span class="o">=</span><span class="n">labels</span><span class="p">,</span> <span class="n">merge_groups</span><span class="o">=</span><span class="n">merge_groups</span><span class="p">,</span> <span class="n">metrics</span><span class="o">=</span><span class="n">metrics</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s1">&#39;auto curated&#39;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AutomaticCuration.get_merge_groups"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration.get_merge_groups">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">get_merge_groups</span><span class="p">(</span><span class="n">sorting</span><span class="p">,</span>
+                         <span class="n">parent_merge_groups</span><span class="p">,</span>
+                         <span class="n">quality_metrics</span><span class="p">,</span>
+                         <span class="n">merge_params</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Identifies units to be merged based on the quality_metrics and</span>
+<span class="sd">        merge parameters and returns an updated list of merges for the curation.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ---------</span>
+<span class="sd">        sorting : spikeinterface.sorting</span>
+<span class="sd">        parent_merge_groups : list</span>
+<span class="sd">            Information about previous merges</span>
+<span class="sd">        quality_metrics : list</span>
+<span class="sd">        merge_params : dict</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        merge_groups : list of lists</span>
+<span class="sd">        merge_occurred : bool</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># overview:</span>
+        <span class="c1"># 1. Use quality metrics to determine merge groups for units</span>
+        <span class="c1"># 2. Combine merge groups with current merge groups to produce union of merges</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">merge_params</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">parent_merge_groups</span><span class="p">,</span> <span class="kc">False</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># TODO: use the metrics to identify clusters that should be merged</span>
+            <span class="c1"># new_merges should then reflect those merges and the line below should be deleted.</span>
+            <span class="n">new_merges</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="c1"># append these merges to the parent merge_groups</span>
+            <span class="k">for</span> <span class="n">new_merge</span> <span class="ow">in</span> <span class="n">new_merges</span><span class="p">:</span>
+                <span class="c1"># check to see if the first cluster listed is in a current merge group</span>
+                <span class="k">for</span> <span class="n">previous_merge</span> <span class="ow">in</span> <span class="n">parent_merge_groups</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">new_merge</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">previous_merge</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+                        <span class="c1"># add the additional units in new_merge to the identified merge group.</span>
+                        <span class="n">previous_merge</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">new_merge</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+                        <span class="n">previous_merge</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+                        <span class="k">break</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="c1"># append this merge group to the list if no previous merge</span>
+                    <span class="n">parent_merge_groups</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_merge</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">parent_merge_groups</span><span class="o">.</span><span class="n">sort</span><span class="p">(),</span> <span class="kc">True</span></div>
+
+<div class="viewcode-block" id="AutomaticCuration.get_labels"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.AutomaticCuration.html#spyglass.spikesorting.spikesorting_curation.AutomaticCuration.get_labels">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">get_labels</span><span class="p">(</span><span class="n">sorting</span><span class="p">,</span> <span class="n">parent_labels</span><span class="p">,</span> <span class="n">quality_metrics</span><span class="p">,</span> <span class="n">label_params</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns a dictionary of labels using quality_metrics and label</span>
+<span class="sd">        parameters.</span>
+
+<span class="sd">        Parameters</span>
+<span class="sd">        ---------</span>
+<span class="sd">        sorting : spikeinterface.sorting</span>
+<span class="sd">        parent_labels : list</span>
+<span class="sd">            Information about previous merges</span>
+<span class="sd">        quality_metrics : list</span>
+<span class="sd">        label_params : dict</span>
+
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">        parent_labels : list</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># overview:</span>
+        <span class="c1"># 1. Use quality metrics to determine labels for units</span>
+        <span class="c1"># 2. Append labels to current labels, checking for inconsistencies</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">label_params</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">parent_labels</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">metric</span> <span class="ow">in</span> <span class="n">label_params</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">metric</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">quality_metrics</span><span class="p">:</span>
+                    <span class="ne">Warning</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">metric</span><span class="si">}</span><span class="s1"> not found in quality metrics; skipping&#39;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">compare</span> <span class="o">=</span> <span class="n">_comparison_to_function</span><span class="p">[</span><span class="n">label_params</span><span class="p">[</span><span class="n">metric</span><span class="p">][</span><span class="mi">0</span><span class="p">]]</span>
+
+                    <span class="k">for</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">quality_metrics</span><span class="p">[</span><span class="n">metric</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+                        <span class="c1"># compare the quality metric to the threshold with the specified operator</span>
+                        <span class="c1"># note that label_params[metric] is a three element list with a comparison operator as a string,</span>
+                        <span class="c1"># the threshold value, and a list of labels to be applied if the comparison is true</span>
+                        <span class="k">if</span> <span class="n">compare</span><span class="p">(</span><span class="n">quality_metrics</span><span class="p">[</span><span class="n">metric</span><span class="p">][</span><span class="n">unit_id</span><span class="p">],</span>
+                                   <span class="n">label_params</span><span class="p">[</span><span class="n">metric</span><span class="p">][</span><span class="mi">1</span><span class="p">]):</span>
+                            <span class="k">if</span> <span class="n">unit_id</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">parent_labels</span><span class="p">:</span>
+                                <span class="n">parent_labels</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">label_params</span><span class="p">[</span><span class="n">metric</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span>
+                            <span class="c1"># check if the label is already there, and if not, add it</span>
+                            <span class="k">elif</span> <span class="n">label_params</span><span class="p">[</span><span class="n">metric</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">parent_labels</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]:</span>
+                                <span class="n">parent_labels</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span>
+                                    <span class="n">label_params</span><span class="p">[</span><span class="n">metric</span><span class="p">][</span><span class="mi">2</span><span class="p">])</span>
+            <span class="k">return</span> <span class="n">parent_labels</span></div></div>
+
+
+<div class="viewcode-block" id="CuratedSpikeSortingSelection"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSortingSelection">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">CuratedSpikeSortingSelection</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; Curation</span>
+<span class="s2">    &quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="CuratedSpikeSorting"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting">[docs]</a><span class="nd">@schema</span>
+<span class="k">class</span> <span class="nc">CuratedSpikeSorting</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
+    <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    -&gt; CuratedSpikeSortingSelection</span>
+<span class="s2">    ---</span>
+<span class="s2">    -&gt; AnalysisNwbfile</span>
+<span class="s2">    units_object_id: varchar(40)</span>
+<span class="s2">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="CuratedSpikeSorting.Unit"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.Unit">[docs]</a>    <span class="k">class</span> <span class="nc">Unit</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
+        <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">        # Table for holding sorted units</span>
+<span class="s2">        -&gt; CuratedSpikeSorting</span>
+<span class="s2">        unit_id: int   # ID for each unit</span>
+<span class="s2">        ---</span>
+<span class="s2">        label=&#39;&#39;: varchar(200)   # optional set of labels for each unit</span>
+<span class="s2">        nn_noise_overlap=-1: float   # noise overlap metric for each unit</span>
+<span class="s2">        nn_isolation=-1: float   # isolation score metric for each unit</span>
+<span class="s2">        isi_violation=-1: float   # ISI violation score for each unit</span>
+<span class="s2">        snr=0: float            # SNR for each unit</span>
+<span class="s2">        firing_rate=-1: float   # firing rate</span>
+<span class="s2">        num_spikes=-1: int   # total number of spikes</span>
+<span class="s2">        peak_channel=null: int # channel of maximum amplitude for each unit</span>
+<span class="s2">        &quot;&quot;&quot;</span></div>
+
+<div class="viewcode-block" id="CuratedSpikeSorting.make"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.make">[docs]</a>    <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+        <span class="n">unit_labels_to_remove</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;reject&#39;</span><span class="p">]</span>
+        <span class="c1"># check that the Curation has metrics</span>
+        <span class="n">metrics</span> <span class="o">=</span> <span class="p">(</span><span class="n">Curation</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;quality_metrics&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">metrics</span> <span class="o">==</span> <span class="p">{}:</span>
+            <span class="ne">Warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s1">&#39;Metrics for Curation </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s1"> should normally be calculated before insertion here&#39;</span><span class="p">)</span>
+
+        <span class="n">sorting</span> <span class="o">=</span> <span class="n">Curation</span><span class="o">.</span><span class="n">get_curated_sorting</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="n">unit_ids</span> <span class="o">=</span> <span class="n">sorting</span><span class="o">.</span><span class="n">get_unit_ids</span><span class="p">()</span>
+        <span class="c1"># Get the labels for the units, add only those units that do not have &#39;reject&#39; or &#39;noise&#39; labels</span>
+        <span class="n">unit_labels</span> <span class="o">=</span> <span class="p">(</span><span class="n">Curation</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;curation_labels&#39;</span><span class="p">)</span>
+        <span class="n">accepted_units</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">unit_ids</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">unit_labels</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">unit_labels_to_remove</span><span class="p">)</span> <span class="o">&amp;</span> <span class="nb">set</span><span class="p">(</span><span class="n">unit_labels</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]))</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">accepted_units</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">unit_id</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">accepted_units</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">unit_id</span><span class="p">)</span>
+
+        <span class="c1"># get the labels for the accepted units</span>
+        <span class="n">labels</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">accepted_units</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">unit_labels</span><span class="p">:</span>
+                <span class="n">labels</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">unit_labels</span><span class="p">[</span><span class="n">unit_id</span><span class="p">])</span>
+
+        <span class="c1"># convert unit_ids in metrics to integers, including only accepted units.</span>
+        <span class="c1">#  TODO: convert to int this somewhere else</span>
+        <span class="n">final_metrics</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">metric</span> <span class="ow">in</span> <span class="n">metrics</span><span class="p">:</span>
+            <span class="n">final_metrics</span><span class="p">[</span><span class="n">metric</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="nb">int</span><span class="p">(</span><span class="n">unit_id</span><span class="p">):</span> <span class="n">metrics</span><span class="p">[</span><span class="n">metric</span><span class="p">][</span><span class="n">unit_id</span><span class="p">]</span>
+                                     <span class="k">for</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">metrics</span><span class="p">[</span><span class="n">metric</span><span class="p">]</span>
+                                     <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">unit_id</span><span class="p">)</span> <span class="ow">in</span> <span class="n">accepted_units</span><span class="p">}</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">accepted_units</span><span class="p">)</span><span class="si">}</span><span class="s1"> accepted units&#39;</span><span class="p">)</span>
+
+        <span class="c1"># get the sorting and save it in the NWB file</span>
+        <span class="n">sorting</span> <span class="o">=</span> <span class="n">Curation</span><span class="o">.</span><span class="n">get_curated_sorting</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="n">recording</span> <span class="o">=</span> <span class="n">Curation</span><span class="o">.</span><span class="n">get_recording</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+
+        <span class="c1"># get the sort_interval and sorting interval list</span>
+        <span class="n">sort_interval_name</span> <span class="o">=</span> <span class="p">(</span><span class="n">SpikeSortingRecording</span> <span class="o">&amp;</span>
+                              <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;sort_interval_name&#39;</span><span class="p">)</span>
+        <span class="n">sort_interval</span> <span class="o">=</span> <span class="p">(</span><span class="n">SortInterval</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">&#39;sort_interval&#39;</span><span class="p">)</span>
+        <span class="n">sort_interval_list_name</span> <span class="o">=</span> <span class="p">(</span><span class="n">SpikeSorting</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
+            <span class="s1">&#39;artifact_removed_interval_list_name&#39;</span><span class="p">)</span>
+
+        <span class="n">timestamps</span> <span class="o">=</span> <span class="n">SpikeSortingRecording</span><span class="o">.</span><span class="n">_get_recording_timestamps</span><span class="p">(</span><span class="n">recording</span><span class="p">)</span>
+
+        <span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">],</span>
+         <span class="n">key</span><span class="p">[</span><span class="s1">&#39;units_object_id&#39;</span><span class="p">])</span> <span class="o">=</span> <span class="n">Curation</span><span class="p">()</span><span class="o">.</span><span class="n">save_sorting_nwb</span><span class="p">(</span>
+            <span class="n">key</span><span class="p">,</span> <span class="n">sorting</span><span class="p">,</span> <span class="n">timestamps</span><span class="p">,</span> <span class="n">sort_interval_list_name</span><span class="p">,</span>
+            <span class="n">sort_interval</span><span class="p">,</span> <span class="n">metrics</span><span class="o">=</span><span class="n">final_metrics</span><span class="p">,</span>
+            <span class="n">unit_ids</span><span class="o">=</span><span class="n">accepted_units</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="n">labels</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+
+        <span class="c1"># now add the units</span>
+        <span class="c1"># Remove the non primary key entries.</span>
+        <span class="k">del</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;units_object_id&#39;</span><span class="p">]</span>
+        <span class="k">del</span> <span class="n">key</span><span class="p">[</span><span class="s1">&#39;analysis_file_name&#39;</span><span class="p">]</span>
+
+        <span class="n">metric_fields</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">metrics_fields</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">accepted_units</span><span class="p">:</span>
+            <span class="n">key</span><span class="p">[</span><span class="s1">&#39;unit_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">unit_id</span>
+            <span class="k">if</span> <span class="n">unit_id</span> <span class="ow">in</span> <span class="n">labels</span><span class="p">:</span>
+                <span class="n">key</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">labels</span><span class="p">[</span><span class="n">unit_id</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">metric_fields</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">final_metrics</span><span class="p">:</span>
+                    <span class="n">key</span><span class="p">[</span><span class="n">field</span><span class="p">]</span> <span class="o">=</span> <span class="n">final_metrics</span><span class="p">[</span><span class="n">field</span><span class="p">][</span><span class="n">unit_id</span><span class="p">]</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="ne">Warning</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s1">&#39;No metric named </span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s1"> in computed unit quality metrics; skipping&#39;</span><span class="p">)</span>
+            <span class="n">CuratedSpikeSorting</span><span class="o">.</span><span class="n">Unit</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="CuratedSpikeSorting.metrics_fields"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.metrics_fields">[docs]</a>    <span class="k">def</span> <span class="nf">metrics_fields</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns a list of the metrics that are currently in the Units table.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">unit_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">Unit</span><span class="p">()</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">limit</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">&quot;frame&quot;</span><span class="p">)</span>
+        <span class="n">unit_fields</span> <span class="o">=</span> <span class="p">[</span><span class="n">column</span> <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">unit_info</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+        <span class="n">unit_fields</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="s1">&#39;label&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">unit_fields</span></div>
+
+<div class="viewcode-block" id="CuratedSpikeSorting.fetch_nwb"><a class="viewcode-back" href="../../../_autosummary/spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.html#spyglass.spikesorting.spikesorting_curation.CuratedSpikeSorting.fetch_nwb">[docs]</a>    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="p">(</span><span class="n">AnalysisNwbfile</span><span class="p">,</span> <span class="s1">&#39;analysis_file_abs_path&#39;</span><span class="p">),</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div></div>
+</pre></div>
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          
+          
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                <a href="../../../copyright.html">Copyright</a> &#169; 2020 - Present, Loren Frank
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            <div class="icons">
+              
+            </div>
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer no-toc">
+      
+      
+      
+    </aside>
+  </div>
+</div><script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/scripts/furo.js"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    </body>
+</html>
