@@ -573,6 +573,6 @@ class ElectrodeFinalBrainRegion(dj.Manual):
     # Table with final brain region of electrodes determined post-experiment e.g. via histological analysis or CT
     -> Electrode
     ---
-    brain_region : varchar(100)
+    -> BrainRegion
     """
     # TODO: alter to check that brain_region belongs to an accepted list of brain regions
