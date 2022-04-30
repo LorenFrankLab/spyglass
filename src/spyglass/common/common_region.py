@@ -45,3 +45,14 @@ class BrainRegion(dj.Lookup):
             cls.insert1(key)
             query = BrainRegion & key
         return query.fetch1('region_id')
+
+
+@schema
+class ElectrodeFinalBrainRegion(dj.Manual):
+    definition = """
+    # Table with final brain region of electrodes determined post-experiment e.g. via histological analysis or CT
+    -> Electrode
+    ---
+    brain_region : varchar(100)
+    """
+    # TODO: alter to check that brain_region belongs to an accepted list of brain regions

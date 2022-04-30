@@ -241,16 +241,6 @@ class SortGroup(dj.Manual):
 
 
 @schema
-class ElectrodeFinalBrainRegion(dj.Manual):
-    definition = """
-    # Table with final brain region of electrodes determined post-experiment e.g. via histological analysis or CT
-    -> Electrode
-    ---
-    brain_region : varchar(100)
-    """
-    # TODO: alter to check that brain_region belongs to an accepted list of brain regions
-
-@schema
 class SortInterval(dj.Manual):
     definition = """
     -> Session
