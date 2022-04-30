@@ -9,7 +9,6 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.toolkit as st
 import probeinterface as pi
-import pynwb
 
 from ..common.common_device import Probe
 from ..common.common_ephys import Electrode, ElectrodeGroup
@@ -242,40 +241,14 @@ class SortGroup(dj.Manual):
 
 
 @schema
-class SortGroupTargetedLocation(dj.Computed):
+class ElectrodeFinalBrainRegion(dj.Manual):
     definition = """
-    # Table with targeted location from nwb file for sort groups
-    -> SortGroup
+    # Table with final brain region of electrodes determined post-experiment e.g. via histological analysis or CT
+    -> Electrode
     ---
-    targeted_location : varchar(40)
+    brain_region : varchar(100)
     """
-
-    def make(self, key):
-        electrode_group_names = np.unique((SortGroup.SortGroupElectrode & {"nwb_file_name": key["nwb_file_name"],
-                                                                           "sort_group_id": key[
-                                                                               "sort_group_id"]}).fetch(
-            "electrode_group_name"))
-        if len(electrode_group_names) != 1:  # check that only found one electrode group for sort group
-            raise Exception(f"Should have found exactly one electrode group for "
-                            f"sort group {key['sort_group_id']} but found {len(electrode_group_names)}")
-        electrode_group_name = electrode_group_names[0]
-        nwbf = pynwb.NWBHDF5IO(Nwbfile().get_abs_path(key["nwb_file_name"]), 'r').read()
-        key = {**key,
-               **{"targeted_location": nwbf.electrode_groups[electrode_group_name].targeted_location}}  # update key
-        self.insert1(key)
-        print('Populated SortGroupTargetedLocation for nwb_file_name {nwb_file_name}, '
-              'sort_group_id {sort_group_id}'.format(**key))
-
-    def return_targeted_location_sort_group_map(self, nwb_file_name):
-        sort_group_ids, targeted_locations = (self & {"nwb_file_name": nwb_file_name}).fetch("sort_group_id",
-                                                                                           "targeted_location")
-        return {targeted_location: sort_group_ids[targeted_locations == targeted_location]
-                                             for targeted_location in set(targeted_locations)}
-    def return_sort_group_targeted_location_map(self, nwb_file_name):
-        sort_group_ids, targeted_locations = (self & {"nwb_file_name": nwb_file_name}).fetch("sort_group_id",
-                                                                                           "targeted_location")
-        return {k: v for k, v in zip(sort_group_ids, targeted_locations)}
-
+    # TODO: alter to check that brain_region belongs to an accepted list of brain regions
 
 @schema
 class SortInterval(dj.Manual):
