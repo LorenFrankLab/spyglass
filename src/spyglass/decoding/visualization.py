@@ -1,3 +1,7 @@
+from math import ceil, floor
+
+import h5py
+import kachery_client as kc
 import matplotlib.animation as animation
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
@@ -6,6 +10,10 @@ import pandas as pd
 import seaborn as sns
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from ripple_detection import get_multiunit_population_firing_rate
+from sortingview.SpikeSortingView import (MultiTimeseries,
+                                          create_live_position_pdf_plot,
+                                          create_position_plot,
+                                          create_spike_raster_plot)
 from tqdm.auto import tqdm
 
 
@@ -371,3 +379,147 @@ def make_multi_environment_movie(
             movie.save(movie_name, writer=writer, dpi=200)
 
         return fig, movie
+
+
+def create_live_position_pdf_plot_h5(*, data: np.ndarray, segment_size: int, multiscale_factor: int):
+    data_uri = kc.store_npy(data)
+    key = {
+        'type': 'live_position_plot_h5',
+        'version': 5,
+        'data_uri': data_uri,
+        'segment_size': segment_size,
+        'multiscale_factor': multiscale_factor
+    }
+    a = kc.get(key)
+    if a and kc.load_file(a):
+        return a
+
+    num_times = data.shape[0]
+    num_positions = data.shape[1]
+
+    def fetch_segment(istart: int, iend: int):
+        return np.nan_to_num(data[istart:iend])
+
+    with kc.TemporaryDirectory() as tmpdir:
+        print(tmpdir)
+        output_file_name = tmpdir + '/live_position_pdf_plot.h5'
+        with h5py.File(output_file_name, 'w') as f:
+            downsample_factor = 1
+            while downsample_factor < num_times:
+                num_segments = ceil(
+                    floor(num_times / downsample_factor) / segment_size)
+                for iseg in range(num_segments):
+                    i1 = iseg * segment_size
+                    i2 = min(i1 + segment_size,
+                             floor(num_times / downsample_factor))
+                    if downsample_factor == 1:
+                        A = fetch_segment(istart=i1, iend=i2)
+                        B = A / \
+                            np.reshape(
+                                np.repeat(np.max(A, axis=1), A.shape[1]), A.shape)
+                        B = (B * 100).astype(np.uint8)
+                    else:
+                        prev_downsample_factor = floor(
+                            downsample_factor / multiscale_factor)
+                        B_prev_list = [
+                            np.array(
+                                f.get(f'segment/{prev_downsample_factor}/{iseg * multiscale_factor + offset}'))
+                            for offset in range(multiscale_factor)
+                            if (iseg * multiscale_factor + offset) * segment_size * prev_downsample_factor < num_times
+                        ]
+                        B_prev = np.concatenate(
+                            B_prev_list, axis=0).astype(np.float32)
+                        N_prev = B_prev.shape[0]
+                        if N_prev % multiscale_factor != 0:
+                            N_prev = floor(
+                                N_prev / multiscale_factor) * multiscale_factor
+                            B_prev = B_prev[:N_prev]
+                        B: np.ndarray = np.mean(np.reshape(B_prev, (floor(
+                            N_prev / multiscale_factor), multiscale_factor, num_positions)), axis=1)
+                        B = B / \
+                            np.reshape(
+                                np.repeat(np.max(B, axis=1), B.shape[1]), B.shape)
+                        B = np.floor(B).astype(np.uint8)
+                    print('Creating', f'segment/{downsample_factor}/{iseg}')
+                    f.create_dataset(
+                        f'segment/{downsample_factor}/{iseg}', data=B)
+                downsample_factor *= multiscale_factor
+
+        h5_uri = kc.store_file(output_file_name)
+        kc.set(key, h5_uri)
+        return h5_uri
+
+
+def create_figurl_decode_visualization(
+        position_info,
+        linear_position_info,
+        classifier,
+        results,
+        visualization_name='test',
+        segment_size=100000,
+        multiscale_factor=3,
+):
+
+    layout = MultiTimeseries(label=visualization_name)
+
+    # # spikes panel
+    # layout.add_panel(
+    #     create_spike_raster_plot(
+    #         times=spike_times.astype(np.float32),
+    #         labels=cell_ids.astype(np.int32),
+    #         label='Spikes'
+    #     )
+    # )
+
+    # linear position panel
+    layout.add_panel(
+        create_position_plot(
+            timestamps=np.asarray(linear_position_info.index),
+            positions=np.asarray(
+                linear_position_info.linear_position, dtype=np.float32),
+            dimension_labels=['Linear position'],
+            label='Linear position',
+            discontinuous=True
+        ), relative_height=1
+    )
+
+    # speed panel
+    layout.add_panel(
+        create_position_plot(
+            timestamps=np.asarray(position_info.index),
+            positions=np.asarray(position_info.head_speed, dtype=np.float32),
+            dimension_labels=['Speed'],
+            label='Speed',
+            discontinuous=False
+        ), relative_height=1
+    )
+
+    posterior = np.asarray(
+        results
+        .acausal_posterior
+        .sum('state')
+        .where(classifier.environments[0].is_track_interior_),
+        dtype=np.float32
+    )
+    time = np.asarray(results.time, dtype=np.float32)
+
+    h5_uri = create_live_position_pdf_plot_h5(
+        data=posterior,
+        segment_size=segment_size,
+        multiscale_factor=multiscale_factor)
+    panel = create_live_position_pdf_plot(
+        start_time_sec=time[0],
+        end_time_sec=time[-1],
+        sampling_frequency=(len(time) - 1) / (time[-1] - time[0]),
+        num_positions=posterior.shape[1],
+        pdf_object={
+            'format': 'position_pdf_h5_v1',
+            'uri': h5_uri
+        },
+        segment_size=segment_size,
+        multiscale_factor=multiscale_factor,
+        label='Position probability'
+    )
+    layout.add_panel(panel, relative_height=3)
+
+    return layout.get_composite_figure().url()
