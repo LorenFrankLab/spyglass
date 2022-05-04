@@ -266,7 +266,7 @@ def get_all_spatial_series(nwbf, verbose=False):
     pos_data_dict = dict()
 
     for index, orig_epoch in enumerate(sorted_order):
-        
+
         spatial_series = list(position.spatial_series.values())[orig_epoch]
         pos_data_dict[index] = dict()
         # get the valid intervals for the position data
@@ -283,7 +283,9 @@ def get_all_spatial_series(nwbf, verbose=False):
                 sampling_rate))
         # add the valid intervals to the Interval list
         pos_data_dict[index]['valid_times'] = get_valid_intervals(
-            timestamps, sampling_rate, 2.5, 0)
+            timestamps, sampling_rate,
+            gap_proportion=2.5,
+            min_valid_len=int(sampling_rate))
         pos_data_dict[index]['raw_position_object_id'] = spatial_series.object_id
 
     return pos_data_dict
