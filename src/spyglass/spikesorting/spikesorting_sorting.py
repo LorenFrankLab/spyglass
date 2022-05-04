@@ -132,7 +132,7 @@ class SpikeSorting(dj.Computed):
 
         # first, get the timestamps
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
-
+        fs = recording.get_sampling_frequency()
         # then concatenate the recordings
         # Note: the timestamps are lost upon concatenation,
         # i.e. concat_recording.get_times() doesn't return true timestamps anymore.
@@ -157,11 +157,11 @@ class SpikeSorting(dj.Computed):
                     np.arange(np.searchsorted(timestamps, interval[0]),
                               np.searchsorted(timestamps, interval[1])))
             list_triggers = [list(np.concatenate(list_triggers))]
-            
+            pad = 2 * (1 / fs) * 1000
             recording = sit.remove_artifacts(
                 recording=recording,
                 list_triggers=list_triggers,
-                ms_before=0, ms_after=0, mode='zeros')
+                ms_before=0, ms_after=pad, mode='zeros')
 
         print(f'Running spike sorting on {key}...')
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
