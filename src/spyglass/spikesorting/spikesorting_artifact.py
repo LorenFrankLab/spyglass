@@ -219,38 +219,11 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
 
     # find timestamps of initial artifact threshold crossings
     above_thresh_times = valid_timestamps[above_thresh]
-    print('thresh crossing count',above_thresh_times.shape)
 
     # keep track of all the artifact timestamps within each artifact removal window and the indices of those timestamps
-    print(time.time())
     artifact_times = []
     artifact_indices = []
-    # about_thresh_times_windowed_for_indices = {}
-    # about_thresh_times_windowed = {}    
-
-    # for a in above_thresh_times:
-    #     artifact_window_indices = (valid_timestamps > (a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s))
-    #     about_thresh_times_windowed[a] = valid_timestamps[artifact_window_indices]
-    #     about_thresh_times_windowed_for_indices[a] = artifact_window_indices
-    # for a in above_thresh_times:
-    #     a_times = np.copy( about_thresh_times_windowed[a])
-    #     a_indices = np.argwhere( about_thresh_times_windowed_for_indices[a])
-    #     artifact_times.append(a_times)
-    #     artifact_indices.append(a_indices)
-    # all_artifact_times = reduce(np.union1d, artifact_times)
-    # all_artifact_indices = reduce(np.union1d, artifact_indices)
-
     for a in above_thresh_times:
-        # original
-        #print(time.time())
-        #a_times = np.copy(valid_timestamps[(valid_timestamps > (
-        #    a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s))])
-        #print(time.time())
-        #a_indices = np.argwhere((valid_timestamps > (
-        #    a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s)))
-        #print(time.time())
-
-        # NEW: only look up window timestamps once
         artifact_window_indices = ((valid_timestamps > (a - half_removal_window_s)) & 
                                     (valid_timestamps <= (a + half_removal_window_s)))
         a_times = np.copy(valid_timestamps[artifact_window_indices])
@@ -259,8 +232,6 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         artifact_indices.append(a_indices)
     all_artifact_times = reduce(np.union1d, artifact_times)
     all_artifact_indices = reduce(np.union1d, artifact_indices)
-    print(time.time())
-
     # turn artifact detected times into intervals
     # should be faster than diffing and comparing to zero
     if not np.all(all_artifact_times[:-1] <= all_artifact_times[1:]):
@@ -280,7 +251,6 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     artifact_removed_valid_times = get_valid_intervals(valid_timestamps[valid_timestamps != -1],
                                                        recording.get_sampling_frequency(), 1.5, 0.000001)
 
-    print(time.time())
     return artifact_removed_valid_times, artifact_intervals
 
 
