@@ -615,11 +615,6 @@ def get_decoding_data_for_epoch(
     marks = xr.concat(
         [marks.sel(time=times) for times in valid_slices], dim='time')
 
-    # temporarily remove the bit where the animal is placed on the track
-    # ideally should use DIOs first poke event?
-    position_info = position_info.iloc[slice(20_000, -1)]
-    marks = marks.isel(time=slice(20_000, -1))
-
     return position_info, marks, valid_slices
 
 
