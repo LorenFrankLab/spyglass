@@ -536,6 +536,15 @@ class MultiunitHighSynchronyEventsParameters(dj.Manual):
     close_event_threshold = 0.0 :  float # events closer than this will be excluded (in seconds)
     """
 
+    def insert_default(self):
+        self.insert1(
+            {'param_name': 'default',
+             'minimum_duration': 0.015,
+             'zscore_threshold': 2.0,
+             'close_event_threshold': 0.0,
+             },
+            skip_duplicates=True)
+
 
 @schema
 class MultiunitHighSynchronyEvents(dj.Computed):
