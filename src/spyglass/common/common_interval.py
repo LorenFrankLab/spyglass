@@ -51,94 +51,100 @@ class IntervalList(dj.Manual):
                 [[epoch_data.start_time, epoch_data.stop_time]])
             cls.insert1(epoch_dict, skip_duplicates=True)
 
-# TODO: make all of the functions below faster if possible
 def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
-    """Returns an interval list with only the intervals whose length is > min_length and < max_length
+    """Select intervals of certain lengths from an interval list.
 
-    Args:
-        interval_list ((N,2) np.array): input interval list.
-        min_length (float, optional): [minimum interval length in seconds]. Defaults to 0.0.
-        max_length ([type], optional): [maximum interval length in seconds]. Defaults to 1e10.
+    Parameters
+    ----------
+    interval_list : array_like
+        Each element is (start time, stop time), i.e. an interval. Unit is seconds.
+    min_length : float, optional
+        Minimum interval length in seconds. Defaults to 0.0.
+    max_length : float, optional
+        Maximum interval length in seconds. Defaults to 1e10.
     """
-    # get the length of each interval
     lengths = np.ravel(np.diff(interval_list))
-    # return only intervals of the appropriate lengths
     return interval_list[np.logical_and(lengths > min_length, lengths < max_length)]
 
-def interval_list_contains_ind(valid_times, timestamps):
-    """Returns the indices for the timestamps that are contained within the valid_times intervals
+def interval_list_contains_ind(interval_list, timestamps):
+    """Find indices of a list of timestamps that are contained in an interval list.
 
-    :param valid_times: Array of [start, end] times
-    :type valid_times: numpy array
-    :param timestamps: list of timestamps
-    :type timestamps: numpy array or list
-    :return: indices of timestamps that are in one of the valid_times intervals
+    Parameters
+    ----------
+    interval_list : array_like
+        Each element is (start time, stop time), i.e. an interval. Unit is seconds.
+    timestamps : array_like
     """
     ind = []
-    for valid_time in valid_times:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= valid_time[0],
-                                                   timestamps <= valid_time[1]))).tolist()
+    for interval in interval_list:
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= interval[0],
+                                                   timestamps <= interval[1]))).tolist()
     return np.asarray(ind)
 
 
-def interval_list_contains(valid_times, timestamps):
-    """Returns the timestamps that are contained within the valid_times intervals
-
-    :param valid_times: Array of [start, end] times
-    :type valid_times: numpy array
-    :param timestamps: list of timestamps
-    :type timestamps: numpy array or list
-    :return: numpy array of timestamps that are in one of the valid_times intervals
+def interval_list_contains(interval_list, timestamps):
+    """Find timestamps that are contained in an interval list.
+    
+    Parameters
+    ----------
+    interval_list : array_like
+        Each element is (start time, stop time), i.e. an interval. Unit is seconds.
+    timestamps : array_like
     """
     ind = []
-    for valid_time in valid_times:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= valid_time[0],
-                                                   timestamps <= valid_time[1]))).tolist()
+    for interval in interval_list:
+        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= interval[0],
+                                                   timestamps <= interval[1]))).tolist()
     return timestamps[ind]
 
 
-def interval_list_excludes_ind(valid_times, timestamps):
-    """Returns the indices of the timestamps that are excluded from the valid_times intervals
+def interval_list_excludes_ind(interval_list, timestamps):
+    """Find indices of a list of timestamps that are not contained in an interval list.
 
-    :param valid_times: Array of [start, end] times
-    :type valid_times: numpy array
-    :param timestamps: list of timestamps
-    :type timestamps: numpy array or list
-    :return: numpy array of timestamps that are in one of the valid_times intervals
+    Parameters
+    ----------
+    interval_list : array_like
+        Each element is (start time, stop time), i.e. an interval. Unit is seconds.
+    timestamps : array_like
     """
-    # add the first and last times to the list and creat a list of invalid intervals
-    valid_times_list = np.ndarray.ravel(valid_times).tolist()
-    valid_times_list.insert(0, timestamps[0] - 0.00001)
-    valid_times_list.append(timestamps[-1] + 0.001)
-    invalid_times = np.array(valid_times_list).reshape(-1, 2)
-    # add the first and last timestamp indices
-    ind = []
-    for invalid_time in invalid_times:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0],
-                                                   timestamps < invalid_time[1]))).tolist()
-    return np.asarray(ind)
+    
+    contained_inds = interval_list_contains_ind(interval_list, timestamps)
+    return np.setdiff1d(np.arange(len(timestamps)), contained_inds)
+    # # add the first and last times to the list and creat a list of invalid intervals
+    # valid_times_list = np.ndarray.ravel(interval_list).tolist()
+    # valid_times_list.insert(0, timestamps[0] - 0.00001)
+    # valid_times_list.append(timestamps[-1] + 0.001)
+    # invalid_times = np.array(valid_times_list).reshape(-1, 2)
+    # # add the first and last timestamp indices
+    # ind = []
+    # for invalid_time in invalid_times:
+    #     ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0],
+    #                                                timestamps < invalid_time[1]))).tolist()
+    # return np.asarray(ind)
 
 
-def interval_list_excludes(valid_times, timestamps):
-    """Returns the indices of the timestamps that are excluded from the valid_times intervals
+def interval_list_excludes(interval_list, timestamps):
+    """Find timestamps that are not contained in an interval list.
 
-    :param valid_times: Array of [start, end] times
-    :type valid_times: numpy array
-    :param timestamps: list of timestamps
-    :type timestamps: numpy array or list
-    :return: numpy array of timestamps that are in one of the valid_times intervals
+    Parameters
+    ----------
+    interval_list : array_like
+        Each element is (start time, stop time), i.e. an interval. Unit is seconds.
+    timestamps : array_like
     """
-    # add the first and last times to the list and creat a list of invalid intervals
-    valid_times_list = np.ravel(valid_times).tolist()
-    valid_times_list.insert(0, timestamps[0] - 0.00001)
-    valid_times_list.append(timestamps[-1] + 0.00001)
-    invalid_times = np.array(valid_times_list).reshape(-1, 2)
-    # add the first and last timestamp indices
-    ind = []
-    for invalid_time in invalid_times:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0],
-                                                   timestamps < invalid_time[1]))).tolist()
-    return timestamps[ind]
+    contained_inds = interval_list_contains_ind(interval_list, timestamps)
+    return np.setdiff1d(timestamps, contained_inds)
+    # # add the first and last times to the list and creat a list of invalid intervals
+    # valid_times_list = np.ravel(valid_times).tolist()
+    # valid_times_list.insert(0, timestamps[0] - 0.00001)
+    # valid_times_list.append(timestamps[-1] + 0.00001)
+    # invalid_times = np.array(valid_times_list).reshape(-1, 2)
+    # # add the first and last timestamp indices
+    # ind = []
+    # for invalid_time in invalid_times:
+    #     ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0],
+    #                                                timestamps < invalid_time[1]))).tolist()
+    # return timestamps[ind]
 
 def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     """Finds the intersections between two interval lists
@@ -293,15 +299,52 @@ def interval_list_union(interval_list1, interval_list2, min_length=0.0, max_leng
 def interval_list_censor(interval_list, timestamps):
     """returns a new interval list that starts and ends at the first and last timestamp
 
-    Args:
-        interval_list (numpy array of intervals [start, stop]): interval list from IntervalList valid times
-        timestamps (numpy array or list): timestamp list
-
-    Returns:
-        interval_list (numpy array of intervals [start, stop])
+    Parameters
+    ----------
+    interval_list : numpy array of intervals [start, stop]
+        interval list from IntervalList valid times
+    timestamps : numpy array or list
+    
+    Returns
+    -------
+    interval_list (numpy array of intervals [start, stop])
     """
     # check that all timestamps are in the interval list
     assert len(interval_list_contains_ind(interval_list, timestamps)) == len(timestamps), 'interval_list must contain all timestamps' 
     
     timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
     return interval_list_intersect(interval_list, timestamps_interval)    
+
+def interval_from_inds(list_frames):
+    """Converts list of sample indices (frames) to intervals.
+    e.g. [2,3,4,6,7,8,9,10] -> [[2,4],[6,10]]
+
+    Parameters
+    ----------
+    list_frames : array_like of int
+    """
+    
+    list_frames = np.sort(list_frames)
+    transition_frames = np.nonzero(np.diff(list_frames) > 1)[0]
+    transition_frames = np.concatenate(([0], transition_frames, [len(list_frames)]))
+    interval = np.zeros((len(transition_frames)-1, 2))
+    for frame_idx in range(len(transition_frames)-1):
+        interval[frame_idx] = [transition_frames[frame_idx], transition_frames[frame_idx+1]]
+    return interval
+
+def interval_inds_to_times(interval_list, timestamps):
+    """Converts interval list in indices to times using a list of timestamps
+
+    Parameters
+    ----------
+    interval_list : _type_
+        _description_
+    timestamps : _type_
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    return NotImplementedError

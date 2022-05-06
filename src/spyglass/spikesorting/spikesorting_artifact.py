@@ -7,7 +7,7 @@ import scipy.stats as stats
 import spikeinterface as si
 from spikeinterface.core.job_tools import ensure_n_jobs, ChunkRecordingExecutor
 
-from ..common.common_interval import IntervalList
+from ..common.common_interval import IntervalList, interval_from_inds, _union_concat, interval_list_excludes_ind
 from ..common.nwb_helper_fn import get_valid_intervals
 from .spikesorting_recording import SpikeSortingRecording
 
@@ -202,39 +202,15 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         print("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
-    # find timestamps of initial artifact threshold crossings
-    above_thresh_times = valid_timestamps[artifact_frames]
-
-    # # keep track of all the artifact timestamps within each artifact removal window and the indices of those timestamps
-    # artifact_times = []
-    # artifact_indices = []
-    # for a in above_thresh_times:
-    #     a_times = np.copy(valid_timestamps[(valid_timestamps > (
-    #         a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s))])
-    #     a_indices = np.argwhere((valid_timestamps > (
-    #         a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s)))
-    #     artifact_times.append(a_times)
-    #     artifact_indices.append(a_indices)
-    # all_artifact_times = reduce(np.union1d, artifact_times)
-    # all_artifact_indices = reduce(np.union1d, artifact_indices)
-    # # turn artifact detected times into intervals
-    # # should be faster than diffing and comparing to zero
-    # if not np.all(all_artifact_times[:-1] <= all_artifact_times[1:]):
-    #     warnings.warn(
-    #         "Warning: sorting artifact timestamps; all_artifact_times was not strictly increasing")
-    #     all_artifact_times = np.sort(all_artifact_times)
-    # artifact_intervals = get_valid_intervals(
-    #     all_artifact_times, recording.get_sampling_frequency(), 1.5, .000001)
-
-    # artifact_percent_of_times = 100 * \
-    #     len(all_artifact_times) / len(valid_timestamps)
-    # print(f"{len(artifact_intervals)} artifact intervals detected;\
-    #       {artifact_percent_of_times} % of the recording's valid_timestamps removed as artifact")
-
-    # # turn all artifact detected times into -1 to easily find non-artifact intervals
-    # valid_timestamps[all_artifact_indices] = -1
-    # artifact_removed_valid_times = get_valid_intervals(valid_timestamps[valid_timestamps != -1],
-    #                                                    recording.get_sampling_frequency(), 1.5, 0.000001)
+    artifact_intervals = interval_from_inds(artifact_frames)
+    
+    for interval_idx, interval in enumerate(artifact_intervals):
+        artifact_intervals[interval_idx] = [valid_timestamps[interval[0]]-half_removal_window_s,
+                                            valid_timestamps[interval[1]]+half_removal_window_s]
+    artifact_intervals = reduce(_union_concat, artifact_intervals)
+    
+    artifact_removed_valid_times = interval_list_excludes_ind(artifact_intervals, valid_timestamps)
+    artifact_removed_valid_times = interval_from_inds(artifact_removed_valid_times)
 
     return artifact_removed_valid_times, artifact_intervals
 
