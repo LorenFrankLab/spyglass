@@ -759,22 +759,6 @@ class CuratedSpikeSorting(dj.Computed):
     units_object_id: varchar(40)
     """
 
-    class Unit(dj.Part):
-        definition = """
-        # Table for holding sorted units
-        -> master
-        unit_id: int   # ID for each unit
-        ---
-        label='': varchar(200)   # optional set of labels for each unit
-        nn_noise_overlap=-1: float   # noise overlap metric for each unit
-        nn_isolation=-1: float   # isolation score metric for each unit
-        isi_violation=-1: float   # ISI violation score for each unit
-        snr=0: float            # SNR for each unit
-        firing_rate=-1: float   # firing rate
-        num_spikes=-1: int   # total number of spikes
-        peak_channel=null: int # channel maximum aplitude for each unit
-        """
-
     def make(self, key):
         unit_labels_to_remove = ['reject']
         # check that the Curation has metrics
@@ -806,7 +790,8 @@ class CuratedSpikeSorting(dj.Computed):
         final_metrics = {}
         for metric in metrics:
             final_metrics[metric] = {int(unit_id): metrics[metric][unit_id]
-                                     for unit_id in metrics[metric] if int(unit_id) in accepted_units}
+                                     for unit_id in metrics[metric]
+                                     if int(unit_id) in accepted_units}
 
         print(f'Found {len(accepted_units)} accepted units')
 
@@ -826,34 +811,53 @@ class CuratedSpikeSorting(dj.Computed):
         (key['analysis_file_name'],
          key['units_object_id']) = Curation().save_sorting_nwb(
             key, sorting, timestamps, sort_interval_list_name,
-            sort_interval, metrics=final_metrics, unit_ids=accepted_units)
+            sort_interval, metrics=final_metrics, unit_ids=accepted_units, labels=labels)
         self.insert1(key)
-
-        # now add the units
-        # Remove the non primary key entries.
-        del key['units_object_id']
         del key['analysis_file_name']
+        del key['units_object_id']
+        Units.populate(key)
 
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+
+@schema
+class Units(dj.Computed):
+    definition = """
+    # Table for holding sorted units
+    -> CuratedSpikeSorting
+    unit_id: int   # ID for each unit
+    ---
+    label='': varchar(200)   # optional set of labels for each unit
+    nn_noise_overlap=-1: float   # noise overlap metric for each unit
+    nn_isolation=-1: float   # isolation score metric for each unit
+    isi_violation=-1: float   # ISI violation score for each unit
+    snr=-1: float            # SNR for each unit
+    firing_rate=-1: float   # firing rate
+    num_spikes=-1: int   # total number of spikes
+    peak_channel=-1: int # channel maximum aplitude for each unit
+    """
+
+    def make(self, key):
+        units_table = (CuratedSpikeSorting & key).fetch_nwb()[0]['units']
+        accepted_units = units_table.index.tolist()
+        labels = units_table['labels']
         metric_fields = self.metrics_fields()
         for unit_id in accepted_units:
             key['unit_id'] = unit_id
             if unit_id in labels:
                 key['label'] = labels[unit_id]
             for field in metric_fields:
-                if field in final_metrics:
-                    key[field] = final_metrics[field][unit_id]
+                if field in units_table.loc[[unit_id]]:
+                    key[field] = units_table.at[unit_id,field]
                 else:
                     Warning(
                         f'No metric named {field} in computed unit quality metrics; skipping')
-            CuratedSpikeSorting.Unit.insert1(key)
-
+            self.insert1(key)
+    
     def metrics_fields(self):
         """Returns a list of the metrics that are currently in the Units table.
         """
-        unit_info = self.Unit().fetch(limit=1, format="frame")
+        unit_info = self.fetch(limit=1, format="frame")
         unit_fields = [column for column in unit_info.columns]
         unit_fields.remove('label')
         return unit_fields
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
