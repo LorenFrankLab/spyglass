@@ -493,14 +493,22 @@ def create_figurl_decode_visualization(
             discontinuous=False
         ), relative_height=1
     )
-
-    posterior = np.asarray(
-        results
-        .acausal_posterior
-        .sum('state')
-        .where(classifier.environments[0].is_track_interior_),
-        dtype=np.float32
-    )
+    try:
+        posterior = np.asarray(
+            results
+            .acausal_posterior
+            .sum('state')
+            .where(classifier.environments[0].is_track_interior_),
+            dtype=np.float32
+        )
+    except AttributeError:
+        posterior = np.asarray(
+            results
+            .acausal_posterior
+            .sum('state')
+            .where(classifier.is_track_interior_),
+            dtype=np.float32
+        )
     time = np.asarray(results.time, dtype=np.float32)
 
     h5_uri = create_live_position_pdf_plot_h5(
