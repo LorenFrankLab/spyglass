@@ -344,8 +344,16 @@ class AnalysisNwbfile(dj.Manual):
                                                 description=f'{metric} metric',
                                                 data=metric_values)
                 if labels is not None:
+                    unit_ids = np.array(list(units.keys()))
+                    for unit in unit_ids:
+                        if unit not in labels:
+                            labels[unit] = ''
+                    label_values = np.array(list(labels.values()))
+                    label_values = label_values[np.argsort(unit_ids)].tolist()
                     nwbf.add_unit_column(
-                        name='label', description='label given during curation', data=labels)
+                        name='label',
+                        description='label given during curation',
+                        data=label_values)
                 # If the waveforms were specified, add them as a dataframe to scratch
                 waveforms_object_id = ''
                 if units_waveforms is not None:
