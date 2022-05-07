@@ -518,7 +518,7 @@ def _get_peak_offset(waveform_extractor: si.WaveformExtractor, peak_sign: str, *
     return peak_offset
 
 def _get_peak_channel(waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params):
-    """Computes the channel with the extremum peak for each unit.
+    """Computes the electrode_id of the channel with the extremum peak for each unit.
     """
     if 'peak_sign' in metric_params:
         del metric_params['peak_sign']
@@ -813,9 +813,6 @@ class CuratedSpikeSorting(dj.Computed):
             key, sorting, timestamps, sort_interval_list_name,
             sort_interval, metrics=final_metrics, unit_ids=accepted_units, labels=labels)
         self.insert1(key)
-        del key['analysis_file_name']
-        del key['units_object_id']
-        Units.populate(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
@@ -834,13 +831,13 @@ class Units(dj.Computed):
     snr=-1: float            # SNR for each unit
     firing_rate=-1: float   # firing rate
     num_spikes=-1: int   # total number of spikes
-    peak_channel=-1: int # channel maximum aplitude for each unit
+    peak_channel=-1: int # electrode_id for channel with maximum aplitude for each unit
     """
 
     def make(self, key):
         units_table = (CuratedSpikeSorting & key).fetch_nwb()[0]['units']
         accepted_units = units_table.index.tolist()
-        labels = units_table['labels']
+        labels = units_table['label']
         metric_fields = self.metrics_fields()
         for unit_id in accepted_units:
             key['unit_id'] = unit_id
