@@ -81,7 +81,6 @@ def interval_list_contains_ind(interval_list, timestamps):
                                                    timestamps <= interval[1]))).tolist()
     return np.asarray(ind)
 
-
 def interval_list_contains(interval_list, timestamps):
     """Find timestamps that are contained in an interval list.
     
@@ -132,8 +131,8 @@ def interval_list_excludes(interval_list, timestamps):
         Each element is (start time, stop time), i.e. an interval. Unit is seconds.
     timestamps : array_like
     """
-    contained_inds = interval_list_contains_ind(interval_list, timestamps)
-    return np.setdiff1d(timestamps, contained_inds)
+    contained_times = interval_list_contains(interval_list, timestamps)
+    return np.setdiff1d(timestamps, contained_times)
     # # add the first and last times to the list and creat a list of invalid intervals
     # valid_times_list = np.ravel(valid_times).tolist()
     # valid_times_list.insert(0, timestamps[0] - 0.00001)
@@ -145,6 +144,16 @@ def interval_list_excludes(interval_list, timestamps):
     #     ind += np.ravel(np.argwhere(np.logical_and(timestamps > invalid_time[0],
     #                                                timestamps < invalid_time[1]))).tolist()
     # return timestamps[ind]
+
+def interval_list_consolidate(interval_list):
+    """Makes intervals disjoint by unioning overlapping intervals
+
+    Parameters
+    ----------
+    interval_list : _type_
+        _description_
+    """
+    return NotImplementedError
 
 def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     """Finds the intersections between two interval lists
