@@ -536,6 +536,15 @@ class MultiunitHighSynchronyEventsParameters(dj.Manual):
     close_event_threshold = 0.0 :  float # events closer than this will be excluded (in seconds)
     """
 
+    def insert_default(self):
+        self.insert1(
+            {'param_name': 'default',
+             'minimum_duration': 0.015,
+             'zscore_threshold': 2.0,
+             'close_event_threshold': 0.0,
+             },
+            skip_duplicates=True)
+
 
 @schema
 class MultiunitHighSynchronyEvents(dj.Computed):
@@ -614,11 +623,6 @@ def get_decoding_data_for_epoch(
 
     marks = xr.concat(
         [marks.sel(time=times) for times in valid_slices], dim='time')
-
-    # temporarily remove the bit where the animal is placed on the track
-    # ideally should use DIOs first poke event?
-    position_info = position_info.iloc[slice(20_000, -1)]
-    marks = marks.isel(time=slice(20_000, -1))
 
     return position_info, marks, valid_slices
 
