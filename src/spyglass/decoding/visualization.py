@@ -31,9 +31,11 @@ def make_single_environment_movie(
     direction_name='head_orientation',
     vmax=0.07,
 ):
-
-    multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
-                        ).astype(float)
+    if marks.ndim > 2:
+        multiunit_spikes = (np.any(~np.isnan(marks), axis=1)
+                            ).astype(float)
+    else:
+        multiunit_spikes = np.asarray(marks, dtype=float)
     multiunit_firing_rate = pd.DataFrame(
         get_multiunit_population_firing_rate(
             multiunit_spikes, sampling_frequency), index=position_info.index,
@@ -277,8 +279,12 @@ def make_multi_environment_movie(
             .unstack('position')
             .where(env.is_track_interior_))
 
-    multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
-                        ).astype(float)
+    if marks.ndim > 2:
+        multiunit_spikes = (np.any(~np.isnan(marks), axis=1)
+                            ).astype(float)
+    else:
+        multiunit_spikes = np.asarray(marks, dtype=float)
+
     multiunit_firing_rate = pd.DataFrame(
         get_multiunit_population_firing_rate(
             multiunit_spikes, sampling_frequency), index=position_info.index,
