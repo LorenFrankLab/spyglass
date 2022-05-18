@@ -9,7 +9,6 @@ from replay_trajectory_classification.discrete_state_transitions import (
 from replay_trajectory_classification.environments import Environment
 from replay_trajectory_classification.initial_conditions import (
     UniformInitialConditions, UniformOneEnvironmentInitialConditions)
-from replay_trajectory_classification.misc import NumbaKDE
 from replay_trajectory_classification.observation_model import ObservationModel
 from track_linearization import make_track_graph
 
@@ -60,10 +59,6 @@ def restore_classes(params):
         'UniformOneEnvironmentInitialConditions':  UniformOneEnvironmentInitialConditions,
     }
 
-    model_types = {
-        'NumbaKDE': NumbaKDE,
-    }
-
     params['classifier_params']['continuous_transition_types'] = [
         [_convert_dict_to_class(
             st, continuous_state_transition_types) for st in sts]
@@ -78,12 +73,6 @@ def restore_classes(params):
     if params['classifier_params']['observation_models'] is not None:
         params['classifier_params']['observation_models'] = [ObservationModel(
             obs) for obs in params['classifier_params']['observation_models']]
-
-    try:
-        params['classifier_params']['clusterless_algorithm_params']['model'] = (
-            model_types[params['classifier_params']['clusterless_algorithm_params']['model']])
-    except KeyError:
-        pass
 
     return params
 

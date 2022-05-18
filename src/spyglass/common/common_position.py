@@ -159,8 +159,8 @@ class IntervalPositionInfo(dj.Computed):
 
         self.insert1(key)
 
+    @staticmethod
     def calculate_position_info_from_spatial_series(
-        self,
         spatial_series,
         max_LED_separation,
         max_plausible_speed,
@@ -643,10 +643,9 @@ class PositionVideo(dj.Computed):
             position_info_df[['head_orientation']])
         video_time = np.asarray(nwb_video.timestamps)
         position_time = np.asarray(position_info_df.index)
-        for device_name in nwb_video.devices:
-            cm_per_pixel = (
-                nwb_video.devices[device_name].meters_per_pixel
-                * M_TO_CM)
+        cm_per_pixel = (
+            nwb_video.device.meters_per_pixel
+            * M_TO_CM)
 
         print('Making video...')
         self.make_video(video_filename, centroids, head_position_mean,

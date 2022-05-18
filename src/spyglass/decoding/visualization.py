@@ -31,9 +31,11 @@ def make_single_environment_movie(
     direction_name='head_orientation',
     vmax=0.07,
 ):
-
-    multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
-                        ).astype(float)
+    if marks.ndim > 2:
+        multiunit_spikes = (np.any(~np.isnan(marks), axis=1)
+                            ).astype(float)
+    else:
+        multiunit_spikes = np.asarray(marks, dtype=float)
     multiunit_firing_rate = pd.DataFrame(
         get_multiunit_population_firing_rate(
             multiunit_spikes, sampling_frequency), index=position_info.index,
@@ -277,8 +279,12 @@ def make_multi_environment_movie(
             .unstack('position')
             .where(env.is_track_interior_))
 
-    multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
-                        ).astype(float)
+    if marks.ndim > 2:
+        multiunit_spikes = (np.any(~np.isnan(marks), axis=1)
+                            ).astype(float)
+    else:
+        multiunit_spikes = np.asarray(marks, dtype=float)
+
     multiunit_firing_rate = pd.DataFrame(
         get_multiunit_population_firing_rate(
             multiunit_spikes, sampling_frequency), index=position_info.index,
@@ -493,14 +499,22 @@ def create_figurl_decode_visualization(
             discontinuous=False
         ), relative_height=1
     )
-
-    posterior = np.asarray(
-        results
-        .acausal_posterior
-        .sum('state')
-        .where(classifier.environments[0].is_track_interior_),
-        dtype=np.float32
-    )
+    try:
+        posterior = np.asarray(
+            results
+            .acausal_posterior
+            .sum('state')
+            .where(classifier.environments[0].is_track_interior_),
+            dtype=np.float32
+        )
+    except AttributeError:
+        posterior = np.asarray(
+            results
+            .acausal_posterior
+            .sum('state')
+            .where(classifier.is_track_interior_),
+            dtype=np.float32
+        )
     time = np.asarray(results.time, dtype=np.float32)
 
     h5_uri = create_live_position_pdf_plot_h5(
