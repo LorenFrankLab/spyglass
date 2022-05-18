@@ -349,7 +349,7 @@ class UnitMarksIndicator(dj.Computed):
         return np.linspace(start_time, end_time, n_samples)
 
     @staticmethod
-    def plot_all_marks(marks_indicators: xr.DataArray):
+    def plot_all_marks(marks_indicators: xr.DataArray, plot_size=5, s=10):
         """Plots 2D slices of each of the spike features against each other
         for all electrodes.
 
@@ -362,17 +362,21 @@ class UnitMarksIndicator(dj.Computed):
             marks = marks_indicators.sel(electrodes=electrode_ind).dropna(
                 'time', how='all').dropna('marks')
             n_features = len(marks.marks)
-            fig, axes = plt.subplots(n_features, n_features,
-                                     constrained_layout=True, sharex=True, sharey=True,
-                                     figsize=(5 * n_features, 5 * n_features))
+            fig, axes = plt.subplots(
+                n_features, n_features,
+                constrained_layout=True, sharex=True, sharey=True,
+                figsize=(plot_size * n_features, plot_size * n_features))
             for ax_ind1, feature1 in enumerate(marks.marks):
                 for ax_ind2, feature2 in enumerate(marks.marks):
                     try:
                         axes[ax_ind1, ax_ind2].scatter(
-                            marks.sel(marks=feature1), marks.sel(marks=feature2), s=10)
+                            marks.sel(marks=feature1),
+                            marks.sel(marks=feature2),
+                            s=s)
                     except TypeError:
                         axes.scatter(marks.sel(marks=feature1),
-                                     marks.sel(marks=feature2), s=10)
+                                     marks.sel(marks=feature2),
+                                     s=s)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
