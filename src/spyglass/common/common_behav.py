@@ -9,7 +9,8 @@ from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .common_task import TaskEpoch
 from .dj_helper_fn import fetch_nwb
-from .nwb_helper_fn import get_all_spatial_series, get_data_interface, get_nwb_file
+from .nwb_helper_fn import (get_all_spatial_series, get_data_interface,
+                            get_nwb_file)
 
 schema = dj.schema('common_behav')
 
@@ -65,6 +66,15 @@ class PositionSource(dj.Manual):
 
 @schema
 class RawPosition(dj.Imported):
+    """
+
+    Notes
+    -----
+    The position timestamps come from: .pos_cameraHWSync.dat.
+    If PTP is not used, the position timestamps are inferred by finding the
+    closest timestamps from the neural recording via the trodes time.
+
+    """
     definition = """
     -> PositionSource
     ---
@@ -110,7 +120,8 @@ class StateScriptFile(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        associated_files = nwbf.processing.get('associated_files') or nwbf.processing.get('associated files')
+        associated_files = nwbf.processing.get(
+            'associated_files') or nwbf.processing.get('associated files')
         if associated_files is None:
             print(f'Unable to import StateScriptFile: no processing module named "associated_files" '
                   f'found in {nwb_file_name}.')
@@ -136,6 +147,15 @@ class StateScriptFile(dj.Imported):
 
 @schema
 class VideoFile(dj.Imported):
+    """
+
+    Notes
+    -----
+    The video timestamps come from: videoTimeStamps.cameraHWSync if PTP is used.
+    If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrameCount .
+
+    """
+
     definition = """
     -> TaskEpoch
     video_file_num = 0: int
@@ -147,7 +167,8 @@ class VideoFile(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        video = get_data_interface(nwbf, 'video', pynwb.behavior.BehavioralEvents)
+        video = get_data_interface(
+            nwbf, 'video', pynwb.behavior.BehavioralEvents)
 
         if video is None:
             print(f'No video data interface found in {nwb_file_name}\n')
@@ -185,7 +206,8 @@ class HeadDir(dj.Imported):
         # position data is stored in the Behavior processing module
         behav_mod = nwbf.processing.get('behavior')
         if behav_mod is None:
-            print(f'Unable to import HeadDir: no processing module named "behavior" in {nwb_file_name}.')
+            print(
+                f'Unable to import HeadDir: no processing module named "behavior" in {nwb_file_name}.')
             return
 
         headdir_obj = behav_mod.get('Head Direction')
@@ -195,7 +217,8 @@ class HeadDir(dj.Imported):
 
         # TODO do something with headdir_obj
         key['nwb_object_id'] = -1
-        key['interval_list_name'] = 'task epochs'  # this is created when we populate the Task schema
+        # this is created when we populate the Task schema
+        key['interval_list_name'] = 'task epochs'
         self.insert1(key)
 
 
@@ -216,7 +239,8 @@ class Speed(dj.Imported):
         # position data is stored in the Behavior processing module
         behav_mod = nwbf.processing.get('behavior')
         if behav_mod is None:
-            print(f'Unable to import Speed: no processing module named "behavior" in {nwb_file_name}.')
+            print(
+                f'Unable to import Speed: no processing module named "behavior" in {nwb_file_name}.')
             return
 
         speed_obj = behav_mod.get('Speed')
@@ -226,7 +250,8 @@ class Speed(dj.Imported):
 
         # TODO do something with speed_obj
         key['nwb_object_id'] = -1
-        key['interval_list_name'] = 'task epochs'  # this is created when we populate the Task schema
+        # this is created when we populate the Task schema
+        key['interval_list_name'] = 'task epochs'
         self.insert1(key)
 
 
@@ -247,7 +272,8 @@ class LinPos(dj.Imported):
         # position data is stored in the Behavior processing module
         behav_mod = nwbf.processing.get('behavior')
         if behav_mod is None:
-            print(f'Unable to import LinPos: no processing module named "behavior" in {nwb_file_name}.')
+            print(
+                f'Unable to import LinPos: no processing module named "behavior" in {nwb_file_name}.')
             return
 
         linpos_obj = behav_mod.get('Linearized Position')
@@ -257,5 +283,6 @@ class LinPos(dj.Imported):
 
         # TODO do something with linpos_obj
         key['nwb_object_id'] = -1
-        key['interval_list_name'] = 'task epochs'  # this is created when we populate the Task schema
+        # this is created when we populate the Task schema
+        key['interval_list_name'] = 'task epochs'
         self.insert1(key)
