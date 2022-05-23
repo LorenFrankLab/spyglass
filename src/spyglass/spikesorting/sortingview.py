@@ -36,6 +36,7 @@ class SortingviewWorkspace(dj.Computed):
         # then save as h5 (sortingview requires this format)
         # import Curation here to avoid circular import
         recording = Curation.get_recording(key)
+        recording = si.concatenate_recordings([recording])
         old_recording = si.create_extractor_from_new_recording(recording)
 
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
