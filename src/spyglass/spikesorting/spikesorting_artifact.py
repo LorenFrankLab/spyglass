@@ -199,13 +199,13 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         above_thresh = np.ravel(np.argwhere(
             np.sum(above_a, axis=1) >= nelect_above))
     elif ((amplitude_thresh is None) and (zscore_thresh is not None)):
-        dataz = np.abs(stats.zscore(data, axis=1))
+        dataz = np.abs(stats.zscore(data, axis=0))
         above_z = dataz > zscore_thresh
         above_thresh = np.ravel(np.argwhere(
             np.sum(above_z, axis=1) >= nelect_above))
     else:
         above_a = np.abs(data) > amplitude_thresh
-        dataz = np.abs(stats.zscore(data, axis=1))
+        dataz = np.abs(stats.zscore(data, axis=0))
         above_z = dataz > zscore_thresh
         above_thresh = np.ravel(np.argwhere(
             np.sum(np.logical_or(above_z, above_a), axis=1) >= nelect_above))
