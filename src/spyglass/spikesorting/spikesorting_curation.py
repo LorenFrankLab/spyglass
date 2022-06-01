@@ -521,7 +521,7 @@ def _get_peak_offset(waveform_extractor: si.WaveformExtractor, peak_sign: str, *
     return peak_offset
 
 def _get_peak_channel(waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params):
-    """Computes the channel with the extremum peak for each unit.
+    """Computes the electrode_id of the channel with the extremum peak for each unit.
     """
     if 'peak_sign' in metric_params:
         del metric_params['peak_sign']
