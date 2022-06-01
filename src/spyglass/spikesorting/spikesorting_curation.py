@@ -808,7 +808,8 @@ class CuratedSpikeSorting(dj.Computed):
         final_metrics = {}
         for metric in metrics:
             final_metrics[metric] = {int(unit_id): metrics[metric][unit_id]
-                                     for unit_id in metrics[metric] if int(unit_id) in accepted_units}
+                                     for unit_id in metrics[metric]
+                                     if int(unit_id) in accepted_units}
 
         print(f'Found {len(accepted_units)} accepted units')
 
@@ -828,7 +829,8 @@ class CuratedSpikeSorting(dj.Computed):
         (key['analysis_file_name'],
          key['units_object_id']) = Curation().save_sorting_nwb(
             key, sorting, timestamps, sort_interval_list_name,
-            sort_interval, metrics=final_metrics, unit_ids=accepted_units)
+            sort_interval, metrics=final_metrics,
+            unit_ids=accepted_units, labels=labels)
         self.insert1(key)
 
         # now add the units
