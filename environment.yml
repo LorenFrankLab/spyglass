@@ -29,7 +29,7 @@ dependencies:
     - spikeextractors
     - git+https://github.com/SpikeInterface/spikeinterface.git
     - pynwb>=2.0.0,<3
-    - hdmf>=3.1.1,<3.3.1
+    - hdmf>=3.1.1,<=3.2.1
     - datajoint>=0.13.*
     - ghostipy
     - pymysql>=1.0.*
