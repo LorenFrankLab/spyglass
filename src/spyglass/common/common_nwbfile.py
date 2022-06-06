@@ -9,12 +9,11 @@ import pandas as pd
 import numpy as np
 import pynwb
 import spikeinterface as si
-import kachery_client as kc
 
 from hdmf.common import DynamicTable
 
 from .dj_helper_fn import get_child_tables
-from .nwb_helper_fn import get_electrode_indices
+from .nwb_helper_fn import get_electrode_indices, get_nwb_file
 
 schema = dj.schema('common_nwbfile')
 
@@ -24,47 +23,6 @@ NWB_KEEP_FIELDS = ('devices', 'electrode_groups', 'electrodes', 'experiment_desc
                    'institution', 'lab', 'session_description', 'session_id',
                    'session_start_time', 'subject', 'timestamps_reference_time')
 
-def get_nwb_file(nwb_file_path):
-    """Return an NWBFile object with the given file path in read mode. 
-       If the file is not found locally, this will check if it has been shared with kachery and if so, download it and open it.
-
-    Parameters
-    ----------
-    nwb_file_path : str
-        Path to the NWB file.
-
-    Returns
-    -------
-    nwbfile : pynwb.NWBFile
-        NWB file object for the given path opened in read mode.
-    """
-    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None)) 
-    uri = None
-    if nwbfile is None:
-        # check to see if the file exists
-        if not os.path.exists(nwb_file_path):
-            print(f'NWB file {nwb_file_path} does not exist locally; checking kachery')
-            # look up the file name; try the AnalysisNwbfile table first, and then the Nwbfile table
-            analysisfilekey = (AnalysisNwbfile & {'analysis_file_abs_path' : nwb_file_path}).fetch("KEY")
-            if analysisfilekey is not None:
-                uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysisfilekey['analysis_file_name']}).fetch('analysis_file_uri')
-            # if the file wasn't in the Analysis file table, check the Nwbfile table
-            else:
-                nwbfilekey = (Nwbfile & {'nwb_file_abs_path' : nwb_file_path}).fetch("KEY")
-                if nwbfilekey is not None:
-                    uri = (NwbfileKachery & {'nwb_file_name' : nwbfilekey['nwb_file_name']}).fetch('nwb_file_uri')
-            if uri is None:
-                warnings.WarningMessage('Requested file {nwb_file_path} not in NwbfileKachery or AnalysisNwbfileKachery table; cannot load remote file')
-                return None
-            # load the file and save it in the nwb_file_path location
-            kc.load_file(uri=uri, dest=nwb_file_path)
-        # now open the file
-        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r',
-                            load_namespaces=True)  # keep file open
-        nwbfile = io.read()
-        __open_nwb_files[nwb_file_path] = (io, nwbfile)
-                
-    return nwbfile
 
 @schema
 class Nwbfile(dj.Manual):
@@ -148,6 +106,8 @@ class Nwbfile(dj.Manual):
         schema.external['raw'].delete(delete_external_files=delete_files)
 
 
+# TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
+# We therefore need another way to keep track of the
 @schema
 class AnalysisNwbfile(dj.Manual):
     definition = """
@@ -547,9 +507,37 @@ class AnalysisNwbfile(dj.Manual):
     def nightly_cleanup():
         child_tables = get_child_tables(AnalysisNwbfile)
         (AnalysisNwbfile - child_tables).delete_quick()
+
         # a separate external files clean up required - this is to be done
         # during times when no other transactions are in progress.
         AnalysisNwbfile.cleanup(True)
 
         # also check to see whether there are directories in the spikesorting folder with this
 
+
+@schema
+class NwbfileKachery(dj.Computed):
+    definition = """
+    -> Nwbfile
+    ---
+    nwb_file_uri: varchar(200)  # the uri the NWB file for kachery
+    """
+
+    def make(self, key):
+        print(f'Linking {key["nwb_file_name"]} and storing in kachery...')
+        key['nwb_file_uri'] = kc.link_file(Nwbfile().get_abs_path(key['nwb_file_name']))
+        self.insert1(key)
+
+
+@schema
+class AnalysisNwbfileKachery(dj.Computed):
+    definition = """
+    -> AnalysisNwbfile
+    ---
+    analysis_file_uri: varchar(200)  # the uri of the file
+    """
+
+    def make(self, key):
+        print(f'Linking {key["analysis_file_name"]} and storing in kachery...')
+        key['analysis_file_uri'] = kc.link_file(AnalysisNwbfile().get_abs_path(key['analysis_file_name']))
+        self.insert1(key)
