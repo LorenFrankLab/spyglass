@@ -366,9 +366,10 @@ class SpikeSortingRecording(dj.Computed):
                          {'nwb_file_name': key['nwb_file_name'],
                           'sort_interval_name': key['sort_interval_name']}
                          ).fetch1('sort_interval')
+        interval_list_name = (SpikeSortingRecordingSelection & key).fetch1("interval_list_name")
         valid_interval_times = (IntervalList &
                                 {'nwb_file_name': key['nwb_file_name'],
-                                 'interval_list_name': 'raw data valid times'}
+                                 'interval_list_name': interval_list_name}
                                 ).fetch1('valid_times')
         valid_sort_times = interval_list_intersect(
             sort_interval, valid_interval_times)
