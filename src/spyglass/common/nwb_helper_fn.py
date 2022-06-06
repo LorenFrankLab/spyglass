@@ -7,8 +7,6 @@ import numpy as np
 import pynwb
 import kachery_client as kc
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.share import NwbfileKachery, AnalysisNwbfileKachery
 
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
@@ -36,6 +34,9 @@ def get_nwb_file(nwb_file_path):
     if nwbfile is None:
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
+            # import necessary code here to avoid circular import
+            from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+            from spyglass.share import NwbfileKachery, AnalysisNwbfileKachery
             print(f'NWB file {nwb_file_path} does not exist locally; checking kachery')
             # look up the file name; try the AnalysisNwbfile table first, and then the Nwbfile table
             analysisfilekey = (AnalysisNwbfile & {'analysis_file_abs_path' : nwb_file_path}).fetch("KEY")
