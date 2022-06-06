@@ -17,49 +17,6 @@ global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 
-def get_nwb_file(nwb_file_path):
-    """Return an NWBFile object with the given file path in read mode. 
-       If the file is not found locally, this will check if it has been shared with kachery and if so, download it and open it.
-
-    Parameters
-    ----------
-    nwb_file_path : str
-        Path to the NWB file.
-
-    Returns
-    -------
-    nwbfile : pynwb.NWBFile
-        NWB file object for the given path opened in read mode.
-    """
-    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None)) 
-    uri = None
-    if nwbfile is None:
-        # check to see if the file exists
-        if not os.path.exists(nwb_file_path):
-            print(f'NWB file {nwb_file_path} does not exist locally; checking kachery')
-            # look up the file name; try the AnalysisNwbfile table first, and then the Nwbfile table
-            analysisfilekey = (AnalysisNwbfile & {'analysis_file_abs_path' : nwb_file_path}).fetch("KEY")
-            if analysisfilekey is not None:
-                uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysisfilekey['analysis_file_name']}).fetch('analysis_file_uri')
-            # if the file wasn't in the Analysis file table, check the Nwbfile table
-            else:
-                nwbfilekey = (Nwbfile & {'nwb_file_abs_path' : nwb_file_path}).fetch("KEY")
-                if nwbfilekey is not None:
-                    uri = (NwbfileKachery & {'nwb_file_name' : nwbfilekey['nwb_file_name']}).fetch('nwb_file_uri')
-            if uri is None:
-                warnings.WarningMessage('Requested file {nwb_file_path} not in NwbfileKachery or AnalysisNwbfileKachery table; cannot load remote file')
-                return None
-            # load the file and save it in the nwb_file_path location
-            kc.load_file(uri=uri, dest=nwb_file_path)
-        # now open the file
-        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r',
-                            load_namespaces=True)  # keep file open
-        nwbfile = io.read()
-        __open_nwb_files[nwb_file_path] = (io, nwbfile)
-                
-    return nwbfile
-
-
 def close_nwb_files():
     for io, _ in __open_nwb_files.values():
         io.close()

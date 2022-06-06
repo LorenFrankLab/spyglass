@@ -4,7 +4,7 @@ import inspect
 import datajoint as dj
 import numpy as np
 
-from .nwb_helper_fn import get_nwb_file
+from .common_nwbfile import get_nwb_file
 
 
 def dj_replace(original_table, new_values, key_column, replace_column):

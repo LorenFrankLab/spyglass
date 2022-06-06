@@ -5,10 +5,10 @@ import pynwb
 
 from .common_ephys import Raw
 from .common_interval import IntervalList  # noqa: F401
-from .common_nwbfile import Nwbfile
+from .common_nwbfile import Nwbfile, get_nwb_file
 from .common_session import Session  # noqa: F401
 from .dj_helper_fn import fetch_nwb
-from .nwb_helper_fn import get_data_interface, get_nwb_file
+from .nwb_helper_fn import get_data_interface
 
 schema = dj.schema('common_sensors')
 

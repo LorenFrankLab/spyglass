@@ -8,12 +8,12 @@ import pynwb
 from .common_device import Probe  # noqa: F401
 from .common_filter import FirFilter
 from .common_interval import IntervalList, interval_list_censor, interval_list_contains_ind, interval_list_intersect  # noqa: F401
-from .common_nwbfile import AnalysisNwbfile, Nwbfile
+from .common_nwbfile import AnalysisNwbfile, Nwbfile, get_nwb_file
 from .common_region import BrainRegion  # noqa: F401
 from .common_session import Session  # noqa: F401
 from .dj_helper_fn import fetch_nwb  # dj_replace
 from .nwb_helper_fn import (estimate_sampling_rate, get_data_interface,
-                            get_electrode_indices, get_nwb_file,
+                            get_electrode_indices,
                             get_valid_intervals, invalid_electrode_index)
 
 schema = dj.schema('common_ephys')
