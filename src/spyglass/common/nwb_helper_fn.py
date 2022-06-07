@@ -30,7 +30,8 @@ def get_nwb_file(nwb_file_path):
         NWB file object for the given path opened in read mode.
     """
     _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None)) 
-    uri = None
+    nwb_uri = None
+    nwb_raw_uri = None
     if nwbfile is None:
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
@@ -41,17 +42,24 @@ def get_nwb_file(nwb_file_path):
             # look up the file name; try the AnalysisNwbfile table first, and then the Nwbfile table
             analysisfilekey = (AnalysisNwbfile & {'analysis_file_abs_path' : nwb_file_path}).fetch("KEY")
             if analysisfilekey is not None:
-                uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysisfilekey['analysis_file_name']}).fetch('analysis_file_uri')
+                nwb_uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysisfilekey['analysis_file_name']}).fetch('analysis_file_uri')
             # if the file wasn't in the Analysis file table, check the Nwbfile table
             else:
                 nwbfilekey = (Nwbfile & {'nwb_file_abs_path' : nwb_file_path}).fetch("KEY")
                 if nwbfilekey is not None:
-                    uri = (NwbfileKachery & {'nwb_file_name' : nwbfilekey['nwb_file_name']}).fetch('nwb_file_uri')
-            if uri is None:
+                    nwb_uri = (NwbfileKachery & {'nwb_file_name' : nwbfilekey['nwb_file_name']}).fetch('nwb_file_uri')
+                    nwb_raw_uri = (NwbfileKachery & {'nwb_file_name' : nwbfilekey['nwb_file_name']}).fetch('nwb_raw_file_uri')
+                    raw_nwb_file_path = os.path.splitext(nwb_file_path)[0][:-1] + '.nwb'
+
+            if nwb_uri is None:
                 warnings.WarningMessage('Requested file {nwb_file_path} not in NwbfileKachery or AnalysisNwbfileKachery table; cannot load remote file')
                 return None
             # load the file and save it in the nwb_file_path location
-            kc.load_file(uri=uri, dest=nwb_file_path)
+            kc.load_file(uri=nwb_uri, dest=nwb_file_path)
+            if nwb_raw_uri is not None:
+                # also get the raw file
+                kc.load_file(uri=nwb_raw_uri, dest=raw_nwb_file_path)
+
         # now open the file
         io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r',
                             load_namespaces=True)  # keep file open
