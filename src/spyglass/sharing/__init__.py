@@ -1,1 +1,2 @@
-from .sharing_kachery import KacheryChannel, NwbfileKachery, AnalysisNwbfileKachery
+from .sharing_kachery import KacheryChannel, NwbfileKacherySelection, \
+                             NwbfileKachery, AnalysisNwbfileKacherySelection, AnalysisNwbfileKachery

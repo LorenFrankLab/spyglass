@@ -116,7 +116,7 @@ class NwbfileKachery(dj.Computed):
         KacheryChannel.set_channel(current_channel)
         
 @schema
-class AnalysisfileKacherySelection(dj.Manual):
+class AnalysisNwbfileKacherySelection(dj.Manual):
     definition="""
     -> KacheryChannel
     -> AnalysisNwbfile
