@@ -37,22 +37,24 @@ def get_nwb_file(nwb_file_path):
         if not os.path.exists(nwb_file_path):
             # import necessary code here to avoid circular import
             from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-            from spyglass.share import NwbfileKachery, AnalysisNwbfileKachery
+            from spyglass.sharing import NwbfileKachery, AnalysisNwbfileKachery
             print(f'NWB file {nwb_file_path} does not exist locally; checking kachery')
             # look up the file name; try the AnalysisNwbfile table first, and then the Nwbfile table
             analysisfilekey = (AnalysisNwbfile & {'analysis_file_abs_path' : nwb_file_path}).fetch("KEY")
-            if analysisfilekey is not None:
+            if len(analysisfilekey) != 0:
                 nwb_uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysisfilekey['analysis_file_name']}).fetch('analysis_file_uri')
             # if the file wasn't in the Analysis file table, check the Nwbfile table
             else:
                 nwbfilekey = (Nwbfile & {'nwb_file_abs_path' : nwb_file_path}).fetch("KEY")
-                if nwbfilekey is not None:
+                if len(nwbfilekey) != 0:
                     nwb_uri = (NwbfileKachery & {'nwb_file_name' : nwbfilekey['nwb_file_name']}).fetch('nwb_file_uri')
                     nwb_raw_uri = (NwbfileKachery & {'nwb_file_name' : nwbfilekey['nwb_file_name']}).fetch('nwb_raw_file_uri')
+                    # get the file name by removing the '_' befoer the extension. 
+                    # TODO: write a short function to return the name of the original NWB file in case someone changes this
                     raw_nwb_file_path = os.path.splitext(nwb_file_path)[0][:-1] + '.nwb'
-
+                    print(f'Downloading raw data from {nwb_file_path} and {raw_nwb_file_path} with kachery; this may take a while....')
             if nwb_uri is None:
-                warnings.WarningMessage('Requested file {nwb_file_path} not in NwbfileKachery or AnalysisNwbfileKachery table; cannot load remote file')
+                Warning('Requested file {nwb_file_path} not in NwbfileKachery or AnalysisNwbfileKachery table; cannot load remote file')
                 return None
             # load the file and save it in the nwb_file_path location
             kc.load_file(uri=nwb_uri, dest=nwb_file_path)
