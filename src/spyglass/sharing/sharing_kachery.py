@@ -25,8 +25,6 @@ class KacheryChannel(dj.Manual):
     definition = """
     channel_name: varchar(200) # the name of the channel
     ---
-    host:   varchar(200)    # the host name for the computer running the daemon for this channel
-    port:   smallint unsigned  # the port number for the daemon on the host
     description: varchar(200) # description of this channel
     """
     def get_channel(self):
@@ -60,12 +58,16 @@ class KacheryChannel(dj.Manual):
         
         returns True if successful, False otherwise
         """
-        kachery_host, kachery_port = (KacheryChannel & {'channel_name' : key['channel_name']}).fetch1('host', 'port')
-        if kachery_host is not None:
-            os.environ["KACHERY_DAEMON_HOST"] = kachery_host
-            os.environ["KACHERY_DAEMON_PORT"] = kachery_port
+        # get the host and port from the environment variables.
+        host_env_var = "KACHERY_" + str(key["channel_name"]).upper() + "_HOST"
+        port_env_var = "KACHERY_" + str(key["channel_name"]).upper() + "_PORT"
+        try:
+            os.environ["KACHERY_DAEMON_HOST"] = os.environ[host_env_var]
+            os.environ["KACHERY_DAEMON_PORT"] = os.environ[port_env_var]
             return True
-        return False
+        except:
+            print(f'Error: environment variable {host_env_var} and/or {port_env_var} not set')
+            return False
 
     def channel_valid(self, key): 
         """Returns True if the specified channel is valid on this machine
@@ -81,10 +83,16 @@ class KacheryChannel(dj.Manual):
     
 
 @schema
-class NwbfileKachery(dj.Computed):
-    definition = """
+class NwbfileKacherySelection(dj.Manual):
+    definition="""
     -> KacheryChannel
     -> Nwbfile
+    """
+
+@schema
+class NwbfileKachery(dj.Computed):
+    definition = """
+    -> NwbfileKacherySelection
     ---
     nwb_file_uri: varchar(200)  # the uri the underscore NWB file for kachery
     nwb_raw_file_uri: varchar(200) # the uri of the original NWB file for kachery
@@ -107,14 +115,28 @@ class NwbfileKachery(dj.Computed):
         # reset the environment variables if they were set
         KacheryChannel.set_channel(current_channel)
         
+@schema
+class AnalysisfileKacherySelection(dj.Manual):
+    definition="""
+    -> KacheryChannel
+    -> AnalysisNwbfile
+    """
 
 @schema
 class AnalysisNwbfileKachery(dj.Computed):
     definition = """
-    -> AnalysisNwbfile
+    -> AnalysisNwbfileKacherySelection
     ---
     analysis_file_uri: varchar(200)  # the uri of the file
     """
+
+    class LinkedFiles(dj.Part):
+        definition = """
+        -> AnalysisNwbfileKachery
+        linked_file_name: varchar(200) # the name of the linked data file
+        ---
+        linked_file_uri: varchar(200) # the uri for the linked file
+        """
     def make(self, key):
         # set up to use the selected kachery channel 
         current_channel = KacheryChannel.get_channel()
@@ -123,6 +145,8 @@ class AnalysisNwbfileKachery(dj.Computed):
         print(f'Linking {key["analysis_file_name"]} and storing in kachery...')
         key['analysis_file_uri'] = kc.link_file(AnalysisNwbfile().get_abs_path(key['analysis_file_name']))
         self.insert1(key)
+        # TODO Detect and insert linked files
+
         # reset the environment variables 
         KacheryChannel.set_channel(current_channel)
         
