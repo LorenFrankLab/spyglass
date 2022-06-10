@@ -359,12 +359,13 @@ class MetricParameters(dj.Manual):
                              'n_neighbors': 5,
                              'n_components': 7,
                              'radius_um': 100,
-                             'seed': 0}
+                             'seed': 0},
+        'peak_channel' : {'peak_sign' : 'neg'}
     }
     # Example of peak_offset parameters 'peak_offset': {'peak_sign': 'neg'}
     available_metrics = [
-        'snr', 'isi_violation',
-        'nn_isolation', 'nn_noise_overlap', 'peak_offset'
+        'snr', 'isi_violation', 'nn_isolation',
+        'nn_noise_overlap', 'peak_offset', 'peak_channel'
         ]
 
     def get_metric_default_params(self, metric: str):
@@ -378,10 +379,11 @@ class MetricParameters(dj.Manual):
     def get_available_metrics(self):
         for metric in _metric_name_to_func:
             if metric in self.available_metrics:
+                metric_doc = _metric_name_to_func[
+                    metric].__doc__.split("\n")[0]
                 metric_string = ("{metric_name} : {metric_doc}").format(
-                metric_name=metric, 
-                metric_doc=_metric_name_to_func[
-                    metric].__doc__.split("\n")[0])
+                metric_name=metric,
+                metric_doc=metric_doc)
                 print(metric_string+'\n')
     
     # TODO
@@ -411,6 +413,11 @@ class MetricSelection(dj.Manual):
             if waveform_params['whiten']:
                 raise Exception("metric 'peak_offset' needs to be "
                                 "calculated on unwhitened waveforms")
+        if 'peak_channel' in metric_params:
+            if waveform_params['whiten']:
+                Warning("Calculating 'peak_channel' metric on "
+                            "whitened waveforms may result in slight "
+                            "discrepancies")
         super().insert1(key, **kwargs)
 
 
@@ -452,19 +459,20 @@ class QualityMetrics(dj.Computed):
         return qm_name
 
     def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
+        peak_sign_metrics = ['snr', 'peak_offset', 'peak_channel']
         metric_func = _metric_name_to_func[metric_name]
         # TODO clean up code below
         if metric_name == 'isi_violation':
             metric = metric_func(waveform_extractor, **metric_params)
-        elif (metric_name == 'snr' or
-              metric_name == 'peak_offset'):
+        elif metric_name in peak_sign_metrics:
             if 'peak_sign' in metric_params:
                 metric = metric_func(waveform_extractor,
                                      peak_sign=metric_params.pop('peak_sign'),
                                      **metric_params)
             else:
                 raise Exception(
-                    'snr and peak_offset metrics require peak_sign to be defined in the metric parameters')
+                    f'{peak_sign_metrics} metrics require peak_sign',
+                    f'to be defined in the metric parameters')
         else:
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():
@@ -512,13 +520,24 @@ def _get_peak_offset(waveform_extractor: si.WaveformExtractor, peak_sign: str, *
     peak_offset = {key: int(val) for key, val in peak_offset_inds.items()}
     return peak_offset
 
+def _get_peak_channel(waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params):
+    """Computes the electrode_id of the channel with the extremum peak for each unit.
+    """
+    if 'peak_sign' in metric_params:
+        del metric_params['peak_sign']
+    peak_channel_dict = st.get_template_extremum_channel(
+        waveform_extractor=waveform_extractor,
+        peak_sign=peak_sign, **metric_params)
+    peak_channel = {key : int(val) for key, val in peak_channel_dict.items()}
+    return peak_channel
 
 _metric_name_to_func = {
     "snr": st.qualitymetrics.compute_snrs,
     "isi_violation": _compute_isi_violation_fractions,
     'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
     'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap,
-    'peak_offset': _get_peak_offset
+    'peak_offset': _get_peak_offset,
+    'peak_channel': _get_peak_channel
 }
 
 
@@ -745,7 +764,7 @@ class CuratedSpikeSorting(dj.Computed):
     class Unit(dj.Part):
         definition = """
         # Table for holding sorted units
-        -> master
+        -> CuratedSpikeSorting
         unit_id: int   # ID for each unit
         ---
         label='': varchar(200)   # optional set of labels for each unit
@@ -755,6 +774,7 @@ class CuratedSpikeSorting(dj.Computed):
         snr=0: float            # SNR for each unit
         firing_rate=-1: float   # firing rate
         num_spikes=-1: int   # total number of spikes
+        peak_channel=null: int # channel of maximum amplitude for each unit
         """
 
     def make(self, key):
@@ -788,7 +808,8 @@ class CuratedSpikeSorting(dj.Computed):
         final_metrics = {}
         for metric in metrics:
             final_metrics[metric] = {int(unit_id): metrics[metric][unit_id]
-                                     for unit_id in metrics[metric] if int(unit_id) in accepted_units}
+                                     for unit_id in metrics[metric]
+                                     if int(unit_id) in accepted_units}
 
         print(f'Found {len(accepted_units)} accepted units')
 
@@ -808,7 +829,8 @@ class CuratedSpikeSorting(dj.Computed):
         (key['analysis_file_name'],
          key['units_object_id']) = Curation().save_sorting_nwb(
             key, sorting, timestamps, sort_interval_list_name,
-            sort_interval, metrics=final_metrics, unit_ids=accepted_units)
+            sort_interval, metrics=final_metrics,
+            unit_ids=accepted_units, labels=labels)
         self.insert1(key)
 
         # now add the units
