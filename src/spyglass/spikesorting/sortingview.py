@@ -195,7 +195,7 @@ class SortingviewWorkspace(dj.Computed):
             metrics = {}
         else:
             # get the metrics from the parent curation
-            metrics = (Curation & key).fetch1('metrics')
+            metrics = (Curation & key).fetch1('quality_metrics')
 
         # insert this curation into the  Table
         return Curation.insert_curation(
