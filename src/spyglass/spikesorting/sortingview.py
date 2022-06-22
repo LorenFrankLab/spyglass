@@ -26,7 +26,6 @@ class SortingviewWorkspace(dj.Computed):
     sortingview_recording_id: varchar(30)
     sortingview_sorting_id: varchar(30)
     channel = NULL : varchar(80)        # the name of kachery channel for data sharing (for kachery daemon, deprecated)
-    project = 'default' : varchar(20)   # the name of kachery cloud project
     """
 
     def make(self, key: dict):
