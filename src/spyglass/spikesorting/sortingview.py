@@ -30,6 +30,13 @@ class SortingviewWorkspace(dj.Computed):
     """
 
     def make(self, key: dict):
+        """Create a Sortingview workspace
+
+        Parameters
+        ----------
+        key : dict
+            primary key of an entry from SortingviewWorkspaceSelection table
+        """
         
         # fetch
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
@@ -71,6 +78,7 @@ class SortingviewWorkspace(dj.Computed):
         Parameters
         ----------
         key : dict
+            primary key of an entry from SortingviewWorkspace table
         metrics : dict
             Quality metrics.
             Key: name of quality metric
@@ -87,27 +95,29 @@ class SortingviewWorkspace(dj.Computed):
         # do
         _add_metrics_to_sorting_in_workspace(workspace, metrics, sortingview_sorting_id)
     
-    def set_workspace_permission(key, team_members):
-        """Sets permission curate specified sorting on sortingview workspace based
-        on google ID
+    def set_workspace_permission(self, key, curators):
+        """Gives curation permission to lab members not in the team associated
+        with the recording (team members are given permission by default).
 
         Parameters
         ----------
-        workspace_uri : sv.Workspace
-        team_members : List[str]
-            list of team members to be given permission to edit the workspace
+        key : dict
+            primary key of an entry from SortingviewWorkspace table
+        curators : List[str]
+            names of lab members to be given permission to curate
         sortingview_sorting_id : str
         """
-        workspace = sv.load_workspace(workspace_uri=key['workspace_uri'])
+        workspace_uri = (self & key).fetch1('workspace_uri')
+        workspace = sv.load_workspace(workspace_uri)
         if sortingview_sorting_id is None:
             sortingview_sorting_id = workspace.sorting_ids[0]
         google_user_ids = []
-        for team_member in team_members:
+        for curator in curators:
             google_user_id = (LabMember.LabMemberInfo & {
-                            'lab_member_name': team_member}).fetch('google_user_name')
+                            'lab_member_name': curator}).fetch('google_user_name')
             if len(google_user_id) != 1:
-                print(f'Google user ID for {team_member} does not exist or more than one ID detected;\
-                        permission not given to {team_member}, skipping...')
+                print(f'Google user ID for {curator} does not exist or more than one ID detected;\
+                        permission not given to {curator}, skipping...')
                 continue
             google_user_ids.append(google_user_id[0])
         workspace = _set_workspace_permission(workspace,
@@ -121,19 +131,19 @@ class SortingviewWorkspace(dj.Computed):
         Parameters
         ----------
         key : dict
-            defines a workspace
+            primary key of an entry from SortingviewWorkspace table
         """
         workspace_uri = (self & key).fetch1('workspace_uri')
         workspace = sv.load_workspace(workspace_uri)
         workspace.set_snippet_len(snippet_len)
-
-    def url(self, key, sortingview_sorting_id: str = None):
+    
+    def url(self, key: dict, sortingview_sorting_id: str = None):
         """Generate a URL for visualizing the sorting on the web.
 
         Parameters
         ----------
         key : dict
-            defines a workspace
+            An entry from SortingviewWorkspace table
         sortingview_sorting_id : str, optional
             sortingview sorting ID to visualize; if None then chooses the first one
 
@@ -141,7 +151,6 @@ class SortingviewWorkspace(dj.Computed):
         -------
         url : str
         """
-
         workspace_uri = (self & key).fetch1('workspace_uri')
         workspace = sv.load_workspace(workspace_uri)
         recording_id = workspace.recording_ids[0]
@@ -153,9 +162,8 @@ class SortingviewWorkspace(dj.Computed):
                                          include_curation=True)
         
         return url
-
-    @staticmethod
-    def insert_manual_curation(key: dict, description='manually curated'):
+    
+    def insert_manual_curation(self, key: dict, description='manually curated'):
         """Based on information in key for an SortingviewWorkspace, loads the
         curated sorting from sortingview, saves it (with labels and the
         optional description) and inserts it to CuratedSorting
@@ -166,13 +174,14 @@ class SortingviewWorkspace(dj.Computed):
         ----------
         key : dict
             primary key of AutomaticCuration
-        description: str
-            optional description of curated sort
+        description: str, optional
+            description of curated sorting
         """
-        print(key)
-        workspace_uri = (SortingviewWorkspace & key).fetch1('workspace_uri')
-        workspace = sv.load_workspace(workspace_uri=workspace_uri)
-
+        workspace_uri = (self & key).fetch('workspace_uri')
+        if workspace_uri.size == 0:
+            raise ValueError('First create a sortingview workspace for this entry.')
+        workspace = sv.load_workspace(workspace_uri=workspace_uri[0])
+            
         sortingview_sorting_id = (SortingviewWorkspace & key).fetch1(
             'sortingview_sorting_id')
 
@@ -196,4 +205,3 @@ class SortingviewWorkspace(dj.Computed):
             merge_groups=labels['mergeGroups'],
             metrics=metrics,
             description=description)
-
