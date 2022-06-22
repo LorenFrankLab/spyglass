@@ -1,24 +1,21 @@
-from pathlib import Path
-
 import datajoint as dj
-import numpy as np
 import sortingview as sv
-import spikeinterface as si
 
-from ..common.common_lab import LabTeam
-from .sortingview_helper_fn import set_workspace_permission
+from ..common.common_lab import LabTeam, LabMember
+from .sortingview_helper_fn import (_add_metrics_to_sorting_in_workspace,
+                                    _create_spikesortingview_workspace,
+                                    _set_workspace_permission)
 from .spikesorting_curation import Curation
 from .spikesorting_recording import SpikeSortingRecording
+from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema('spikesorting_sortingview')
-
 
 @schema
 class SortingviewWorkspaceSelection(dj.Manual):
     definition = """
     -> Curation
     """
-
 
 @schema
 class SortingviewWorkspace(dj.Computed):
@@ -28,60 +25,41 @@ class SortingviewWorkspace(dj.Computed):
     workspace_uri: varchar(1000)
     sortingview_recording_id: varchar(30)
     sortingview_sorting_id: varchar(30)
-    channel = 'franklab2' : varchar(80) # the name of the kachery channel for data sharing
+    channel = NULL : varchar(80)        # the name of kachery channel for data sharing (for kachery daemon, deprecated)
+    project = 'default' : varchar(20)   # the name of kachery cloud project
     """
 
     def make(self, key: dict):
-        # Load recording, wrap it as old spikeextractors recording extractor,
-        # then save as h5 (sortingview requires this format)
-        # import Curation here to avoid circular import
-        recording = Curation.get_recording(key)
-        recording = si.concatenate_recordings([recording])
-        old_recording = si.create_extractor_from_new_recording(recording)
-
+        
+        # fetch
         recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
-
-        h5_recording = sv.LabboxEphysRecordingExtractor.store_recording_link_h5(
-            old_recording,
-            str(Path(recording_path) / 'recording.h5'),
-            dtype='int16')
-
-        workspace_name = SpikeSortingRecording._get_recording_name(key)
-        workspace = sv.create_workspace(label=workspace_name)
-        key['workspace_uri'] = workspace.uri
-        key['sortingview_recording_id'] = workspace.add_recording(
-            recording=h5_recording,
-            label=workspace_name)
-        sorting = Curation.get_curated_sorting(key)
-        sorting = si.create_extractor_from_new_sorting(sorting)
-        h5_sorting = sv.LabboxEphysSortingExtractor.store_sorting_link_h5(
-            sorting, str(Path(recording_path) / 'sorting.h5'))
-
-        key['sortingview_sorting_id'] = workspace.add_sorting(
-            recording_id=workspace.recording_ids[0],
-            sorting=h5_sorting, label=key['curation_id'])
-        self.insert1(key)
-
-        # add metrics to the sorting if they exist
+        sorting_path = (SpikeSorting & key).fetch1('sorting_path')
+        merge_groups = (Curation & key).fetch1('merge_groups')
+        workspace_label = SpikeSortingRecording._get_recording_name(key)
+        recording_label = SpikeSortingRecording._get_recording_name(key)
+        sorting_label = SpikeSorting._get_recording_name(key)
         metrics = (Curation & key).fetch1('quality_metrics')
-        self.add_metrics_to_sorting(
-            key, metrics, key['sortingview_sorting_id'])
-
-        labels = (Curation & key).fetch1('curation_labels')
-        print(labels)
-        for unit_id in labels:
-            for label in labels[unit_id]:
-                workspace.sorting_curation_add_label(
-                    sorting_id=key['sortingview_sorting_id'],
-                    label=label,
-                    unit_ids=[int(unit_id)])
-
-        # set the permissions
+        curation_labels = (Curation & key).fetch1('curation_labels')
         team_name = (SpikeSortingRecording & key).fetch1()['team_name']
         team_members = (LabTeam.LabTeamMember & {
                         'team_name': team_name}).fetch('lab_member_name')
-        set_workspace_permission(
-            workspace.uri, team_members, key['sortingview_sorting_id'])
+        google_user_ids = []
+        for team_member in team_members:
+            google_user_id = (LabMember.LabMemberInfo & {
+                            'lab_member_name': team_member}).fetch('google_user_name')
+            if len(google_user_id) != 1:
+                print(f'Google user ID for {team_member} does not exist or more than one ID detected;\
+                        permission not given to {team_member}, skipping...')
+                continue
+            google_user_ids.append(google_user_id[0])
+
+        # do
+        key = _create_spikesortingview_workspace(key, recording_path, sorting_path, merge_groups,
+                                                 workspace_label, recording_label, sorting_label,
+                                                 metrics, curation_labels, google_user_ids)
+        
+        # insert
+        self.insert1(key)
 
     def remove_sorting_from_workspace(self, key):
         return NotImplementedError
@@ -102,28 +80,40 @@ class SortingviewWorkspace(dj.Computed):
             if not specified, just uses the first sorting ID of the workspace
         """
 
-        # check that the unit ids are str
-        for metric_name in metrics:
-            unit_ids = metrics[metric_name].keys()
-            assert np.all([isinstance(unit_id, int)] for unit_id in unit_ids)
-
-        # the metrics must be in this form to be added to sortingview
-        external_metrics = [
-            {'name': metric_name,
-             'label': metric_name,
-             'tooltip': metric_name,
-             'data': metric} for metric_name, metric in metrics.items()]
-
+        # fetch
         workspace_uri = (self & key).fetch1('workspace_uri')
         workspace = sv.load_workspace(workspace_uri)
-        if sortingview_sorting_id is None:
-            print('sortingview sorting ID not specified, using the first'
-                  'sorting in the workspace...')
-            sortingview_sorting_id = workspace.sorting_ids[0]
+        
+        # do
+        _add_metrics_to_sorting_in_workspace(workspace, metrics, sortingview_sorting_id)
+    
+    def set_workspace_permission(key, team_members):
+        """Sets permission curate specified sorting on sortingview workspace based
+        on google ID
 
-        workspace.set_unit_metrics_for_sorting(
-            sorting_id=sortingview_sorting_id,
-            metrics=external_metrics)
+        Parameters
+        ----------
+        workspace_uri : sv.Workspace
+        team_members : List[str]
+            list of team members to be given permission to edit the workspace
+        sortingview_sorting_id : str
+        """
+        workspace = sv.load_workspace(workspace_uri=key['workspace_uri'])
+        if sortingview_sorting_id is None:
+            sortingview_sorting_id = workspace.sorting_ids[0]
+        google_user_ids = []
+        for team_member in team_members:
+            google_user_id = (LabMember.LabMemberInfo & {
+                            'lab_member_name': team_member}).fetch('google_user_name')
+            if len(google_user_id) != 1:
+                print(f'Google user ID for {team_member} does not exist or more than one ID detected;\
+                        permission not given to {team_member}, skipping...')
+                continue
+            google_user_ids.append(google_user_id[0])
+        workspace = _set_workspace_permission(workspace,
+                                              google_user_ids,
+                                              sortingview_sorting_id)
+        return workspace
 
     def set_snippet_len(self, key: dict, snippet_len: int):
         """Sets the snippet length of a workspace specified by the key
@@ -138,7 +128,7 @@ class SortingviewWorkspace(dj.Computed):
         workspace.set_snippet_len(snippet_len)
 
     def url(self, key, sortingview_sorting_id: str = None):
-        """Generate a URL for visualizing the sorting on the browser
+        """Generate a URL for visualizing the sorting on the web.
 
         Parameters
         ----------
@@ -161,6 +151,7 @@ class SortingviewWorkspace(dj.Computed):
                                          sorting_id=sortingview_sorting_id,
                                          label=workspace.label,
                                          include_curation=True)
+        
         return url
 
     @staticmethod
@@ -205,3 +196,4 @@ class SortingviewWorkspace(dj.Computed):
             merge_groups=labels['mergeGroups'],
             metrics=metrics,
             description=description)
+
