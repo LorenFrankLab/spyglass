@@ -43,7 +43,7 @@ class SortingviewWorkspace(dj.Computed):
         merge_groups = (Curation & key).fetch1('merge_groups')
         workspace_label = SpikeSortingRecording._get_recording_name(key)
         recording_label = SpikeSortingRecording._get_recording_name(key)
-        sorting_label = SpikeSorting._get_recording_name(key)
+        sorting_label = SpikeSorting._get_sorting_name(key)
         metrics = (Curation & key).fetch1('quality_metrics')
         curation_labels = (Curation & key).fetch1('curation_labels')
         team_name = (SpikeSortingRecording & key).fetch1()['team_name']
