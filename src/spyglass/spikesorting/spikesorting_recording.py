@@ -13,7 +13,7 @@ import probeinterface as pi
 from ..common.common_device import Probe
 from ..common.common_ephys import Electrode, ElectrodeGroup
 from ..common.common_interval import (IntervalList, interval_list_intersect,
-                                      union_adjacent_index)
+                                      union_adjacent_index, intervals_by_length)
 from ..common.common_lab import LabTeam
 from ..common.common_nwbfile import Nwbfile
 from ..common.common_session import Session
@@ -373,6 +373,12 @@ class SpikeSortingRecording(dj.Computed):
                                 ).fetch1('valid_times')
         valid_sort_times = interval_list_intersect(
             sort_interval, valid_interval_times)
+        # Exclude intervals shorter than specified length
+        params = (SpikeSortingPreprocessingParameters &
+                  key).fetch1('preproc_params')
+        if 'min_segment_length' in params:
+            valid_sort_times = intervals_by_length(valid_sort_times,
+                                                   min_length=params['min_segment_length'])
         return valid_sort_times
 
     def _get_filtered_recording(self, key: dict):
