@@ -1,4 +1,4 @@
-name: spyglass
+name: spyglass-test
 channels:
   - conda-forge
   - defaults
@@ -23,7 +23,6 @@ dependencies:
   - tqdm
   - nb_conda
   - pip:
-    - h5py==2.10.*
     - mountainsort4
     - git+https://github.com/SpikeInterface/spikeinterface.git
     - pynwb>=2.0.0,<3
