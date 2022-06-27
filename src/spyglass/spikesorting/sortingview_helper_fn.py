@@ -70,14 +70,15 @@ def _add_metrics_to_sorting_in_workspace(workspace: sv.Workspace, metrics: Dict[
     
     return workspace
 
-def _create_spikesortingview_workspace(key: dict, recording_path: str, sorting_path: str, merge_groups,
+def _create_spikesortingview_workspace(recording_path: str, sorting_path: str, merge_groups: List[List[int]],
                                        workspace_label: str, recording_label: str, sorting_label: str,
                                        metrics: dict=None, google_user_ids: List=None, curation_labels: dict=None):
     
     workspace = sv.create_workspace(label=workspace_label)
     
     recording = si.load_extractor(recording_path)
-    recording = si.concatenate_recordings([recording])
+    if recording.get_num_segments() > 1:
+        recording = si.concatenate_recordings([recording])
     recording_id = workspace.add_recording(label=recording_label, recording=recording)
     
     sorting = si.load_extractor(sorting_path)
@@ -104,8 +105,4 @@ def _create_spikesortingview_workspace(key: dict, recording_path: str, sorting_p
                                      label=workspace_label, include_curation=True)
     print(f"figurl: {url}")
     
-    key['workspace_uri'] = workspace.uri
-    key['sortingview_recording_id'] = recording_id
-    key['sortingview_sorting_id'] = sorting_id
-    
-    return key
+    return workspace.uri, recording_id, sorting_id
