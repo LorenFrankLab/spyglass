@@ -23,6 +23,7 @@ dependencies:
   - tqdm
   - nb_conda
   - pip:
+    - h5py==2.10.*
     - mountainsort4
     - git+https://github.com/SpikeInterface/spikeinterface.git
     - pynwb>=2.0.0,<3
@@ -30,8 +31,6 @@ dependencies:
     - datajoint>=0.13.6
     - ghostipy
     - pymysql>=1.0.*
-    - cython==0.29.*
-    - h5py==2.10.*
     - sortingview>=0.8
     - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
     - pyyaml
