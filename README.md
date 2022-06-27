@@ -43,7 +43,7 @@ The following only applies if you are a member of Frank lab at UCSF. If you're n
      export SPYGLASS_SORTING_DIR="$SPYGLASS_BASE_DIR/sorting"
      export SPYGLASS_WAVEFORMS_DIR="$SPYGLASS_BASE_DIR/waveforms"
      export SPYGLASS_TEMP_DIR="$SPYGLASS_BASE_DIR/tmp"
-     export KACHERY_CLOUD_DIR="$SPYGLASS_BASE_DIR/.kachery_cloud"
+     export KACHERY_CLOUD_DIR="$SPYGLASS_BASE_DIR/.kachery-cloud"
      export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
      ```
 
