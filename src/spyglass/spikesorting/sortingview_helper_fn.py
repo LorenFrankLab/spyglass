@@ -49,8 +49,7 @@ def _add_metrics_to_sorting_in_workspace(workspace: sv.Workspace, metrics: Dict[
 
     # make sure the unit IDs are str
     for metric_name in metrics:
-        for unit_id in metrics[metric_name].keys():
-            metrics[metric_name][str(unit_id)] = metrics[metric_name].pop(unit_id)
+        metrics[metric_name] = {str(unit_id): metric_value for unit_id, metric_value in metrics[metric_name].items()}
 
     # the metrics must be in this form (List[Dict]) to be added to sortingview
     external_metrics = [
