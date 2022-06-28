@@ -60,9 +60,15 @@ class SortingviewWorkspace(dj.Computed):
             google_user_ids.append(google_user_id[0])
 
         # do
-        workspace_uri, recording_id, sorting_id = _create_spikesortingview_workspace(recording_path, sorting_path, merge_groups,
-                                                                                     workspace_label, recording_label, sorting_label,
-                                                                                     metrics, curation_labels, google_user_ids)
+        workspace_uri, recording_id, sorting_id = _create_spikesortingview_workspace(recording_path=recording_path,
+                                                                                     sorting_path=sorting_path,
+                                                                                     merge_groups=merge_groups,
+                                                                                     workspace_label=workspace_label,
+                                                                                     recording_label=recording_label,
+                                                                                     sorting_label=sorting_label,
+                                                                                     metrics=metrics,
+                                                                                     curation_labels=curation_labels,
+                                                                                     google_user_ids=google_user_ids)
         
         # insert
         key['workspace_uri'] = workspace_uri
