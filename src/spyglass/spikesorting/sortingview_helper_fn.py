@@ -101,7 +101,7 @@ def _create_spikesortingview_workspace(recording_path: str, sorting_path: str, m
                 unit_ids=[int(unit_id)])
 
     url = workspace.spikesortingview(recording_id=recording_id, sorting_id=sorting_id,
-                                     label=workspace_label, include_curation=True)
+                                     label=workspace_label)
     print(f"figurl: {url}")
     
     return workspace.uri, recording_id, sorting_id
