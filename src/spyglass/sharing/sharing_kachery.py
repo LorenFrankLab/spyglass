@@ -46,7 +46,7 @@ class NwbfileKachery(dj.Computed):
     class LinkedFile(dj.Part):
         definition = """
         -> NwbfileKachery
-        linked_file_name: varchar(200) # the name of the linked data file
+        linked_file_path: varchar(200) # the path to the linked data file
         ---
         linked_file_uri='': varchar(200) # the uri for the linked file
         linked_file_enc_uri='': varchar(200) # the encrypted uri for the linked file
@@ -68,13 +68,53 @@ class NwbfileKachery(dj.Computed):
         # we also need to insert the original NWB file. 
         # TODO: change this to automatically detect all linked files
         # For the moment, remove the last character ('_') and add the extension
-        orig_nwb_abs_path = os.path.splitext(nwb_abs_path)[0][:-1] + '.nwb'
-        uri = kcl.link_file(orig_nwb_abs_path)
+        key['linked_file_path'] = os.path.splitext(nwb_abs_path)[0][:-1] + '.nwb'
+        uri = kcl.link_file(key['linked_file_path'])
         if access_group != '':
             linked_key['linked_file_enc_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
         else:  
             linked_key['linked_file_uri'] = uri
         self.LinkedFile.insert1(key)
+    
+    @staticmethod
+    def download_file(nwb_file_path: str):
+        """Download the specified Nwbfile and associated linked files from kachery-cloud if possible
+
+        Parameters
+        ----------
+        nwb_file_path : str
+            The full path of the NWB file
+        
+        Returns
+        ----------
+        bool
+            True if the file was successfully downloaded, false otherwise
+        """
+        nwb_file_key = (Nwbfile & {'nwb_file_abs_path' : nwb_file_path}).fetch("KEY")
+        if len(nwb_file_key) != 0:
+            nwb_uri, nwb_enc_uri = (NwbfileKachery & {'nwb_file_name' : nwb_file_key['nwb_file_name']}).fetch1('nwb_file_uri', 'nwb_file_enc_uri')
+            uri = nwb_uri if nwb_uri != '' else nwb_enc_uri
+            if uri != '':
+                if not kcl.load_file(uri, dest=nwb_file_path):
+                    Warning('nwb file uri is in database but file cannot be downloaded')
+                    return False
+            else:
+                Warning(f'nwb file uri for {nwb_file_path} is not in database ')
+                return False
+
+            # now download the linked file(s)
+            linked_files = (NwbfileKachery.LinkedFile & {'nwb_file_name' : nwb_file_key['nwb_file_name']}).fetch(as_dict=True)
+            for file in linked_files:
+                uri = file['linked_file_uri'] if file['linked_file_uri'] != '' else file['linked_file_enc_uri']
+                if uri != '':
+                    if not kcl.load_file(uri, dest=file['linked_file_path']):
+                        Warning('nwb linked file uri is in database but file cannot be downloaded')
+                        return False
+                else:
+                    Warning(f'nwb file uri for {nwb_file_path} is not in database ')
+                    return False
+            return True
+        return False
         
 @schema
 class AnalysisNwbfileKacherySelection(dj.Manual):
@@ -117,3 +157,42 @@ class AnalysisNwbfileKachery(dj.Computed):
         # TODO: change this to automatically detect all linked files
         #self.LinkedFile.insert1(key)
 
+    @staticmethod
+    def download_file(analysis_file_path: str):
+        """Download the specified analysisfile and associated linked files from kachery-cloud if possible
+
+        Parameters
+        ----------
+        analysis_file_path : str
+            The full path of the analysis file
+        
+        Returns
+        ----------
+        bool
+            True if the file was successfully downloaded, false otherwise
+        """
+        analysis_file_key = (AnalysisNwbfile & {'analysis_file_abs_path' : analysis_file_path}).fetch("KEY")
+        if len(analysis_file_key) != 0:
+            analysis_uri, analysis_enc_uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysis_file_key['analysis_file_name']}).fetch1('analysis_file_uri', 'analysis_file_enc_uri')
+            uri = analysis_uri if analysis_uri != '' else analysis_enc_uri
+            if uri != '':
+                if not kcl.load_file(uri, dest=analysis_file_path):
+                    Warning('analysis file uri is in database but file cannot be downloaded')
+                    return False
+            else:
+                Warning(f'analysis file uri for {analysis_file_path} is not in database ')
+                return False
+
+            # now download the linked file(s)
+            linked_files = (AnalysisNwbfileKachery.LinkedFile & {'analysis_file_name' : analysis_file_key['analysis_file_name']}).fetch(as_dict=True)
+            for file in linked_files:
+                uri = file['linked_file_uri'] if file['linked_file_uri'] != '' else file['linked_file_enc_uri']
+                if uri != '':
+                    if not kcl.load_file(uri, dest=file['linked_file_path']):
+                        Warning('analysis linked file uri is in database but file cannot be downloaded')
+                        return False
+                else:
+                    Warning(f'analysis file uri for {analysis_file_path} is not in database ')
+                    return False
+            return True
+        return False
