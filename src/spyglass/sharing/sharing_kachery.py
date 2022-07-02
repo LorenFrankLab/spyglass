@@ -79,7 +79,7 @@ class NwbfileKachery(dj.Computed):
 @schema
 class AnalysisNwbfileKacherySelection(dj.Manual):
     definition="""
-    -> KacheryChannel
+    -> KacherySharingGroup
     -> AnalysisNwbfile
     """
 
