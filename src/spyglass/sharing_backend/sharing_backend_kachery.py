@@ -17,13 +17,13 @@ import kachery_cloud as kcl
 # for this backend.
 
 # uri is obtained from kcl.store_*_local(fname) on this computer
-def kachery_store_shared_file(*, uri_enc: str):
-    """decrypts uri_enc if possible and then stores the file locally
+def kachery_store_shared_file(*, uri: str):
+    """uploads the shared file when requested. Note that the uri must be sent by the task on the client
 
     Parameters
     ----------
-    uri_enc : encrypted uri
-        the encyrpyted uri for the file
+    uri : str
+        the uri for the file
 
     Raises
     ------
@@ -31,8 +31,6 @@ def kachery_store_shared_file(*, uri_enc: str):
         Raises Unable to load file if file can't be loaded
     """
     # impose restrictions on uri here
-    print(f'Decrypting requested uri {uri_enc}')
-    uri = kcl.decrypt_uri(uri_enc)
     if uri != '' and uri is not None:
         fname = kcl.load_file(uri, local_only=True) # requires kachery-cloud >= 0.1.19
         if fname is not None:

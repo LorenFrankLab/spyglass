@@ -13,6 +13,7 @@ import numpy as np
 import pynwb
 import spikeinterface as si
 import kachery_cloud as kcl
+from kachery_cloud.TaskBackend import TaskClient
 
 from hdmf.common import DynamicTable
 
@@ -32,7 +33,7 @@ def kachery_request_upload(uri: str):
     Returns when task completes     
     """
     project_id = os.environ['KACHERY_CLOUD_PROJECT'] if 'KACHERY_CLOUD_PROJECT' in os.environ else None
-    task_client = kcl.TaskClient(project_id=project_id)
+    task_client = TaskClient(project_id=project_id)
     print('Requesting upload task')
     task_client.request_task(
         task_type='action',
@@ -42,6 +43,7 @@ def kachery_request_upload(uri: str):
         }
     )
     return
+
 
 def kachery_download_file(uri: str, dest:str):
     """downloads the specified uri from using kachery cloud.
@@ -58,6 +60,13 @@ def kachery_download_file(uri: str, dest:str):
         str
             The path to the downloaded file or None if the download was unsucessful    
     """
+    fname = kcl.load_file(uri, dest=dest)
+    if fname is None:
+        kachery_request_upload(uri=uri)
+        # if we can't load the uri directly, it should be because it is not in the cloud, so we need to start a task to load it
+        if not kcl.load_file(uri, dest=dest):
+            print('Error: analysis file uri is in database but file cannot be downloaded')
+            return False
 
 
 @schema
