@@ -1,4 +1,5 @@
 import os
+from re import A
 import stat
 import pathlib
 import random
@@ -6,6 +7,7 @@ import string
 from warnings import WarningMessage
 
 import datajoint as dj
+from matplotlib import projections
 import pandas as pd
 import numpy as np
 import pynwb
@@ -18,6 +20,45 @@ from ..common.common_nwbfile import Nwbfile, AnalysisNwbfile
 
 
 schema = dj.schema('sharing_kachery')
+
+def kachery_request_upload(uri: str):
+    """generate a kachery task request to upload the specified uri to the cloud
+
+    Parameters
+    ----------
+    uri : str
+        the uri of the requested file
+
+    Returns when task completes     
+    """
+    project_id = os.environ['KACHERY_CLOUD_PROJECT'] if 'KACHERY_CLOUD_PROJECT' in os.environ else None
+    task_client = kcl.TaskClient(project_id=project_id)
+    print('Requesting upload task')
+    task_client.request_task(
+        task_type='action',
+        task_name='kachery_store_shared_file.1',
+        task_input={
+            'uri': uri,
+        }
+    )
+    return
+
+def kachery_download_file(uri: str, dest:str):
+    """downloads the specified uri from using kachery cloud.
+    First tries to download directly, and if that fails, starts an upload request for the file and then downloads it
+
+    Parameters
+    ----------
+    uri : str
+        the uri of the requested file
+    dest : str
+        the full path for the downloaded file
+
+    Returns 
+        str
+            The path to the downloaded file or None if the download was unsucessful    
+    """
+
 
 @schema
 class KacherySharingGroup(dj.Manual):
@@ -156,7 +197,7 @@ class AnalysisNwbfileKachery(dj.Computed):
 
     @staticmethod
     def download_file(analysis_file_name: str):
-        """Download the specified analysisfile and associated linked files from kachery-cloud if possible
+        """Download the specified analysis file and associated linked files from kachery-cloud if possible
 
         Parameters
         ----------
@@ -169,26 +210,26 @@ class AnalysisNwbfileKachery(dj.Computed):
             True if the file was successfully downloaded, false otherwise
         """
         analysis_uri, analysis_enc_uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysis_file_name}).fetch1('analysis_file_uri', 'analysis_file_enc_uri')
-        uri = analysis_uri if analysis_uri != '' else analysis_enc_uri
-        print(f'attempting to download uri {uri}')
-        
-        if uri != '':
-            if not kcl.load_file(uri, dest=AnalysisNwbfile.get_abs_path(analysis_file_name)):
-                print('Error: analysis file uri is in database but file cannot be downloaded')
-                return False
+        if analysis_enc_uri != '':
+            # decypt the URI
+            uri = kcl.decrypt_uri(analysis_enc_uri)
         else:
-            print(f'Warning: analysis file uri for {analysis_file_name} is not in database ')
-            return False
+            uri = analysis_uri 
+        print(f'attempting to download uri {uri}')
 
+        if not kachery_download_file(uri=uri, dest=AnalysisNwbfile.get_abs_path(analysis_file_name)):
+            raise Exception(f'{AnalysisNwbfile.get_abs_path(analysis_file_name)} cannot be downloaded')
+            return False
         # now download the linked file(s)
         linked_files = (AnalysisNwbfileKachery.LinkedFile & {'analysis_file_name' : analysis_file_name}).fetch(as_dict=True)
         for file in linked_files:
-            uri = file['linked_file_uri'] if file['linked_file_uri'] != '' else file['linked_file_enc_uri']
-            if uri != '':
-                if not kcl.load_file(uri, dest=file['linked_file_path']):
-                    print('Error: analysis linked file uri is in database but file cannot be downloaded')
-                    return False
+            if file['linked_file_enc_uri'] != '':
+                uri = kcl.decrypt_uri(file['linked_file_enc_uri'])
             else:
-                print(f'Warning: analysis file uri for {analysis_file_name} is not in database ')
+                uri = file['linked_file_uri']
+            print(f'attempting to download linked file uri {uri}')
+            if not kachery_download_file(uri=uri, dest=file['linked_file_path']):
+                raise Exception(f'{AnalysisNwbfile.get_abs_path(analysis_file_name)} cannot be downloaded')
                 return False
+            
         return True
