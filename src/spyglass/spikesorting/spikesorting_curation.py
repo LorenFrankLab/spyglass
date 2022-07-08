@@ -863,21 +863,22 @@ class CuratedSpikeSorting(dj.Computed):
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
-
+@schema
 class UnitInclusionParameters(dj.Manual):
     definition = """
     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
     ---
-    inclusion_param_dict: BLOB # the dictionary of inclusion / exclusion parameters
+    inclusion_param_dict: blob # the dictionary of inclusion / exclusion parameters
     """
-    # The inclusion parameter dict has the following form:
-    #param_dict['metric_name'] = (operator, value)
-    #    where operator is '<', '>', <=', '>=', or '==' and value is the comparison (float) value to be used ()
-    #param_dict['exclude_labels'] = [list of labels to exclude]
+    
 
     def insert1(self, key, **kwargs):
         # check to see that the dictionary fits the specifications
-        pdict = key['inclusion_param_dict']        
+        # The inclusion parameter dict has the following form:
+        #param_dict['metric_name'] = (operator, value)
+        #    where operator is '<', '>', <=', '>=', or '==' and value is the comparison (float) value to be used ()
+        #param_dict['exclude_labels'] = [list of labels to exclude]
+        pdict = key['inclusion_param_dict']
         metrics_list = CuratedSpikeSorting().metrics_fields()
 
         for k in pdict:
@@ -885,7 +886,7 @@ class UnitInclusionParameters(dj.Manual):
                 raise Exception(f'key {k} is not a valid element of the inclusion_param_dict')
             if k in metrics_list:
                 if pdict[k][0] not in _comparison_to_function:
-                    raise Exception(f'operator {pdict[k][0]} for metric {k} is not in the valid operators list: {_comparison_to_function}')
+                    raise Exception(f'operator {pdict[k][0]} for metric {k} is not in the valid operators list: {_comparison_to_function.keys()}')
             if k == 'exclude_labels':
                 for label in pdict[k]:
                     if label not in valid_labels:                
@@ -909,9 +910,9 @@ class UnitInclusionParameters(dj.Manual):
             key to select all of the included units
         """
         curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
-        inc_param_dict = (UnitInclusionParameters & unit_inclusion_param_name).fetch1('inclusion_param_dict')
-
+        inc_param_dict = (UnitInclusionParameters & {'unit_inclusion_param_name': unit_inclusion_param_name}).fetch1('inclusion_param_dict')
         units = (CuratedSpikeSorting().Unit() & curated_sortings).fetch()
+        units_key = (CuratedSpikeSorting().Unit() & curated_sortings).fetch('KEY')
         # get a list of the metrics in the units table
         metrics_list = CuratedSpikeSorting().metrics_fields()
         # get the list of labels to exclude if there is one
@@ -925,19 +926,18 @@ class UnitInclusionParameters(dj.Manual):
         keep = np.asarray([True] * len(units))
         for metric in inc_param_dict:
             # for all units, go through each metric, compare it to the value specified, and update the list to be kept
-            keep = np.logical_and(keep, _comparison_to_function[inc_param_dict[metric][0]](units[metric], inc_param_dict[metric][1]))
-        units = units[keep]
+            keep = np.logical_and(keep, _comparison_to_function[inc_param_dict[metric][0]](units[metric], inc_param_dict[metric][1]))       
+       
         #now exclude by label if it is specified
         if len(exclude_labels):
             included_units = []
-            for unit in units:
-                labels = unit['label'].split(',')
+            for unit_ind in np.ravel(np.argwhere(keep)):
+                labels = units[unit_ind]['label'].split(',')
                 exclude = False
                 for label in labels:
                     if label in exclude_labels:
-                        exclude = True
-                if not exclude:
-                    included_units.append(unit)
-            return included_units
-        else:
-            return units
+                        keep[unit_ind] = False
+                        break
+        # return units that passed all of the tests 
+        # TODO: Make this more efficient
+        return {i: units_key[i] for i in np.ravel(np.argwhere(keep))}
