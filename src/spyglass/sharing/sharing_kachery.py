@@ -97,7 +97,7 @@ class NwbfileKachery(dj.Computed):
     class LinkedFile(dj.Part):
         definition = """
         -> NwbfileKachery
-        linked_file_path: varchar(200) # the path to the linked data file
+        linked_file_rel_path: varchar(200) # the relative to the linked data file (assumes base path of SPYGLASS_BASE_DIR environment variable)
         ---
         linked_file_uri='': varchar(200) # the uri for the linked file
         linked_file_enc_uri='': varchar(200) # the encrypted uri for the linked file
@@ -115,17 +115,19 @@ class NwbfileKachery(dj.Computed):
         else:  
             key['nwb_file_uri'] = uri
         self.insert1(key)
-         
+
         # we also need to insert the original NWB file. 
         # TODO: change this to automatically detect all linked files
         # For the moment, remove the last character ('_') and add the extension
-        key['linked_file_path'] = os.path.splitext(nwb_abs_path)[0][:-1] + '.nwb'
-        uri = kcl.link_file(key['linked_file_path'])
+        linked_file_path = os.path.splitext(nwb_abs_path)[0][:-1] + '.nwb'
+        uri = kcl.link_file(linked_file_path)
         if access_group != '':
             linked_key['linked_file_enc_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
         else:  
             linked_key['linked_file_uri'] = uri
-        self.LinkedFile.insert1(key)
+        linked_key['linked_file_rel_path'] = str.replace(linked_file_path, os.environ['SPYGLASS_BASE_DIR'], '')
+        self.LinkedFile.insert1(linked_key)
+
     
     @staticmethod
     def download_file(nwb_file_name: str):
