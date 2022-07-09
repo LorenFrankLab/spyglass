@@ -116,7 +116,7 @@ class NwbfileKachery(dj.Computed):
         else:  
             key['nwb_file_uri'] = uri
         self.insert1(key)
-         
+
         # we also need to insert the original NWB file. 
         # TODO: change this to automatically detect all linked files
         # For the moment, remove the last character ('_') and add the extension
