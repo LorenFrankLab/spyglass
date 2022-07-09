@@ -92,8 +92,7 @@ class NwbfileKachery(dj.Computed):
     definition = """
     -> NwbfileKacherySelection
     ---
-    nwb_file_uri='': varchar(200)  # the uri for underscore NWB file for kachery. This is left empty for non-public files
-    nwb_file_enc_uri='': varchar(200) # the encyrpted uri for the underscore NWB file for kachery. This is left empty for public files 
+    nwb_file_uri='': varchar(200)  # the uri for underscore NWB file for kachery. This may be encrypted (for limited sharing) or not encrypted (for public files)
     """
     class LinkedFile(dj.Part):
         definition = """
@@ -101,7 +100,6 @@ class NwbfileKachery(dj.Computed):
         linked_file_rel_path: varchar(200) # the relative path to the linked data file (assumes base of SPYGLASS_BASE_DIR)
         ---
         linked_file_uri='': varchar(200) # the uri for the linked file
-        linked_file_enc_uri='': varchar(200) # the encrypted uri for the linked file
 
         """
     def make(self, key):
@@ -112,7 +110,7 @@ class NwbfileKachery(dj.Computed):
         uri = kcl.link_file(nwb_abs_path)
         access_group = (KacherySharingGroup & {'group_name' : key['group_name']}).fetch1('access_group_id')
         if access_group != '':
-            key['nwb_file_enc_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
+            key['nwb_file_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
         else:  
             key['nwb_file_uri'] = uri
         self.insert1(key)
@@ -123,7 +121,7 @@ class NwbfileKachery(dj.Computed):
         linked_file_path = os.path.splitext(nwb_abs_path)[0][:-1] + '.nwb'
         uri = kcl.link_file(linked_file_path)
         if access_group != '':
-            linked_key['linked_file_enc_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
+            linked_key['linked_file_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
         else:  
             linked_key['linked_file_uri'] = uri
         linked_key['linked_file_rel_path'] = str.replace(linked_file_path, os.environ['SPYGLASS_BASE_DIR'], '')
@@ -143,11 +141,11 @@ class NwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        nwb_uri, nwb_enc_uri = (NwbfileKachery & {'nwb_file_name' : nwb_file_name}).fetch('nwb_file_uri', 'nwb_file_enc_uri')
+        nwb_uri = (NwbfileKachery & {'nwb_file_name' : nwb_file_name}).fetch('nwb_file_uri')
         if len(nwb_uri) == 0:
             return False
-
-        if nwb_enc_uri[0] != '':
+        # check to see if the sha1 is encrypted
+        if nwb_uri[0].startswith('sha1-enc://'):
             # decypt the URI
             uri = kcl.decrypt_uri(nwb_enc_uri[0])
         else:
@@ -160,13 +158,14 @@ class NwbfileKachery(dj.Computed):
         # now download the linked file(s)
         linked_files = (NwbfileKachery.LinkedFile & {'nwb_file_name' : nwb_file_name}).fetch(as_dict=True)
         for file in linked_files:
-            if file['linked_file_enc_uri'] != '':
-                uri = kcl.decrypt_uri(file['linked_file_enc_uri'])
+            if file['linked_file_uri'].startswith('sha1-enc://'):
+                uri = kcl.decrypt_uri(file['linked_file_uri'])
             else:
                 uri = file['linked_file_uri']
             print(f'attempting to download linked file uri {uri}')
-            if not kachery_download_file(uri=uri, dest=file['linked_file_path']):
-                raise Exception(f'{Nwbfile.get_abs_path(nwb_file_name)} cannot be downloaded')
+            linked_file_path = os.environ['SPYGLASS_BASE_DIR']+file['linked_file_rel_path']
+            if not kachery_download_file(uri=uri, dest=linked_file_path):
+                raise Exception(f'Linked file {linked_file_path} cannot be downloaded')
                 return False
             
         return True
@@ -184,17 +183,15 @@ class AnalysisNwbfileKachery(dj.Computed):
     definition = """
     -> AnalysisNwbfileKacherySelection
     ---
-    analysis_file_uri='': varchar(200)  # the uri of the file (for public sharing)
-    analysis_file_enc_uri='': varchar(200) # the encrypted uri of the file (for private sharing)
+    analysis_file_uri='': varchar(200)  # the uri of the file; may be encyrpted (limited sharing) or not encrypted (public sharing)
     """
 
     class LinkedFile(dj.Part):
         definition = """
         -> AnalysisNwbfileKachery
-        linked_file_name: varchar(200) # the name of the linked data file
+        linked_file_rel_path: varchar(200) # the path for the linked file relative to the SPYGLASS_BASE_DIR environment variable
         ---
         linked_file_uri='': varchar(200) # the uri for the linked file
-        linked_file_enc_uri='': varchar(200) # the encrypted uri for the linked file
         """
 
     def make(self, key):
@@ -204,7 +201,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         uri = kcl.link_file(AnalysisNwbfile().get_abs_path(key['analysis_file_name']))
         access_group = (KacherySharingGroup & {'group_name' : key['group_name']}).fetch1('access_group_id')
         if access_group != '':
-            key['analysis_file_enc_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
+            key['analysis_file_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
         else:  
             key['analysis_file_uri'] = uri
         self.insert1(key)
@@ -227,13 +224,13 @@ class AnalysisNwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        analysis_uri, analysis_enc_uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysis_file_name}).fetch('analysis_file_uri', 'analysis_file_enc_uri')
+        analysis_uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysis_file_name}).fetch('analysis_file_uri')
         if len(analysis_uri) == 0:
             return False
     
-        if analysis_enc_uri[0] == '':
+        if analysis_uri[0].startswith('sha1-enc://'):
             # decypt the URI
-            uri = kcl.decrypt_uri(analysis_enc_uri[0])
+            uri = kcl.decrypt_uri(analysis_uri[0])
         else:
             uri = analysis_uri[0] 
         print(f'attempting to download uri {uri}')
@@ -244,13 +241,14 @@ class AnalysisNwbfileKachery(dj.Computed):
         # now download the linked file(s)
         linked_files = (AnalysisNwbfileKachery.LinkedFile & {'analysis_file_name' : analysis_file_name}).fetch(as_dict=True)
         for file in linked_files:
-            if file['linked_file_enc_uri'] != '':
-                uri = kcl.decrypt_uri(file['linked_file_enc_uri'])
+            if file['linked_file_uri'].startswith('sha1-enc://'):
+                uri = kcl.decrypt_uri(file['linked_file_uri'])
             else:
                 uri = file['linked_file_uri']
             print(f'attempting to download linked file uri {uri}')
-            if not kachery_download_file(uri=uri, dest=file['linked_file_path']):
-                raise Exception(f'{AnalysisNwbfile.get_abs_path(analysis_file_name)} cannot be downloaded')
+            linked_file_path = os.environ['SPYGLASS_BASE_DIR']+file['linked_file_rel_path']
+            if not kachery_download_file(uri=uri, dest=linked_file_path):
+                raise Exception(f'Linked file {linked_file_path} cannot be downloaded')
                 return False
             
         return True
