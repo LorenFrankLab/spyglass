@@ -33,16 +33,17 @@ def get_nwb_file(nwb_file_path):
     nwb_uri = None
     nwb_raw_uri = None
     if nwbfile is None:
+        print(nwb_file_path)
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
             print(f'NWB file {nwb_file_path} does not exist locally; checking kachery')
             # first try the analysis files
             from ..sharing.sharing_kachery import NwbfileKachery, AnalysisNwbfileKachery
-            if not AnalysisNwbfileKachery.download_file(nwb_file_path) and not NwbfileKachery.download_file(nwb_file_path):
+            # the download functions assume just the filename, so we need to get that from the path
+            if not AnalysisNwbfileKachery.download_file(os.path.basename(nwb_file_path)) \
+                      and not NwbfileKachery.download_file(os.path.basename(nwb_file_path)):
                 print(f'NWB file {nwb_file_path} is not available on kachery; aborting')
                 return None
-            else:
-                print("file downloaded")
         # now open the file
         io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r',
                             load_namespaces=True)  # keep file open

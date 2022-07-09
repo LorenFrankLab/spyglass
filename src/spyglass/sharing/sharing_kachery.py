@@ -1,5 +1,4 @@
 import os
-from re import A
 import stat
 import pathlib
 import random
@@ -62,11 +61,13 @@ def kachery_download_file(uri: str, dest:str):
     """
     fname = kcl.load_file(uri, dest=dest)
     if fname is None:
-        kachery_request_upload(uri=uri)
         # if we can't load the uri directly, it should be because it is not in the cloud, so we need to start a task to load it
+        kcl.request_file_experimental(uri=uri, project_id=os.environ['KACHERY_CLOUD_PROJECT'])
         if not kcl.load_file(uri, dest=dest):
             print('Error: analysis file uri is in database but file cannot be downloaded')
             return False
+    print('file requested')
+    return True
 
 
 @schema
@@ -128,40 +129,43 @@ class NwbfileKachery(dj.Computed):
     
     @staticmethod
     def download_file(nwb_file_name: str):
-        """Download the specified Nwbfile and associated linked files from kachery-cloud if possible
+        """Download the specified nwb file and associated linked files from kachery-cloud if possible
 
         Parameters
         ----------
         nwb_file_name : str
-            The name of the NWB file
+            The name of the nwb file
         
         Returns
         ----------
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        nwb_uri, nwb_enc_uri = (NwbfileKachery & {'nwb_file_name' : nwb_file_name}).fetch('nwb_file_uri', 'nwb_file_enc_uri')
-        uri = nwb_uri if nwb_uri != '' else nwb_enc_uri
-        if uri != '':
-            if not kcl.load_file(uri, dest=nwb_file_name):
-                Warning('nwb file uri is in database but file cannot be downloaded')
-                return False
+        nwb_uri, nwb_enc_uri = (NwbfileKachery & {'nwb_file_name' : nwb_file_name}).fetch1('nwb_file_uri', 'nwb_file_enc_uri')
+        if nwb_enc_uri != '':
+            # decypt the URI
+            uri = kcl.decrypt_uri(nwb_enc_uri)
         else:
-            Warning(f'nwb file uri for {nwb_file_name} is not in database ')
-            return False
+            uri = nwb_uri 
+        print(f'attempting to download uri {uri}')
 
+        if not kachery_download_file(uri=uri, dest=Nwbfile.get_abs_path(nwb_file_name)):
+            raise Exception(f'{Nwbfile.get_abs_path(nwb_file_name)} cannot be downloaded')
+            return False
         # now download the linked file(s)
         linked_files = (NwbfileKachery.LinkedFile & {'nwb_file_name' : nwb_file_name}).fetch(as_dict=True)
         for file in linked_files:
-            uri = file['linked_file_uri'] if file['linked_file_uri'] != '' else file['linked_file_enc_uri']
-            if uri != '':
-                if not kcl.load_file(uri, dest=file['linked_file_path']):
-                    Warning('nwb linked file uri is in database but file cannot be downloaded')
-                    return False
+            if file['linked_file_enc_uri'] != '':
+                uri = kcl.decrypt_uri(file['linked_file_enc_uri'])
             else:
-                Warning(f'nwb file uri for {nwb_file_name} is not in database ')
+                uri = file['linked_file_uri']
+            print(f'attempting to download linked file uri {uri}')
+            if not kachery_download_file(uri=uri, dest=file['linked_file_path']):
+                raise Exception(f'{Nwbfile.get_abs_path(nwb_file_name)} cannot be downloaded')
                 return False
+            
         return True
+
         
 @schema
 class AnalysisNwbfileKacherySelection(dj.Manual):
