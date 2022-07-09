@@ -143,12 +143,15 @@ class NwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        nwb_uri, nwb_enc_uri = (NwbfileKachery & {'nwb_file_name' : nwb_file_name}).fetch1('nwb_file_uri', 'nwb_file_enc_uri')
-        if nwb_enc_uri != '':
+        nwb_uri, nwb_enc_uri = (NwbfileKachery & {'nwb_file_name' : nwb_file_name}).fetch('nwb_file_uri', 'nwb_file_enc_uri')
+        if len(nwb_uri) == 0:
+            return False
+
+        if nwb_enc_uri[0] != '':
             # decypt the URI
-            uri = kcl.decrypt_uri(nwb_enc_uri)
+            uri = kcl.decrypt_uri(nwb_enc_uri[0])
         else:
-            uri = nwb_uri 
+            uri = nwb_uri[0] 
         print(f'attempting to download uri {uri}')
 
         if not kachery_download_file(uri=uri, dest=Nwbfile.get_abs_path(nwb_file_name)):
@@ -224,12 +227,15 @@ class AnalysisNwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        analysis_uri, analysis_enc_uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysis_file_name}).fetch1('analysis_file_uri', 'analysis_file_enc_uri')
-        if analysis_enc_uri != '':
+        analysis_uri, analysis_enc_uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysis_file_name}).fetch('analysis_file_uri', 'analysis_file_enc_uri')
+        if len(analysis_uri) == 0:
+            return False
+    
+        if analysis_enc_uri[0] == '':
             # decypt the URI
-            uri = kcl.decrypt_uri(analysis_enc_uri)
+            uri = kcl.decrypt_uri(analysis_enc_uri[0])
         else:
-            uri = analysis_uri 
+            uri = analysis_uri[0] 
         print(f'attempting to download uri {uri}')
 
         if not kachery_download_file(uri=uri, dest=AnalysisNwbfile.get_abs_path(analysis_file_name)):
