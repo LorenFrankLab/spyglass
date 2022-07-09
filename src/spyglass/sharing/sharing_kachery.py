@@ -3,6 +3,7 @@ import stat
 import pathlib
 import random
 import string
+import copy
 from warnings import WarningMessage
 
 import datajoint as dj
@@ -97,7 +98,7 @@ class NwbfileKachery(dj.Computed):
     class LinkedFile(dj.Part):
         definition = """
         -> NwbfileKachery
-        linked_file_path: varchar(200) # the path to the linked data file
+        linked_file_rel_path: varchar(200) # the relative path to the linked data file (assumes base of SPYGLASS_BASE_DIR)
         ---
         linked_file_uri='': varchar(200) # the uri for the linked file
         linked_file_enc_uri='': varchar(200) # the encrypted uri for the linked file
@@ -105,7 +106,7 @@ class NwbfileKachery(dj.Computed):
         """
     def make(self, key):
         # note that we're assuming that the user has initialized a kachery-cloud client with kachery-cloud-init
-        linked_key = key
+        linked_key = copy.deepcopy(key)
         print(f'Linking {key["nwb_file_name"]} and storing in kachery-cloud...')
         nwb_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
         uri = kcl.link_file(nwb_abs_path)
@@ -119,13 +120,14 @@ class NwbfileKachery(dj.Computed):
         # we also need to insert the original NWB file. 
         # TODO: change this to automatically detect all linked files
         # For the moment, remove the last character ('_') and add the extension
-        key['linked_file_path'] = os.path.splitext(nwb_abs_path)[0][:-1] + '.nwb'
-        uri = kcl.link_file(key['linked_file_path'])
+        linked_file_path = os.path.splitext(nwb_abs_path)[0][:-1] + '.nwb'
+        uri = kcl.link_file(linked_file_path)
         if access_group != '':
             linked_key['linked_file_enc_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
         else:  
             linked_key['linked_file_uri'] = uri
-        self.LinkedFile.insert1(key)
+        linked_key['linked_file_rel_path'] = str.replace(linked_file_path, os.environ['SPYGLASS_BASE_DIR'], '')
+        self.LinkedFile.insert1(linked_key)
     
     @staticmethod
     def download_file(nwb_file_name: str):
@@ -194,7 +196,7 @@ class AnalysisNwbfileKachery(dj.Computed):
 
     def make(self, key):
        # note that we're assuming that the user has initialized a kachery-cloud client with kachery-cloud-init
-        linked_key = key
+        linked_key = copy.deepcopy(key)
         print(f'Linking {key["analysis_file_name"]} and storing in kachery-cloud...')
         uri = kcl.link_file(AnalysisNwbfile().get_abs_path(key['analysis_file_name']))
         access_group = (KacherySharingGroup & {'group_name' : key['group_name']}).fetch1('access_group_id')
