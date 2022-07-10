@@ -106,7 +106,7 @@ class NwbfileKachery(dj.Computed):
         self.LinkedFile.insert1(linked_key)
     
     @staticmethod
-    def download_file(nwb_file_name: str, project_id: str):
+    def download_file(nwb_file_name: str):
         """Download the specified nwb file and associated linked files from kachery-cloud if possible
 
         Parameters
