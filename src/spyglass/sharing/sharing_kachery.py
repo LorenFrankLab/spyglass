@@ -105,7 +105,7 @@ class NwbfileKachery(dj.Computed):
     def make(self, key):
         # note that we're assuming that the user has initialized a kachery-cloud client with kachery-cloud-init
         linked_key = copy.deepcopy(key)
-        print(f'Linking {key["nwb_file_name"]} and storing in kachery-cloud...')
+        print(f'Linking {key["nwb_file_name"]} in kachery-cloud...')
         nwb_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
         uri = kcl.link_file(nwb_abs_path)
         access_group = (KacherySharingGroup & {'group_name' : key['group_name']}).fetch1('access_group_id')
@@ -147,7 +147,7 @@ class NwbfileKachery(dj.Computed):
         # check to see if the sha1 is encrypted
         if nwb_uri[0].startswith('sha1-enc://'):
             # decypt the URI
-            uri = kcl.decrypt_uri(nwb_enc_uri[0])
+            uri = kcl.decrypt_uri(nwb_uri[0])
         else:
             uri = nwb_uri[0] 
         print(f'attempting to download uri {uri}')
@@ -197,7 +197,7 @@ class AnalysisNwbfileKachery(dj.Computed):
     def make(self, key):
        # note that we're assuming that the user has initialized a kachery-cloud client with kachery-cloud-init
         linked_key = copy.deepcopy(key)
-        print(f'Linking {key["analysis_file_name"]} and storing in kachery-cloud...')
+        print(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
         uri = kcl.link_file(AnalysisNwbfile().get_abs_path(key['analysis_file_name']))
         access_group = (KacherySharingGroup & {'group_name' : key['group_name']}).fetch1('access_group_id')
         if access_group != '':
