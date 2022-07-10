@@ -50,8 +50,16 @@ The Frank lab Datajoint pipeline facilitates the storage, analysis, and sharing 
      export FIGURL_CHANNEL="franklab2"
      export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
      ```
-
      Note that a local SPYGLASS_TEMP_DIR (e.g. one on your machine) will speed up spike sorting, but make sure it has enough free space (ideally at least 500GB)
+
+     If you also want to enable file sharing of franklab files through kachery-cloud, add the following
+     ```bash
+     export KACHERY_CLOUD_DIR="/stelmo/nwb/.kachery-cloud"
+     export KACHERY_CLOUD_PROJECT=lqqrbobsevexport KACHERY_="/stelmo/nwb/"
+     ```
+     
+     Additional instructions for setting up sharing can be found in the main documentation (TODO)
+
 
 3. Check if you have access to the `kachery` daemon. Open up a terminal, activate the conda environment, and type
 
