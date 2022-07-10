@@ -22,30 +22,7 @@ from ..common.common_nwbfile import Nwbfile, AnalysisNwbfile
 
 schema = dj.schema('sharing_kachery')
 
-def kachery_request_upload(uri: str):
-    """generate a kachery task request to upload the specified uri to the cloud
-
-    Parameters
-    ----------
-    uri : str
-        the uri of the requested file
-
-    Returns when task completes     
-    """
-    project_id = os.environ['KACHERY_CLOUD_PROJECT'] if 'KACHERY_CLOUD_PROJECT' in os.environ else None
-    task_client = TaskClient(project_id=project_id)
-    print('Requesting upload task')
-    task_client.request_task(
-        task_type='action',
-        task_name='kachery_store_shared_file.1',
-        task_input={
-            'uri': uri,
-        }
-    )
-    return
-
-
-def kachery_download_file(uri: str, dest:str):
+def kachery_download_file(uri: str, dest:str, project_id:str):
     """downloads the specified uri from using kachery cloud.
     First tries to download directly, and if that fails, starts an upload request for the file and then downloads it
 
@@ -63,7 +40,7 @@ def kachery_download_file(uri: str, dest:str):
     fname = kcl.load_file(uri, dest=dest)
     if fname is None:
         # if we can't load the uri directly, it should be because it is not in the cloud, so we need to start a task to load it
-        kcl.request_file_experimental(uri=uri, project_id=os.environ['KACHERY_CLOUD_PROJECT'])
+        kcl.request_file_experimental(uri=uri, project_id=project_id)
         if not kcl.load_file(uri, dest=dest):
             print('Error: analysis file uri is in database but file cannot be downloaded')
             return False
@@ -78,6 +55,7 @@ class KacherySharingGroup(dj.Manual):
     ---
     description: varchar(200) # description of this group
     access_group_id = '': varchar(100) # the id for this group on http://cloud.kacheryhub.org/. Leaving this empty implies that the group is public. 
+    project_id: varchar(100) # the idea of the project for this sharing group
     """
 
 @schema
@@ -128,7 +106,7 @@ class NwbfileKachery(dj.Computed):
         self.LinkedFile.insert1(linked_key)
     
     @staticmethod
-    def download_file(nwb_file_name: str):
+    def download_file(nwb_file_name: str, project_id: str):
         """Download the specified nwb file and associated linked files from kachery-cloud if possible
 
         Parameters
@@ -224,7 +202,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        analysis_uri = (AnalysisNwbfileKachery & {'analysis_file_name' : analysis_file_name}).fetch('analysis_file_uri')
+        analysis_uri, sharing_group = (AnalysisNwbfileKachery & {'analysis_file_name' : analysis_file_name}).fetch('analysis_file_uri', 'sharing_group')
         if len(analysis_uri) == 0:
             return False
     
@@ -233,9 +211,11 @@ class AnalysisNwbfileKachery(dj.Computed):
             uri = kcl.decrypt_uri(analysis_uri[0])
         else:
             uri = analysis_uri[0] 
+
+        project_id = (KacherySharingGroup & {'group_name': sharing_group}).fetch1('project_id')
         print(f'attempting to download uri {uri}')
 
-        if not kachery_download_file(uri=uri, dest=AnalysisNwbfile.get_abs_path(analysis_file_name)):
+        if not kachery_download_file(uri=uri, dest=AnalysisNwbfile.get_abs_path(analysis_file_name), project_id=project_id):
             raise Exception(f'{AnalysisNwbfile.get_abs_path(analysis_file_name)} cannot be downloaded')
             return False
         # now download the linked file(s)
@@ -247,7 +227,7 @@ class AnalysisNwbfileKachery(dj.Computed):
                 uri = file['linked_file_uri']
             print(f'attempting to download linked file uri {uri}')
             linked_file_path = os.environ['SPYGLASS_BASE_DIR']+file['linked_file_rel_path']
-            if not kachery_download_file(uri=uri, dest=linked_file_path):
+            if not kachery_download_file(uri=uri, dest=linked_file_path, project_id=project_id):
                 raise Exception(f'Linked file {linked_file_path} cannot be downloaded')
                 return False
             
