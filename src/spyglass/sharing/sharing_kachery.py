@@ -51,11 +51,11 @@ def kachery_download_file(uri: str, dest:str, project_id:str):
 @schema
 class KacherySharingGroup(dj.Manual):
     definition = """
-    group_name: varchar(200) # the name of the group we are sharing with
+    sharing_group_name: varchar(200) # the name of the group we are sharing with
     ---
     description: varchar(200) # description of this group
     access_group_id = '': varchar(100) # the id for this group on http://cloud.kacheryhub.org/. Leaving this empty implies that the group is public. 
-    project_id: varchar(100) # the idea of the project for this sharing group
+    project_id: varchar(100) # the ids of the project for this sharing group
     """
 
 @schema
@@ -86,7 +86,7 @@ class NwbfileKachery(dj.Computed):
         print(f'Linking {key["nwb_file_name"]} in kachery-cloud...')
         nwb_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
         uri = kcl.link_file(nwb_abs_path)
-        access_group = (KacherySharingGroup & {'group_name' : key['group_name']}).fetch1('access_group_id')
+        access_group = (KacherySharingGroup & {'sharing_group_name' : key['sharing_group_name']}).fetch1('access_group_id')
         if access_group != '':
             key['nwb_file_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
         else:  
@@ -177,7 +177,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         linked_key = copy.deepcopy(key)
         print(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
         uri = kcl.link_file(AnalysisNwbfile().get_abs_path(key['analysis_file_name']))
-        access_group = (KacherySharingGroup & {'group_name' : key['group_name']}).fetch1('access_group_id')
+        access_group = (KacherySharingGroup & {'sharing_group_name' : key['sharing_group_name']}).fetch1('access_group_id')
         if access_group != '':
             key['analysis_file_uri'] = kcl.encrypt_uri(uri, access_group=access_group)
         else:  
@@ -212,7 +212,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         else:
             uri = analysis_uri[0] 
 
-        project_id = (KacherySharingGroup & {'group_name': sharing_group}).fetch1('project_id')
+        project_id = (KacherySharingGroup & {'sharing_group_name': sharing_group}).fetch1('project_id')
         print(f'attempting to download uri {uri}')
 
         if not kachery_download_file(uri=uri, dest=AnalysisNwbfile.get_abs_path(analysis_file_name), project_id=project_id):
