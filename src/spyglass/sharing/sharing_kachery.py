@@ -44,7 +44,7 @@ def kachery_download_file(uri: str, dest:str, project_id:str):
         if not kcl.load_file(uri, dest=dest):
             print('Error: analysis file uri is in database but file cannot be downloaded')
             return False
-    print('file requested')
+    print('File downloaded')
     return True
 
 
@@ -119,7 +119,7 @@ class NwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        nwb_uri = (NwbfileKachery & {'nwb_file_name' : nwb_file_name}).fetch('nwb_file_uri')
+        nwb_uri, sharing_group_name = (NwbfileKachery & {'nwb_file_name' : nwb_file_name}).fetch('nwb_file_uri', 'sharing_group_name')
         if len(nwb_uri) == 0:
             return False
         # check to see if the sha1 is encrypted
@@ -128,9 +128,11 @@ class NwbfileKachery(dj.Computed):
             uri = kcl.decrypt_uri(nwb_uri[0])
         else:
             uri = nwb_uri[0] 
+        
+        project_id = (KacherySharingGroup & {'sharing_group_name': sharing_group_name[0]}).fetch1('project_id')
         print(f'attempting to download uri {uri}')
 
-        if not kachery_download_file(uri=uri, dest=Nwbfile.get_abs_path(nwb_file_name)):
+        if not kachery_download_file(uri=uri, dest=Nwbfile.get_abs_path(nwb_file_name), project_id=project_id):
             raise Exception(f'{Nwbfile.get_abs_path(nwb_file_name)} cannot be downloaded')
             return False
         # now download the linked file(s)
@@ -142,7 +144,7 @@ class NwbfileKachery(dj.Computed):
                 uri = file['linked_file_uri']
             print(f'attempting to download linked file uri {uri}')
             linked_file_path = os.environ['SPYGLASS_BASE_DIR']+file['linked_file_rel_path']
-            if not kachery_download_file(uri=uri, dest=linked_file_path):
+            if not kachery_download_file(uri=uri, dest=linked_file_path, project_id=project_id):
                 raise Exception(f'Linked file {linked_file_path} cannot be downloaded')
                 return False
             
@@ -202,7 +204,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        analysis_uri, sharing_group = (AnalysisNwbfileKachery & {'analysis_file_name' : analysis_file_name}).fetch('analysis_file_uri', 'sharing_group')
+        analysis_uri, sharing_group_name = (AnalysisNwbfileKachery & {'analysis_file_name' : analysis_file_name}).fetch('analysis_file_uri', 'sharing_group_name')
         if len(analysis_uri) == 0:
             return False
     
@@ -212,7 +214,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         else:
             uri = analysis_uri[0] 
 
-        project_id = (KacherySharingGroup & {'sharing_group_name': sharing_group}).fetch1('project_id')
+        project_id = (KacherySharingGroup & {'sharing_group_name': sharing_group_name[0]}).fetch1('project_id')
         print(f'attempting to download uri {uri}')
 
         if not kachery_download_file(uri=uri, dest=AnalysisNwbfile.get_abs_path(analysis_file_name), project_id=project_id):
