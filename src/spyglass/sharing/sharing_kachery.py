@@ -42,7 +42,6 @@ def kachery_download_file(uri: str, dest:str, project_id:str):
         # if we can't load the uri directly, it should be because it is not in the cloud, so we need to start a task to load it
         kcl.request_file_experimental(uri=uri, project_id=project_id)
         if not kcl.load_file(uri, dest=dest):
-            print('Error: analysis file uri is in database but file cannot be downloaded')
             return False
     print('File downloaded')
     return True
@@ -134,7 +133,7 @@ class NwbfileKachery(dj.Computed):
 
         if not kachery_download_file(uri=uri, dest=Nwbfile.get_abs_path(nwb_file_name), project_id=project_id):
             raise Exception(f'{Nwbfile.get_abs_path(nwb_file_name)} cannot be downloaded')
-            return False
+
         # now download the linked file(s)
         linked_files = (NwbfileKachery.LinkedFile & {'nwb_file_name' : nwb_file_name}).fetch(as_dict=True)
         for file in linked_files:
