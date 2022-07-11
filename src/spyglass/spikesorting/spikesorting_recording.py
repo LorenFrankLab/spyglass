@@ -432,23 +432,22 @@ class SpikeSortingRecording(dj.Computed):
                        {'nwb_file_name': key['nwb_file_name'],
                         'sort_group_id': key['sort_group_id']}
                        ).fetch('electrode_id')
-        channel_ids = channel_ids.tolist()
         ref_channel_id = (SortGroup &
                           {'nwb_file_name': key['nwb_file_name'],
                            'sort_group_id': key['sort_group_id']}
-                          ).fetch('sort_reference_electrode_id')
-        ref_channel_id = ref_channel_id.tolist()
-
+                          ).fetch1('sort_reference_electrode_id')
+        channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
+        
         # include ref channel in first slice, then exclude it in second slice
-        if ref_channel_id[0] >= 0:
-            channel_ids_ref = channel_ids + ref_channel_id
+        if ref_channel_id >= 0:
+            channel_ids_ref = np.append(channel_ids, ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids_ref)
 
             recording = st.preprocessing.common_reference(
                 recording, reference='single',
                 ref_channel_ids=ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids)
-        elif ref_channel_id[0] == -2:
+        elif ref_channel_id == -2:
             recording = recording.channel_slice(channel_ids=channel_ids)
             recording = st.preprocessing.common_reference(
                 recording,
