@@ -1,4 +1,6 @@
 pytest
 pytest-cov
+kachery
+kachery-client
 kachery-cloud
 hither2
