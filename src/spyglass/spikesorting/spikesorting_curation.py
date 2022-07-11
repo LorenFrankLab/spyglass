@@ -517,7 +517,7 @@ def _get_peak_offset(waveform_extractor: si.WaveformExtractor, peak_sign: str, *
     peak_offset_inds = st.get_template_extremum_channel_peak_shift(
         waveform_extractor=waveform_extractor,
         peak_sign=peak_sign, **metric_params)
-    peak_offset = {key: int(val) for key, val in peak_offset_inds.items()}
+    peak_offset = {key: int(abs(val)) for key, val in peak_offset_inds.items()}
     return peak_offset
 
 def _get_peak_channel(waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params):
