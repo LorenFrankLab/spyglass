@@ -23,6 +23,7 @@ dependencies:
   - tqdm
   - nb_conda
   - pip:
+    - pubnub<6.4.0
     - mountainsort4
     - git+https://github.com/SpikeInterface/spikeinterface.git
     - pynwb>=2.0.0,<3
