@@ -1,4 +1,4 @@
-name: spyglass_test
+name: spyglass
 channels:
   - conda-forge
   - defaults
