@@ -42,6 +42,7 @@ def insert_sessions(nwb_file_names):
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
         populate_all_common(out_nwb_file_name)
 
+
 def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
     print(
         f'Creating a copy of NWB file {nwb_file_name} with link to raw ephys data: {out_nwb_file_name}')
