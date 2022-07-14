@@ -12,7 +12,7 @@ A clear and concise description of what the bug is.
 
 **To Reproduce**
 Steps to reproduce the behavior:
-1. Go to '...'
+1. This error is on file '....' at file path '....'
 2. Click on '....'
 3. Scroll down to '....'
 4. See error
@@ -25,3 +25,4 @@ If applicable, add screenshots to help explain your problem.
 
 **Additional context**
 Add any other context about the problem here.
+
