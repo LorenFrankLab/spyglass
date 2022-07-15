@@ -282,7 +282,7 @@ class Waveforms(dj.Computed):
         waveform_params = (WaveformParameters & key).fetch1('waveform_params')
         if 'whiten' in waveform_params:
             if waveform_params.pop('whiten'):
-                recording = st.preprocessing.whiten(recording)
+                recording = si.preprocessing.whiten(recording)
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key['waveform_extractor_path'] = str(
