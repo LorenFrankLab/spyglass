@@ -244,8 +244,8 @@ class SpikeSorting(dj.Computed):
                 print(f'removing {full_path}')
                 shutil.rmtree(
                     str(Path(os.environ['SPYGLASS_SORTING_DIR']) / dir))
-
-    def _get_sorting_name(self, key):
+    @staticmethod
+    def _get_sorting_name(key):
         recording_name = SpikeSortingRecording._get_recording_name(key)
         sorting_name = recording_name + '_' \
             + str(uuid.uuid4())[0:8] + '_spikesorting'

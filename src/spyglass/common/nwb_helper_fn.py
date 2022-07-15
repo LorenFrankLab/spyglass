@@ -5,6 +5,8 @@ import warnings
 
 import numpy as np
 import pynwb
+import kachery_client as kc
+
 
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
@@ -14,7 +16,8 @@ invalid_electrode_index = 99999999
 
 
 def get_nwb_file(nwb_file_path):
-    """Return an NWBFile object with the given file path in read mode.
+    """Return an NWBFile object with the given file path in read mode. 
+       If the file is not found locally, this will check if it has been shared with kachery and if so, download it and open it.
 
     Parameters
     ----------
@@ -26,12 +29,27 @@ def get_nwb_file(nwb_file_path):
     nwbfile : pynwb.NWBFile
         NWB file object for the given path opened in read mode.
     """
-    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
+    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None)) 
+    nwb_uri = None
+    nwb_raw_uri = None
     if nwbfile is None:
+        print(nwb_file_path)
+        # check to see if the file exists
+        if not os.path.exists(nwb_file_path):
+            print(f'NWB file {nwb_file_path} does not exist locally; checking kachery')
+            # first try the analysis files
+            from ..sharing.sharing_kachery import NwbfileKachery, AnalysisNwbfileKachery
+            # the download functions assume just the filename, so we need to get that from the path
+            if not AnalysisNwbfileKachery.download_file(os.path.basename(nwb_file_path)) \
+                      and not NwbfileKachery.download_file(os.path.basename(nwb_file_path)):
+                print(f'NWB file {nwb_file_path} is not available on kachery; aborting')
+                return None
+        # now open the file
         io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r',
-                             load_namespaces=True)  # keep file open
+                            load_namespaces=True)  # keep file open
         nwbfile = io.read()
         __open_nwb_files[nwb_file_path] = (io, nwbfile)
+
     return nwbfile
 
 

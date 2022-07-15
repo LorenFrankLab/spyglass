@@ -241,20 +241,10 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     # all_artifact_indices = reduce(np.union1d, artifact_indices)
 
     for a in above_thresh_times:
-        # original
-        #print(time.time())
-        #a_times = np.copy(valid_timestamps[(valid_timestamps > (
-        #    a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s))])
-        #print(time.time())
-        #a_indices = np.argwhere((valid_timestamps > (
-        #    a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s)))
-        #print(time.time())
-
-        # NEW: only look up window timestamps once
         artifact_window_indices = ((valid_timestamps > (a - half_removal_window_s)) & 
                                     (valid_timestamps <= (a + half_removal_window_s)))
         a_times = np.copy(valid_timestamps[artifact_window_indices])
-        a_indices = np.argwhere(artifact_window_indices)
+        a_indices = np.argwhere(artifact_window_indices)        
         artifact_times.append(a_times)
         artifact_indices.append(a_indices)
     all_artifact_times = reduce(np.union1d, artifact_times)

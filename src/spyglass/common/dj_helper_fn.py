@@ -3,6 +3,7 @@ import inspect
 
 import datajoint as dj
 import numpy as np
+import os
 
 from .nwb_helper_fn import get_nwb_file
 
@@ -70,6 +71,19 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
 
     if not attrs:
         attrs = query_expression.heading.names
+
+    # get the list of analysis or nwb files
+    file_name_str = 'analysis_file_name' if 'analysis' in nwb_master[1] else 'nwb_file_name'
+    #TODO: avoid this import?
+    from .common_nwbfile import AnalysisNwbfile, Nwbfile
+    file_path_fn = AnalysisNwbfile.get_abs_path if 'analysis' in nwb_master[1] else Nwbfile.get_abs_path
+        
+    nwb_files = (query_expression * tbl.proj(nwb2load_filepath=attr_name)).fetch(file_name_str)
+    for file_name in nwb_files:
+        file_path = file_path_fn(file_name)
+        if not os.path.exists(file_path):
+            # retrieve the file from kachery. This also opens the file and stores the file object
+            get_nwb_file(file_path)
 
     rec_dicts = (query_expression * tbl.proj(nwb2load_filepath=attr_name)
                  ).fetch(*attrs, 'nwb2load_filepath', **kwargs)
