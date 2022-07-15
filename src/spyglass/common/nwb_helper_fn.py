@@ -5,8 +5,6 @@ import warnings
 
 import numpy as np
 import pynwb
-import kachery_client as kc
-
 
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
