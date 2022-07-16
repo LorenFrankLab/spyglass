@@ -166,8 +166,7 @@ class SortingviewWorkspace(dj.Computed):
             sortingview_sorting_id = workspace.sorting_ids[0]
         url = workspace.spikesortingview(recording_id=recording_id,
                                          sorting_id=sortingview_sorting_id,
-                                         label=workspace.label,
-                                         include_curation=True)
+                                         label=workspace.label)
         
         return url
     
