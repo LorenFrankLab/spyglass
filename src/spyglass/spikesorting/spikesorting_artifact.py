@@ -1,5 +1,6 @@
 import warnings
 from functools import reduce
+from typing import Union
 
 import datajoint as dj
 import numpy as np
@@ -70,9 +71,11 @@ class ArtifactDetection(dj.Computed):
             recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
             recording_name = SpikeSortingRecording._get_recording_name(key)
             recording = si.load_extractor(recording_path)
-
+            
+            job_kwargs = {'chunk_duration': '5s', 'n_jobs': 4, 'progress_bar':'True'}
+            
             artifact_removed_valid_times, artifact_times = _get_artifact_times(
-                recording, **artifact_params)
+                recording, **artifact_params, **job_kwargs)
 
             # NOTE: decided not to do this but to just create a single long segment; keep for now
             # get artifact times by segment
@@ -131,17 +134,17 @@ class ArtifactRemovedIntervalList(dj.Manual):
     """
 
 
-def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
-                        proportion_above_thresh=1.0, removal_window_ms=1.0, verbose=False, **job_kwargs):
+def _get_artifact_times(recording: si.BaseRecording, zscore_thresh: Union[float, None] = None, amplitude_thresh: Union[float, None] = None,
+                        proportion_above_thresh: float = 1.0, removal_window_ms: float =1.0, verbose: bool = False, **job_kwargs):
     """Detects times during which artifacts do and do not occur.
     Artifacts are defined as periods where the absolute value of the recording signal exceeds one
-    OR both specified amplitude or zscore thresholds on the proportion of channels specified,
+    or both specified amplitude or zscore thresholds on the proportion of channels specified,
     with the period extended by the removal_window_ms/2 on each side. Z-score and amplitude
     threshold values of None are ignored.
 
     Parameters
     ----------
-    recording : si.Recording
+    recording : si.BaseRecording
     zscore_thresh : float, optional
         Stdev threshold for exclusion, should be >=0, defaults to None
     amplitude_thresh : float, optional
@@ -153,11 +156,11 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
         (window/2 removed on each side of threshold crossing), defaults to 1 ms
 
     Returns
-    ------_
-    artifact_intervals : np.ndarray
-        Intervals in which artifacts are detected (including removal windows), unit: seconds
+    -------
     artifact_removed_valid_times : np.ndarray
         Intervals of valid times where artifacts were not detected, unit: seconds
+    artifact_intervals : np.ndarray
+        Intervals in which artifacts are detected (including removal windows), unit: seconds
     """
 
     valid_timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
@@ -165,8 +168,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     if recording.get_num_segments() > 1:
         recording = si.concatenate_recordings([recording])
         
-    # if both thresholds are None, we essentially skip artifract detection and
-    # return an array with the times of the first and last samples of the recording
+    # if both thresholds are None, we skip artifract detection
     if (amplitude_thresh is None) and (zscore_thresh is None):
         recording_interval = np.asarray(
             [valid_timestamps[0], valid_timestamps[-1]])
@@ -180,6 +182,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     
     # detect frames that are above threshold in parallel 
     n_jobs = ensure_n_jobs(recording, n_jobs=job_kwargs.get('n_jobs', 1))
+    print(f'using {n_jobs} jobs...')
     
     func = _compute_artifact_chunk
     init_func = _init_artifact_worker
@@ -194,7 +197,7 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     artifact_frames = np.array(artifact_frames)
 
     # turn ms to remove total into s to remove from either side of each detected artifact
-    half_removal_window_s = removal_window_ms * (1 / 1000) * (1 / 2)
+    half_removal_window_s = removal_window_ms / 1000 * 0.5
 
     if len(artifact_frames) == 0:
         recording_interval = np.asarray([[valid_timestamps[0], valid_timestamps[-1]]])
@@ -228,9 +231,7 @@ def _init_artifact_worker(recording, zscore_thresh=None, amplitude_thresh=None,
     return worker_ctx
 
 def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
-    # recover variables of the worker
-    recording = worker_ctx['recording']
-    
+    recording = worker_ctx['recording']   
     zscore_thresh = worker_ctx['zscore_thresh']
     amplitude_thresh = worker_ctx['amplitude_thresh']
     proportion_above_thresh = worker_ctx['proportion_above_thresh']
