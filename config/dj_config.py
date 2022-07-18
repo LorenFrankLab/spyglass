@@ -14,6 +14,8 @@ def set_configuration(user_name):
     dj.config['enable_python_native_blobs'] = True
     dj.config['database.use_tls'] = True
     dj.config['database.user'] = user_name
+    # disable checksum for files > 1 GB
+    dj.config['filepath_checksum_size_limit'] = 1 * 1024**3
 
     # change password; this will prompt you to type in a new password
     dj.set_password()
@@ -21,7 +23,8 @@ def set_configuration(user_name):
     # next, set up external stores
     # (read about them here: https://docs.datajoint.io/python/admin/5-blob-config.html)
 
-    assert os.getenv('SPYGLASS_BASE_DIR') is not None, 'environment variable SPYGLASS_BASE_DIR must be set'
+    assert os.getenv(
+        'SPYGLASS_BASE_DIR') is not None, 'environment variable SPYGLASS_BASE_DIR must be set'
 
     data_dir = pathlib.Path(os.environ['SPYGLASS_BASE_DIR'])
     raw_dir = data_dir / 'raw'
