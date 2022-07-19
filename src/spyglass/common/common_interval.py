@@ -2,6 +2,7 @@ import datajoint as dj
 import numpy as np
 from numpy.lib import emath
 from functools import reduce
+import itertools
 
 from .common_session import Session  # noqa: F401
 
@@ -325,21 +326,19 @@ def interval_list_censor(interval_list, timestamps):
     return interval_list_intersect(interval_list, timestamps_interval)    
 
 def interval_from_inds(list_frames):
-    """Converts list of sample indices (frames) to intervals.
+    """Converts a list of indices to a list of intervals.
     e.g. [2,3,4,6,7,8,9,10] -> [[2,4],[6,10]]
 
     Parameters
     ----------
     list_frames : array_like of int
     """
-    
-    list_frames = np.sort(list_frames)
-    transition_frames = np.nonzero(np.diff(list_frames) > 1)[0]
-    transition_frames = np.concatenate(([0], transition_frames, [len(list_frames)]))
-    interval = np.zeros((len(transition_frames)-1, 2))
-    for frame_idx in range(len(transition_frames)-1):
-        interval[frame_idx] = [transition_frames[frame_idx], transition_frames[frame_idx+1]]
-    return interval
+    list_frames = np.unique(list_frames)
+    interval_list = []
+    for key, group in itertools.groupby(enumerate(list_frames), lambda t: t[1] - t[0]):
+        group = list(group)
+        interval_list.append([group[0][1], group[-1][1]])
+    return np.asarray(interval_list)
 
 def interval_inds_to_times(interval_list, timestamps):
     """Converts interval list in indices to times using a list of timestamps

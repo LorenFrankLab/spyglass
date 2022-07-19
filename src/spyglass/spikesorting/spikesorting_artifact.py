@@ -163,7 +163,7 @@ def _get_artifact_times(recording: si.BaseRecording, zscore_thresh: Union[float,
         Intervals in which artifacts are detected (including removal windows), unit: seconds
     """
 
-    valid_timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
+    valid_timestamps = recording.get_times()
     
     if recording.get_num_segments() > 1:
         recording = si.concatenate_recordings([recording])
@@ -194,7 +194,7 @@ def _get_artifact_times(recording: si.BaseRecording, zscore_thresh: Union[float,
     executor = ChunkRecordingExecutor(recording, func, init_func, init_args, verbose=verbose,
                                       handle_returns=True, job_name='detect_artifact_frames', **job_kwargs)
     artifact_frames = executor.run()
-    artifact_frames = np.array(artifact_frames)
+    artifact_frames = np.concatenate(artifact_frames)
 
     # turn ms to remove total into s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms / 1000 * 0.5
