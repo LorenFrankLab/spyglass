@@ -8,7 +8,7 @@ import scipy.stats as stats
 import spikeinterface as si
 from spikeinterface.core.job_tools import ensure_n_jobs, ChunkRecordingExecutor
 
-from ..common.common_interval import IntervalList, interval_from_inds, _union_concat, interval_list_excludes_ind
+from ..common.common_interval import IntervalList, interval_from_inds, _union_concat, interval_list_excludes_ind, interval_list_intersect
 from ..common.nwb_helper_fn import get_valid_intervals
 from .spikesorting_recording import SpikeSortingRecording
 
@@ -212,8 +212,8 @@ def _get_artifact_times(recording: si.BaseRecording, zscore_thresh: Union[float,
                                             valid_timestamps[interval[1]]+half_removal_window_s]
     artifact_intervals = reduce(_union_concat, artifact_intervals)
     
-    artifact_removed_valid_times = interval_list_excludes_ind(artifact_intervals, valid_timestamps)
-    artifact_removed_valid_times = interval_from_inds(artifact_removed_valid_times)
+    valid_intervals = get_valid_intervals(valid_timestamps,recording.get_sampling_frequency(), 1.5, 0.000001)
+    artifact_removed_valid_times = interval_list_intersect(valid_intervals, artifact_intervals)
 
     return artifact_removed_valid_times, artifact_intervals
 
