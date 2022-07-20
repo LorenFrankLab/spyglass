@@ -146,16 +146,6 @@ def interval_list_excludes(interval_list, timestamps):
     #                                                timestamps < invalid_time[1]))).tolist()
     # return timestamps[ind]
 
-def interval_list_consolidate(interval_list):
-    """Makes intervals disjoint by unioning overlapping intervals
-
-    Parameters
-    ----------
-    interval_list : _type_
-        _description_
-    """
-    return NotImplementedError
-
 def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     """Finds the intersections between two interval lists
 
@@ -339,20 +329,3 @@ def interval_from_inds(list_frames):
         group = list(group)
         interval_list.append([group[0][1], group[-1][1]])
     return np.asarray(interval_list)
-
-def interval_inds_to_times(interval_list, timestamps):
-    """Converts interval list in indices to times using a list of timestamps
-
-    Parameters
-    ----------
-    interval_list : _type_
-        _description_
-    timestamps : _type_
-        _description_
-
-    Returns
-    -------
-    _type_
-        _description_
-    """
-    return NotImplementedError
