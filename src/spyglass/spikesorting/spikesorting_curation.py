@@ -5,6 +5,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import List
+import warnings
 
 import datajoint as dj
 import numpy as np
@@ -411,7 +412,7 @@ class MetricSelection(dj.Manual):
             'metric_params')
         if 'peak_offset' in metric_params:
             if waveform_params['whiten']:
-                raise Warning("Calculating 'peak_offset' metric on "
+                warnings.warn("Calculating 'peak_offset' metric on "
                             "whitened waveforms may result in slight "
                             "discrepancies")
         if 'peak_channel' in metric_params:
