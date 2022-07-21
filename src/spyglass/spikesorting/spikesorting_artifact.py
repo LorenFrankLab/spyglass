@@ -71,8 +71,6 @@ class ArtifactDetection(dj.Computed):
             recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
             recording_name = SpikeSortingRecording._get_recording_name(key)
             recording = si.load_extractor(recording_path)
-            if recording.get_num_segments() > 1:
-                recording = si.concatenate_recordings([recording])
         
             job_kwargs = {'chunk_duration': '10s', 'n_jobs': 4, 'progress_bar':'True'}
             
@@ -165,6 +163,8 @@ def _get_artifact_times(recording: si.BaseRecording, zscore_thresh: Union[float,
         Intervals in which artifacts are detected (including removal windows), unit: seconds
     """
 
+    if recording.get_num_segments() > 1:
+        recording = si.concatenate_recordings([recording])
     valid_timestamps = recording.get_times()
     
     if recording.get_num_segments() > 1:
