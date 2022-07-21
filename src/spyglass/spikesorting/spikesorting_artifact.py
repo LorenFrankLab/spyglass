@@ -8,7 +8,7 @@ import scipy.stats as stats
 import spikeinterface as si
 from spikeinterface.core.job_tools import ensure_n_jobs, ChunkRecordingExecutor
 
-from ..common.common_interval import IntervalList, interval_from_inds, _union_concat, interval_list_excludes_ind, interval_list_intersect
+from ..common.common_interval import IntervalList, interval_from_inds, _union_concat, interval_list_intersect
 from ..common.nwb_helper_fn import get_valid_intervals
 from .spikesorting_recording import SpikeSortingRecording
 
