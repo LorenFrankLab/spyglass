@@ -71,7 +71,9 @@ class ArtifactDetection(dj.Computed):
             recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
             recording_name = SpikeSortingRecording._get_recording_name(key)
             recording = si.load_extractor(recording_path)
-            
+            if recording.get_num_segments() > 1:
+                recording = si.concatenate_recordings([recording])
+        
             job_kwargs = {'chunk_duration': '10s', 'n_jobs': 4, 'progress_bar':'True'}
             
             artifact_removed_valid_times, artifact_times = _get_artifact_times(
