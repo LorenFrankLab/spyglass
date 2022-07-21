@@ -165,10 +165,8 @@ def _get_artifact_times(recording: si.BaseRecording, zscore_thresh: Union[float,
 
     if recording.get_num_segments() > 1:
         recording = si.concatenate_recordings([recording])
-    valid_timestamps = recording.get_times()
     
-    if recording.get_num_segments() > 1:
-        recording = si.concatenate_recordings([recording])
+    valid_timestamps = recording.get_times()
         
     # if both thresholds are None, we skip artifract detection
     if (amplitude_thresh is None) and (zscore_thresh is None):
