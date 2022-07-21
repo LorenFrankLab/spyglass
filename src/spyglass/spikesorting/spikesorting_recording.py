@@ -443,13 +443,13 @@ class SpikeSortingRecording(dj.Computed):
             channel_ids_ref = np.append(channel_ids, ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids_ref)
 
-            recording = st.preprocessing.common_reference(
+            recording = si.preprocessing.common_reference(
                 recording, reference='single',
                 ref_channel_ids=ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids)
         elif ref_channel_id == -2:
             recording = recording.channel_slice(channel_ids=channel_ids)
-            recording = st.preprocessing.common_reference(
+            recording = si.preprocessing.common_reference(
                 recording,
                 reference='global',
                 operator='median')
@@ -457,7 +457,7 @@ class SpikeSortingRecording(dj.Computed):
             raise ValueError("Invalid reference channel ID")
         filter_params = (SpikeSortingPreprocessingParameters &
                          key).fetch1('preproc_params')
-        recording = st.preprocessing.bandpass_filter(
+        recording = si.preprocessing.bandpass_filter(
             recording,
             freq_min=filter_params['frequency_min'],
             freq_max=filter_params['frequency_max'])
