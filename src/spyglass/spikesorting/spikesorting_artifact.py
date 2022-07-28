@@ -103,13 +103,6 @@ class ArtifactDetection(dj.Computed):
 
             ArtifactRemovedIntervalList.insert1(key, replace=True)
 
-            # # insert artifact times and valid times into ArtifactRemovedIntervalList with an appropriate name
-            # tmp_key = (ArtifactDetectionSelection & key).proj().fetch1()
-            # tmp_key['artifact_removed_interval_list_name'] = key['artifact_removed_interval_list_name']
-            # tmp_key['artifact_removed_valid_times'] = key['artifact_removed_valid_times']
-            # tmp_key['artifact_times'] = key['artifact_times']
-            # ArtifactRemovedIntervalList.insert1(tmp_key, skip_duplicates = True)
-
             # also insert into IntervalList
             tmp_key = {}
             tmp_key['nwb_file_name'] = key['nwb_file_name']
@@ -119,7 +112,6 @@ class ArtifactDetection(dj.Computed):
 
             # insert into computed table
             self.insert1(key)
-
 
 @schema
 class ArtifactRemovedIntervalList(dj.Manual):
@@ -164,9 +156,10 @@ def _get_artifact_times(recording: si.BaseRecording, zscore_thresh: Union[float,
     """
 
     if recording.get_num_segments() > 1:
+        valid_timestamps = np.array([])
+        for segment in range(recording.get_num_segments()):
+            valid_timestamps = np.concatenate((valid_timestamps,recording.get_times(segment_index=segment)))
         recording = si.concatenate_recordings([recording])
-    
-    valid_timestamps = recording.get_times()
         
     # if both thresholds are None, we skip artifract detection
     if (amplitude_thresh is None) and (zscore_thresh is None):
@@ -195,7 +188,7 @@ def _get_artifact_times(recording: si.BaseRecording, zscore_thresh: Union[float,
                                       handle_returns=True, job_name='detect_artifact_frames', **job_kwargs)
     artifact_frames = executor.run()
     artifact_frames = np.concatenate(artifact_frames)
-
+    
     # turn ms to remove total into s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms / 1000 * 0.5
 
@@ -207,15 +200,16 @@ def _get_artifact_times(recording: si.BaseRecording, zscore_thresh: Union[float,
 
     artifact_intervals = interval_from_inds(artifact_frames)
     
+    artifact_intervals_s = np.zeros((len(artifact_intervals),2),dtype=np.float64)
     for interval_idx, interval in enumerate(artifact_intervals):
-        artifact_intervals[interval_idx] = [valid_timestamps[interval[0]]-half_removal_window_s,
-                                            valid_timestamps[interval[1]]+half_removal_window_s]
-    artifact_intervals = reduce(_union_concat, artifact_intervals)
+        artifact_intervals_s[interval_idx] = [valid_timestamps[interval[0]]-half_removal_window_s,
+                                              valid_timestamps[interval[1]]+half_removal_window_s]
+    artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
     
-    valid_intervals = get_valid_intervals(valid_timestamps,recording.get_sampling_frequency(), 1.5, 0.000001)
-    artifact_removed_valid_times = interval_list_intersect(valid_intervals, artifact_intervals)
-
-    return artifact_removed_valid_times, artifact_intervals
+    valid_intervals = get_valid_intervals(valid_timestamps, recording.get_sampling_frequency(), 1.5, 0.000001)
+    artifact_removed_valid_times = interval_list_intersect(valid_intervals, artifact_intervals_s)
+    
+    return artifact_removed_valid_times, artifact_intervals_s
 
 def _init_artifact_worker(recording, zscore_thresh=None, amplitude_thresh=None,
                           proportion_above_thresh=1.0):
