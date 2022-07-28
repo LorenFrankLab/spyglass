@@ -256,6 +256,7 @@ class AnalysisNwbfile(dj.Manual):
 
         # see if the file exists and is stored in the base analysis dir
         test_path = str(base_dir / 'analysis' / analysis_nwb_file_name)
+
         if os.path.exists(test_path):
             return test_path
         else:
