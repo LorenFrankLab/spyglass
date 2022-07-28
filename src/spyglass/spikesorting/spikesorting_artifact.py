@@ -194,18 +194,18 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     if ((amplitude_thresh is not None) and (zscore_thresh is None)):
         above_a = np.abs(data) > amplitude_thresh
         above_thresh = np.ravel(np.argwhere(
-            np.sum(above_a, axis=0) >= nelect_above))
+            np.sum(above_a, axis=1) >= nelect_above))
     elif ((amplitude_thresh is None) and (zscore_thresh is not None)):
-        dataz = np.abs(stats.zscore(data, axis=1))
+        dataz = np.abs(stats.zscore(data, axis=0))
         above_z = dataz > zscore_thresh
         above_thresh = np.ravel(np.argwhere(
-            np.sum(above_z, axis=0) >= nelect_above))
+            np.sum(above_z, axis=1) >= nelect_above))
     else:
         above_a = np.abs(data) > amplitude_thresh
-        dataz = np.abs(stats.zscore(data, axis=1))
+        dataz = np.abs(stats.zscore(data, axis=0))
         above_z = dataz > zscore_thresh
         above_thresh = np.ravel(np.argwhere(
-            np.sum(np.logical_or(above_z, above_a), axis=0) >= nelect_above))
+            np.sum(np.logical_or(above_z, above_a), axis=1) >= nelect_above))
 
     if len(above_thresh) == 0:
         recording_interval = np.asarray(
@@ -221,10 +221,10 @@ def _get_artifact_times(recording, zscore_thresh=None, amplitude_thresh=None,
     artifact_times = []
     artifact_indices = []
     for a in above_thresh_times:
-        a_times = np.copy(valid_timestamps[(valid_timestamps > (
-            a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s))])
-        a_indices = np.argwhere((valid_timestamps > (
-            a - half_removal_window_s)) & (valid_timestamps <= (a + half_removal_window_s)))
+        artifact_window_indices = ((valid_timestamps > (a - half_removal_window_s)) & 
+                                    (valid_timestamps <= (a + half_removal_window_s)))
+        a_times = np.copy(valid_timestamps[artifact_window_indices])
+        a_indices = np.argwhere(artifact_window_indices)        
         artifact_times.append(a_times)
         artifact_indices.append(a_indices)
     all_artifact_times = reduce(np.union1d, artifact_times)

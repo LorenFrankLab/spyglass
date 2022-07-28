@@ -33,7 +33,8 @@ def generate_config_yaml(filename: str, **kwargs):
     # next, set up external stores
     # (read about them here: https://docs.datajoint.io/python/admin/5-blob-config.html)
 
-    assert os.getenv('SPYGLASS_BASE_DIR') is not None, 'environment variable SPYGLASS_BASE_DIR must be set'
+    assert os.getenv(
+        'SPYGLASS_BASE_DIR') is not None, 'environment variable SPYGLASS_BASE_DIR must be set'
 
     data_dir = pathlib.Path(os.environ['SPYGLASS_BASE_DIR'])
     raw_dir = data_dir / 'raw'

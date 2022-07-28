@@ -8,11 +8,12 @@ import numpy as np
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.toolkit as st
+import probeinterface as pi
 
 from ..common.common_device import Probe
 from ..common.common_ephys import Electrode, ElectrodeGroup
 from ..common.common_interval import (IntervalList, interval_list_intersect,
-                                      union_adjacent_index)
+                                      union_adjacent_index, intervals_by_length)
 from ..common.common_lab import LabTeam
 from ..common.common_nwbfile import Nwbfile
 from ..common.common_session import Session
@@ -365,12 +366,19 @@ class SpikeSortingRecording(dj.Computed):
                          {'nwb_file_name': key['nwb_file_name'],
                           'sort_interval_name': key['sort_interval_name']}
                          ).fetch1('sort_interval')
+        interval_list_name = (SpikeSortingRecordingSelection & key).fetch1("interval_list_name")
         valid_interval_times = (IntervalList &
                                 {'nwb_file_name': key['nwb_file_name'],
-                                 'interval_list_name': 'raw data valid times'}
+                                 'interval_list_name': interval_list_name}
                                 ).fetch1('valid_times')
         valid_sort_times = interval_list_intersect(
             sort_interval, valid_interval_times)
+        # Exclude intervals shorter than specified length
+        params = (SpikeSortingPreprocessingParameters &
+                  key).fetch1('preproc_params')
+        if 'min_segment_length' in params:
+            valid_sort_times = intervals_by_length(valid_sort_times,
+                                                   min_length=params['min_segment_length'])
         return valid_sort_times
 
     def _get_filtered_recording(self, key: dict):
@@ -424,25 +432,24 @@ class SpikeSortingRecording(dj.Computed):
                        {'nwb_file_name': key['nwb_file_name'],
                         'sort_group_id': key['sort_group_id']}
                        ).fetch('electrode_id')
-        channel_ids = channel_ids.tolist()
         ref_channel_id = (SortGroup &
                           {'nwb_file_name': key['nwb_file_name'],
                            'sort_group_id': key['sort_group_id']}
-                          ).fetch('sort_reference_electrode_id')
-        ref_channel_id = ref_channel_id.tolist()
-
+                          ).fetch1('sort_reference_electrode_id')
+        channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
+        
         # include ref channel in first slice, then exclude it in second slice
-        if ref_channel_id[0] >= 0:
-            channel_ids_ref = channel_ids + ref_channel_id
+        if ref_channel_id >= 0:
+            channel_ids_ref = np.append(channel_ids, ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids_ref)
 
-            recording = st.preprocessing.common_reference(
+            recording = si.preprocessing.common_reference(
                 recording, reference='single',
                 ref_channel_ids=ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids)
-        elif ref_channel_id[0] == -2:
+        elif ref_channel_id == -2:
             recording = recording.channel_slice(channel_ids=channel_ids)
-            recording = st.preprocessing.common_reference(
+            recording = si.preprocessing.common_reference(
                 recording,
                 reference='global',
                 operator='median')
@@ -450,9 +457,26 @@ class SpikeSortingRecording(dj.Computed):
             raise ValueError("Invalid reference channel ID")
         filter_params = (SpikeSortingPreprocessingParameters &
                          key).fetch1('preproc_params')
-        recording = st.preprocessing.bandpass_filter(
+        recording = si.preprocessing.bandpass_filter(
             recording,
             freq_min=filter_params['frequency_min'],
             freq_max=filter_params['frequency_max'])
 
+        # if the sort group is a tetrode, change the channel location
+        # note that this is a workaround that would be deprecated when spikeinterface uses 3D probe locations
+        probe_type = []
+        electrode_group = []
+        for channel_id in channel_ids:
+            probe_type.append((Electrode & {'nwb_file_name': key['nwb_file_name'],
+                                            'electrode_id': channel_id}).fetch1('probe_type'))
+            electrode_group.append((Electrode & {'nwb_file_name': key['nwb_file_name'],
+                                                 'electrode_id': channel_id}).fetch1('electrode_group_name'))
+        if all(p=='tetrode_12.5' for p in probe_type) and len(probe_type)==4 and all(eg==electrode_group[0] for eg in electrode_group):
+            tetrode = pi.Probe(ndim=2)
+            position = [[0,0],[0,12.5],[12.5,0],[12.5,12.5]]
+            tetrode.set_contacts(position, shapes='circle', shape_params={'radius': 6.25})
+            tetrode.set_contact_ids(channel_ids)
+            tetrode.set_device_channel_indices(np.arange(4))
+            recording = recording.set_probe(tetrode, in_place=True)
+        
         return recording

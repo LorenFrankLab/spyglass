@@ -262,7 +262,7 @@ class AnalysisNwbfile(dj.Manual):
             base_dir / 'analysis' / analysis_nwb_file_name)
         return analysis_nwb_file_abspath
 
-    def add_nwb_object(self, analysis_file_name, nwb_object):
+    def add_nwb_object(self, analysis_file_name, nwb_object, table_name='pandas_table'):
         # TODO: change to add_object with checks for object type and a name parameter, which should be specified if
         # it is not an NWB container
         """Add an NWB object to the analysis file in the scratch area and returns the NWB object ID
@@ -273,6 +273,8 @@ class AnalysisNwbfile(dj.Manual):
             The name of the analysis NWB file.
         nwb_object : pynwb.core.NWBDataInterface
             The NWB object created by PyNWB.
+        table_name : str (optional, defaults to 'pandas_table')
+            The name of the DynamicTable made from a dataframe.
 
         Returns
         -------
@@ -282,7 +284,7 @@ class AnalysisNwbfile(dj.Manual):
         with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
             nwbf = io.read()
             if isinstance(nwb_object, pd.DataFrame):
-                dt_object = DynamicTable.from_dataframe(name='pandas_table', df=nwb_object)
+                dt_object = DynamicTable.from_dataframe(name=table_name, df=nwb_object)
                 nwbf.add_scratch(dt_object)
                 io.write(nwbf)
                 return dt_object.object_id
@@ -344,8 +346,16 @@ class AnalysisNwbfile(dj.Manual):
                                                 description=f'{metric} metric',
                                                 data=metric_values)
                 if labels is not None:
+                    unit_ids = np.array(list(units.keys()))
+                    for unit in unit_ids:
+                        if unit not in labels:
+                            labels[unit] = ''
+                    label_values = np.array(list(labels.values()))
+                    label_values = label_values[np.argsort(unit_ids)].tolist()
                     nwbf.add_unit_column(
-                        name='label', description='label given during curation', data=labels)
+                        name='label',
+                        description='label given during curation',
+                        data=label_values)
                 # If the waveforms were specified, add them as a dataframe to scratch
                 waveforms_object_id = ''
                 if units_waveforms is not None:

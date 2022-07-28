@@ -201,6 +201,7 @@ class SampleCount(dj.Imported):
             print(f'Unable to import SampleCount: no data interface named "sample_count" found in {nwb_file_name}.')
             return
         key['sample_count_object_id'] = sample_count.object_id
+        self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
@@ -565,3 +566,13 @@ class LFPBand(dj.Computed):
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+
+
+@schema
+class ElectrodeBrainRegion(dj.Manual):
+    definition = """
+    # Table with brain region of electrodes determined post-experiment e.g. via histological analysis or CT
+    -> Electrode
+    ---
+    -> BrainRegion
+    """
