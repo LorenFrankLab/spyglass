@@ -169,6 +169,8 @@ class SpikeSorting(dj.Computed):
 
         sorter_temp_dir = tempfile.TemporaryDirectory(
             dir=os.getenv('SPYGLASS_TEMP_DIR'))
+        # add tempdir option for mountainsort
+        sorter_params["tempdir"] = sorter_temp_dir.name
 
         if sorter == 'clusterless_thresholder':
             # Detect peaks for clusterless decoding
