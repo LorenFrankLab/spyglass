@@ -178,14 +178,10 @@ class AnalysisNwbfile(dj.Manual):
 
         return analysis_file_name
 
-        # # get the list of names of analysis files related to this nwb file
-        # names = (AnalysisNwbfile() & {'nwb_file_name': nwb_file_name}).fetch('analysis_file_name')
-        # n1 = [str.replace(name, os.path.splitext(nwb_file_name)[0], '') for name in names]
-        # max_analysis_file_num = max([int(str.replace(ext, '.nwb', '')) for ext in n1])
-        # # name the file, adding the number of files with preceeding zeros
-        # analysis_file_name = os.path.splitext(nwb_file_name)[0] + str(max_analysis_file_num+1).zfill(6) + '.nwb'
-        # print(analysis_file_name)
-        # return analysis_file_name
+    @classmethod 
+    def __get_analysis_file_dir(cls, analysis_file_name:str):
+         # strip off everything after and including the final underscore and return the result
+        return analysis_file_name[0:analysis_file_name.rfind('_')-1]
 
     @classmethod
     def copy(cls, nwb_file_name):
@@ -258,9 +254,17 @@ class AnalysisNwbfile(dj.Manual):
         base_dir = pathlib.Path(os.getenv('SPYGLASS_BASE_DIR', None))
         assert base_dir is not None, 'You must set SPYGLASS_BASE_DIR environment variable.'
 
-        analysis_nwb_file_abspath = str(
-            base_dir / 'analysis' / analysis_nwb_file_name)
-        return analysis_nwb_file_abspath
+        # see if the file exists and is stored in the base analysis dir
+        test_path = str(base_dir / 'analysis' / analysis_nwb_file_name)
+
+        if os.path.exists(test_path):
+            return test_path
+        else:
+            # use the new path 
+            analysis_file_base_path = base_dir / 'analysis' / AnalysisNwbfile.__get_analysis_file_dir(analysis_nwb_file_name)
+            if not analysis_file_base_path.exists():
+                os.mkdir(str(analysis_file_base_path))
+            return str(analysis_file_base_path / analysis_nwb_file_name)
 
     def add_nwb_object(self, analysis_file_name, nwb_object, table_name='pandas_table'):
         # TODO: change to add_object with checks for object type and a name parameter, which should be specified if
