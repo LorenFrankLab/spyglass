@@ -1,0 +1,13 @@
+database.host: lmf-db.cin.ucsf.edu
+database.port: 3306
+database.use_tls: true
+enable_python_native_blobs: true
+stores:
+  analysis:
+    location: /stelmo/nwb/analysis
+    protocol: file
+    stage: /stelmo/nwb/analysis
+  raw:
+    location: /stelmo/nwb/raw
+    protocol: file
+    stage: /stelmo/nwb/raw
