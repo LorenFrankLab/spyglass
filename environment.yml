@@ -1,4 +1,4 @@
-name: spyglass-test
+name: spyglass
 channels:
   - defaults
   - franklab
@@ -20,8 +20,8 @@ dependencies:
   - ipympl
   - tqdm
   - nb_conda
+  - skan
   - pip:
-    - skan
     - mountainsort4
     - git+https://github.com/SpikeInterface/spikeinterface.git
     - h5py==2.10
