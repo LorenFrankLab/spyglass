@@ -125,10 +125,15 @@ class StateScriptFile(dj.Imported):
             # TODO update associated_file_obj.task_epochs to be an array of 1-based ints,
             # not a comma-separated string of ints
             epoch_list = associated_file_obj.task_epochs.split(',')
-            # find the file associated with this epoch
-            if str(key['epoch']) in epoch_list:
-                key['file_object_id'] = associated_file_obj.object_id
-                self.insert1(key)
+            # only insert if this is the statescript file
+            print(associated_file_obj.description)
+            if 'statescript'.upper() in associated_file_obj.description.upper():
+                # find the file associated with this epoch
+                if str(key['epoch']) in epoch_list:
+                    key['file_object_id'] = associated_file_obj.object_id
+                    self.insert1(key)
+            else:
+                print('not a statescript file')
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
