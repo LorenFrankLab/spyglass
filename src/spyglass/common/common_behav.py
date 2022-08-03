@@ -127,7 +127,9 @@ class StateScriptFile(dj.Imported):
             epoch_list = associated_file_obj.task_epochs.split(',')
             # only insert if this is the statescript file
             print(associated_file_obj.description)
-            if 'statescript'.upper() in associated_file_obj.description.upper():
+            if ('statescript'.upper() in associated_file_obj.description.upper() or
+            'state_script'.upper() in associated_file_obj.description.upper() or
+            'state script'.upper() in associated_file_obj.description.upper() ):
                 # find the file associated with this epoch
                 if str(key['epoch']) in epoch_list:
                     key['file_object_id'] = associated_file_obj.object_id
