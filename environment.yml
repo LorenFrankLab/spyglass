@@ -2,6 +2,7 @@ name: spyglass
 channels:
   - defaults
   - franklab
+  - conda-forge
   - edeno
 dependencies:
   - python>=3.8,<3.10
@@ -21,10 +22,10 @@ dependencies:
   - tqdm
   - nb_conda
   - skan
+  - h5py==2.10
   - pip:
     - mountainsort4
     - git+https://github.com/SpikeInterface/spikeinterface.git
-    - h5py==2.10
     - pynwb
     - hdmf
     - datajoint>=0.13.6
