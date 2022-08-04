@@ -22,7 +22,7 @@ dependencies:
   - tqdm
   - nb_conda
   - skan
-  - h5py==2.10
+  - h5py<=2.10
   - pip:
     - mountainsort4
     - git+https://github.com/SpikeInterface/spikeinterface.git
