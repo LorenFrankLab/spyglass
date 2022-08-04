@@ -4,6 +4,7 @@ channels:
   - franklab
   - conda-forge
   - edeno
+  - anaconda
 dependencies:
   - python>=3.8,<3.10
   - jupyterlab>=3.*
