@@ -181,30 +181,30 @@ class Raw(dj.Imported):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
 
 
-@schema
-class SampleCount(dj.Imported):
-    definition = """
-    # Sample count :s timestamp timeseries
-    -> Session
-    ---
-    sample_count_object_id: varchar(40)      # the NWB object ID for loading this object from the file
-    """
-
-    def make(self, key):
-        nwb_file_name = key['nwb_file_name']
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        # get the sample count object
-        # TODO: change name when nwb file is changed
-        sample_count = get_data_interface(nwbf, 'sample_count')
-        if sample_count is None:
-            print(f'Unable to import SampleCount: no data interface named "sample_count" found in {nwb_file_name}.')
-            return
-        key['sample_count_object_id'] = sample_count.object_id
-        self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
+# @schema
+# class SampleCount(dj.Imported):
+#     definition = """
+#     # Sample count :s timestamp timeseries
+#     -> Session
+#     ---
+#     sample_count_object_id: varchar(40)      # the NWB object ID for loading this object from the file
+#     """
+#
+#     def make(self, key):
+#         nwb_file_name = key['nwb_file_name']
+#         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+#         nwbf = get_nwb_file(nwb_file_abspath)
+#         # get the sample count object
+#         # TODO: change name when nwb file is changed
+#         sample_count = get_data_interface(nwbf, 'sample_count')
+#         if sample_count is None:
+#             print(f'Unable to import SampleCount: no data interface named "sample_count" found in {nwb_file_name}.')
+#             return
+#         key['sample_count_object_id'] = sample_count.object_id
+#         self.insert1(key)
+#
+#     def fetch_nwb(self, *attrs, **kwargs):
+#         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
 
 
 @schema
