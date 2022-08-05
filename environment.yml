@@ -23,16 +23,16 @@ dependencies:
   - tqdm
   - nb_conda
   - skan
-  - h5py<3
+  - pyyaml
+  - click
+  - pymysql>=1.0.*
   - pip:
+    - h5py<3
     - mountainsort4
     - git+https://github.com/SpikeInterface/spikeinterface.git
     - pynwb
     - hdmf
     - datajoint>=0.13.6
     - ghostipy
-    - pymysql>=1.0.*
     - sortingview>=0.8
     - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
-    - pyyaml
-    - click
