@@ -1,7 +1,9 @@
 """NWB helper functions for finding processing modules and data interfaces."""
 
 import os
+from pathlib import Path
 import warnings
+import yaml
 
 import numpy as np
 import pynwb
@@ -9,12 +11,15 @@ import pynwb
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
 
+# dict mapping NWB file path to config after it is loaded once
+__configs = dict()
+
 global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 
 def get_nwb_file(nwb_file_path):
-    """Return an NWBFile object with the given file path in read mode. 
+    """Return an NWBFile object with the given file path in read mode.
        If the file is not found locally, this will check if it has been shared with kachery and if so, download it and open it.
 
     Parameters
@@ -27,7 +32,7 @@ def get_nwb_file(nwb_file_path):
     nwbfile : pynwb.NWBFile
         NWB file object for the given path opened in read mode.
     """
-    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None)) 
+    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
     nwb_uri = None
     nwb_raw_uri = None
     if nwbfile is None:
@@ -49,6 +54,33 @@ def get_nwb_file(nwb_file_path):
         __open_nwb_files[nwb_file_path] = (io, nwbfile)
 
     return nwbfile
+
+
+def get_config(nwb_file_path):
+    """Return a dictionary of config settings for the given NWB file.
+
+    Parameters
+    ----------
+    nwb_file_path : str
+        Absolute path to the NWB file.
+
+    Returns
+    -------
+    d : dict
+        Dictionary of configuration settings loaded from the corresponding YAML file
+    """
+    if nwb_file_path in __configs:  # load from cache if exists
+        return __configs[nwb_file_path]
+
+    p = Path(nwb_file_path)
+    # NOTE use p.stem[:-1] to remove the underscore that was added to the file
+    config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
+    print(config_path)
+    with open(config_path, "r") as stream:
+        d = yaml.safe_load(stream)
+    print(d)
+    __configs[nwb_file_path] = d  # store in cache
+    return d
 
 
 def close_nwb_files():
