@@ -57,7 +57,7 @@ class Session(dj.Imported):
         print()
 
         print('Subject...')
-        Subject().insert_from_nwbfile(nwbf)
+        Subject().insert_from_nwbfile(nwbf, config)
         print()
 
         print('DataAcquisitionDevice...')
