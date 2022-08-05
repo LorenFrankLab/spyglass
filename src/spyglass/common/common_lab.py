@@ -26,7 +26,7 @@ class LabMember(dj.Manual):
         """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert lab member information from an NWB file.
 
         Parameters
@@ -34,14 +34,23 @@ class LabMember(dj.Manual):
         nwbf: pynwb.NWBFile
             The NWB file with experimenter information.
         """
-        if nwbf.experimenter is None:
+        if nwbf.experimenter is None and "LabMember" not in config:
             print('No experimenter metadata found.\n')
-            return
-        for experimenter in nwbf.experimenter:
-            cls.insert_from_name(experimenter)
+        elif nwbf.experimenter is not None and "LabMember" not in config:
+            for experimenter in nwbf.experimenter:
+                cls.insert_from_name(experimenter)
             # each person is by default the member of their own LabTeam (same as their name)
             LabTeam.create_new_team(team_name=experimenter, team_members=[experimenter])
-
+        else:
+            for lab_member in config["LabMember"]:
+                # to override, must have both first_name and last_name populated in the config
+                if lab_member['first_name'] is not None and lab_member['last_name'] is not None:
+                    cls.insert1(lab_member)
+                else:
+                    cls.insert_from_name(lab_member['lab_member_name'])
+            # each person is by default the member of their own LabTeam (same as their name)
+            LabTeam.create_new_team(team_name=experimenter, team_members=[experimenter])
+        
     @classmethod
     def insert_from_name(cls, full_name):
         """Insert a lab member by name.
@@ -116,7 +125,7 @@ class Institution(dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert institution information from an NWB file.
 
         Parameters
@@ -124,11 +133,12 @@ class Institution(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with institution information.
         """
-        if nwbf.institution is None:
+        if nwbf.institution is None and "Institution" not in config:
             print('No institution metadata found.\n')
-            return
-        cls.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
-
+        elif nwbf.institution is not None and "Institution" not in config:
+            cls.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
+        else:
+            cls.insert1(dict(institution_name=config["Institution"]['institution_name']), skip_duplicates=True)
 
 @schema
 class Lab(dj.Manual):
@@ -138,7 +148,7 @@ class Lab(dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert lab name information from an NWB file.
 
         Parameters
@@ -146,7 +156,9 @@ class Lab(dj.Manual):
         nwbf : pynwb.NWBFile
             The NWB file with lab name information.
         """
-        if nwbf.lab is None:
+        if nwbf.lab is None and "Lab" not in config:
             print('No lab metadata found.\n')
-            return
-        cls.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)
+        elif nwbf.lab is not None and "Lab" not in config:
+            cls.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)
+        else:
+            cls.insert1(dict(lab_name=config["Lab"]["lab_name"]), skip_duplicates=True)
