@@ -46,24 +46,31 @@ class Session(dj.Imported):
 
         print('Institution...')
         Institution().insert_from_nwbfile(nwbf)
+        print()
 
         print('Lab...')
         Lab().insert_from_nwbfile(nwbf)
+        print()
 
         print('LabMember...')
         LabMember().insert_from_nwbfile(nwbf)
+        print()
 
         print('Subject...')
         Subject().insert_from_nwbfile(nwbf)
+        print()
 
         print('DataAcquisitionDevice...')
         DataAcquisitionDevice().insert_from_nwbfile(nwbf)
+        print()
 
         print('CameraDevice...')
         CameraDevice().insert_from_nwbfile(nwbf)
+        print()
 
         print('Probe...')
         Probe().insert_from_nwbfile(nwbf)
+        print()
 
         if nwbf.subject is not None:
             subject_id = nwbf.subject.subject_id
@@ -90,9 +97,11 @@ class Session(dj.Imported):
 
         print('IntervalList...')
         IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
+        print()
 
         # print('Unit...')
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
+
 
 @schema
 class ExperimenterList(dj.Imported):

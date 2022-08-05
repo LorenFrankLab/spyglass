@@ -15,20 +15,24 @@ def populate_all_common(nwb_file_name):
     fp = [(Nwbfile & {'nwb_file_name': nwb_file_name}).proj()]
     print('Populate Session...')
     Session.populate(fp)
-    
+    print()
+
     # If we use Kachery for data sharing we can uncomment the following two lines. TBD
     # print('Populate NwbfileKachery...')
     # NwbfileKachery.populate()
-    
+
     print('Populate ExperimenterList...')
     ExperimenterList.populate(fp)
-    
+    print()
+
     print('Populate ElectrodeGroup...')
     ElectrodeGroup.populate(fp)
-    
+    print()
+
     print('Populate Electrode...')
     Electrode.populate(fp)
-    
+    print()
+
     print('Populate Raw...')
     Raw.populate(fp)
     print()
@@ -39,20 +43,31 @@ def populate_all_common(nwb_file_name):
 
     print('Populate DIOEvents...')
     DIOEvents.populate(fp)
+    print()
+
     # sensor data (from analog ProcessingModule) is temporarily removed from NWBFile
     # to reduce file size while it is not being used. add it back in by commenting out
     # the removal code in spyglass/data_import/insert_sessions.py when ready
     # print('Populate SensorData')
     # SensorData.populate(fp)
+
     print('Populate TaskEpochs')
     TaskEpoch.populate(fp)
+    print()
+
     print('Populate StateScriptFile')
     StateScriptFile.populate(fp)
+    print()
+
     print('Populate VideoFile')
     VideoFile.populate(fp)
+    print()
+
     print('RawPosition...')
     PositionSource.insert_from_nwbfile(nwb_file_name)
     RawPosition.populate(fp)
+    print()
+
     # print('HeadDir...')
     # HeadDir().populate()
     # print('Speed...')
