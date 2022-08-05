@@ -27,7 +27,7 @@ dependencies:
   - click
   - pymysql>=1.0.*
   - pip:
-    - h5py<3
+    - h5py
     - mountainsort4
     - git+https://github.com/SpikeInterface/spikeinterface.git
     - pynwb
