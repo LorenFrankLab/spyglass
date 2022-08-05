@@ -148,7 +148,7 @@ class Raw(dj.Imported):
         interval_dict['nwb_file_name'] = key['nwb_file_name']
         interval_dict['interval_list_name'] = raw_interval_name
         if rawdata.rate is not None:
-            interval_dict['valid_times'] = np.array([[0, len(rawdata.data)*rawdata.rate]])
+            interval_dict['valid_times'] = np.array([[0, len(rawdata.data)/rawdata.rate]])
         else:
             # get the list of valid times given the specified sampling rate.
             interval_dict['valid_times'] = get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
@@ -159,7 +159,7 @@ class Raw(dj.Imported):
         key['raw_object_id'] = rawdata.object_id
         key['sampling_rate'] = sampling_rate
         print(
-            f'Importing raw data: Estimated sampling rate:\t{key["sampling_rate"]} Hz')
+            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz')
         print(
             f'Number of valid intervals:\t{len(interval_dict["valid_times"])}')
         key['interval_list_name'] = raw_interval_name
