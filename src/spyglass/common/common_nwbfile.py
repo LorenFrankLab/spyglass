@@ -181,7 +181,7 @@ class AnalysisNwbfile(dj.Manual):
     @classmethod 
     def __get_analysis_file_dir(cls, analysis_file_name:str):
          # strip off everything after and including the final underscore and return the result
-        return analysis_file_name[0:analysis_file_name.rfind('_')-1]
+        return analysis_file_name[0:analysis_file_name.rfind('_')]
 
     @classmethod
     def copy(cls, nwb_file_name):

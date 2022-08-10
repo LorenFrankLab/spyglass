@@ -10,7 +10,6 @@ import numpy as np
 import spikeinterface as si
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
-import spikeinterface.toolkit as sit
 
 from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import AnalysisNwbfile
@@ -157,11 +156,10 @@ class SpikeSorting(dj.Computed):
                     np.arange(np.searchsorted(timestamps, interval[0]),
                               np.searchsorted(timestamps, interval[1])))
             list_triggers = [list(np.concatenate(list_triggers))]
-            pad = 2 * (1 / fs) * 1000
-            recording = sit.remove_artifacts(
+            recording = si.preprocessing.remove_artifacts(
                 recording=recording,
                 list_triggers=list_triggers,
-                ms_before=0, ms_after=pad, mode='zeros')
+                ms_before=None, ms_after=None, mode='zeros')
 
         print(f'Running spike sorting on {key}...')
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
@@ -169,6 +167,8 @@ class SpikeSorting(dj.Computed):
 
         sorter_temp_dir = tempfile.TemporaryDirectory(
             dir=os.getenv('SPYGLASS_TEMP_DIR'))
+        # add tempdir option for mountainsort
+        sorter_params["tempdir"] = sorter_temp_dir.name
 
         if sorter == 'clusterless_thresholder':
             # Detect peaks for clusterless decoding
