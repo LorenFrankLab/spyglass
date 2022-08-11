@@ -75,10 +75,10 @@ def get_config(nwb_file_path):
     p = Path(nwb_file_path)
     # NOTE use p.stem[:-1] to remove the underscore that was added to the file
     config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
-    print(config_path)
     with open(config_path, "r") as stream:
         d = yaml.safe_load(stream)
-    print(d)
+
+    # TODO write a JSON schema for the yaml file and validate the yaml file
     __configs[nwb_file_path] = d  # store in cache
     return d
 

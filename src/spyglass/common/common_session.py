@@ -61,15 +61,15 @@ class Session(dj.Imported):
         print()
 
         print('DataAcquisitionDevice...')
-        DataAcquisitionDevice().insert_from_nwbfile(nwbf)
+        DataAcquisitionDevice().insert_from_nwbfile(nwbf, config)
         print()
 
         print('CameraDevice...')
-        CameraDevice().insert_from_nwbfile(nwbf)
+        CameraDevice().insert_from_nwbfile(nwbf, config)
         print()
 
         print('Probe...')
-        Probe().insert_from_nwbfile(nwbf)
+        Probe().insert_from_nwbfile(nwbf, config)
         print()
 
         if nwbf.subject is not None:

@@ -1,7 +1,32 @@
 import datajoint as dj
 import ndx_franklab_novela
+import warnings
 
 schema = dj.schema('common_device')
+
+
+@schema
+class DataAcquisitionDeviceSystem(dj.Manual):
+    definition = """
+    system: varchar(80)
+    ---
+    """
+
+    # these system values are added to the table in prepopulate()
+    starting_opts = [
+        "SpikeGadgets",
+        "TDT_Rig1",
+        "TDT_Rig2",
+        "PCS",
+        "RCS",
+        "RNS",
+        "NeuroOmega"
+    ]
+
+    @classmethod
+    def prepopulate(cls):
+        for s in cls.starting_opts:
+            cls.insert1({"system": s}, skip_duplicates=True)
 
 
 @schema
@@ -9,13 +34,13 @@ class DataAcquisitionDevice(dj.Manual):
     definition = """
     device_name: varchar(80)
     ---
-    system = "Other": enum("SpikeGadgets","TDT_Rig1","TDT_Rig2","PCS","RCS","RNS","NeuroOmega","Other")
+    -> DataAcquisitionDeviceSystem
     amplifier = "Other": enum("Intan","PZ5_Amp1","PZ5_Amp2","Other")
     adc_circuit = NULL: varchar(2000)
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert data acquisition devices from an NWB file.
 
         Parameters
@@ -41,12 +66,33 @@ class DataAcquisitionDevice(dj.Manual):
                 device_dict['adc_circuit'] = device.adc_circuit
                 cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['device_name'])
+
+        # if "DataAcquisitionDevice" in config:  # add DataAcquisitionDevice from config file
+        #     assert "device_name" in config["DataAcquisitionDevice"], "DataAcquisitionDevice.device_name is required"
+        #     device_dict = config["DataAcquisitionDevice"]
+        #     if cls._add_system(device_dict["system"]):
+        #         cls.insert1(device_dict, skip_duplicates=True)
+        #     device_name_list.append(device_dict['device_name'])
+
         if device_name_list:
             print(f'Inserted data acquisition devices {device_name_list}')
         else:
             print('No conforming data acquisition device metadata found.')
 
         return device_name_list
+
+    @classmethod
+    def _add_system(cls, system):
+        if {"system": system} not in DataAcquisitionDeviceSystem():
+            warnings.warn(f"Device system '{system}' not found in database. Current values: "
+                          "{sgc.DataAcquisitionDeviceSystem.fetch('system').tolist()}")
+            val = input(f"Do you want to add device system '{system}' to the database? (y/N)")
+            if val.lower() == "y":
+                DataAcquisitionDeviceSystem.insert1({"system": system}, skip_duplicates=True)
+                return True
+            else:
+                return False
+        return True
 
 
 @schema
@@ -62,7 +108,7 @@ class CameraDevice(dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert camera devices from an NWB file
 
         Parameters
@@ -89,6 +135,13 @@ class CameraDevice(dj.Manual):
                 device_dict['meters_per_pixel'] = device.meters_per_pixel
                 cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['camera_name'])
+
+        if "CameraDevice" in config:  # add CameraDevice from config file
+            assert "camera_name" in config["CameraDevice"], "CameraDevice.camera_name is required"
+            device_dict = config["CameraDevice"]
+            cls.insert1(device_dict, skip_duplicates=True)
+            device_name_list.append(device_dict['camera_name'])
+
         if device_name_list:
             print(f'Inserted camera devices {device_name_list}')
         else:
@@ -124,7 +177,7 @@ class Probe(dj.Manual):
         """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert probe devices from an NWB file
 
         Parameters
@@ -172,8 +225,35 @@ class Probe(dj.Manual):
                             elect_dict['rel_z'] = electrode.rel_z
                             cls.Electrode.insert1(elect_dict)
 
+        device_name_list.extend(cls.insert_from_config(config))
+
         if device_name_list:
             print(f'Inserted probe devices {device_name_list}')
         else:
             print('No conforming probe device metadata found.')
+        return device_name_list
+
+    @classmethod
+    def insert_from_config(cls, config):
+        """Add Probes, Shanks, Electrodes from config file."""
+        if "Probe" not in config:
+            return
+
+        device_name_list = list()
+        for probe_dict in config["Probe"]:
+            shanks = probe_dict.pop("Shank")
+            probe_dict['num_shanks'] = len(shanks)
+            cls.insert1(probe_dict, skip_duplicates=True)
+            device_name_list.append(probe_dict['probe_type'])
+
+            for shank_dict in shanks:
+                shank_dict['probe_type'] = probe_dict['probe_type']
+                electrodes = shank_dict.pop("Electrode")
+                cls.Shank.insert1(shank_dict)
+
+                for elect_dict in electrodes:
+                    elect_dict['probe_type'] = probe_dict['probe_type']
+                    elect_dict['probe_shank'] = shank_dict['probe_shank']
+                    cls.Electrode.insert1(elect_dict)
+
         return device_name_list

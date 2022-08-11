@@ -3,7 +3,7 @@ import os
 from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import (HeadDir, LinPos, PositionSource, RawPosition, Speed,
                            StateScriptFile, VideoFile)
-from .common_device import CameraDevice, DataAcquisitionDevice, Probe
+from .common_device import CameraDevice, DataAcquisitionDevice, Probe, DataAcquisitionDeviceSystem
 from .common_dio import DIOEvents
 from .common_ephys import (LFP, Electrode, ElectrodeGroup, LFPBand,
                            LFPBandSelection, LFPSelection, Raw)
@@ -32,3 +32,6 @@ from .nwb_helper_fn import (close_nwb_files, estimate_sampling_rate,
                             get_data_interface, get_electrode_indices,
                             get_nwb_file, get_raw_eseries, get_valid_intervals)
 from .populate_all_common import populate_all_common
+
+
+DataAcquisitionDeviceSystem.prepopulate()
