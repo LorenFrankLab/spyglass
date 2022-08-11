@@ -1,5 +1,6 @@
 """Schema for institution name, lab name, and lab members (experimenters)."""
 import datajoint as dj
+import warnings
 
 schema = dj.schema('common_lab')
 
@@ -36,21 +37,29 @@ class LabMember(dj.Manual):
         """
         if nwbf.experimenter is None and "LabMember" not in config:
             print('No experimenter metadata found.\n')
-        elif nwbf.experimenter is not None and "LabMember" not in config:
+            return None
+
+        if nwbf.experimenter is not None and "LabMember" not in config:
             for experimenter in nwbf.experimenter:
                 cls.insert_from_name(experimenter)
             # each person is by default the member of their own LabTeam (same as their name)
             LabTeam.create_new_team(team_name=experimenter, team_members=[experimenter])
         else:
             for lab_member in config["LabMember"]:
+                if (('first_name' in lab_member and 'last_name' not in lab_member) or
+                        ('first_name' not in lab_member and 'last_name' in lab_member)):
+                    warnings.warn("One but not both of first_name and last_name was specified. "
+                                  "Both first_name and last_name must be specified to use them both. "
+                                  "Otherwise, first name and last name will be parsed from lab_member_name.")
                 # to override, must have both first_name and last_name populated in the config
-                if lab_member['first_name'] is not None and lab_member['last_name'] is not None:
+                if lab_member.get('first_name') is not None and lab_member.get('last_name') is not None:
                     cls.insert1(lab_member)
                 else:
                     cls.insert_from_name(lab_member['lab_member_name'])
             # each person is by default the member of their own LabTeam (same as their name)
-            LabTeam.create_new_team(team_name=experimenter, team_members=[experimenter])
-        
+            LabTeam.create_new_team(team_name=lab_member['lab_member_name'],
+                                    team_members=[lab_member['lab_member_name']])
+
     @classmethod
     def insert_from_name(cls, full_name):
         """Insert a lab member by name.
@@ -135,10 +144,16 @@ class Institution(dj.Manual):
         """
         if nwbf.institution is None and "Institution" not in config:
             print('No institution metadata found.\n')
-        elif nwbf.institution is not None and "Institution" not in config:
-            cls.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
+            return None
+
+        if nwbf.institution is not None and "Institution" not in config:
+            institution_name = nwbf.institution
         else:
-            cls.insert1(dict(institution_name=config["Institution"]['institution_name']), skip_duplicates=True)
+            institution_name = config["Institution"]['institution_name']
+
+        cls.insert1(dict(institution_name=institution_name), skip_duplicates=True)
+        return institution_name
+
 
 @schema
 class Lab(dj.Manual):
@@ -158,7 +173,12 @@ class Lab(dj.Manual):
         """
         if nwbf.lab is None and "Lab" not in config:
             print('No lab metadata found.\n')
-        elif nwbf.lab is not None and "Lab" not in config:
-            cls.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)
+            return None
+
+        if nwbf.lab is not None and "Lab" not in config:
+            lab_name = nwbf.lab
         else:
-            cls.insert1(dict(lab_name=config["Lab"]["lab_name"]), skip_duplicates=True)
+            lab_name = config["Lab"]["lab_name"]
+
+        cls.insert1(dict(lab_name=lab_name), skip_duplicates=True)
+        return lab_name

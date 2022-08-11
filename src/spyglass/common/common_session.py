@@ -12,6 +12,15 @@ schema = dj.schema('common_session')
 # TODO: figure out what to do about ExperimenterList
 
 
+class SessionDataAcquisitionDevice(dj.Manual):
+    # join table for Session and DataAcquisitionDevice
+    # each session can be associated with multiple data acquisition devices
+    definition = """
+    -> Session
+    -> DataAcquisitionDevice
+    """
+
+
 @schema
 class Session(dj.Imported):
     definition = """
@@ -21,7 +30,6 @@ class Session(dj.Imported):
     -> [nullable] Subject
     -> [nullable] Institution
     -> [nullable] Lab
-    -> [nullable] DataAcquisitionDevice
     session_id = NULL: varchar(200)
     session_description: varchar(2000)
     session_start_time: datetime
@@ -46,15 +54,15 @@ class Session(dj.Imported):
         # be dependent on (contain a primary key for) a session
 
         print('Institution...')
-        Institution().insert_from_nwbfile(nwbf)
+        institution_name = Institution().insert_from_nwbfile(nwbf, config)
         print()
 
         print('Lab...')
-        Lab().insert_from_nwbfile(nwbf)
+        lab_name = Lab().insert_from_nwbfile(nwbf, config)
         print()
 
         print('LabMember...')
-        LabMember().insert_from_nwbfile(nwbf)
+        LabMember().insert_from_nwbfile(nwbf, config)
         print()
 
         print('Subject...')
@@ -62,33 +70,42 @@ class Session(dj.Imported):
         print()
 
         print('DataAcquisitionDevice...')
-        DataAcquisitionDevice().insert_from_nwbfile(nwbf, config)
+        device_names = DataAcquisitionDevice().insert_from_nwbfile(nwbf, config)
         print()
 
         print('CameraDevice...')
         CameraDevice().insert_from_nwbfile(nwbf, config)
         print()
 
-        print('Probe...')
-        Probe().insert_from_nwbfile(nwbf, config)
-        print()
+        # print('Probe...')
+        # Probe().insert_from_nwbfile(nwbf, config)
+        # print()
 
         if nwbf.subject is not None:
             subject_id = nwbf.subject.subject_id
         else:
             subject_id = None
 
+        print(Institution())
+
         Session().insert1({
             'nwb_file_name': nwb_file_name,
             'subject_id': subject_id,
-            'institution_name': nwbf.institution,
-            'lab_name': nwbf.lab,
+            'institution_name': institution_name,
+            'lab_name': lab_name,
             'session_id': nwbf.session_id,
             'session_description': nwbf.session_description,
             'session_start_time': nwbf.session_start_time,
             'timestamps_reference_time': nwbf.timestamps_reference_time,
             'experiment_description': nwbf.experiment_description
         }, skip_duplicates=True)
+
+        # populate join table between Session and DataAcquisitionDevice
+        for device_name in device_names:
+            SessionDataAcquisitionDevice.insert1({
+                'nwb_file_name': nwb_file_name,
+                'device_name': device_name
+            })
 
         print('Skipping Apparatus for now...')
         # Apparatus().insert_from_nwbfile(nwbf)

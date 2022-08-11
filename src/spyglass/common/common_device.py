@@ -2,6 +2,8 @@ import datajoint as dj
 import ndx_franklab_novela
 import warnings
 
+from .errors import PopulateException
+
 schema = dj.schema('common_device')
 
 
@@ -12,7 +14,7 @@ class DataAcquisitionDeviceSystem(dj.Manual):
     ---
     """
 
-    # these system values are added to the table in prepopulate()
+    # these values are added to the table in prepopulate()
     starting_opts = [
         "SpikeGadgets",
         "TDT_Rig1",
@@ -38,7 +40,7 @@ class DataAcquisitionDeviceAmplifier(dj.Manual):
     ---
     """
 
-    # these system values are added to the table in prepopulate()
+    # these values are added to the table in prepopulate()
     starting_opts = [
         "Intan",
         "PZ5_Amp1",
@@ -77,36 +79,56 @@ class DataAcquisitionDevice(dj.Manual):
         device_name_list : list
             List of data acquisition object names found in the NWB file.
         """
-        device_name_list = list()
-        for device in nwbf.devices.values():
-            if isinstance(device, ndx_franklab_novela.DataAcqDevice):
-                device_dict = dict()
-                device_dict['device_name'] = device.name
-                if device.system == 'MCU':
-                    device_dict['system'] = 'SpikeGadgets'
-                else:
-                    device_dict['system'] = device.system
-                device_dict['amplifier'] = device.amplifier
-                device_dict['adc_circuit'] = device.adc_circuit
-                cls.insert1(device_dict, skip_duplicates=True)
-                device_name_list.append(device_dict['device_name'])
 
-        # if "DataAcquisitionDevice" in config:  # add DataAcquisitionDevice from config file
-        #     assert "device_name" in config["DataAcquisitionDevice"], "DataAcquisitionDevice.device_name is required"
-        #     device_dict = config["DataAcquisitionDevice"]
-        #     if cls._add_system(device_dict["system"]):
-        #         cls.insert1(device_dict, skip_duplicates=True)
-        #     device_name_list.append(device_dict['device_name'])
+        # make a dict of device name to PyNWB device object for all devices in the NWB file that are
+        # of type ndx_franklab_novela.DataAcqDevice and thus have the required metadata
+        ndx_devices = {device_obj.name: device_obj for device_obj in nwbf.devices.values()
+                       if isinstance(device_obj, ndx_franklab_novela.DataAcqDevice)}
 
-        if device_name_list:
-            print(f'Inserted data acquisition devices {device_name_list}')
+        # make a dict of device name to dict of device metadata from the config YAML if exists
+        if "DataAcquisitionDevice" in config:
+            config_devices = {device_dict["device_name"]: device_dict
+                              for device_dict in config["DataAcquisitionDevice"]}
+        else:
+            config_devices = dict()
+
+        all_device_names = set(ndx_devices.keys()).union(set(config_devices.keys()))
+
+        for device_name in all_device_names:
+            new_device_dict = dict()
+
+            if device_name in ndx_devices:
+                nwb_device_obj = ndx_devices[device_name]
+                new_device_dict['device_name'] = nwb_device_obj.name
+                new_device_dict["system"] = nwb_device_obj.system
+                new_device_dict['amplifier'] = nwb_device_obj.amplifier
+                new_device_dict['adc_circuit'] = nwb_device_obj.adc_circuit
+
+            if device_name in config_devices:  # override new_device_dict with values from config if specified
+                device_config = config_devices[device_name]
+                new_device_dict.update(device_config)
+
+            # check new_device_dict["system"] value and override if necessary
+            new_device_dict["system"] = cls._add_system(new_device_dict["system"])
+
+            # check new_device_dict["amplifier"] value and override if necessary
+            new_device_dict["amplifier"] = cls._add_amplifier(new_device_dict["amplifier"])
+
+            print(new_device_dict)
+            cls.insert1(new_device_dict, skip_duplicates=True)
+
+        if all_device_names:
+            print(f'Inserted data acquisition devices {all_device_names}')
         else:
             print('No conforming data acquisition device metadata found.')
 
-        return device_name_list
+        return all_device_names
 
     @classmethod
     def _add_system(cls, system):
+        if system == 'MCU':
+            system = 'SpikeGadgets'
+
         if {"system": system} not in DataAcquisitionDeviceSystem():
             warnings.warn(f"Device system '{system}' not found in database. Current values: "
                           "{sgc.DataAcquisitionDeviceSystem.fetch('system').tolist()}. "
@@ -114,14 +136,14 @@ class DataAcquisitionDevice(dj.Manual):
                           "exist in the database under a different name or spelling. "
                           "If you want to use an existing name in the database, "
                           "please specify that name for the device 'system' in the config YAML or "
-                          "change the corresponding Device object in the NWB file.")
+                          "change the corresponding Device object in the NWB file. Entering 'N' "
+                          "will raise an exception.")
             val = input(f"Do you want to add device system '{system}' to the database? (y/N)")
-            if val.lower() == "y":
+            if val.lower() in ["y", "yes"]:
                 DataAcquisitionDeviceSystem.insert1({"system": system}, skip_duplicates=True)
-                return True
             else:
-                return False
-        return True
+                raise PopulateException(f"User chose not to add device system '{system}' to the database.")
+        return system
 
     @classmethod
     def _add_amplifier(cls, amplifier):
@@ -132,13 +154,14 @@ class DataAcquisitionDevice(dj.Manual):
                           "exist in the database under a different name or spelling. "
                           "If you want to use an existing name in the database, "
                           "please specify that name for the device 'amplifier' in the config YAML or "
-                          "change the corresponding Device object in the NWB file.")
+                          "change the corresponding Device object in the NWB file. Entering 'N' "
+                          "will raise an exception.")
             val = input(f"Do you want to add device amplifier '{amplifier}' to the database? (y/N)")
-            if val.lower() == "y":
+            if val.lower() in ["y", "yes"]:
                 DataAcquisitionDeviceAmplifier.insert1({"amplifier": amplifier}, skip_duplicates=True)
-                return True
             else:
-                return False
+                raise PopulateException(f"User chose not to add device amplifier '{amplifier}' to the database.")
+        return amplifier
 
 
 @schema
