@@ -20,13 +20,37 @@ class DataAcquisitionDeviceSystem(dj.Manual):
         "PCS",
         "RCS",
         "RNS",
-        "NeuroOmega"
+        "NeuroOmega",
+        "Unknown"
     ]
 
+    # this is called in __init__.py
     @classmethod
     def prepopulate(cls):
         for s in cls.starting_opts:
             cls.insert1({"system": s}, skip_duplicates=True)
+
+
+@schema
+class DataAcquisitionDeviceAmplifier(dj.Manual):
+    definition = """
+    amplifier: varchar(80)
+    ---
+    """
+
+    # these system values are added to the table in prepopulate()
+    starting_opts = [
+        "Intan",
+        "PZ5_Amp1",
+        "PZ5_Amp2",
+        "Unknown"
+    ]
+
+    # this is called in __init__.py
+    @classmethod
+    def prepopulate(cls):
+        for s in cls.starting_opts:
+            cls.insert1({"amplifier": s}, skip_duplicates=True)
 
 
 @schema
@@ -35,7 +59,7 @@ class DataAcquisitionDevice(dj.Manual):
     device_name: varchar(80)
     ---
     -> DataAcquisitionDeviceSystem
-    amplifier = "Other": enum("Intan","PZ5_Amp1","PZ5_Amp2","Other")
+    -> DataAcquisitionDeviceAmplifier
     adc_circuit = NULL: varchar(2000)
     """
 
@@ -85,7 +109,12 @@ class DataAcquisitionDevice(dj.Manual):
     def _add_system(cls, system):
         if {"system": system} not in DataAcquisitionDeviceSystem():
             warnings.warn(f"Device system '{system}' not found in database. Current values: "
-                          "{sgc.DataAcquisitionDeviceSystem.fetch('system').tolist()}")
+                          "{sgc.DataAcquisitionDeviceSystem.fetch('system').tolist()}. "
+                          "Please ensure that the device system you want to add does not already "
+                          "exist in the database under a different name or spelling. "
+                          "If you want to use an existing name in the database, "
+                          "please specify that name for the device 'system' in the config YAML or "
+                          "change the corresponding Device object in the NWB file.")
             val = input(f"Do you want to add device system '{system}' to the database? (y/N)")
             if val.lower() == "y":
                 DataAcquisitionDeviceSystem.insert1({"system": system}, skip_duplicates=True)
@@ -93,6 +122,23 @@ class DataAcquisitionDevice(dj.Manual):
             else:
                 return False
         return True
+
+    @classmethod
+    def _add_amplifier(cls, amplifier):
+        if {"amplifier": amplifier} not in DataAcquisitionDeviceAmplifier():
+            warnings.warn(f"Device amplifier '{amplifier}' not found in database. Current values: "
+                          "{sgc.DataAcquisitionDeviceAmplifier.fetch('system').tolist()}. "
+                          "Please ensure that the device amplifier you want to add does not already "
+                          "exist in the database under a different name or spelling. "
+                          "If you want to use an existing name in the database, "
+                          "please specify that name for the device 'amplifier' in the config YAML or "
+                          "change the corresponding Device object in the NWB file.")
+            val = input(f"Do you want to add device amplifier '{amplifier}' to the database? (y/N)")
+            if val.lower() == "y":
+                DataAcquisitionDeviceAmplifier.insert1({"amplifier": amplifier}, skip_duplicates=True)
+                return True
+            else:
+                return False
 
 
 @schema

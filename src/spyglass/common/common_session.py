@@ -21,6 +21,7 @@ class Session(dj.Imported):
     -> [nullable] Subject
     -> [nullable] Institution
     -> [nullable] Lab
+    -> [nullable] DataAcquisitionDevice
     session_id = NULL: varchar(200)
     session_description: varchar(2000)
     session_start_time: datetime

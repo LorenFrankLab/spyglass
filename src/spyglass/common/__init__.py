@@ -3,7 +3,8 @@ import os
 from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import (HeadDir, LinPos, PositionSource, RawPosition, Speed,
                            StateScriptFile, VideoFile)
-from .common_device import CameraDevice, DataAcquisitionDevice, Probe, DataAcquisitionDeviceSystem
+from .common_device import (CameraDevice, DataAcquisitionDevice, Probe, DataAcquisitionDeviceSystem,
+                            DataAcquisitionDeviceAmplifier)
 from .common_dio import DIOEvents
 from .common_ephys import (LFP, Electrode, ElectrodeGroup, LFPBand,
                            LFPBandSelection, LFPSelection, Raw, SampleCount)
@@ -35,3 +36,4 @@ from .populate_all_common import populate_all_common
 
 
 DataAcquisitionDeviceSystem.prepopulate()
+DataAcquisitionDeviceAmplifier.prepopulate()
