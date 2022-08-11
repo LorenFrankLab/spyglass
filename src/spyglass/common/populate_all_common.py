@@ -3,7 +3,7 @@ from .common_behav import (PositionSource, RawPosition, StateScriptFile,
                            VideoFile)
 from .common_dio import DIOEvents
 # from .common_nwbfile import NwbfileKachery
-from .common_ephys import Electrode, ElectrodeGroup, Raw
+from .common_ephys import Electrode, ElectrodeGroup, Raw, SampleCount
 from .common_nwbfile import Nwbfile
 # from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session
@@ -35,12 +35,10 @@ def populate_all_common(nwb_file_name):
 
     print('Populate Raw...')
     Raw.populate(fp)
-    print()
-
-    # print('Populate SampleCount...')
-    # SampleCount.populate(fp)
-    # print()
-
+    
+    print('Populate SampleCount...')
+    SampleCount.populate(fp)
+    
     print('Populate DIOEvents...')
     DIOEvents.populate(fp)
     print()
