@@ -1,6 +1,7 @@
 """NWB helper functions for finding processing modules and data interfaces."""
 
 import os
+import os.path
 from pathlib import Path
 import warnings
 import yaml
@@ -75,6 +76,8 @@ def get_config(nwb_file_path):
     p = Path(nwb_file_path)
     # NOTE use p.stem[:-1] to remove the underscore that was added to the file
     config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
+    if not os.path.exists(config_path):
+        return dict()
     with open(config_path, "r") as stream:
         d = yaml.safe_load(stream)
 
