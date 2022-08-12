@@ -1,0 +1,52 @@
+DataAcquisitionDevice:
+- device_name: Neuralynx Data Acquisition System
+  system: Neuralynx
+  amplifier: Intan
+  adc_circuit: Unknown
+- device_name: ABC Data Acquisition System
+  system: ABC
+  amplifier: Intan
+  adc_circuit: Unknown
+  
+Subject:
+  subject_id: My Subject
+  age: 6 months
+
+Probe:
+- probe_type: My probe
+  num_shanks: 2
+  probe_description: My description
+  contact_side_numbering: True
+  Shank:
+  - probe_shank: 0
+    Electrode:
+    - probe_electrode: 0
+      contact_size: 2.0
+      rel_x: 3.0
+      rel_y: 4.0
+      rel_z: 5.0
+    - probe_electrode: 1
+    - probe_electrode: 2
+  - probe_shank: 1
+    Electrode:
+    - probe_electrode: 3
+    - probe_electrode: 4
+    - probe_electrode: 5
+
+ElectrodeGroup:
+- electrode_group_name: 0
+- probe_type: My probe
+
+Institution:
+  institution_name: "ABC University"
+  
+Lab:
+  lab_name: "ABC Lab"
+  
+LabMember:
+- lab_member_name: "Grad Student One"
+  first_name: "Grad"
+  last_name: "Student One"
+- lab_member_name: "Grad Student Two"
+- lab_member_name: "Grad Student Three"
+  first_name: "Grad"

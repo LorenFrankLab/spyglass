@@ -149,13 +149,13 @@ class DataAcquisitionDevice(dj.Manual):
     def _add_amplifier(cls, amplifier):
         if {"amplifier": amplifier} not in DataAcquisitionDeviceAmplifier():
             warnings.warn(f"Device amplifier '{amplifier}' not found in database. Current values: "
-                          "{sgc.DataAcquisitionDeviceAmplifier.fetch('system').tolist()}. "
-                          "Please ensure that the device amplifier you want to add does not already "
-                          "exist in the database under a different name or spelling. "
-                          "If you want to use an existing name in the database, "
-                          "please specify that name for the device 'amplifier' in the config YAML or "
-                          "change the corresponding Device object in the NWB file. Entering 'N' "
-                          "will raise an exception.")
+                           "{sgc.DataAcquisitionDeviceAmplifier.fetch('system').tolist()}. "
+                           "Please ensure that the device amplifier you want to add does not already "
+                           "exist in the database under a different name or spelling. "
+                           "If you want to use an existing name in the database, "
+                           "please specify that name for the device 'amplifier' in the config YAML or "
+                           "change the corresponding Device object in the NWB file. Entering 'N' "
+                           "will raise an exception.")
             val = input(f"Do you want to add device amplifier '{amplifier}' to the database? (y/N)")
             if val.lower() in ["y", "yes"]:
                 DataAcquisitionDeviceAmplifier.insert1({"amplifier": amplifier}, skip_duplicates=True)
@@ -259,70 +259,158 @@ class Probe(dj.Manual):
         device_name_list : list
             List of probe device types found in the NWB file.
         """
-        device_name_list = list()
-        for device in nwbf.devices.values():
-            if isinstance(device, ndx_franklab_novela.Probe):
-                # add this probe if it's not already here
-                # NOTE probe type should be very specific. if the same name is used with different configurations, then
-                # only the first one added will actually be added to the table
-                if {'probe_type': device.probe_type} not in Probe():
-                    probe_dict = dict()
-                    probe_dict['probe_type'] = device.probe_type
-                    probe_dict['probe_description'] = device.probe_description
-                    probe_dict['num_shanks'] = len(device.shanks)
-                    probe_dict['contact_side_numbering'] = 'True' if device.contact_side_numbering else 'False'
-                    cls.insert1(probe_dict)
-                    device_name_list.append(probe_dict['probe_type'])
+        
+         # make a dict of device name to PyNWB device object for all devices in the NWB file that are
+        # of type ndx_franklab_novela.DataAcqDevice and thus have the required metadata
+        ndx_probes = {device_obj.probe_type: device_obj for device_obj in nwbf.devices.values()
+                       if isinstance(device_obj, ndx_franklab_novela.Probe)}
 
-                    # go through the shanks and add each one to the Shank table
-                    for shank in device.shanks.values():
-                        shank_dict = dict()
-                        shank_dict['probe_type'] = probe_dict['probe_type']
-                        shank_dict['probe_shank'] = int(shank.name)
-                        cls.Shank.insert1(shank_dict)
-
-                        # go through the electrodes and add each one to the Electrode table
-                        for electrode in shank.shanks_electrodes.values():
-                            # the next line will need to be fixed if we have different sized contacts on a shank
-                            elect_dict = dict()
-                            elect_dict['probe_type'] = probe_dict['probe_type']
-                            elect_dict['probe_shank'] = shank_dict['probe_shank']
-                            elect_dict['contact_size'] = device.contact_size
-                            elect_dict['probe_electrode'] = int(electrode.name)
-                            elect_dict['rel_x'] = electrode.rel_x
-                            elect_dict['rel_y'] = electrode.rel_y
-                            elect_dict['rel_z'] = electrode.rel_z
-                            cls.Electrode.insert1(elect_dict)
-
-        device_name_list.extend(cls.insert_from_config(config))
-
-        if device_name_list:
-            print(f'Inserted probe devices {device_name_list}')
+        # make a dict of device name to dict of device metadata from the config YAML if exists
+        if "Probe" in config:
+            config_probes = {probe_dict["probe_type"]: probe_dict
+                              for probe_dict in config["Probe"]}
         else:
-            print('No conforming probe device metadata found.')
-        return device_name_list
+            config_probes = dict()
 
-    @classmethod
-    def insert_from_config(cls, config):
-        """Add Probes, Shanks, Electrodes from config file."""
-        if "Probe" not in config:
-            return
+        all_probes_types = set(ndx_probes.keys()).union(set(config_probes.keys()))
 
-        device_name_list = list()
-        for probe_dict in config["Probe"]:
-            shanks = probe_dict.pop("Shank")
-            probe_dict['num_shanks'] = len(shanks)
-            cls.insert1(probe_dict, skip_duplicates=True)
-            device_name_list.append(probe_dict['probe_type'])
+        for probe_type in all_probes_types:
+            new_probe_dict = dict()
+            shank_dict = dict()
+            elect_dict = dict()
 
-            for shank_dict in shanks:
-                shank_dict['probe_type'] = probe_dict['probe_type']
-                electrodes = shank_dict.pop("Electrode")
-                cls.Shank.insert1(shank_dict)
+            if probe_type in ndx_probes:
+                nwb_probe_obj = ndx_probes[probe_type]
+                new_probe_dict['probe_type'] = nwb_probe_obj.probe_type
+                new_probe_dict["probe_description"] = nwb_probe_obj.probe_description
+                new_probe_dict['num_shanks'] = len(nwb_probe_obj.shanks)
+                new_probe_dict['contact_side_numbering'] = 'True' if nwb_probe_obj.contact_side_numbering else 'False'
 
-                for elect_dict in electrodes:
-                    elect_dict['probe_type'] = probe_dict['probe_type']
-                    elect_dict['probe_shank'] = shank_dict['probe_shank']
-                    cls.Electrode.insert1(elect_dict)
+                # go through the shanks and add each one to the Shank table
+                for shank in nwb_probe_obj.shanks.values():
+                    shank_dict[shank.name] = {}
+                    shank_dict[shank.name]['probe_type'] = new_probe_dict['probe_type']
+                    shank_dict[shank.name]['probe_shank'] = int(shank.name)
 
-        return device_name_list
+                    # go through the electrodes and add each one to the Electrode table
+                    for electrode in shank.shanks_electrodes.values():
+                        # the next line will need to be fixed if we have different sized contacts on a shank
+                        elect_dict[electrode.name] = {}
+                        elect_dict[electrode.name]['probe_type'] = new_probe_dict['probe_type']
+                        elect_dict[electrode.name]['probe_shank'] = shank_dict['probe_shank']
+                        elect_dict[electrode.name]['contact_size'] = nwb_probe_obj.contact_size
+                        elect_dict[electrode.name]['probe_electrode'] = int(electrode.name)
+                        elect_dict[electrode.name]['rel_x'] = electrode.rel_x
+                        elect_dict[electrode.name]['rel_y'] = electrode.rel_y
+                        elect_dict[electrode.name]['rel_z'] = electrode.rel_z
+
+            if probe_type in config_probes:  # override new_device_dict with values from config if specified
+                probe = config_probes[probe_type]
+                shanks = probe.pop('Shank')
+                print(f'config probes: {config_probes}')
+                print(f'new probe dict: {new_probe_dict}')
+                new_probe_dict.update(probe)
+                for shank in shanks:
+                    print(f"type of shank: {type(shank['probe_shank'])}")
+                    if shank['probe_shank'] not in shank_dict:
+                        shank_dict[shank['probe_shank']] = {}
+                    shank_dict[shank['probe_shank']]['probe_type'] = new_probe_dict['probe_type']
+                    electrodes = shank.pop('Electrode')
+                    shank_dict[shank['probe_shank']].update(shank)
+                    for electrode in electrodes:
+                        if electrode['probe_electrode'] not in elect_dict:
+                            elect_dict[electrode['probe_electrode']] = {}   
+                        elect_dict[electrode['probe_electrode']]['probe_type'] = new_probe_dict['probe_type']
+                        elect_dict[electrode['probe_electrode']]['probe_shank'] = shank['probe_shank']
+                        elect_dict[electrode['probe_electrode']].update(electrode)
+
+            print(f"new_probe_dict[num_shanks]: {new_probe_dict['num_shanks']}")
+            print(f"len(shank_dict): {len(shank_dict)}")
+            print(f"shank dict: {shank_dict}")
+            assert new_probe_dict['num_shanks'] == len(shank_dict), "`num_shanks` is not equal to the number of shanks."
+            cls.insert1(new_probe_dict, skip_duplicates=True)
+            
+            for shank in shank_dict.values():
+                cls.Shank.insert1(shank, skip_duplicates=True)
+            # cls.Shank.insert(list(shank_dict.values()), skip_duplicates=True)
+            print(f"elect_dict: {elect_dict}")
+            for electrode in elect_dict.values():
+                cls.Electrode.insert1(electrode, skip_duplicates=True)
+            # cls.Electrode.insert(list(elect_dict.values()), skip_duplicates=True)
+
+        if all_probes_types:
+            print(f'Inserted probes {all_probes_types}')
+        else:
+            print('No conforming probe metadata found.')
+
+        return all_probes_types
+
+        
+        
+        # probe_name_list = list()
+        # for device in nwbf.devices.values():
+        #     if isinstance(device, ndx_franklab_novela.Probe):
+        #         # add this probe if it's not already here
+        #         # NOTE probe type should be very specific. if the same name is used with different configurations, then
+        #         # only the first one added will actually be added to the table
+        #         if {'probe_type': device.probe_type} not in Probe():
+        #             probe_dict = dict()
+        #             probe_dict['probe_type'] = device.probe_type
+        #             probe_dict['probe_description'] = device.probe_description
+        #             probe_dict['num_shanks'] = len(device.shanks)
+        #             probe_dict['contact_side_numbering'] = 'True' if device.contact_side_numbering else 'False'
+        #             cls.insert1(probe_dict)
+        #             device_name_list.append(probe_dict['probe_type'])
+
+        #             # go through the shanks and add each one to the Shank table
+        #             for shank in device.shanks.values():
+        #                 shank_dict = dict()
+        #                 shank_dict['probe_type'] = probe_dict['probe_type']
+        #                 shank_dict['probe_shank'] = int(shank.name)
+        #                 cls.Shank.insert1(shank_dict)
+
+        #                 # go through the electrodes and add each one to the Electrode table
+        #                 for electrode in shank.shanks_electrodes.values():
+        #                     # the next line will need to be fixed if we have different sized contacts on a shank
+        #                     elect_dict = dict()
+        #                     elect_dict['probe_type'] = probe_dict['probe_type']
+        #                     elect_dict['probe_shank'] = shank_dict['probe_shank']
+        #                     elect_dict['contact_size'] = device.contact_size
+        #                     elect_dict['probe_electrode'] = int(electrode.name)
+        #                     elect_dict['rel_x'] = electrode.rel_x
+        #                     elect_dict['rel_y'] = electrode.rel_y
+        #                     elect_dict['rel_z'] = electrode.rel_z
+        #                     cls.Electrode.insert1(elect_dict)
+
+        # device_name_list.extend(cls.insert_from_config(config))
+
+        # if device_name_list:
+        #     print(f'Inserted probe devices {device_name_list}')
+        # else:
+        #     print('No conforming probe device metadata found.')
+        # return device_name_list
+
+    # @classmethod
+    # def insert_from_config(cls, config):
+    #     """Add Probes, Shanks, Electrodes from config file."""
+    #     if "Probe" not in config:
+    #         return
+
+    #     device_name_list = list()
+    #     for probe_dict in config["Probe"]:
+    #         shanks = probe_dict.pop("Shank")
+    #         probe_dict['num_shanks'] = len(shanks)
+    #         cls.insert1(probe_dict, skip_duplicates=True)
+    #         device_name_list.append(probe_dict['probe_type'])
+
+    #         for shank_dict in shanks:
+    #             shank_dict['probe_type'] = probe_dict['probe_type']
+    #             electrodes = shank_dict.pop("Electrode")
+    #             cls.Shank.insert1(shank_dict)
+
+    #             for elect_dict in electrodes:
+    #                 elect_dict['probe_type'] = probe_dict['probe_type']
+    #                 elect_dict['probe_shank'] = shank_dict['probe_shank']
+    #                 cls.Electrode.insert1(elect_dict)
+
+    #     return device_name_list
