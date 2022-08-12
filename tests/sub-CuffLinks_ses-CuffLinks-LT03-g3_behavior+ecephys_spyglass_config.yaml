@@ -34,9 +34,13 @@ Probe:
     - probe_electrode: 5
 
 ElectrodeGroup:
-- electrode_group_name: 0
-- probe_type: My probe
-
+- electrode_group_name: "0"
+  probe_type: My probe
+- electrode_group_name: "Shank1"
+  probe_type: My probe
+  region_id: 2
+  description: Description
+  
 Institution:
   institution_name: "ABC University"
   
