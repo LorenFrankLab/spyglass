@@ -487,7 +487,7 @@ class QualityMetrics(dj.Computed):
         for key, value in qm_dict.items():
             m = {}
             for unit_id, metric_val in value.items():
-                m[str(unit_id)] = metric_val
+                m[str(unit_id)] = np.float64(metric_val)
             new_qm[str(key)] = m
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(new_qm, f, ensure_ascii=False, indent=4)
