@@ -80,14 +80,14 @@ class SpikeSorterParameters(dj.Manual):
             # Locally exclusive means one unit per spike detected
             method='locally_exclusive',
             peak_sign='neg',
-            n_shifts=2,
+            #n_shifts=2,
             local_radius_um=100,
             # noise levels needs to be 1.0 so the units are in uV and not MAD
             noise_levels=np.asarray([1.0]),
             random_chunk_kwargs={},
             # output needs to be set to sorting for the rest of the pipeline
             outputs='sorting',
-            localization_dict=None,
+            #localization_dict=None,
         )
         self.insert1([sorter, sorter_params_name, sorter_params],
                      skip_duplicates=True)
@@ -172,6 +172,8 @@ class SpikeSorting(dj.Computed):
 
         if sorter == 'clusterless_thresholder':
             # Detect peaks for clusterless decoding
+            # need to remove tempdir
+            sorter_params.pop('tempdir',None)
             sorting = detect_peaks(recording, **sorter_params)
         else:
             sorting = sis.run_sorter(sorter, recording,
