@@ -175,7 +175,7 @@ class SpikeSorting(dj.Computed):
             # need to remove tempdir
             sorter_params.pop('tempdir',None)
             detected_spikes = detect_peaks(recording, **sorter_params)
-            sorting = si.NumpySorting.from_times_labels(times_list=detected_spikes,
+            sorting = si.NumpySorting.from_times_labels(times_list=detected_spikes['sample_ind'],
                                                         labels_list=np.zeros(len(detected_spikes)),
                                                         sampling_frequency=recording.get_sampling_frequency())
         else:

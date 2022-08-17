@@ -204,12 +204,13 @@ class Curation(dj.Manual):
         if unit_ids is None:
             unit_ids = sorting.get_unit_ids()
 
+        # unit_ids need to be int for saving, but are float with clusterless    
         for unit_id in unit_ids:
             spike_times_in_samples = sorting.get_unit_spike_train(
                 unit_id=unit_id)
-            units[unit_id] = timestamps[spike_times_in_samples]
-            units_valid_times[unit_id] = sort_interval_valid_times
-            units_sort_interval[unit_id] = [sort_interval]
+            units[np.int(unit_id)] = timestamps[spike_times_in_samples]
+            units_valid_times[np.int(unit_id)] = sort_interval_valid_times
+            units_sort_interval[np.int(unit_id)] = [sort_interval]
 
         analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
         object_ids = AnalysisNwbfile().add_units(analysis_file_name,
