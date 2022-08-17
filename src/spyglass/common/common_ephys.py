@@ -18,74 +18,77 @@ from .nwb_helper_fn import (estimate_sampling_rate, get_data_interface,
 
 schema = dj.schema('common_ephys')
 
+# NOTE: Electrode group table is redundant with Probe.Shank! Remove.
+# @schema
+# class ElectrodeGroup(dj.Imported):
+#     definition = """
+#     # Grouping of electrodes corresponding to a physical probe.
+#     -> Session
+#     electrode_group_name: varchar(80)  # electrode group name from NWBFile
+#     ---
+#     -> BrainRegion
+#     -> [nullable] Probe
+#     description: varchar(2000)  # description of electrode group
+#     target_hemisphere = "Unknown": enum("Right", "Left", "Unknown")
+#     """
 
-@schema
-class ElectrodeGroup(dj.Imported):
-    definition = """
-    # Grouping of electrodes corresponding to a physical probe.
-    -> Session
-    electrode_group_name: varchar(80)  # electrode group name from NWBFile
-    ---
-    -> BrainRegion
-    -> [nullable] Probe
-    description: varchar(2000)  # description of electrode group
-    target_hemisphere = "Unknown": enum("Right", "Left", "Unknown")
-    """
+#     def make(self, key: dict):
+#         nwb_file_name = key['nwb_file_name']
+#         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+#         nwbf = get_nwb_file(nwb_file_abspath)
+#         config = get_config(nwb_file_abspath)
 
-    def make(self, key: dict):
-        nwb_file_name = key['nwb_file_name']
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath)
+#         # make a dict of device name to PyNWB device object for all devices in the NWB file that are
+#         # of type ndx_franklab_novela.DataAcqDevice and thus have the required metadata
+#         nwb_egs = {electrode_group.name: electrode_group for electrode_group in nwbf.electrode_groups.values()}
 
-        # make a dict of device name to PyNWB device object for all devices in the NWB file that are
-        # of type ndx_franklab_novela.DataAcqDevice and thus have the required metadata
-        nwb_egs = {electrode_group.name: electrode_group for electrode_group in nwbf.electrode_groups.values()}
+#         # make a dict of device name to dict of device metadata from the config YAML if exists
+#         if "ElectrodeGroup" in config:
+#             config_egs = {eg_dict["electrode_group_name"]: eg_dict for eg_dict in config["ElectrodeGroup"]}
+#         else:
+#             config_egs = dict()
 
-        # make a dict of device name to dict of device metadata from the config YAML if exists
-        if "ElectrodeGroup" in config:
-            config_egs = {eg_dict["electrode_group_name"]: eg_dict for eg_dict in config["ElectrodeGroup"]}
-        else:
-            config_egs = dict()
+#         all_eg_names = set(nwb_egs.keys()).union(set(config_egs.keys()))
 
-        all_eg_names = set(nwb_egs.keys()).union(set(config_egs.keys()))
+#         for eg_name in all_eg_names:
+#             new_eg_dict = dict(key)
 
-        for eg_name in all_eg_names:
-            new_eg_dict = dict(key)
+#             if eg_name in nwb_egs:
+#                 nwb_eg_obj = nwb_egs[eg_name]
 
-            if eg_name in nwb_egs:
-                nwb_eg_obj = nwb_egs[eg_name]
+#                 new_eg_dict['electrode_group_name'] = nwb_eg_obj.name
+#                 # add electrode group location if it does not exist, and fetch the row
+#                 new_eg_dict['region_id'] = BrainRegion.fetch_add(region_name=nwb_eg_obj.location)
+#                 if isinstance(nwb_eg_obj.device, ndx_franklab_novela.Probe):
+#                     new_eg_dict['probe_type'] = nwb_eg_obj.device.probe_type
+#                 new_eg_dict['description'] = nwb_eg_obj.description
+#                 if isinstance(nwb_eg_obj, ndx_franklab_novela.NwbElectrodeGroup):
+#                     # Define target_hemisphere based on targeted x coordinate
+#                     if nwb_eg_obj.targeted_x >= 0:  # if positive or zero x coordinate
+#                         new_eg_dict["target_hemisphere"] = "Right"  # define target location as right hemisphere
+#                     else:  # if negative x coordinate
+#                         new_eg_dict["target_hemisphere"] = "Left"  # define target location as left hemisphere
 
-                new_eg_dict['electrode_group_name'] = nwb_eg_obj.name
-                # add electrode group location if it does not exist, and fetch the row
-                new_eg_dict['region_id'] = BrainRegion.fetch_add(region_name=nwb_eg_obj.location)
-                if isinstance(nwb_eg_obj.device, ndx_franklab_novela.Probe):
-                    new_eg_dict['probe_type'] = nwb_eg_obj.device.probe_type
-                new_eg_dict['description'] = nwb_eg_obj.description
-                if isinstance(nwb_eg_obj, ndx_franklab_novela.NwbElectrodeGroup):
-                    # Define target_hemisphere based on targeted x coordinate
-                    if nwb_eg_obj.targeted_x >= 0:  # if positive or zero x coordinate
-                        new_eg_dict["target_hemisphere"] = "Right"  # define target location as right hemisphere
-                    else:  # if negative x coordinate
-                        new_eg_dict["target_hemisphere"] = "Left"  # define target location as left hemisphere
+#             if eg_name in config_egs:  # override new_device_dict with values from config if specified
+#                 eg = config_egs[eg_name]
+#                 # NOTE if the yaml dict for ElectrodeGroup includes a probe_type that is not in the Probe table,
+#                 # the insert will fail
+#                 new_eg_dict.update(eg)
+#                 assert {'region_id': new_eg_dict['region_id']} in BrainRegion(), (f"region_id {new_eg_dict['region_id']} in config file"
+#                                                                                    " not found in BrainRegion")
+                    
+#                 assert {"probe_type": new_eg_dict["probe_type"]} in Probe(), \
+#                        (f'Probe type {new_eg_dict["probe_type"]} for '
+#                         'Electrode Group "{eg_name}" not found in Probe table.')
 
-            if eg_name in config_egs:  # override new_device_dict with values from config if specified
-                eg = config_egs[eg_name]
-                # NOTE if the yaml dict for ElectrodeGroup includes a probe_type that is not in the Probe table,
-                # the insert will fail
-                new_eg_dict.update(eg)
-                assert {"probe_type": new_eg_dict["probe_type"]} in Probe(), \
-                       (f'Probe type {new_eg_dict["probe_type"]} for '
-                        'Electrode Group "{eg_name}" not found in Probe table.')
-
-            print(new_eg_dict)
-            self.insert1(new_eg_dict, skip_duplicates=True)
+#             print(new_eg_dict)
+#             self.insert1(new_eg_dict, skip_duplicates=True)
 
 
 @schema
 class Electrode(dj.Imported):
     definition = """
-    -> ElectrodeGroup
+    -> Session
     electrode_id: int                      # the unique number for this electrode
     ---
     -> [nullable] Probe.Electrode
@@ -112,15 +115,15 @@ class Electrode(dj.Imported):
         for elect_id, elect_data in electrodes.iterrows():
             key['electrode_id'] = elect_id
             key['name'] = str(elect_id)
-            key['electrode_group_name'] = elect_data.group_name
+            # key['electrode_group_name'] = elect_data.group_name
             # rough check of whether the electrodes table was created by rec_to_nwb and has
             # the appropriate custom columns used by rec_to_nwb
             # TODO this could be better resolved by making an extension for the electrodes table
-            if (isinstance(elect_data.group.device, ndx_franklab_novela.Probe) and
-                    'probe_shank' in elect_data and
-                    'probe_electrode' in elect_data and
-                    'bad_channel' in elect_data and
-                    'ref_elect_id' in elect_data):
+            if ({'probe_type': elect_data.group.device.name} in Probe and
+                'probe_shank' in elect_data and
+                'probe_electrode' in elect_data and
+                'bad_channel' in elect_data and
+                'ref_elect_id' in elect_data):
                 key['probe_type'] = elect_data.group.device.probe_type
                 key['probe_shank'] = elect_data.probe_shank
                 key['probe_electrode'] = elect_data.probe_electrode
@@ -457,7 +460,7 @@ class LFPBandSelection(dj.Manual):
         for e, r in zip(electrode_list, ref_list):
             key['electrode_id'] = e
             query = Electrode & {'nwb_file_name': nwb_file_name, 'electrode_id': e}
-            key['electrode_group_name'] = query.fetch1('electrode_group_name')
+            # key['electrode_group_name'] = query.fetch1('electrode_group_name')
             key['reference_elect_id'] = r
             self.LFPBandElectrode().insert1(key, skip_duplicates=True)
 
