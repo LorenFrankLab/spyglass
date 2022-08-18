@@ -76,7 +76,7 @@ schema = dj.schema('common_ephys')
 #                 new_eg_dict.update(eg)
 #                 assert {'region_id': new_eg_dict['region_id']} in BrainRegion(), (f"region_id {new_eg_dict['region_id']} in config file"
 #                                                                                    " not found in BrainRegion")
-                    
+
 #                 assert {"probe_type": new_eg_dict["probe_type"]} in Probe(), \
 #                        (f'Probe type {new_eg_dict["probe_type"]} for '
 #                         'Electrode Group "{eg_name}" not found in Probe table.')
@@ -111,6 +111,7 @@ class Electrode(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
+        config = get_config(nwb_file_abspath)
         electrodes = nwbf.electrodes.to_dataframe()
         for elect_id, elect_data in electrodes.iterrows():
             key['electrode_id'] = elect_id
@@ -119,16 +120,73 @@ class Electrode(dj.Imported):
             # rough check of whether the electrodes table was created by rec_to_nwb and has
             # the appropriate custom columns used by rec_to_nwb
             # TODO this could be better resolved by making an extension for the electrodes table
-            if ({'probe_type': elect_data.group.device.name} in Probe and
-                'probe_shank' in elect_data and
-                'probe_electrode' in elect_data and
-                'bad_channel' in elect_data and
-                'ref_elect_id' in elect_data):
-                key['probe_type'] = elect_data.group.device.probe_type
-                key['probe_shank'] = elect_data.probe_shank
-                key['probe_electrode'] = elect_data.probe_electrode
-                key['bad_channel'] = 'True' if elect_data.bad_channel else 'False'
-                key['original_reference_electrode'] = elect_data.ref_elect_id
+            if isinstance(elect_data.group.device, ndx_franklab_novela.Probe):
+                probe_type = elect_data.group.device.probe_type
+            else:
+                probe_type = elect_data.group.device.name
+            probe_shank = elect_data.get("probe_shank")
+            probe_electrode = elect_data.get("probe_electrode")
+
+            # if config file contains NWB_replacement->Probe, then find the device referred to by
+            # the device_name and treat it as the Probe entity with the corresponding probe_type
+            if "NWB_replacement" in config:
+                for replacement in config["NWB_replacement"]:
+                    if "Probe" in replacement:
+                        device_name = replacement["Probe"]["device_name"]
+                        if probe_type == device_name:
+                            probe_type = replacement["Probe"]["probe_type"]  # replace
+
+            assert {'probe_type': probe_type} in Probe(), \
+                (f"Probe type {probe_type} not found in Probe. Please insert this probe to the Probe table first")
+
+            assert len(electrodes) == len((Probe.Electrode & {"probe_type": probe_type}).fetch("probe_electrode"))
+
+            # INFER mapping between electrode table and Probe shanks and electrodes
+            # the i-th electrode in the NWB file electrodes table will be mapped to the i-th electrode
+            # of this Probe (which should be based on order of initial insert)
+            # alternative solution: support explicit arbitrary mapping of electrodes in NWB file to electrodes in Probe
+            if probe_shank is None and probe_electrode is None:
+                electrodes_query = (Probe.Electrode & {"probe_type": probe_type}).fetch()
+                probe_shank = electrodes_query[elect_id]["probe_shank"]
+                probe_electrode = electrodes_query[elect_id]["probe_electrode"]
+
+            # basic check to make sure that the mapping is correct
+            # NOTE there are a lot of edge cases here
+            if elect_id == 0:
+                probe_electrode_key = {
+                    "probe_type": probe_type,
+                    "probe_shank": probe_shank,
+                    "probe_electrode": probe_electrode
+                }
+                if "rel_x" in elect_data:
+                    probe_electrode_rel_x = (Probe.Electrode & probe_electrode_key).fetch1("rel_x")
+                    if elect_data.rel_x != probe_electrode_rel_x:
+                        print(f"rel_x value in NWB file ({elect_data.rel_x}) does not match the rel_x value "
+                                      "for the Probe ({probe_electrode_rel_x}). Please check that these values are "
+                                      "correct. They may be based off of a different zero or mirror images of each "
+                                      "other.")
+
+                if "rel_y" in elect_data:
+                    probe_electrode_rel_y = (Probe.Electrode & probe_electrode_key).fetch1("rel_y")
+                    if elect_data.rel_y != probe_electrode_rel_y:
+                        print(f"rel_y value in NWB file ({elect_data.rel_y}) does not match the rel_y value "
+                                      "for the Probe ({probe_electrode_rel_y}). Please check that these values are "
+                                      "correct. They may be based off of a different zero or mirror images of each "
+                                      "other.")
+
+                if "rel_z" in elect_data:
+                    probe_electrode_rel_z = (Probe.Electrode & probe_electrode_key).fetch1("rel_z")
+                    if elect_data.rel_z != probe_electrode_rel_z:
+                        print(f"rel_z value in NWB file ({elect_data.rel_z}) does not match the rel_z value "
+                                      "for the Probe ({probe_electrode_rel_z}). Please check that these values are "
+                                      "correct. They may be based off of a different zero or mirror images of each "
+                                      "other.")
+
+            key['probe_type'] = probe_type
+            key['probe_shank'] = probe_shank
+            key['probe_electrode'] = probe_electrode
+            key['bad_channel'] = 'True' if elect_data.get("bad_channel", False) else 'False'
+            key['original_reference_electrode'] = elect_data.get("ref_elect_id")
             key['region_id'] = BrainRegion.fetch_add(region_name=elect_data.group.location)
             key['x'] = elect_data.x
             key['y'] = elect_data.y

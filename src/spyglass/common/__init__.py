@@ -6,7 +6,7 @@ from .common_behav import (HeadDir, LinPos, PositionSource, RawPosition, Speed,
 from .common_device import (CameraDevice, DataAcquisitionDevice, Probe, DataAcquisitionDeviceSystem,
                             DataAcquisitionDeviceAmplifier)
 from .common_dio import DIOEvents
-from .common_ephys import (LFP, Electrode, ElectrodeGroup, LFPBand,
+from .common_ephys import (LFP, Electrode, LFPBand,
                            LFPBandSelection, LFPSelection, Raw, SampleCount)
 from .common_filter import FirFilter
 from .common_interval import (IntervalList, interval_list_censor,

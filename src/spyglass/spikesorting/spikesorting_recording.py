@@ -7,11 +7,10 @@ import datajoint as dj
 import numpy as np
 import spikeinterface as si
 import spikeinterface.extractors as se
-import spikeinterface.toolkit as st
 import probeinterface as pi
 
 from ..common.common_device import Probe
-from ..common.common_ephys import Electrode, ElectrodeGroup
+from ..common.common_ephys import Electrode
 from ..common.common_interval import (IntervalList, interval_list_intersect,
                                       union_adjacent_index, intervals_by_length)
 from ..common.common_lab import LabTeam
@@ -65,9 +64,9 @@ class SortGroup(dj.Manual):
         electrodes = (Electrode & {'nwb_file_name': nwb_file_name}
                                 & {'bad_channel': 'False'}).fetch()
         probe_shanks = np.unique(electrodes['probe_shank'])
-        
+
         sort_group_id = len(self)
-        sg_key = dict()        
+        sg_key = dict()
         sg_key['nwb_file_name'] = nwb_file_name
         for probe_shank in probe_shanks:
             if not references:
@@ -79,14 +78,14 @@ class SortGroup(dj.Manual):
                         f'Reference electrodes in shank {probe_shank} are not all the same.')
             else:
                 if probe_shank in references.keys():
-                    sg_key['sort_reference_electrode_id'] = references[probe_shank]    
-                else: 
+                    sg_key['sort_reference_electrode_id'] = references[probe_shank]
+                else:
                     raise ValueError(
                             f"Reference electrodes for shank {probe_shank} missing.")
             sg_key['sort_group_id'] = sort_group_id
             sg_key['probe_shank'] = probe_shank
             self.insert1(sg_key)
-            
+
             shank_electrodes = [e for e in electrodes if e['probe_shank']==probe_shank]
             for shank_electrode in shank_electrodes:
                 sge_key = dict()
@@ -94,7 +93,7 @@ class SortGroup(dj.Manual):
                 sge_key['sort_group_id'] = sort_group_id
                 sge_key['electrode_id'] = shank_electrode['electrode_id']
                 self.SortGroupElectrode().insert1(sge_key)
-                
+
             sort_group_id += 1
 
 
@@ -414,7 +413,7 @@ class SpikeSortingRecording(dj.Computed):
                            'sort_group_id': key['sort_group_id']}
                           ).fetch1('sort_reference_electrode_id')
         channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
-        
+
         # include ref channel in first slice, then exclude it in second slice
         if ref_channel_id >= 0:
             channel_ids_ref = np.append(channel_ids, ref_channel_id)
@@ -455,5 +454,5 @@ class SpikeSortingRecording(dj.Computed):
             tetrode.set_contact_ids(channel_ids)
             tetrode.set_device_channel_indices(np.arange(4))
             recording = recording.set_probe(tetrode, in_place=True)
-        
+
         return recording

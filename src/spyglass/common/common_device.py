@@ -114,7 +114,6 @@ class DataAcquisitionDevice(dj.Manual):
             # check new_device_dict["amplifier"] value and override if necessary
             new_device_dict["amplifier"] = cls._add_amplifier(new_device_dict["amplifier"])
 
-            print(new_device_dict)
             cls.insert1(new_device_dict, skip_duplicates=True)
 
         if all_device_names:
@@ -259,7 +258,7 @@ class Probe(dj.Manual):
         device_name_list : list
             List of probe device types found in the NWB file.
         """
-        
+
          # make a dict of device name to PyNWB device object for all devices in the NWB file that are
         # of type ndx_franklab_novela.DataAcqDevice and thus have the required metadata
         ndx_probes = {device_obj.probe_type: device_obj for device_obj in nwbf.devices.values()
@@ -307,11 +306,8 @@ class Probe(dj.Manual):
             if probe_type in config_probes:  # override new_device_dict with values from config if specified
                 probe = config_probes[probe_type]
                 shanks = probe.pop('Shank')
-                print(f'config probes: {config_probes}')
-                print(f'new probe dict: {new_probe_dict}')
                 new_probe_dict.update(probe)
                 for shank in shanks:
-                    print(f"type of shank: {type(shank['probe_shank'])}")
                     if shank['probe_shank'] not in shank_dict:
                         shank_dict[shank['probe_shank']] = {}
                     shank_dict[shank['probe_shank']]['probe_type'] = new_probe_dict['probe_type']
@@ -319,24 +315,18 @@ class Probe(dj.Manual):
                     shank_dict[shank['probe_shank']].update(shank)
                     for electrode in electrodes:
                         if electrode['probe_electrode'] not in elect_dict:
-                            elect_dict[electrode['probe_electrode']] = {}   
+                            elect_dict[electrode['probe_electrode']] = {}
                         elect_dict[electrode['probe_electrode']]['probe_type'] = new_probe_dict['probe_type']
                         elect_dict[electrode['probe_electrode']]['probe_shank'] = shank['probe_shank']
                         elect_dict[electrode['probe_electrode']].update(electrode)
 
-            print(f"new_probe_dict[num_shanks]: {new_probe_dict['num_shanks']}")
-            print(f"len(shank_dict): {len(shank_dict)}")
-            print(f"shank dict: {shank_dict}")
             assert new_probe_dict['num_shanks'] == len(shank_dict), "`num_shanks` is not equal to the number of shanks."
             cls.insert1(new_probe_dict, skip_duplicates=True)
-            
+
             for shank in shank_dict.values():
                 cls.Shank.insert1(shank, skip_duplicates=True)
-            # cls.Shank.insert(list(shank_dict.values()), skip_duplicates=True)
-            print(f"elect_dict: {elect_dict}")
             for electrode in elect_dict.values():
                 cls.Electrode.insert1(electrode, skip_duplicates=True)
-            # cls.Electrode.insert(list(elect_dict.values()), skip_duplicates=True)
 
         if all_probes_types:
             print(f'Inserted probes {all_probes_types}')
@@ -345,8 +335,6 @@ class Probe(dj.Manual):
 
         return all_probes_types
 
-        
-        
         # probe_name_list = list()
         # for device in nwbf.devices.values():
         #     if isinstance(device, ndx_franklab_novela.Probe):
