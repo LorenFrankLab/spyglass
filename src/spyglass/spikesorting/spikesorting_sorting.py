@@ -172,7 +172,12 @@ class SpikeSorting(dj.Computed):
 
         if sorter == 'clusterless_thresholder':
             # Detect peaks for clusterless decoding
-            sorting = detect_peaks(recording, **sorter_params)
+            # need to remove tempdir
+            sorter_params.pop('tempdir',None)
+            detected_spikes = detect_peaks(recording, **sorter_params)
+            sorting = si.NumpySorting.from_times_labels(times_list=detected_spikes['sample_ind'],
+                                                        labels_list=np.zeros(len(detected_spikes), dtype=np.int),
+                                                        sampling_frequency=recording.get_sampling_frequency())
         else:
             sorting = sis.run_sorter(sorter, recording,
                                      output_folder=sorter_temp_dir.name,
