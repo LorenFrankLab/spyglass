@@ -1,5 +1,5 @@
 from math import ceil, floor
-from typing import Callable, Dict, List, Literal, Optional, Tuple, cast
+from typing import Callable, Dict, Tuple, cast
 
 import h5py
 import kachery_client as kc
@@ -12,7 +12,6 @@ import seaborn as sns
 import sortingview.views.franklab as vvf
 import xarray as xr
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-from nptyping import Float64, NDArray
 from replay_trajectory_classification.environments import (get_grid,
                                                            get_track_interior)
 from ripple_detection import get_multiunit_population_firing_rate
@@ -562,7 +561,10 @@ def get_base_track_information(base_probabilities: xr.Dataset):
     return (x_count, x_min, x_width, y_count, y_min, y_width)
 
 
-def generate_linearization_function(location_lookup: Dict[Tuple[float, float], int], x_count: int, x_min: float, x_width: float, y_min: float, y_width: float):
+def generate_linearization_function(
+        location_lookup: Dict[Tuple[float, float], int], x_count: int,
+        x_min: float, x_width: float, y_min: float, y_width: float):
+
     args = {
         'location_lookup': location_lookup,
         'x_count': x_count,
@@ -679,9 +681,9 @@ def process_decoded_data(results):
     }
 
 
-def make_track(points: NDArray, bin_size: float = 1.0):
-    (edges, _, place_bin_centers, _) = get_grid(points, bin_size)
-    is_track_interior = get_track_interior(points, edges)
+def make_track(positions, bin_size: float = 1.0):
+    (edges, _, place_bin_centers, _) = get_grid(positions, bin_size)
+    is_track_interior = get_track_interior(positions, edges)
 
     # bin dimensions are the difference between bin centers in the x and y directions.
     bin_width = np.max(np.diff(place_bin_centers, axis=0)[:, 0])
@@ -690,15 +692,12 @@ def make_track(points: NDArray, bin_size: float = 1.0):
     # so we can represent the track as a collection of rectangles of width bin_width and height bin_height,
     # centered on the values of place_bin_centers where track_interior = true.
     # Note, the original code uses Fortran ordering.
-    # reshaped_ctrs = place_bin_centers.reshape(
-    #     is_track_interior.shape + (2,), order='F')
-    # true_ctrs = reshaped_ctrs[is_track_interior]
     true_ctrs = place_bin_centers[is_track_interior.ravel(order='F')]
 
     return (bin_width, bin_height, get_ul_corners(bin_width, bin_height, true_ctrs))
 
 
-def get_ul_corners(width: float, height: float, centers: NDArray):
+def get_ul_corners(width: float, height: float, centers):
     ul = np.subtract(centers, (width / 2, -height / 2))
 
     # Reshape so we have an x array and a y array
@@ -708,11 +707,11 @@ def get_ul_corners(width: float, height: float, centers: NDArray):
 def create_static_track_animation(*,
                                   track_rect_width: float,
                                   track_rect_height: float,
-                                  ul_corners: NDArray[Literal["*, 2"], Float64],
-                                  timestamps: NDArray[Literal["Length, 1"], Float64],
-                                  positions: NDArray[Literal["Length, 2"], Float64],
+                                  ul_corners,
+                                  timestamps,
+                                  positions,
                                   compute_real_time_rate: bool = False,
-                                  head_dir: Optional[NDArray[Literal["Length, 1"], Float64]] = None
+                                  head_dir=None
                                   ):
     # float32 gives about 7 digits of decimal precision; we want 3 digits right of the decimal.
     # So need to compress-store the timestamp if the start is greater than say 5000.
@@ -788,8 +787,7 @@ def create_interactive_2D_decoding_figurl(
     position_info,
     bin_size,
     results=None,
-    position_names=[
-        'head_position_x', 'head_position_y'],
+    position_names=['head_position_x', 'head_position_y'],
     head_direction_name='head_orientation',
     label=''
 ):
