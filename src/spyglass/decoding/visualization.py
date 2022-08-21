@@ -1,4 +1,5 @@
 from math import ceil, floor
+from typing import Callable, Dict, List, Literal, Optional, Tuple, cast
 
 import h5py
 import kachery_client as kc
@@ -8,19 +9,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import sortingview.views.franklab as vvf
+import xarray as xr
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+from nptyping import Float64, NDArray
+from replay_trajectory_classification.environments import (get_grid,
+                                                           get_track_interior)
 from ripple_detection import get_multiunit_population_firing_rate
 from sortingview.SpikeSortingView import (MultiTimeseries,
                                           create_live_position_pdf_plot,
                                           create_position_plot,
                                           create_spike_raster_plot)
 from tqdm.auto import tqdm
-
-import xarray as xr
-from typing import Literal, Optional, List, Dict, Tuple, Callable, cast
-from nptyping import NDArray, Float64
-import sortingview.views.franklab as vvf
-from replay_trajectory_classification.environments import get_grid, get_track_interior
 
 
 def make_single_environment_movie(
@@ -543,6 +543,7 @@ def create_figurl_decode_visualization(
     layout.add_panel(panel, relative_height=3)
 
     return layout.get_composite_figure().url()
+
 
 def get_base_probabilities(file: str) -> xr.Dataset:
     results = cast(xr.Dataset, xr.open_dataset(file).sum('state'))
