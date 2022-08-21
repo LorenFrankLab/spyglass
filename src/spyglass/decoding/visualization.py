@@ -16,6 +16,12 @@ from sortingview.SpikeSortingView import (MultiTimeseries,
                                           create_spike_raster_plot)
 from tqdm.auto import tqdm
 
+import xarray as xr
+from typing import Literal, Optional, List, Dict, Tuple, Callable, cast
+from nptyping import NDArray, Float64
+import sortingview.views.franklab as vvf
+from replay_trajectory_classification.environments import get_grid, get_track_interior
+
 
 def make_single_environment_movie(
     time_slice,
@@ -537,3 +543,275 @@ def create_figurl_decode_visualization(
     layout.add_panel(panel, relative_height=3)
 
     return layout.get_composite_figure().url()
+
+def get_base_probabilities(file: str) -> xr.Dataset:
+    results = cast(xr.Dataset, xr.open_dataset(file).sum('state'))
+    return results
+
+
+def get_base_track_information(base_probabilities: xr.Dataset):
+    x_count = len(base_probabilities.x_position)
+    y_count = len(base_probabilities.y_position)
+    x_min = np.min(base_probabilities.x_position).item()
+    y_min = np.min(base_probabilities.y_position).item()
+    x_width = round(
+        (np.max(base_probabilities.x_position).item() - x_min) / (x_count - 1), 6)
+    y_width = round(
+        (np.max(base_probabilities.y_position).item() - y_min) / (y_count - 1), 6)
+    return (x_count, x_min, x_width, y_count, y_min, y_width)
+
+
+def generate_linearization_function(location_lookup: Dict[Tuple[float, float], int], x_count: int, x_min: float, x_width: float, y_min: float, y_width: float):
+    args = {
+        'location_lookup': location_lookup,
+        'x_count': x_count,
+        'x_min': x_min,
+        'x_width': x_width,
+        'y_min': y_min,
+        'y_width': y_width
+    }
+
+    def inner(t: Tuple[float, float, float]):
+        return memo_linearize(t, **args)
+    return inner
+
+
+def memo_linearize(t: Tuple[float, float, float], /,
+                   location_lookup: Dict[Tuple[float, float], int],
+                   x_count: int,
+                   x_min: float,
+                   x_width: float,
+                   y_min: float,
+                   y_width: float
+                   ):
+    (_, y, x) = t
+    my_tuple = (x, y)
+    if my_tuple not in location_lookup:
+        lin = (x_count * round((y - y_min) / y_width) +
+               round((x - x_min) / x_width))
+        location_lookup[my_tuple] = lin
+    return location_lookup[my_tuple]
+
+
+def extract_slice_data(base_slice: xr.Dataset, location_fn: Callable[[Tuple[float, float]], int]):
+    i_trim = discretize_and_trim(base_slice)
+    observations = i_trim.acausal_posterior.values
+    positions = get_positions(i_trim, location_fn)
+    observations_per_frame = get_observations_per_frame(i_trim, base_slice)
+    return (observations, positions, observations_per_frame)
+
+
+def discretize_and_trim(base_slice: xr.Dataset):
+    i = np.multiply(base_slice, 255).astype('int8')
+    i_stack = i.stack(unified_index=['time', 'y_position', 'x_position'])
+    i_trim = i_stack.where(i_stack.acausal_posterior >
+                           0, drop=True).astype('int8')
+    return i_trim
+
+
+def get_positions(i_trim: xr.Dataset, linearization_fn: Callable[[Tuple[float, float]], int]):
+    linearizer_map = map(linearization_fn, i_trim.unified_index.data)
+    positions = np.array(list(linearizer_map), dtype='int16')
+    return positions
+
+
+def get_observations_per_frame(i_trim: xr.Dataset, base_slice: xr.Dataset):
+    (times, time_counts_np) = np.unique(i_trim.time.data, return_counts=True)
+    time_counts = xr.DataArray(time_counts_np, coords={'time': times})
+    raw_times = base_slice.time
+    (_, good_counts) = xr.align(raw_times, time_counts, join='left', fill_value=0)
+    observations_per_frame = good_counts.data.astype('int8')
+    return observations_per_frame
+
+
+def process_decoded_data(results):
+    frame_step_size = 100_000
+    location_lookup = {}
+    base_probabilities = cast(xr.Dataset, results.sum('state'))
+
+    (x_count, x_min, x_width, y_count, y_min,
+     y_width) = get_base_track_information(base_probabilities)
+    location_fn = generate_linearization_function(
+        location_lookup, x_count, x_min, x_width, y_min, y_width)
+
+    total_frame_count = len(base_probabilities.time)
+    final_frame_bounds = np.zeros(total_frame_count, dtype='int8')
+    # intentionally oversized preallocation--will trim later
+    # Note: By definition there can't be more than 255 observations per frame (since we drop any observation
+    # lower than 1/255 and the probabilities for any frame sum to 1). However, this preallocation may be way
+    # too big for memory for long recordings. We could use a smaller one, but would need to include logic
+    # to expand the length of the array if its actual allocated bounds are exceeded.
+    final_values = np.zeros(total_frame_count * 255, dtype='int8')
+    final_locations = np.zeros(total_frame_count * 255, dtype='int16')
+
+    frames_done = 0
+    total_observations = 0
+    while (frames_done <= total_frame_count):
+        base_slice = base_probabilities.isel(time=slice(
+            frames_done, frames_done + frame_step_size))
+        (observations, positions, observations_per_frame) = extract_slice_data(
+            base_slice, location_fn)
+        final_frame_bounds[frames_done:frames_done +
+                           len(observations_per_frame)] = observations_per_frame
+        final_values[total_observations:total_observations +
+                     len(observations)] = observations
+        final_locations[total_observations:total_observations +
+                        len(observations)] = positions
+        total_observations += len(observations)
+        frames_done += frame_step_size
+    # These were intentionally oversized in preallocation; trim to the number of actual values.
+    final_values.resize(total_observations)
+    final_locations.resize(total_observations)
+
+    return {
+        'type': 'DecodedPositionData',
+        'xmin': x_min,
+        'binWidth': x_width,
+        'xcount': x_count,
+        'ymin': y_min,
+        'binHeight': y_width,
+        'ycount': y_count,
+        'uniqueLocations': np.unique(final_locations),
+        'values': final_values,
+        'locations': final_locations,
+        'frameBounds': final_frame_bounds
+    }
+
+
+def make_track(points: NDArray, bin_size: float = 1.0):
+    (edges, _, place_bin_centers, _) = get_grid(points, bin_size)
+    is_track_interior = get_track_interior(points, edges)
+
+    # bin dimensions are the difference between bin centers in the x and y directions.
+    bin_width = np.max(np.diff(place_bin_centers, axis=0)[:, 0])
+    bin_height = np.max(np.diff(place_bin_centers, axis=0)[:, 1])
+
+    # so we can represent the track as a collection of rectangles of width bin_width and height bin_height,
+    # centered on the values of place_bin_centers where track_interior = true.
+    # Note, the original code uses Fortran ordering.
+    # reshaped_ctrs = place_bin_centers.reshape(
+    #     is_track_interior.shape + (2,), order='F')
+    # true_ctrs = reshaped_ctrs[is_track_interior]
+    true_ctrs = place_bin_centers[is_track_interior.ravel(order='F')]
+
+    return (bin_width, bin_height, get_ul_corners(bin_width, bin_height, true_ctrs))
+
+
+def get_ul_corners(width: float, height: float, centers: NDArray):
+    ul = np.subtract(centers, (width / 2, -height / 2))
+
+    # Reshape so we have an x array and a y array
+    return np.transpose(ul)
+
+
+def create_static_track_animation(*,
+                                  track_rect_width: float,
+                                  track_rect_height: float,
+                                  ul_corners: NDArray[Literal["*, 2"], Float64],
+                                  timestamps: NDArray[Literal["Length, 1"], Float64],
+                                  positions: NDArray[Literal["Length, 2"], Float64],
+                                  compute_real_time_rate: bool = False,
+                                  head_dir: Optional[NDArray[Literal["Length, 1"], Float64]] = None
+                                  ):
+    # float32 gives about 7 digits of decimal precision; we want 3 digits right of the decimal.
+    # So need to compress-store the timestamp if the start is greater than say 5000.
+    first_timestamp = 0
+    if timestamps[0] > 5000:
+        first_timestamp = timestamps[0]
+        timestamps -= first_timestamp
+    data = {
+        'type': 'TrackAnimation',
+        'trackBinWidth': track_rect_width,
+        'trackBinHeight': track_rect_height,
+        'trackBinULCorners': ul_corners.astype('float32'),
+        'totalRecordingFrameLength': len(timestamps),
+        'timestamps': timestamps.astype('float32'),
+        'positions': positions.astype('float32'),
+        'xmin': np.min(ul_corners[0]),
+        'xmax': np.max(ul_corners[0]) + track_rect_width,
+        'ymin': np.min(ul_corners[1]),
+        'ymax': np.max(ul_corners[1]) + track_rect_height
+        # Speed: should this be displayed?
+        # TODO: Better approach for accommodating further data streams
+    }
+    if (head_dir is not None):
+        # print(f'Loading head direction: {head_dir}')
+        data['headDirection'] = head_dir.astype('float32')
+    if (compute_real_time_rate):
+        median_delta_t = np.median(np.diff(timestamps))
+        sampling_frequency_Hz = 1 / median_delta_t
+        data['samplingFrequencyHz'] = sampling_frequency_Hz
+    if first_timestamp > 0:
+        data['timestampStart'] = first_timestamp
+
+    return data
+
+
+def create_track_animation_object(*, static_track_animation: any):
+    if ('decodedData' in static_track_animation):
+        decoded_data = static_track_animation['decodedData']
+        decoded_data_obj = vvf.DecodedPositionData(
+            x_min=decoded_data['xmin'],
+            x_count=decoded_data['xcount'],
+            y_min=decoded_data['ymin'],
+            y_count=decoded_data['ycount'],
+            bin_width=decoded_data['binWidth'],
+            bin_height=decoded_data['binHeight'],
+            values=decoded_data['values'].astype('int16'),
+            locations=decoded_data['locations'],
+            frame_bounds=decoded_data['frameBounds'].astype('int16')
+        )
+    else:
+        decoded_data_obj = None
+
+    view = vvf.TrackPositionAnimationV1(
+        track_bin_width=static_track_animation['trackBinWidth'],
+        track_bin_height=static_track_animation['trackBinHeight'],
+        track_bin_ul_corners=static_track_animation['trackBinULCorners'],
+        total_recording_frame_length=static_track_animation['totalRecordingFrameLength'],
+        timestamp_start=static_track_animation['timestampStart'] if 'timestampStart' in static_track_animation else None,
+        timestamps=static_track_animation['timestamps'],
+        positions=static_track_animation['positions'],
+        x_min=static_track_animation['xmin'],
+        x_max=static_track_animation['xmax'],
+        y_min=static_track_animation['ymin'],
+        y_max=static_track_animation['ymax'],
+        sampling_frequency_hz=static_track_animation['samplingFrequencyHz'],
+        head_direction=static_track_animation['headDirection'] if 'headDirection' in static_track_animation else None,
+        decoded_data=decoded_data_obj
+    )
+    return view
+
+
+def create_interactive_2D_decoding_figurl(
+    position_info,
+    bin_size,
+    results=None,
+    position_names=[
+        'head_position_x', 'head_position_y'],
+    head_direction_name='head_orientation',
+    label=''
+):
+
+    positions = np.asarray(position_info[position_names])
+    (track_width, track_height, upper_left_points) = make_track(
+        positions, bin_size=bin_size)
+    timestamps = np.squeeze(np.asarray(position_info.index))
+
+    head_dir = np.squeeze(np.asarray(position_info[head_direction_name]))
+
+    data = create_static_track_animation(
+        ul_corners=upper_left_points,
+        track_rect_height=track_height,
+        track_rect_width=track_width,
+        timestamps=timestamps,
+        positions=positions.T,
+        head_dir=head_dir,
+        compute_real_time_rate=True
+    )
+    if results is not None:
+        data['decodedData'] = process_decoded_data(results)
+
+    view = create_track_animation_object(static_track_animation=data)
+
+    return view.url(label=label)
