@@ -247,9 +247,13 @@ class RippleTimes(dj.Computed):
         start_offset = ripple_start if relative else 0
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(12, 1))
-        ax.plot(ripple_consensus_trace.loc[time_slice])
+        ax.plot(ripple_consensus_trace.loc[time_slice].index - start_offset,
+                ripple_consensus_trace.loc[time_slice])
         ax.axvspan(ripple_start - start_offset, ripple_end -
                    start_offset, zorder=-1, alpha=0.5, color='lightgrey')
+        ax.set_xlabel('Time [s]')
+        ax.set_xlim((time_slice.start - start_offset,
+                    time_slice.stop - start_offset))
 
     @staticmethod
     def plot_ripple(
