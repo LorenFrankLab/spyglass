@@ -4,10 +4,11 @@ import numpy as np
 import pandas as pd
 from ripple_detection import Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
-from spyglass.common import (Electrode, IntervalList, IntervalPositionInfo,
+from spyglass.common import (Electrode, IntervalList,  # noqa
+                             IntervalPositionInfo,
                              IntervalPositionInfoSelection, LFPBand, Session)
-
-from .common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.dj_helper_fn import fetch_nwb
 
 schema = dj.schema('common_ripple')
 
@@ -39,6 +40,7 @@ def get_Kay_ripple_consensus_trace(ripple_filtered_lfps, sampling_frequency,
 class RippleLFPSelection(dj.Manual):
     definition = """
      -> Session
+     id = 0 : int
      """
 
     class RippleLFPElectrode(dj.Part):
@@ -47,36 +49,31 @@ class RippleLFPSelection(dj.Manual):
         -> Electrode
         """
 
-    def set_lfp_electrodes(self, nwb_file_name, id, electrode_list):
+    @staticmethod
+    def set_lfp_electrodes(nwb_file_name, electrode_list, id=0):
         '''Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
 
         Parameters
         ----------
         nwb_file_name : str
             The name of the nwb file for the desired session
-        id : int
         electrode_list : list
             list of electrodes to be used for LFP
+        id : int, optional
 
         '''
-        # remove the session and then recreate the session and Electrode list
-        (RippleLFPSelection() & {
-         'nwb_file_name': nwb_file_name, 'id': id}).delete()
-        # check to see if the user allowed the deletion
-        if len((RippleLFPSelection() & {'nwb_file_name': nwb_file_name}).fetch()) == 0:
-            RippleLFPSelection().insert1(
-                {'nwb_file_name': nwb_file_name, 'id': id})
+        RippleLFPSelection().insert1(
+            {'nwb_file_name': nwb_file_name, 'id': id}, skip_duplicates=True)
 
-            # TODO: do this in a better way
-            all_electrodes = (
-                Electrode() & {'nwb_file_name': nwb_file_name}).fetch(as_dict=True)
-            primary_key = Electrode.primary_key
-            for e in all_electrodes:
-                # create a dictionary so we can insert new elects
-                if e['electrode_id'] in electrode_list:
-                    lfpelectdict = {k: v for k,
-                                    v in e.items() if k in primary_key}
-                    RippleLFPSelection().RippleLFPElectrode.insert1(lfpelectdict, replace=True)
+        electrode_keys = (pd.DataFrame(Electrode & {'nwb_file_name': nwb_file_name})
+                          .set_index('electrode_id')
+                          .loc[electrode_list]
+                          .reset_index()
+                          .loc[:, Electrode.primary_key]
+                          )
+        electrode_keys['id'] = id
+        RippleLFPSelection().RippleLFPElectrode.insert(
+            electrode_keys.to_dict(orient='records'), replace=True)
 
 
 @schema
@@ -103,7 +100,7 @@ class RippleParameters(dj.Lookup):
 
 
 @schema
-class RippleTimes(dj.Manual):
+class RippleTimes(dj.Computed):
     definition = """
     -> RippleParameters
     -> RippleLFPSelection
@@ -114,6 +111,10 @@ class RippleTimes(dj.Manual):
      """
 
     def make(self, key):
+        print(f'Computing ripple times for: {key}')
+        key['analysis_file_name'] = AnalysisNwbfile().create(
+            key['nwb_file_name'])
+
         nwb_file_name = key['nwb_file_name']
         interval_list_name = key['interval_list_name']
         position_info_param_name = key['position_info_param_name']
@@ -192,6 +193,17 @@ class RippleTimes(dj.Manual):
             analysis_file_name=key['analysis_file_name'])
 
         self.insert1(key)
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
+                         *attrs, **kwargs)
+
+    def fetch1_dataframe(self):
+        """Convenience function for returning the marks in a readable format"""
+        return self.fetch_dataframe()[0]
+
+    def fetch_dataframe(self):
+        return [data['ripple_times'] for data in self.fetch_nwb()]
 
     def plot_ripple(lfps, ripple_times, ripple_label=1,  offset=0.100, relative=True):
         lfp_labels = lfps.columns
