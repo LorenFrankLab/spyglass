@@ -87,6 +87,20 @@ class RippleParameters(dj.Lookup):
     ripple_param_dict : BLOB    # dictionary of parameters
     """
 
+    def insert_default(self):
+        """Insert the default parameter set
+
+        Examples
+        --------
+        {'peak_sign': 'neg', 'threshold' : 100}
+        corresponds to negative going waveforms of at least 100 uV size
+        """
+        default_dict = {
+            'filter_name': 'Ripple 150-250 Hz'
+        }
+        self.insert1({'ripple_param_name': 'default',
+                      'ripple_param_dict': default_dict}, skip_duplicates=True)
+
 
 @schema
 class RippleTimes(dj.Manual):
