@@ -141,8 +141,8 @@ class IntervalPositionInfo(dj.Computed):
                 comments=spatial_series.comments,
                 description='head_x_velocity, head_y_velocity, head_speed'
             )
-        except ValueError:
-            pass
+        except ValueError as e:
+            print(e)
 
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
@@ -177,7 +177,10 @@ class IntervalPositionInfo(dj.Computed):
 
         # Get spatial series properties
         time = np.asarray(spatial_series.timestamps)  # seconds
-        position = np.asarray(spatial_series.data)  # meters
+        position = np.asarray(
+            pd.DataFrame(spatial_series.data,
+                         columns=spatial_series.description.split(', '))
+            .loc[:, ['xloc', 'yloc', 'xloc2', 'yloc2']])  # meters
 
         # remove NaN times
         is_nan_time = np.isnan(time)
