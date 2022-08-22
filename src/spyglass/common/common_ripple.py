@@ -154,32 +154,6 @@ class RippleTimes(dj.Computed):
         return [data['ripple_times'] for data in self.fetch_nwb()]
 
     @staticmethod
-    def plot_ripple(lfps, ripple_times, ripple_label=1,  offset=0.100, relative=True, ax=None):
-        lfp_labels = lfps.columns
-        n_lfps = len(lfp_labels)
-        ripple_start = ripple_times.loc[ripple_label].start_time
-        ripple_end = ripple_times.loc[ripple_label].end_time
-        time_slice = slice(ripple_start - offset,
-                           ripple_end + offset)
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=(12, n_lfps * 0.20))
-
-        start_offset = ripple_start if relative else 0
-
-        for lfp_ind, lfp_label in enumerate(lfp_labels):
-            lfp = lfps.loc[time_slice, lfp_label]
-            ax.plot(lfp.index - start_offset, lfp_ind + (lfp - lfp.mean()) / (lfp.max() - lfp.min()),
-                    color='black')
-
-        ax.axvspan(ripple_start - start_offset, ripple_end -
-                   start_offset, zorder=-1, alpha=0.5, color='lightgrey')
-        ax.set_ylim((-1, n_lfps))
-        ax.set_xlim((time_slice.start - start_offset,
-                    time_slice.stop - start_offset))
-        ax.set_ylabel('LFPs')
-        ax.set_xlabel('Time [s]')
-
-    @staticmethod
     def get_ripple_lfps_and_position_info(key):
         nwb_file_name = key['nwb_file_name']
         interval_list_name = key['interval_list_name']
@@ -257,12 +231,14 @@ class RippleTimes(dj.Computed):
         return pd.DataFrame(np.sqrt(ripple_consensus_trace), index=ripple_filtered_lfps.index)
 
     @staticmethod
-    def plot_ripple_consensus_trace(ripple_consensus_trace,
-                                    ripple_times,
-                                    ripple_label=1,
-                                    relative=False,
-                                    offset=0.5,
-                                    ax=None):
+    def plot_ripple_consensus_trace(
+        ripple_consensus_trace,
+        ripple_times,
+        ripple_label=1,
+        offset=0.100,
+        relative=True,
+        ax=None
+    ):
         ripple_start = ripple_times.loc[ripple_label].start_time
         ripple_end = ripple_times.loc[ripple_label].end_time
         time_slice = slice(ripple_start - offset,
@@ -274,3 +250,36 @@ class RippleTimes(dj.Computed):
         ax.plot(ripple_consensus_trace.loc[time_slice])
         ax.axvspan(ripple_start - start_offset, ripple_end -
                    start_offset, zorder=-1, alpha=0.5, color='lightgrey')
+
+    @staticmethod
+    def plot_ripple(
+        lfps,
+        ripple_times,
+        ripple_label=1,
+        offset=0.100,
+        relative=True,
+        ax=None
+    ):
+        lfp_labels = lfps.columns
+        n_lfps = len(lfp_labels)
+        ripple_start = ripple_times.loc[ripple_label].start_time
+        ripple_end = ripple_times.loc[ripple_label].end_time
+        time_slice = slice(ripple_start - offset,
+                           ripple_end + offset)
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(12, n_lfps * 0.20))
+
+        start_offset = ripple_start if relative else 0
+
+        for lfp_ind, lfp_label in enumerate(lfp_labels):
+            lfp = lfps.loc[time_slice, lfp_label]
+            ax.plot(lfp.index - start_offset, lfp_ind + (lfp - lfp.mean()) / (lfp.max() - lfp.min()),
+                    color='black')
+
+        ax.axvspan(ripple_start - start_offset, ripple_end -
+                   start_offset, zorder=-1, alpha=0.5, color='lightgrey')
+        ax.set_ylim((-1, n_lfps))
+        ax.set_xlim((time_slice.start - start_offset,
+                    time_slice.stop - start_offset))
+        ax.set_ylabel('LFPs')
+        ax.set_xlabel('Time [s]')
