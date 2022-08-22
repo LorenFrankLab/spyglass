@@ -231,11 +231,15 @@ class LFPSelection(dj.Manual):
         """
 
     def set_lfp_electrodes(self, nwb_file_name, electrode_list):
-        '''
-        Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
-        :param nwb_file_name: string - the name of the nwb file for the desired session
-        :param electrode_list: list of electrodes to be used for LFP
-        :return:
+        '''Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the nwb file for the desired session
+        electrode_list : list
+            list of electrodes to be used for LFP
+
         '''
         # remove the session and then recreate the session and Electrode list
         (LFPSelection() & {'nwb_file_name': nwb_file_name}).delete()
