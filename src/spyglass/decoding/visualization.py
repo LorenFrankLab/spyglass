@@ -175,9 +175,12 @@ def make_single_environment_movie(
             title.set_text(
                 f'time = {posterior.isel(time=time_ind).time.values:0.2f}')
 
-            multiunit_firing_line.set_data(
-                window_ind / sampling_frequency,
-                np.asarray(rate.iloc[time_ind + (window_size // 2) + window_ind]))
+            try:
+                multiunit_firing_line.set_data(
+                    window_ind / sampling_frequency,
+                    np.asarray(rate.iloc[time_ind + (window_size // 2) + window_ind]))
+            except IndexError:
+                pass
 
             progress_bar.update()
 
