@@ -2,7 +2,7 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from ripple_detection import Kay_ripple_detector
+from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
 from spyglass.common import (Electrode, IntervalList,  # noqa
                              IntervalPositionInfo,
@@ -11,6 +11,11 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.dj_helper_fn import fetch_nwb
 
 schema = dj.schema('common_ripple')
+
+RIPPLE_DETECTION_ALGORITHMS = {
+    'Kay_ripple_detector': Kay_ripple_detector,
+    'Karlsson_ripple_detector': Karlsson_ripple_detector,
+}
 
 
 def interpolate_to_new_time(df, new_time, upsampling_interpolation_method='linear'):
@@ -23,24 +28,11 @@ def interpolate_to_new_time(df, new_time, upsampling_interpolation_method='linea
             .reindex(index=new_time))
 
 
-def get_Kay_ripple_consensus_trace(ripple_filtered_lfps, sampling_frequency,
-                                   smoothing_sigma=0.004):
-    ripple_consensus_trace = np.full_like(ripple_filtered_lfps, np.nan)
-    not_null = np.all(pd.notnull(ripple_filtered_lfps), axis=1)
-
-    ripple_consensus_trace[not_null] = get_envelope(
-        np.asarray(ripple_filtered_lfps)[not_null])
-    ripple_consensus_trace = np.sum(ripple_consensus_trace ** 2, axis=1)
-    ripple_consensus_trace[not_null] = gaussian_smooth(
-        ripple_consensus_trace[not_null], smoothing_sigma, sampling_frequency)
-    return np.sqrt(ripple_consensus_trace)
-
-
 @schema
 class RippleLFPSelection(dj.Manual):
     definition = """
      -> Session
-     id = 0 : int
+     brain_region = 'Hippocampus' : varchar(80)
      """
 
     class RippleLFPElectrode(dj.Part):
@@ -50,7 +42,7 @@ class RippleLFPSelection(dj.Manual):
         """
 
     @staticmethod
-    def set_lfp_electrodes(nwb_file_name, electrode_list, id=0):
+    def set_lfp_electrodes(nwb_file_name, electrode_list, brain_region='Hippocampus'):
         '''Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
 
         Parameters
@@ -59,11 +51,11 @@ class RippleLFPSelection(dj.Manual):
             The name of the nwb file for the desired session
         electrode_list : list
             list of electrodes to be used for LFP
-        id : int, optional
+        brain_region : str, optional
 
         '''
         RippleLFPSelection().insert1(
-            {'nwb_file_name': nwb_file_name, 'id': id}, skip_duplicates=True)
+            {'nwb_file_name': nwb_file_name, 'brain_region': brain_region}, skip_duplicates=True)
 
         electrode_keys = (pd.DataFrame(Electrode & {'nwb_file_name': nwb_file_name})
                           .set_index('electrode_id')
@@ -71,7 +63,7 @@ class RippleLFPSelection(dj.Manual):
                           .reset_index()
                           .loc[:, Electrode.primary_key]
                           )
-        electrode_keys['id'] = id
+        electrode_keys['brain_region'] = brain_region
         RippleLFPSelection().RippleLFPElectrode.insert(
             electrode_keys.to_dict(orient='records'), replace=True)
 
@@ -85,15 +77,18 @@ class RippleParameters(dj.Lookup):
     """
 
     def insert_default(self):
-        """Insert the default parameter set
-
-        Examples
-        --------
-        {'peak_sign': 'neg', 'threshold' : 100}
-        corresponds to negative going waveforms of at least 100 uV size
-        """
+        """Insert the default parameter set"""
         default_dict = {
-            'filter_name': 'Ripple 150-250 Hz'
+            'filter_name': 'Ripple 150-250 Hz',
+            'speed_name': 'head_speed',
+            'ripple_detection_algorithm': 'Kay_ripple_detector',
+            'ripple_detection_params': dict(
+                speed_threshold=4.0,  # cm/s
+                minimum_duration=0.015,  # sec
+                zscore_threshold=2.0,  # std
+                smoothing_sigma=0.004,  # sec
+                close_ripple_threshold=0.0  # sec
+            )
         }
         self.insert1({'ripple_param_name': 'default',
                       'ripple_param_dict': default_dict}, skip_duplicates=True)
@@ -112,24 +107,95 @@ class RippleTimes(dj.Computed):
 
     def make(self, key):
         print(f'Computing ripple times for: {key}')
-        key['analysis_file_name'] = AnalysisNwbfile().create(
-            key['nwb_file_name'])
+        ripple_params = (
+            RippleParameters &
+            {'ripple_param_name': key['ripple_param_name']}
+        ).fetch1('ripple_param_dict')
 
+        ripple_detection_algorithm = ripple_params['ripple_detection_algorithm']
+        ripple_detection_params = ripple_params['ripple_detection_params']
+
+        (speed,
+         interval_ripple_lfps,
+         sampling_frequency
+         ) = self.get_ripple_lfps_and_position_info(key)
+
+        ripple_times = RIPPLE_DETECTION_ALGORITHMS[ripple_detection_algorithm](
+            time=np.asarray(interval_ripple_lfps.index),
+            filtered_lfps=np.asarray(interval_ripple_lfps),
+            speed=np.asarray(speed),
+            sampling_frequency=sampling_frequency,
+            **ripple_detection_params
+        )
+
+        # Insert into analysis nwb file
+        nwb_analysis_file = AnalysisNwbfile()
+        key['analysis_file_name'] = nwb_analysis_file.create(
+            key['nwb_file_name'])
+        key['ripple_times_object_id'] = nwb_analysis_file.add_nwb_object(
+            analysis_file_name=key['analysis_file_name'],
+            nwb_object=ripple_times,
+        )
+        nwb_analysis_file.add(
+            nwb_file_name=key['nwb_file_name'],
+            analysis_file_name=key['analysis_file_name'])
+
+        self.insert1(key)
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
+                         *attrs, **kwargs)
+
+    def fetch1_dataframe(self):
+        """Convenience function for returning the marks in a readable format"""
+        return self.fetch_dataframe()[0]
+
+    def fetch_dataframe(self):
+        return [data['ripple_times'] for data in self.fetch_nwb()]
+
+    @staticmethod
+    def plot_ripple(lfps, ripple_times, ripple_label=1,  offset=0.100, relative=True, ax=None):
+        lfp_labels = lfps.columns
+        n_lfps = len(lfp_labels)
+        ripple_start = ripple_times.loc[ripple_label].start_time
+        ripple_end = ripple_times.loc[ripple_label].end_time
+        time_slice = slice(ripple_start - offset,
+                           ripple_end + offset)
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(12, n_lfps * 0.20))
+
+        start_offset = ripple_start if relative else 0
+
+        for lfp_ind, lfp_label in enumerate(lfp_labels):
+            lfp = lfps.loc[time_slice, lfp_label]
+            ax.plot(lfp.index - start_offset, lfp_ind + (lfp - lfp.mean()) / (lfp.max() - lfp.min()),
+                    color='black')
+
+        ax.axvspan(ripple_start - start_offset, ripple_end -
+                   start_offset, zorder=-1, alpha=0.5, color='lightgrey')
+        ax.set_ylim((-1, n_lfps))
+        ax.set_xlim((time_slice.start - start_offset,
+                    time_slice.stop - start_offset))
+        ax.set_ylabel('LFPs')
+        ax.set_xlabel('Time [s]')
+
+    @staticmethod
+    def get_ripple_lfps_and_position_info(key):
         nwb_file_name = key['nwb_file_name']
         interval_list_name = key['interval_list_name']
         position_info_param_name = key['position_info_param_name']
-        id = key['id']
-
+        brain_region = key['brain_region']
         ripple_params = (
             RippleParameters &
             {'ripple_param_name': key['ripple_param_name']}
         ).fetch1('ripple_param_dict')
 
         filter_name = ripple_params['filter_name']
+        speed_name = ripple_params['speed_name']
 
         electrode_keys = (RippleLFPSelection() &
                           {'nwb_file_name': nwb_file_name,
-                          'id': id}
+                          'brain_region': brain_region}
                           ).RippleLFPElectrode().fetch('KEY')
 
         # warn/validate that there is only one wire per electrode
@@ -173,58 +239,38 @@ class RippleTimes(dj.Computed):
         position_info = interpolate_to_new_time(
             position_info, interval_ripple_lfps.index)
 
-        ripple_times = Kay_ripple_detector(
-            time=np.asarray(interval_ripple_lfps.index),
-            filtered_lfps=np.asarray(interval_ripple_lfps),
-            speed=np.asarray(position_info.head_speed),
-            sampling_frequency=sampling_frequency
-        )
+        return (position_info[speed_name],
+                interval_ripple_lfps,
+                sampling_frequency)
 
-        # Insert into analysis nwb file
-        nwb_analysis_file = AnalysisNwbfile()
+    @staticmethod
+    def get_Kay_ripple_consensus_trace(ripple_filtered_lfps, sampling_frequency,
+                                       smoothing_sigma=0.004):
+        ripple_consensus_trace = np.full_like(ripple_filtered_lfps, np.nan)
+        not_null = np.all(pd.notnull(ripple_filtered_lfps), axis=1)
 
-        key['ripple_times_object_id'] = nwb_analysis_file.add_nwb_object(
-            analysis_file_name=key['analysis_file_name'],
-            nwb_object=ripple_times,
-        )
+        ripple_consensus_trace[not_null] = get_envelope(
+            np.asarray(ripple_filtered_lfps)[not_null])
+        ripple_consensus_trace = np.sum(ripple_consensus_trace ** 2, axis=1)
+        ripple_consensus_trace[not_null] = gaussian_smooth(
+            ripple_consensus_trace[not_null], smoothing_sigma, sampling_frequency)
+        return pd.DataFrame(np.sqrt(ripple_consensus_trace), index=ripple_filtered_lfps.index)
 
-        nwb_analysis_file.add(
-            nwb_file_name=key['nwb_file_name'],
-            analysis_file_name=key['analysis_file_name'])
-
-        self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'),
-                         *attrs, **kwargs)
-
-    def fetch1_dataframe(self):
-        """Convenience function for returning the marks in a readable format"""
-        return self.fetch_dataframe()[0]
-
-    def fetch_dataframe(self):
-        return [data['ripple_times'] for data in self.fetch_nwb()]
-
-    def plot_ripple(lfps, ripple_times, ripple_label=1,  offset=0.100, relative=True):
-        lfp_labels = lfps.columns
-        n_lfps = len(lfp_labels)
+    @staticmethod
+    def plot_ripple_consensus_trace(ripple_consensus_trace,
+                                    ripple_times,
+                                    ripple_label=1,
+                                    relative=False,
+                                    offset=0.5,
+                                    ax=None):
         ripple_start = ripple_times.loc[ripple_label].start_time
         ripple_end = ripple_times.loc[ripple_label].end_time
         time_slice = slice(ripple_start - offset,
                            ripple_end + offset)
-        fig, ax = plt.subplots(1, 1, figsize=(12, n_lfps * 0.20))
 
         start_offset = ripple_start if relative else 0
-
-        for lfp_ind, lfp_label in enumerate(lfp_labels):
-            lfp = lfps.loc[time_slice, lfp_label]
-            ax.plot(lfp.index - start_offset, lfp_ind + (lfp - lfp.mean()) / (lfp.max() - lfp.min()),
-                    color='black')
-
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(12, 1))
+        ax.plot(ripple_consensus_trace.loc[time_slice])
         ax.axvspan(ripple_start - start_offset, ripple_end -
                    start_offset, zorder=-1, alpha=0.5, color='lightgrey')
-        ax.set_ylim((-1, n_lfps))
-        ax.set_xlim((time_slice.start - start_offset,
-                    time_slice.stop - start_offset))
-        ax.set_ylabel('LFPs')
-        ax.set_xlabel('Time [s]')
