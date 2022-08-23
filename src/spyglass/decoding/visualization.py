@@ -480,7 +480,7 @@ def create_figurl_decode_visualization(
     layout = MultiTimeseries(label=visualization_name)
 
     # spikes panel
-    if spikes is None:
+    if spikes is not None:
         cell_ids, spike_ind = np.nonzero(spikes)
         time = np.asarray(results.time)
         spike_times = np.asarray(
