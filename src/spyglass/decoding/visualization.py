@@ -2,7 +2,7 @@ from math import ceil, floor
 from typing import Callable, Dict, Tuple, cast
 
 import h5py
-import kachery_client as kc
+import kachery_cloud as kcl
 import matplotlib.animation as animation
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
@@ -396,7 +396,7 @@ def make_multi_environment_movie(
 
 
 def create_live_position_pdf_plot_h5(*, data: np.ndarray, segment_size: int, multiscale_factor: int):
-    data_uri = kc.store_npy(data)
+    data_uri = kcl.store_npy(data)
     key = {
         'type': 'live_position_plot_h5',
         'version': 5,
@@ -404,8 +404,9 @@ def create_live_position_pdf_plot_h5(*, data: np.ndarray, segment_size: int, mul
         'segment_size': segment_size,
         'multiscale_factor': multiscale_factor
     }
-    a = kc.get(key)
-    if a and kc.load_file(a):
+    key_str = f'@create_live_position_pdf_plot_h5/{kcl.sha1_of_dict(key)}'
+    a = kcl.get_mutable_local(key_str)
+    if a and kcl.load_file(a):
         return a
 
     num_times = data.shape[0]
@@ -414,7 +415,7 @@ def create_live_position_pdf_plot_h5(*, data: np.ndarray, segment_size: int, mul
     def fetch_segment(istart: int, iend: int):
         return np.nan_to_num(data[istart:iend])
 
-    with kc.TemporaryDirectory() as tmpdir:
+    with kcl.TemporaryDirectory() as tmpdir:
         print(tmpdir)
         output_file_name = tmpdir + '/live_position_pdf_plot.h5'
         with h5py.File(output_file_name, 'w') as f:
@@ -459,8 +460,9 @@ def create_live_position_pdf_plot_h5(*, data: np.ndarray, segment_size: int, mul
                         f'segment/{downsample_factor}/{iseg}', data=B)
                 downsample_factor *= multiscale_factor
 
-        h5_uri = kc.store_file(output_file_name)
-        kc.set(key, h5_uri)
+        h5_uri = kcl.store_file(output_file_name)
+        kcl.set_mutable_local(key_str, h5_uri)
+
         return h5_uri
 
 
@@ -469,6 +471,7 @@ def create_figurl_decode_visualization(
         linear_position_info,
         classifier,
         results,
+        spikes=None,
         visualization_name='test',
         segment_size=100000,
         multiscale_factor=3,
@@ -476,19 +479,27 @@ def create_figurl_decode_visualization(
 
     layout = MultiTimeseries(label=visualization_name)
 
-    # # spikes panel
-    # layout.add_panel(
-    #     create_spike_raster_plot(
-    #         times=spike_times.astype(np.float32),
-    #         labels=cell_ids.astype(np.int32),
-    #         label='Spikes'
-    #     )
-    # )
+    # spikes panel
+    if spikes is None:
+        cell_ids, spike_ind = np.nonzero(spikes)
+        time = np.asarray(results.time)
+        spike_times = np.asarray(
+            time[spike_ind] - time[0], dtype=np.float32)
+        layout.add_panel(
+            create_spike_raster_plot(
+                times=np.asarray(
+                    spike_times - results.time[0], dtype=np.float32),
+                labels=cell_ids.astype(np.int32),
+                label='Spikes'
+            )
+        )
 
     # linear position panel
     layout.add_panel(
         create_position_plot(
-            timestamps=np.asarray(linear_position_info.index),
+            timestamps=np.asarray(
+                linear_position_info.index - linear_position_info.index[0],
+                dtype=np.float32),
             positions=np.asarray(
                 linear_position_info.linear_position, dtype=np.float32),
             dimension_labels=['Linear position'],
@@ -500,7 +511,8 @@ def create_figurl_decode_visualization(
     # speed panel
     layout.add_panel(
         create_position_plot(
-            timestamps=np.asarray(position_info.index),
+            timestamps=np.asarray(position_info.index - position_info.index[0],
+                                  dtype=np.float32),
             positions=np.asarray(position_info.head_speed, dtype=np.float32),
             dimension_labels=['Speed'],
             label='Speed',
@@ -523,7 +535,7 @@ def create_figurl_decode_visualization(
             .where(classifier.is_track_interior_),
             dtype=np.float32
         )
-    time = np.asarray(results.time, dtype=np.float32)
+    time = np.asarray(results.time - results.time[0], dtype=np.float32)
 
     h5_uri = create_live_position_pdf_plot_h5(
         data=posterior,
