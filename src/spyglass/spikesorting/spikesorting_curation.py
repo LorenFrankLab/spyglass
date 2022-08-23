@@ -361,12 +361,16 @@ class MetricParameters(dj.Manual):
                              'n_components': 7,
                              'radius_um': 100,
                              'seed': 0},
-        'peak_channel' : {'peak_sign' : 'neg'}
+        'peak_channel' : {'peak_sign' : 'neg'},
+        'cosine_similarity' : {'method' : 'cosine_similarity'},
+        'correl_asymm' : {'window_ms' : 40.0,
+                          'bin_ms' : 0.5}
     }
     # Example of peak_offset parameters 'peak_offset': {'peak_sign': 'neg'}
     available_metrics = [
         'snr', 'isi_violation', 'nn_isolation',
-        'nn_noise_overlap', 'peak_offset', 'peak_channel'
+        'nn_noise_overlap', 'peak_offset', 'peak_channel',
+        'cosine_similarity', 'correl_asymm'
         ]
 
     def get_metric_default_params(self, metric: str):
@@ -462,9 +466,10 @@ class QualityMetrics(dj.Computed):
 
     def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
         peak_sign_metrics = ['snr', 'peak_offset', 'peak_channel']
+        pass_param_metrics = ['isi_violation', 'cosine_similarity', 'correl_asymm']
         metric_func = _metric_name_to_func[metric_name]
         # TODO clean up code below
-        if metric_name == 'isi_violation':
+        if metric_name in pass_param_metrics:
             metric = metric_func(waveform_extractor, **metric_params)
         elif metric_name in peak_sign_metrics:
             if 'peak_sign' in metric_params:
@@ -533,13 +538,37 @@ def _get_peak_channel(waveform_extractor: si.WaveformExtractor, peak_sign: str, 
     peak_channel = {key : int(val) for key, val in peak_channel_dict.items()}
     return peak_channel
 
+def _get_correlogram_asymmetry(waveform_extractor: si.WaveformExtractor, **metric_params):
+    """Computes the correlogram asymmetry between two units using spikeinterface compute_correlogram
+    """
+
+    corr, bins = si.postprocessing.compute_correlograms(
+        waveform_extractor, **metric_params)
+    # To only use left edge of bin
+    bins = bins[:-1]
+    neg_inds = np.where((bins < 0) & (bins>-20))[0]
+    pos_inds = np.where((bins > 0) & (bins<20))[0]
+    zero_inds = np.where(bins==0)[0]
+    asym_mat = np.zeros(shape=(corr.shape[0], corr.shape[1]))
+    unit_ids = waveform_extractor.sorting.unit_ids
+    for i, _ in enumerate(unit_ids):
+        for j, _ in enumerate(unit_ids):
+            ccg = corr[i,j]
+            neg_count = np.sum(ccg[neg_inds])
+            pos_count = np.sum(ccg[pos_inds])
+            zero_count = np.sum(ccg[zero_inds])
+            asym_mat[i,j] = (np.max([neg_count, pos_count]) + zero_count/2)/(zero_count + neg_count + pos_count)
+    return asym_mat
+
 _metric_name_to_func = {
     "snr": st.qualitymetrics.compute_snrs,
     "isi_violation": _compute_isi_violation_fractions,
     'nn_isolation': st.qualitymetrics.nearest_neighbors_isolation,
     'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap,
     'peak_offset': _get_peak_offset,
-    'peak_channel': _get_peak_channel
+    'peak_channel': _get_peak_channel,
+    'cosine_similarity': si.postprocessing.compute_template_similarity,
+    'correl_asymm': _get_correlogram_asymmetry
 }
 
 
