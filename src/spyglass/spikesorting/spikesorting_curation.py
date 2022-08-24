@@ -488,11 +488,19 @@ class QualityMetrics(dj.Computed):
         return metric
 
     def _dump_to_json(self, qm_dict, save_path):
+        matrix_metrics = ['cosine_similarity', 'correl_asymm']
         new_qm = {}
         for key, value in qm_dict.items():
-            m = {}
-            for unit_id, metric_val in value.items():
-                m[str(unit_id)] = metric_val
+            if key in matrix_metrics:
+                m = {}
+                for unit_id1 in value.keys():
+                    m[str(unit_id1)] = {}
+                    for unit_id2 in value.keys():
+                        m[str(unit_id1)][str(unit_id2)] = value[unit_id1][unit_id2]
+            else:
+                m = {}
+                for unit_id, metric_val in value.items():
+                    m[str(unit_id)] = metric_val
             new_qm[str(key)] = m
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(new_qm, f, ensure_ascii=False, indent=4)
@@ -538,6 +546,20 @@ def _get_peak_channel(waveform_extractor: si.WaveformExtractor, peak_sign: str, 
     peak_channel = {key : int(val) for key, val in peak_channel_dict.items()}
     return peak_channel
 
+def _get_cosine_similarity(waveform_extractor: si.WaveformExtractor, **metric_params):
+    """Gets the cosine similarity as computed by SpikeInterface's compute_template_similarity
+    """
+    cos_sim_mat = si.postprocessing.compute_template_similarity(
+        waveform_extractor=waveform_extractor,
+        **metric_params)
+    unit_ids = waveform_extractor.sorting.unit_ids
+    cos_sim_dict = {
+        unit_id1: {unit_id2: np.float64(cos_sim_mat[i, j])
+        for j, unit_id2 in enumerate(unit_ids)}
+        for i, unit_id1 in enumerate(unit_ids)
+        }
+    return cos_sim_dict
+
 def _get_correlogram_asymmetry(waveform_extractor: si.WaveformExtractor, **metric_params):
     """Computes the correlogram asymmetry between two units using spikeinterface compute_correlogram
     """
@@ -549,16 +571,19 @@ def _get_correlogram_asymmetry(waveform_extractor: si.WaveformExtractor, **metri
     neg_inds = np.where((bins < 0) & (bins>-20))[0]
     pos_inds = np.where((bins > 0) & (bins<20))[0]
     zero_inds = np.where(bins==0)[0]
-    asym_mat = np.zeros(shape=(corr.shape[0], corr.shape[1]))
+    # asym_mat = np.zeros(shape=(corr.shape[0], corr.shape[1]))
     unit_ids = waveform_extractor.sorting.unit_ids
-    for i, _ in enumerate(unit_ids):
-        for j, _ in enumerate(unit_ids):
+    asym_dict = {unit_id : dict.fromkeys(unit_ids) for unit_id in unit_ids}
+    for i, unit_id1 in enumerate(unit_ids):
+        for j, unit_id2 in enumerate(unit_ids):
             ccg = corr[i,j]
             neg_count = np.sum(ccg[neg_inds])
             pos_count = np.sum(ccg[pos_inds])
             zero_count = np.sum(ccg[zero_inds])
-            asym_mat[i,j] = (np.max([neg_count, pos_count]) + zero_count/2)/(zero_count + neg_count + pos_count)
-    return asym_mat
+            asym_dict[unit_id1][unit_id2] = np.float64(
+                (np.max([neg_count, pos_count]) + zero_count/2)/
+                (zero_count + neg_count + pos_count))
+    return asym_dict
 
 _metric_name_to_func = {
     "snr": st.qualitymetrics.compute_snrs,
@@ -567,7 +592,7 @@ _metric_name_to_func = {
     'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap,
     'peak_offset': _get_peak_offset,
     'peak_channel': _get_peak_channel,
-    'cosine_similarity': si.postprocessing.compute_template_similarity,
+    'cosine_similarity': _get_cosine_similarity,
     'correl_asymm': _get_correlogram_asymmetry
 }
 
