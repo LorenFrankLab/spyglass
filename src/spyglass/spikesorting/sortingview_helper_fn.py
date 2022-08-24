@@ -118,15 +118,15 @@ def _create_spikesortingview_workspace(recording_path: str, sorting_path: str, m
     
     # create a fake unit similiarity matrix
     similarity_scores = []
-    for u1 in X.unit_ids:
-        for u2 in X.unit_ids:
-            similarity_scores.append(
-                vv.UnitSimilarityScore(
-                    unit_id1=u1,
-                    unit_id2=u2,
-                    similarity=similarity_matrix[(X.unit_ids==u1),(X.unit_ids==u2)]
-                )
-            )
+    # for u1 in X.unit_ids:
+    #     for u2 in X.unit_ids:
+    #         similarity_scores.append(
+    #             vv.UnitSimilarityScore(
+    #                 unit_id1=u1,
+    #                 unit_id2=u2,
+    #                 similarity=similarity_matrix[(X.unit_ids==u1),(X.unit_ids==u2)]
+    #             )
+    #         )
     # Create the similarity matrix view
     unit_similarity_matrix_view = vv.UnitSimilarityMatrix(
         unit_ids=X.unit_ids,
