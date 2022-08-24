@@ -179,11 +179,17 @@ class VideoFile(dj.Imported):
         valid_times = (IntervalList & {'nwb_file_name': key['nwb_file_name'],
                                        'interval_list_name': interval_list_name}).fetch1('valid_times')
 
+        is_found = False
         for video_obj in video.time_series.values():
             # check to see if the times for this video_object are largely overlapping with the task epoch times
             if len(interval_list_contains(valid_times, video_obj.timestamps) > .9 * len(video_obj.timestamps)):
                 key['video_file_object_id'] = video_obj.object_id
                 self.insert1(key)
+                is_found = True
+
+        if not is_found:
+            print(
+                f'No video found corresponding to epoch {interval_list_name}')
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
