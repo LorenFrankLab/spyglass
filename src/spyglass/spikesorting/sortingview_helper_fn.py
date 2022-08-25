@@ -128,10 +128,10 @@ def _create_spikesortingview_workspace(recording_path: str, sorting_path: str, m
     #             )
     #         )
     # Create the similarity matrix view
-    unit_similarity_matrix_view = vv.UnitSimilarityMatrix(
-        unit_ids=X.unit_ids,
-        similarity_scores=similarity_scores
-        )
+    #unit_similarity_matrix_view = vv.UnitSimilarityMatrix(
+    #    unit_ids=X.unit_ids,
+    #    similarity_scores=similarity_scores
+    #    )
     
     # Assemble the views in a layout
     # You can replace this with other layouts
@@ -169,10 +169,10 @@ def _create_spikesortingview_workspace(recording_path: str, sorting_path: str, m
                 label='Electrode geometry',
                 view=X.electrode_geometry_view()
             ),
-            vv.MountainLayoutItem(
-                label='Unit similarity matrix',
-                view=unit_similarity_matrix_view
-            ),
+            #vv.MountainLayoutItem(
+            #    label='Unit similarity matrix',
+            #    view=unit_similarity_matrix_view
+            #),
             vv.MountainLayoutItem(
                 label='Curation',
                 view=vv.SortingCuration(),
