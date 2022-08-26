@@ -14,7 +14,8 @@ from .common_session import Session  # noqa: F401
 from .dj_helper_fn import fetch_nwb  # dj_replace
 from .nwb_helper_fn import (estimate_sampling_rate, get_data_interface,
                             get_electrode_indices, get_nwb_file, get_config,
-                            get_valid_intervals, invalid_electrode_index)
+                            get_valid_intervals, invalid_electrode_index,
+                            get_raw_eseries)
 
 schema = dj.schema('common_ephys')
 
@@ -84,6 +85,80 @@ schema = dj.schema('common_ephys')
 #             print(new_eg_dict)
 #             self.insert1(new_eg_dict, skip_duplicates=True)
 
+@schema
+class Raw(dj.Imported):
+    definition = """
+    # Raw voltage timeseries data, ElectricalSeries in NWB.
+    -> Session
+    raw_object_name: varchar(200)   # name of the raw data object (e.g. ElectricalSeries)
+    ---
+    -> IntervalList
+    raw_object_id: varchar(40)      # the NWB object ID for loading this object from the file
+    sampling_rate: float            # Sampling rate calculated from data, in Hz
+    comments: varchar(2000)
+    description: varchar(2000)
+    """
+
+    def make(self, key):
+        nwb_file_name = key['nwb_file_name']
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        nwbf = get_nwb_file(nwb_file_abspath)
+        raw_interval_name = "raw data valid times"
+        # get the acquisition object
+        # try:
+            # TODO this assumes there is a single item in NWBFile.acquisition
+            # rawdata = nwbf.get_acquisition()
+        rawdata_list = get_raw_eseries(nwbf)
+        assert rawdata_list, 'No ElectricalSeries in the NWB file acquisition object.'
+        # except (ValueError, AssertionError):
+        #     warnings.warn(f'Unable to get acquisition object in: {nwb_file_abspath}')
+        #     return
+        for rawdata in rawdata_list:
+            if rawdata.rate is not None:
+                sampling_rate = rawdata.rate
+            else:
+                print('Estimating sampling rate...')
+                # NOTE: Only use first 1e6 timepoints to save time
+                sampling_rate = estimate_sampling_rate(np.asarray(rawdata.timestamps[:int(1e6)]), 1.5)
+                print(f'Estimated sampling rate: {sampling_rate}')
+            key['sampling_rate'] = sampling_rate
+
+            interval_dict = dict()
+            interval_dict['nwb_file_name'] = key['nwb_file_name']
+            interval_dict['interval_list_name'] = raw_interval_name
+            if rawdata.rate is not None:
+                interval_dict['valid_times'] = np.array([[0, len(rawdata.data)/rawdata.rate]])
+            else:
+                # get the list of valid times given the specified sampling rate.
+                interval_dict['valid_times'] = get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
+                                                                   1.75, 0)
+            IntervalList().insert1(interval_dict, skip_duplicates=True)
+
+            # now insert each of the electrodes as an individual row, but with the same nwb_object_id
+            key['raw_object_name'] = rawdata.name
+            key['raw_object_id'] = rawdata.object_id
+            key['sampling_rate'] = sampling_rate
+            print(
+                f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz')
+            print(
+                f'Number of valid intervals:\t{len(interval_dict["valid_times"])}')
+            key['interval_list_name'] = raw_interval_name
+            key['comments'] = rawdata.comments
+            key['description'] = rawdata.description
+            self.insert1(key, skip_duplicates=True)
+
+    def nwb_object(self, key):
+        # TODO return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
+        # so we can modify the other one.
+        nwb_file_name = key['nwb_file_name']
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        nwbf = get_nwb_file(nwb_file_abspath)
+        raw_object_id = (self & {'nwb_file_name': key['nwb_file_name']}).fetch1(
+            'raw_object_id')
+        return nwbf.objects[raw_object_id]
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
 
 @schema
 class Electrode(dj.Imported):
@@ -91,6 +166,7 @@ class Electrode(dj.Imported):
     -> Session
     electrode_id: int                      # the unique number for this electrode
     ---
+    -> [nullable] Raw
     -> [nullable] Probe.Electrode
     -> BrainRegion
     name = "": varchar(200)                 # unique label for each contact
@@ -112,6 +188,13 @@ class Electrode(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath)
+        es_list = get_raw_eseries(nwbf)
+        electrode_to_es = dict()
+        for es in es_list:
+            ee = [es.electrodes.table.id[x] for x in es.electrodes.data]
+            for electrode in ee:
+                electrode_to_es[electrode] = es.name
+        
         electrodes = nwbf.electrodes.to_dataframe()
         for elect_id, elect_data in electrodes.iterrows():
             key['electrode_id'] = elect_id
@@ -135,6 +218,7 @@ class Electrode(dj.Imported):
                         device_name = replacement["Probe"]["device_name"]
                         if probe_type == device_name:
                             probe_type = replacement["Probe"]["probe_type"]  # replace
+
 
             assert {'probe_type': probe_type} in Probe(), \
                 (f"Probe type {probe_type} not found in Probe. Please insert this probe to the Probe table first")
@@ -181,7 +265,8 @@ class Electrode(dj.Imported):
                                       "for the Probe ({probe_electrode_rel_z}). Please check that these values are "
                                       "correct. They may be based off of a different zero or mirror images of each "
                                       "other.")
-
+            
+            key['raw_object_name'] = electrode_to_es[elect_id]
             key['probe_type'] = probe_type
             key['probe_shank'] = probe_shank
             key['probe_electrode'] = probe_electrode
@@ -198,79 +283,6 @@ class Electrode(dj.Imported):
             key['filtering'] = elect_data.filtering
             key['impedance'] = elect_data.imp
             self.insert1(key, skip_duplicates=True)
-
-
-@schema
-class Raw(dj.Imported):
-    definition = """
-    # Raw voltage timeseries data, ElectricalSeries in NWB.
-    -> Session
-    ---
-    -> IntervalList
-    raw_object_id: varchar(40)      # the NWB object ID for loading this object from the file
-    sampling_rate: float            # Sampling rate calculated from data, in Hz
-    comments: varchar(2000)
-    description: varchar(2000)
-    """
-
-    def make(self, key):
-        nwb_file_name = key['nwb_file_name']
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        raw_interval_name = "raw data valid times"
-        # get the acquisition object
-        try:
-            # TODO this assumes there is a single item in NWBFile.acquisition
-            rawdata = nwbf.get_acquisition()
-            assert isinstance(rawdata, pynwb.ecephys.ElectricalSeries)
-        except (ValueError, AssertionError):
-            warnings.warn(f'Unable to get acquisition object in: {nwb_file_abspath}')
-            return
-        if rawdata.rate is not None:
-            sampling_rate = rawdata.rate
-        else:
-            print('Estimating sampling rate...')
-            # NOTE: Only use first 1e6 timepoints to save time
-            sampling_rate = estimate_sampling_rate(np.asarray(rawdata.timestamps[:int(1e6)]), 1.5)
-            print(f'Estimated sampling rate: {sampling_rate}')
-        key['sampling_rate'] = sampling_rate
-
-        interval_dict = dict()
-        interval_dict['nwb_file_name'] = key['nwb_file_name']
-        interval_dict['interval_list_name'] = raw_interval_name
-        if rawdata.rate is not None:
-            interval_dict['valid_times'] = np.array([[0, len(rawdata.data)/rawdata.rate]])
-        else:
-            # get the list of valid times given the specified sampling rate.
-            interval_dict['valid_times'] = get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
-                                                               1.75, 0)
-        IntervalList().insert1(interval_dict, skip_duplicates=True)
-
-        # now insert each of the electrodes as an individual row, but with the same nwb_object_id
-        key['raw_object_id'] = rawdata.object_id
-        key['sampling_rate'] = sampling_rate
-        print(
-            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz')
-        print(
-            f'Number of valid intervals:\t{len(interval_dict["valid_times"])}')
-        key['interval_list_name'] = raw_interval_name
-        key['comments'] = rawdata.comments
-        key['description'] = rawdata.description
-        self.insert1(key, skip_duplicates=True)
-
-    def nwb_object(self, key):
-        # TODO return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
-        # so we can modify the other one.
-        nwb_file_name = key['nwb_file_name']
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        raw_object_id = (self & {'nwb_file_name': key['nwb_file_name']}).fetch1(
-            'raw_object_id')
-        return nwbf.objects[raw_object_id]
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
-
 
 @schema
 class SampleCount(dj.Imported):

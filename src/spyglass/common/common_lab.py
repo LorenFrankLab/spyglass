@@ -42,8 +42,8 @@ class LabMember(dj.Manual):
         if nwbf.experimenter is not None and "LabMember" not in config:
             for experimenter in nwbf.experimenter:
                 cls.insert_from_name(experimenter)
-            # each person is by default the member of their own LabTeam (same as their name)
-            LabTeam.create_new_team(team_name=experimenter, team_members=[experimenter])
+                # each person is by default the member of their own LabTeam (same as their name)
+                LabTeam.create_new_team(team_name=experimenter, team_members=[experimenter])
         else:
             for lab_member in config["LabMember"]:
                 if (('first_name' in lab_member and 'last_name' not in lab_member) or
@@ -51,14 +51,14 @@ class LabMember(dj.Manual):
                     warnings.warn("One but not both of first_name and last_name was specified. "
                                   "Both first_name and last_name must be specified to use them both. "
                                   "Otherwise, first name and last name will be parsed from lab_member_name.")
-                # to override, must have both first_name and last_name populated in the config
+                # if both first_name and last_name are provided, then used; otherwise inferred
                 if lab_member.get('first_name') is not None and lab_member.get('last_name') is not None:
                     cls.insert1(lab_member)
                 else:
                     cls.insert_from_name(lab_member['lab_member_name'])
-            # each person is by default the member of their own LabTeam (same as their name)
-            LabTeam.create_new_team(team_name=lab_member['lab_member_name'],
-                                    team_members=[lab_member['lab_member_name']])
+                # each person is by default the member of their own LabTeam (same as their name)
+                LabTeam.create_new_team(team_name=lab_member['lab_member_name'],
+                                        team_members=[lab_member['lab_member_name']])
 
     @classmethod
     def insert_from_name(cls, full_name):

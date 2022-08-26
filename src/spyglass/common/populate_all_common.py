@@ -29,12 +29,13 @@ def populate_all_common(nwb_file_name):
     # ElectrodeGroup.populate(fp)
     # print()
 
+    print('Populate Raw...')
+    Raw.populate(fp)
+    print()
+    
     print('Populate Electrode...')
     Electrode.populate(fp)
     print()
-
-    print('Populate Raw...')
-    Raw.populate(fp)
 
     print('Populate SampleCount...')
     SampleCount.populate(fp)
