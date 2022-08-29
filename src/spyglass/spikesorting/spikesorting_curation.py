@@ -362,7 +362,7 @@ class MetricParameters(dj.Manual):
                              'radius_um': 100,
                              'seed': 0},
         'peak_channel' : {'peak_sign' : 'neg'},
-        'cosine_similarity' : {'method' : 'cosine_similarity'},
+        'waveform_similarity' : {'method' : 'cosine_similarity'},
         'correl_asymm' : {'window_ms' : 40.0,
                           'bin_ms' : 0.5}
     }
@@ -546,7 +546,7 @@ def _get_peak_channel(waveform_extractor: si.WaveformExtractor, peak_sign: str, 
     peak_channel = {key : int(val) for key, val in peak_channel_dict.items()}
     return peak_channel
 
-def _get_cosine_similarity(waveform_extractor: si.WaveformExtractor, **metric_params):
+def _get_waveform_similarity(waveform_extractor: si.WaveformExtractor, **metric_params):
     """Gets the cosine similarity as computed by SpikeInterface's compute_template_similarity
     """
     cos_sim_mat = si.postprocessing.compute_template_similarity(
@@ -592,7 +592,7 @@ _metric_name_to_func = {
     'nn_noise_overlap': st.qualitymetrics.nearest_neighbors_noise_overlap,
     'peak_offset': _get_peak_offset,
     'peak_channel': _get_peak_channel,
-    'cosine_similarity': _get_cosine_similarity,
+    'cosine_similarity': _get_waveform_similarity,
     'correl_asymm': _get_correlogram_asymmetry
 }
 
