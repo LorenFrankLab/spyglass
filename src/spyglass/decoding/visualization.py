@@ -494,20 +494,6 @@ def create_figurl_decode_visualization(
             )
         )
 
-    # linear position panel
-    layout.add_panel(
-        create_position_plot(
-            timestamps=np.asarray(
-                linear_position_info.index - linear_position_info.index[0],
-                dtype=np.float32),
-            positions=np.asarray(
-                linear_position_info.linear_position, dtype=np.float32),
-            dimension_labels=['Linear position'],
-            label='Linear position',
-            discontinuous=True
-        ), relative_height=1
-    )
-
     # speed panel
     layout.add_panel(
         create_position_plot(
@@ -542,6 +528,7 @@ def create_figurl_decode_visualization(
         segment_size=segment_size,
         multiscale_factor=multiscale_factor)
     panel = create_live_position_pdf_plot(
+        linear_positions=np.asarray(linear_position_info.linear_position),
         start_time_sec=time[0],
         end_time_sec=time[-1],
         sampling_frequency=(len(time) - 1) / (time[-1] - time[0]),
