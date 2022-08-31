@@ -528,7 +528,8 @@ def create_figurl_decode_visualization(
         segment_size=segment_size,
         multiscale_factor=multiscale_factor)
     panel = create_live_position_pdf_plot(
-        linear_positions=np.asarray(linear_position_info.linear_position),
+        linear_positions=np.asarray(
+            linear_position_info.linear_position, dtype=np.float32),
         start_time_sec=time[0],
         end_time_sec=time[-1],
         sampling_frequency=(len(time) - 1) / (time[-1] - time[0]),
