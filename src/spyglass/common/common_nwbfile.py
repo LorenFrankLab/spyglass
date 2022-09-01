@@ -160,8 +160,8 @@ class AnalysisNwbfile(dj.Manual):
             with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode='w', manager=io.manager) as export_io:
                 export_io.export(io, nwbf)
 
-        # change the permissions to only allow owner to write
-        permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+        # change the permissions to allow others to read and write
+        permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH | stat.S_IWOTH
         os.chmod(analysis_file_abs_path, permissions)
 
         return analysis_file_name
