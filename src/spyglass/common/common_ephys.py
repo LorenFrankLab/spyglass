@@ -194,7 +194,7 @@ class Electrode(dj.Imported):
             ee = [es.electrodes.table.id[x] for x in es.electrodes.data]
             for electrode in ee:
                 electrode_to_es[electrode] = es.name
-        
+
         electrodes = nwbf.electrodes.to_dataframe()
         for elect_id, elect_data in electrodes.iterrows():
             key['electrode_id'] = elect_id
@@ -265,7 +265,7 @@ class Electrode(dj.Imported):
                                       "for the Probe ({probe_electrode_rel_z}). Please check that these values are "
                                       "correct. They may be based off of a different zero or mirror images of each "
                                       "other.")
-            
+
             key['raw_object_name'] = electrode_to_es[elect_id]
             key['probe_type'] = probe_type
             key['probe_shank'] = probe_shank
@@ -283,6 +283,7 @@ class Electrode(dj.Imported):
             key['filtering'] = elect_data.filtering
             key['impedance'] = elect_data.imp
             self.insert1(key, skip_duplicates=True)
+
 
 @schema
 class SampleCount(dj.Imported):

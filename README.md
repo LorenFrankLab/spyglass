@@ -31,7 +31,7 @@
 
 ### Setting up Frank lab database access
 
-The following only applies if you are a member of Frank lab at UCSF. If you're not affiliated with UCSF or if you are just looking to try out `spyglass`, then you will need to set up a different MySQL server. For example, you can set up your own local server with a Docker image of a MySQL server configured for Datajoint (see [instructions](https://tutorials.datajoint.io/setting-up/local-database.html) and/or [tutorial notebook](./notebooks/docker_mysql_tutorial.ipynb)).
+Step 1 below only applies if you are a member of Frank lab at UCSF. If you're not affiliated with UCSF or if you are just looking to try out `spyglass`, then you will need to set up a different MySQL server and add your own account to it. For example, you can set up your own local server with a Docker image of a MySQL server configured for Datajoint (see [instructions](https://tutorials.datajoint.org/setting-up/local-database.html) and/or [tutorial notebook](./notebooks/docker_mysql_tutorial.ipynb)).
 
 1. Ask Loren or Eric to set up an account for you on the Frank lab `DataJoint` database. Note that you have to be connected to UCSF LAN to access this server.
 
@@ -50,7 +50,7 @@ The following only applies if you are a member of Frank lab at UCSF. If you're n
 
      If you also want to enable file sharing of franklab files through kachery-cloud, add the following
      ```bash
-     export KACHERY_CLOUD_PROJECT=lqqrbobsevexport KACHERY_="/stelmo/nwb/"
+     export KACHERY_CLOUD_PROJECT=lqqrbobsev
      ```
 
      Additional instructions for setting up sharing can be found in the main documentation (TODO)

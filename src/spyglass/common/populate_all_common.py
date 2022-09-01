@@ -32,7 +32,7 @@ def populate_all_common(nwb_file_name):
     print('Populate Raw...')
     Raw.populate(fp)
     print()
-    
+
     print('Populate Electrode...')
     Electrode.populate(fp)
     print()

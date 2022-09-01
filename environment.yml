@@ -22,6 +22,7 @@ dependencies:
   - ipympl
   - tqdm
   - nb_conda
+  - pyfftw  # used by ghostipy. install from conda-forge so that it works on Mac ARM processors
   - pip:
     - pubnub<6.4.0
     - mountainsort4
