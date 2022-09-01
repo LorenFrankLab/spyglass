@@ -51,7 +51,7 @@ dependencies = [
     "pyyaml",
     "click",
     "spikeinterface",
-    "ndx_franklab_novela @ git+https://github.com/LorenFrankLab/ndx-franklab-novela@master#egg=ndx_franklab_novela"
+    "ndx_franklab_novela>=0.1.0"
 ]
 
 [project.scripts]
