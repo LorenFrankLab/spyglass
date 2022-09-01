@@ -50,7 +50,7 @@ dependencies = [
     "sortingview>=0.8",
     "pyyaml",
     "click",
-    "spikeinterface @ git+https://github.com/SpikeInterface/spikeinterface@master#egg=spikeinterface",
+    "spikeinterface",
     "ndx_franklab_novela @ git+https://github.com/LorenFrankLab/ndx-franklab-novela@master#egg=ndx_franklab_novela"
 ]
 
