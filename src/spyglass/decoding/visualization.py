@@ -792,7 +792,8 @@ def create_interactive_2D_decoding_figurl(
     results=None,
     position_names=['head_position_x', 'head_position_y'],
     head_direction_name='head_orientation',
-    label=''
+    label='',
+    local=False,
 ):
 
     positions = np.asarray(position_info[position_names])
@@ -816,4 +817,4 @@ def create_interactive_2D_decoding_figurl(
 
     view = create_track_animation_object(static_track_animation=data)
 
-    return view.url(label=label)
+    return view.url(label=label, local=local)
