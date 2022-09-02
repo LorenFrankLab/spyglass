@@ -56,8 +56,9 @@ class LabMember(dj.Manual):
         """
         labmember_dict = dict()
         labmember_dict['lab_member_name'] = full_name
-        labmember_dict['first_name'] = str.split(full_name)[:-1]
-        labmember_dict['last_name'] = str.split(full_name)[-1]
+        full_name_split = str.split(full_name)
+        labmember_dict['first_name'] = " ".join(full_name_split[:-1])
+        labmember_dict['last_name'] = full_name_split[-1]
         cls.insert1(labmember_dict, skip_duplicates=True)
 
 
