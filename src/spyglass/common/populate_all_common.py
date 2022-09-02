@@ -39,6 +39,7 @@ def populate_all_common(nwb_file_name):
 
     print('Populate SampleCount...')
     SampleCount.populate(fp)
+    print()
 
     print('Populate DIOEvents...')
     DIOEvents.populate(fp)

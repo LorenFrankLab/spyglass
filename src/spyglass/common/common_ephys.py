@@ -19,154 +19,46 @@ from .nwb_helper_fn import (estimate_sampling_rate, get_data_interface,
 
 schema = dj.schema('common_ephys')
 
-# NOTE: Electrode group table is redundant with Probe.Shank! Remove.
-# @schema
-# class ElectrodeGroup(dj.Imported):
-#     definition = """
-#     # Grouping of electrodes corresponding to a physical probe.
-#     -> Session
-#     electrode_group_name: varchar(80)  # electrode group name from NWBFile
-#     ---
-#     -> BrainRegion
-#     -> [nullable] Probe
-#     description: varchar(2000)  # description of electrode group
-#     target_hemisphere = "Unknown": enum("Right", "Left", "Unknown")
-#     """
-
-#     def make(self, key: dict):
-#         nwb_file_name = key['nwb_file_name']
-#         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-#         nwbf = get_nwb_file(nwb_file_abspath)
-#         config = get_config(nwb_file_abspath)
-
-#         # make a dict of device name to PyNWB device object for all devices in the NWB file that are
-#         # of type ndx_franklab_novela.DataAcqDevice and thus have the required metadata
-#         nwb_egs = {electrode_group.name: electrode_group for electrode_group in nwbf.electrode_groups.values()}
-
-#         # make a dict of device name to dict of device metadata from the config YAML if exists
-#         if "ElectrodeGroup" in config:
-#             config_egs = {eg_dict["electrode_group_name"]: eg_dict for eg_dict in config["ElectrodeGroup"]}
-#         else:
-#             config_egs = dict()
-
-#         all_eg_names = set(nwb_egs.keys()).union(set(config_egs.keys()))
-
-#         for eg_name in all_eg_names:
-#             new_eg_dict = dict(key)
-
-#             if eg_name in nwb_egs:
-#                 nwb_eg_obj = nwb_egs[eg_name]
-
-#                 new_eg_dict['electrode_group_name'] = nwb_eg_obj.name
-#                 # add electrode group location if it does not exist, and fetch the row
-#                 new_eg_dict['region_id'] = BrainRegion.fetch_add(region_name=nwb_eg_obj.location)
-#                 if isinstance(nwb_eg_obj.device, ndx_franklab_novela.Probe):
-#                     new_eg_dict['probe_type'] = nwb_eg_obj.device.probe_type
-#                 new_eg_dict['description'] = nwb_eg_obj.description
-#                 if isinstance(nwb_eg_obj, ndx_franklab_novela.NwbElectrodeGroup):
-#                     # Define target_hemisphere based on targeted x coordinate
-#                     if nwb_eg_obj.targeted_x >= 0:  # if positive or zero x coordinate
-#                         new_eg_dict["target_hemisphere"] = "Right"  # define target location as right hemisphere
-#                     else:  # if negative x coordinate
-#                         new_eg_dict["target_hemisphere"] = "Left"  # define target location as left hemisphere
-
-#             if eg_name in config_egs:  # override new_device_dict with values from config if specified
-#                 eg = config_egs[eg_name]
-#                 # NOTE if the yaml dict for ElectrodeGroup includes a probe_type that is not in the Probe table,
-#                 # the insert will fail
-#                 new_eg_dict.update(eg)
-#                 assert {'region_id': new_eg_dict['region_id']} in BrainRegion(), (f"region_id {new_eg_dict['region_id']} in config file"
-#                                                                                    " not found in BrainRegion")
-
-#                 assert {"probe_type": new_eg_dict["probe_type"]} in Probe(), \
-#                        (f'Probe type {new_eg_dict["probe_type"]} for '
-#                         'Electrode Group "{eg_name}" not found in Probe table.')
-
-#             print(new_eg_dict)
-#             self.insert1(new_eg_dict, skip_duplicates=True)
 
 @schema
-class Raw(dj.Imported):
+class ElectrodeGroup(dj.Imported):
     definition = """
-    # Raw voltage timeseries data, ElectricalSeries in NWB.
+    # Grouping of electrodes corresponding to a physical probe.
     -> Session
-    raw_object_name: varchar(200)   # name of the raw data object (e.g. ElectricalSeries)
+    electrode_group_name: varchar(80)  # electrode group name from NWBFile
     ---
-    -> IntervalList
-    raw_object_id: varchar(40)      # the NWB object ID for loading this object from the file
-    sampling_rate: float            # Sampling rate calculated from data, in Hz
-    comments: varchar(2000)
-    description: varchar(2000)
+    -> BrainRegion
+    -> [nullable] Probe
+    description: varchar(2000)  # description of electrode group
+    target_hemisphere = "Unknown": enum("Right", "Left", "Unknown")
     """
 
     def make(self, key):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        raw_interval_name = "raw data valid times"
-        # get the acquisition object
-        # try:
-            # TODO this assumes there is a single item in NWBFile.acquisition
-            # rawdata = nwbf.get_acquisition()
-        rawdata_list = get_raw_eseries(nwbf)
-        assert rawdata_list, 'No ElectricalSeries in the NWB file acquisition object.'
-        # except (ValueError, AssertionError):
-        #     warnings.warn(f'Unable to get acquisition object in: {nwb_file_abspath}')
-        #     return
-        for rawdata in rawdata_list:
-            if rawdata.rate is not None:
-                sampling_rate = rawdata.rate
-            else:
-                print('Estimating sampling rate...')
-                # NOTE: Only use first 1e6 timepoints to save time
-                sampling_rate = estimate_sampling_rate(np.asarray(rawdata.timestamps[:int(1e6)]), 1.5)
-                print(f'Estimated sampling rate: {sampling_rate}')
-            key['sampling_rate'] = sampling_rate
-
-            interval_dict = dict()
-            interval_dict['nwb_file_name'] = key['nwb_file_name']
-            interval_dict['interval_list_name'] = raw_interval_name
-            if rawdata.rate is not None:
-                interval_dict['valid_times'] = np.array([[0, len(rawdata.data)/rawdata.rate]])
-            else:
-                # get the list of valid times given the specified sampling rate.
-                interval_dict['valid_times'] = get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
-                                                                   1.75, 0)
-            IntervalList().insert1(interval_dict, skip_duplicates=True)
-
-            # now insert each of the electrodes as an individual row, but with the same nwb_object_id
-            key['raw_object_name'] = rawdata.name
-            key['raw_object_id'] = rawdata.object_id
-            key['sampling_rate'] = sampling_rate
-            print(
-                f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz')
-            print(
-                f'Number of valid intervals:\t{len(interval_dict["valid_times"])}')
-            key['interval_list_name'] = raw_interval_name
-            key['comments'] = rawdata.comments
-            key['description'] = rawdata.description
+        for electrode_group in nwbf.electrode_groups.values():
+            key['electrode_group_name'] = electrode_group.name
+            # add electrode group location if it does not exist, and fetch the row
+            key['region_id'] = BrainRegion.fetch_add(region_name=electrode_group.location)
+            if isinstance(electrode_group.device, ndx_franklab_novela.Probe):
+                key['probe_type'] = electrode_group.device.probe_type
+            key['description'] = electrode_group.description
+            if isinstance(electrode_group, ndx_franklab_novela.NwbElectrodeGroup):
+                # Define target_hemisphere based on targeted x coordinate
+                if electrode_group.targeted_x >= 0:  # if positive or zero x coordinate
+                    key["target_hemisphere"] = "Right"  # define target location as right hemisphere
+                else:  # if negative x coordinate
+                    key["target_hemisphere"] = "Left"  # define target location as left hemisphere
             self.insert1(key, skip_duplicates=True)
 
-    def nwb_object(self, key):
-        # TODO return the nwb_object; FIX: this should be replaced with a fetch call. Note that we're using the raw file
-        # so we can modify the other one.
-        nwb_file_name = key['nwb_file_name']
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        raw_object_id = (self & {'nwb_file_name': key['nwb_file_name']}).fetch1(
-            'raw_object_id')
-        return nwbf.objects[raw_object_id]
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
 
 @schema
 class Electrode(dj.Imported):
     definition = """
-    -> Session
+    -> ElectrodeGroup
     electrode_id: int                      # the unique number for this electrode
     ---
-    -> [nullable] Raw
     -> [nullable] Probe.Electrode
     -> BrainRegion
     name = "": varchar(200)                 # unique label for each contact
@@ -187,91 +79,24 @@ class Electrode(dj.Imported):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath)
-        es_list = get_raw_eseries(nwbf)
-        electrode_to_es = dict()
-        for es in es_list:
-            ee = [es.electrodes.table.id[x] for x in es.electrodes.data]
-            for electrode in ee:
-                electrode_to_es[electrode] = es.name
-
         electrodes = nwbf.electrodes.to_dataframe()
         for elect_id, elect_data in electrodes.iterrows():
             key['electrode_id'] = elect_id
             key['name'] = str(elect_id)
-            # key['electrode_group_name'] = elect_data.group_name
+            key['electrode_group_name'] = elect_data.group_name
             # rough check of whether the electrodes table was created by rec_to_nwb and has
             # the appropriate custom columns used by rec_to_nwb
             # TODO this could be better resolved by making an extension for the electrodes table
-            if isinstance(elect_data.group.device, ndx_franklab_novela.Probe):
-                probe_type = elect_data.group.device.probe_type
-            else:
-                probe_type = elect_data.group.device.name
-            probe_shank = elect_data.get("probe_shank")
-            probe_electrode = elect_data.get("probe_electrode")
-
-            # if config file contains NWB_replacement->Probe, then find the device referred to by
-            # the device_name and treat it as the Probe entity with the corresponding probe_type
-            if "NWB_replacement" in config:
-                for replacement in config["NWB_replacement"]:
-                    if "Probe" in replacement:
-                        device_name = replacement["Probe"]["device_name"]
-                        if probe_type == device_name:
-                            probe_type = replacement["Probe"]["probe_type"]  # replace
-
-
-            assert {'probe_type': probe_type} in Probe(), \
-                (f"Probe type {probe_type} not found in Probe. Please insert this probe to the Probe table first")
-
-            assert len(electrodes) == len((Probe.Electrode & {"probe_type": probe_type}).fetch("probe_electrode"))
-
-            # INFER mapping between electrode table and Probe shanks and electrodes
-            # the i-th electrode in the NWB file electrodes table will be mapped to the i-th electrode
-            # of this Probe (which should be based on order of initial insert)
-            # alternative solution: support explicit arbitrary mapping of electrodes in NWB file to electrodes in Probe
-            if probe_shank is None and probe_electrode is None:
-                electrodes_query = (Probe.Electrode & {"probe_type": probe_type}).fetch()
-                probe_shank = electrodes_query[elect_id]["probe_shank"]
-                probe_electrode = electrodes_query[elect_id]["probe_electrode"]
-
-            # basic check to make sure that the mapping is correct
-            # NOTE there are a lot of edge cases here
-            if elect_id == 0:
-                probe_electrode_key = {
-                    "probe_type": probe_type,
-                    "probe_shank": probe_shank,
-                    "probe_electrode": probe_electrode
-                }
-                if "rel_x" in elect_data:
-                    probe_electrode_rel_x = (Probe.Electrode & probe_electrode_key).fetch1("rel_x")
-                    if elect_data.rel_x != probe_electrode_rel_x:
-                        print(f"rel_x value in NWB file ({elect_data.rel_x}) does not match the rel_x value "
-                                      "for the Probe ({probe_electrode_rel_x}). Please check that these values are "
-                                      "correct. They may be based off of a different zero or mirror images of each "
-                                      "other.")
-
-                if "rel_y" in elect_data:
-                    probe_electrode_rel_y = (Probe.Electrode & probe_electrode_key).fetch1("rel_y")
-                    if elect_data.rel_y != probe_electrode_rel_y:
-                        print(f"rel_y value in NWB file ({elect_data.rel_y}) does not match the rel_y value "
-                                      "for the Probe ({probe_electrode_rel_y}). Please check that these values are "
-                                      "correct. They may be based off of a different zero or mirror images of each "
-                                      "other.")
-
-                if "rel_z" in elect_data:
-                    probe_electrode_rel_z = (Probe.Electrode & probe_electrode_key).fetch1("rel_z")
-                    if elect_data.rel_z != probe_electrode_rel_z:
-                        print(f"rel_z value in NWB file ({elect_data.rel_z}) does not match the rel_z value "
-                                      "for the Probe ({probe_electrode_rel_z}). Please check that these values are "
-                                      "correct. They may be based off of a different zero or mirror images of each "
-                                      "other.")
-
-            key['raw_object_name'] = electrode_to_es[elect_id]
-            key['probe_type'] = probe_type
-            key['probe_shank'] = probe_shank
-            key['probe_electrode'] = probe_electrode
-            key['bad_channel'] = 'True' if elect_data.get("bad_channel", False) else 'False'
-            key['original_reference_electrode'] = elect_data.get("ref_elect_id")
+            if (isinstance(elect_data.group.device, ndx_franklab_novela.Probe) and
+                    'probe_shank' in elect_data and
+                    'probe_electrode' in elect_data and
+                    'bad_channel' in elect_data and
+                    'ref_elect_id' in elect_data):
+                key['probe_type'] = elect_data.group.device.probe_type
+                key['probe_shank'] = elect_data.probe_shank
+                key['probe_electrode'] = elect_data.probe_electrode
+                key['bad_channel'] = 'True' if elect_data.bad_channel else 'False'
+                key['original_reference_electrode'] = elect_data.ref_elect_id
             key['region_id'] = BrainRegion.fetch_add(region_name=elect_data.group.location)
             key['x'] = elect_data.x
             key['y'] = elect_data.y
