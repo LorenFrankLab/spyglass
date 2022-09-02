@@ -13,19 +13,19 @@ import pprint
 import datajoint as dj
 import numpy as np
 import pandas as pd
-from spyglass.common.common_interval import IntervalList
-from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.dj_helper_fn import fetch_nwb
-from spyglass.decoding.dj_decoder_conversion import (
-    convert_classes_to_dict, restore_classes)
-from spyglass.spikesorting.spikesorting_curation import \
-    CuratedSpikeSorting
 from replay_trajectory_classification.classifier import (
-    _DEFAULT_CONTINUOUS_TRANSITIONS, _DEFAULT_ENVIRONMENT)
+    _DEFAULT_CONTINUOUS_TRANSITIONS, _DEFAULT_ENVIRONMENT,
+    _DEFAULT_SORTED_SPIKES_MODEL_KWARGS)
 from replay_trajectory_classification.discrete_state_transitions import \
     DiagonalDiscrete
 from replay_trajectory_classification.initial_conditions import \
     UniformInitialConditions
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.dj_helper_fn import fetch_nwb
+from spyglass.decoding.dj_decoder_conversion import (convert_classes_to_dict,
+                                                     restore_classes)
+from spyglass.spikesorting.spikesorting_curation import CuratedSpikeSorting
 
 schema = dj.schema('decoding_sortedspikes')
 
@@ -67,8 +67,10 @@ class SortedSpikesIndicator(dj.Computed):
         time = self.get_time_bins_from_interval(interval_times, sampling_rate)
 
         spikes_nwb = (CuratedSpikeSorting & key).fetch_nwb()
-        spikes_nwb = [entry for entry in spikes_nwb if "units" in entry]  # restrict to cases with units
-        spike_times_list = [np.asarray(n_trode['units']['spike_times']) for n_trode in spikes_nwb]
+        # restrict to cases with units
+        spikes_nwb = [entry for entry in spikes_nwb if "units" in entry]
+        spike_times_list = [np.asarray(
+            n_trode['units']['spike_times']) for n_trode in spikes_nwb]
         if len(spike_times_list) > 0:  # if units
             spikes = np.concatenate(spike_times_list)
 
@@ -152,8 +154,8 @@ def make_default_decoding_parameters_gpu():
         discrete_transition_type=DiagonalDiscrete(0.98),
         initial_conditions_type=UniformInitialConditions(),
         infer_track_interior=True,
-        knot_spacing=10,
-        spike_model_penalty=1E1
+        sorted_spikes_algorithm='spiking_likelihood_kde',
+        sorted_spikes_algorithm_params=_DEFAULT_SORTED_SPIKES_MODEL_KWARGS,
     )
 
     predict_parameters = {
