@@ -3,13 +3,14 @@
 import os
 import pathlib
 import sys
-import yaml
 import tempfile
 
 import datajoint as dj
+import yaml
+
 
 def generate_config_yaml(filename: str, **kwargs):
-    """Generate a yaml configuration file for the specified user_name. By default this 
+    """Generate a yaml configuration file for the specified user_name. By default this
 
     Parameters
     ----------
@@ -29,7 +30,7 @@ def generate_config_yaml(filename: str, **kwargs):
     config['database.port'] = kwargs['database_port'] if 'database_port' in kwargs else 3306
     config['database.use_tls'] = kwargs['database_use_tls'] if 'database.use_tls' in kwargs else True
     config['enable_python_native_blobs'] = True
-    
+
     # next, set up external stores
     # (read about them here: https://docs.datajoint.io/python/admin/5-blob-config.html)
 
@@ -56,8 +57,8 @@ def generate_config_yaml(filename: str, **kwargs):
         yaml.dump(config, outfile, default_flow_style=False)
 
 
-def set_configuration(user_name:str, file_name:str = None):
-    """Sets the dj.config parameters for the specified user. Allows for specification of a yaml file with the defaults; 
+def set_configuration(user_name: str, file_name: str = None):
+    """Sets the dj.config parameters for the specified user. Allows for specification of a yaml file with the defaults;
     if no file is specified, it will write one using the generate_config_yaml function.
 
     Parameters
@@ -68,13 +69,13 @@ def set_configuration(user_name:str, file_name:str = None):
         A yaml file with the configuration information, by default None
     """
     if file_name is None:
-        #create a named temporary file and write the default config to it
+        # create a named temporary file and write the default config to it
         config_file = tempfile.NamedTemporaryFile("r+")
         generate_config_yaml(config_file.name)
         config_file.seek(0)
     else:
         config_file = open(file_name)
-   
+
     # now read in the config file
     config = yaml.full_load(config_file)
 
@@ -84,7 +85,7 @@ def set_configuration(user_name:str, file_name:str = None):
 
     # set the users password
     dj.set_password()
-    
+
     # finally, save these settings
     dj.config.save_global()
 
