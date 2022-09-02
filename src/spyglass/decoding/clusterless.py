@@ -209,7 +209,7 @@ class UnitMarks(dj.Computed):
     @staticmethod
     def _convert_to_dataframe(nwb_data):
         n_marks = nwb_data['marks'].data.shape[1]
-        columns = [f'amplitude_{ind}' for ind in range(n_marks)]
+        columns = [f'amplitude_{ind:04d}' for ind in range(n_marks)]
         return pd.DataFrame(nwb_data['marks'].data,
                             index=pd.Index(nwb_data['marks'].timestamps,
                                            name='time'),
@@ -390,8 +390,32 @@ class UnitMarksIndicator(dj.Computed):
         return [data['marks_indicator'].set_index('time') for data in self.fetch_nwb()]
 
     def fetch_xarray(self):
-        return (xr.concat([df.to_xarray().to_array('marks') for df in self.fetch_dataframe()], dim='electrodes')
-                .transpose('time', 'marks', 'electrodes'))
+        # sort_group_electrodes = (
+        #     SortGroup.SortGroupElectrode() &
+        #     pd.DataFrame(self).to_dict('records'))
+        # brain_region = (sort_group_electrodes * Electrode *
+        #                 BrainRegion).fetch('region_name')
+
+        marks_indicators = (
+            xr.concat(
+                [df.to_xarray().to_array('marks')
+                 for df in self.fetch_dataframe()], dim='electrodes')
+            .transpose('time', 'marks', 'electrodes')
+            .assign_coords({'electrodes': self.fetch('sort_group_id')})
+            .sortby(['electrodes', 'marks'])
+        )
+
+        # hacky way to keep the marks in order
+        def reformat_name(name):
+            mark_type, number = name.split('_')
+            return f'{mark_type}_{int(number):04d}'
+
+        new_mark_names = [reformat_name(name)
+                          for name in marks_indicators.marks.values]
+
+        return (marks_indicators
+                .assign_coords({'marks': new_mark_names})
+                .sortby(['electrodes', 'marks']))
 
 
 def make_default_decoding_parameters_cpu():
@@ -688,7 +712,8 @@ def create_model_for_multiple_epochs(
         continuous_transition_types.append([])
         for epoch2 in epoch_names:
             if epoch1 == epoch2:
-                continuous_transition_types[-1].append(RandomWalk(epoch1, use_diffusion=True))
+                continuous_transition_types[-1].append(
+                    RandomWalk(epoch1, use_diffusion=True))
             else:
                 continuous_transition_types[-1].append(Uniform(epoch1, epoch2))
 
