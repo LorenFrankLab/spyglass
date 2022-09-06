@@ -11,6 +11,7 @@ speeds. eLife 10, e64505 (2021).
 import os
 import shutil
 import uuid
+from copy import deepcopy
 from pathlib import Path
 
 import datajoint as dj
@@ -725,6 +726,8 @@ def populate_mark_indicators(
         mark_param_name='default',
         position_info_param_name='default'
 ):
+
+    spikesorting_selection_keys = deepcopy(spikesorting_selection_keys)
     # Populate spike sorting
     SpikeSortingSelection().insert(
         spikesorting_selection_keys,
