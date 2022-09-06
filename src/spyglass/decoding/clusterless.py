@@ -724,7 +724,7 @@ def create_model_for_multiple_epochs(
 def populate_mark_indicators(
         spikesorting_selection_keys: list,
         mark_param_name='default',
-        position_info_param_name='default'
+        position_info_param_name='default_decoding'
 ):
 
     spikesorting_selection_keys = deepcopy(spikesorting_selection_keys)
