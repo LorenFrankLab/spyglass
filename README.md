@@ -47,14 +47,6 @@ Step 1 below only applies if you are a member of Frank lab at UCSF. If you're no
      export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
      ```
      Note that a local SPYGLASS_TEMP_DIR (e.g. one on your machine) will speed up spike sorting, but make sure it has enough free space (ideally at least 500GB)
-
-     If you also want to enable file sharing of franklab files through kachery-cloud, add the following
-     ```bash
-     export KACHERY_CLOUD_DIR="/stelmo/nwb/.kachery-cloud"
-     export KACHERY_CLOUD_PROJECT=lqqrbobsev
-     ```
-     
-     Additional instructions for setting up sharing can be found in the main documentation (TODO)
  
 3. Configure `DataJoint`. To connect to the database, you need to specify information such as the hostname and the port. You should also change your password from the temporary one you were given. Go to the config directory, and run [`dj_config.py`](https://github.com/LorenFrankLab/spyglass/blob/master/config/dj_config.py) in the terminal with your username:
 
