@@ -1,3 +1,4 @@
+from typing import Union, List
 import os
 import stat
 import warnings
@@ -8,14 +9,14 @@ from ..common import Nwbfile, get_raw_eseries, populate_all_common
 from .storage_dirs import check_env
 
 
-def insert_sessions(nwb_file_names):
+def insert_sessions(nwb_file_names: Union[str, List[str]]):
     """
     Populate the dj database with new sessions.
 
     Parameters
     ----------
-    nwb_file_names : string or List of strings
-        nwb_file_names is a list of relative file paths, relative to $SPYGLASS_BASE_DIR, pointing to
+    nwb_file_names : str or List of str
+        File paths (relative to $SPYGLASS_BASE_DIR) pointing to
         existing .nwb files. Each file represents a session.
     """
     check_env()
