@@ -28,14 +28,9 @@
    ```bash
    pip install -e .
    ```
-### Installing from pip or conda
+### Installing from pip
 ```bash
 pip install spyglass-neuro
-pip install git+https://github.com/SpikeInterface/spikeinterface.git
-```
-
-```bash
-conda install -c franklab spyglass-neuro
 pip install git+https://github.com/SpikeInterface/spikeinterface.git
 ```
 
