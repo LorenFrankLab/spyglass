@@ -323,7 +323,6 @@ def get_all_spatial_series(nwbf, verbose=False):
         spatial_series = list(position.spatial_series.values())[orig_epoch]
         pos_data_dict[index] = dict()
         # get the valid intervals for the position data
-        timestamps = np.asarray(spatial_series.timestamps)
 
         # estimate the sampling rate
         timestamps = np.asarray(spatial_series.timestamps)

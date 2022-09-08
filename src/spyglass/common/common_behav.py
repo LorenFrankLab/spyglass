@@ -20,7 +20,7 @@ class PositionSource(dj.Manual):
     -> Session
     -> IntervalList
     ---
-    source: varchar(200)            # source of data; current options are "trodes" and "dlc" (deep lab cut)
+    source: varchar(200)             # source of data; current options are "trodes" and "dlc" (deep lab cut)
     import_file_name: varchar(2000)  # path to import file if importing position data
     """
 
