@@ -799,7 +799,7 @@ def create_interactive_2D_decoding_figurl(
     positions = np.asarray(position_info[position_names])
     (track_width, track_height, upper_left_points) = make_track(
         positions, bin_size=bin_size)
-    timestamps = np.squeeze(np.asarray(position_info.index))
+    timestamps = np.squeeze(np.asarray(position_info.index)).copy()
 
     head_dir = np.squeeze(np.asarray(position_info[head_direction_name]))
 
