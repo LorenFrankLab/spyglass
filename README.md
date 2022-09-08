@@ -28,6 +28,17 @@
    ```bash
    pip install -e .
    ```
+### Installing from pip or conda
+```bash
+pip install spyglass-neuro
+pip install git+https://github.com/SpikeInterface/spikeinterface.git
+```
+
+```bash
+conda install -c franklab spyglass-neuro
+pip install git+https://github.com/SpikeInterface/spikeinterface.git
+```
+
 
 ### Setting up Frank lab database access
 
@@ -47,7 +58,7 @@ Step 1 below only applies if you are a member of Frank lab at UCSF. If you're no
      export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
      ```
      Note that a local SPYGLASS_TEMP_DIR (e.g. one on your machine) will speed up spike sorting, but make sure it has enough free space (ideally at least 500GB)
- 
+
 3. Configure `DataJoint`. To connect to the database, you need to specify information such as the hostname and the port. You should also change your password from the temporary one you were given. Go to the config directory, and run [`dj_config.py`](https://github.com/LorenFrankLab/spyglass/blob/master/config/dj_config.py) in the terminal with your username:
 
     ```bash
