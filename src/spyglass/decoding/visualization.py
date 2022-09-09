@@ -12,7 +12,8 @@ import seaborn as sns
 import sortingview.views.franklab as vvf
 import xarray as xr
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-from replay_trajectory_classification.environments import (get_grid,
+from replay_trajectory_classification.environments import (get_bin_ind,
+                                                           get_grid,
                                                            get_track_interior)
 from ripple_detection import get_multiunit_population_firing_rate
 from sortingview.SpikeSortingView import (MultiTimeseries,
@@ -527,9 +528,13 @@ def create_figurl_decode_visualization(
         data=posterior,
         segment_size=segment_size,
         multiscale_factor=multiscale_factor)
+
+    binned_linear_position = (
+        get_bin_ind(linear_position_info.linear_position,
+                    classifier.environments[0].edges_)[0]
+        - 1)
     panel = create_live_position_pdf_plot(
-        linear_positions=np.asarray(
-            linear_position_info.linear_position, dtype=np.float32),
+        linear_positions=binned_linear_position.astype(np.int32),
         start_time_sec=time[0],
         end_time_sec=time[-1],
         sampling_frequency=(len(time) - 1) / (time[-1] - time[0]),
