@@ -553,11 +553,6 @@ def create_interactive_1D_decoding_figurl(
     return layout.get_composite_figure().url()
 
 
-def get_base_probabilities(file: str) -> xr.Dataset:
-    results = cast(xr.Dataset, xr.open_dataset(file).sum('state'))
-    return results
-
-
 def get_base_track_information(base_probabilities: xr.Dataset):
     x_count = len(base_probabilities.x_position)
     y_count = len(base_probabilities.y_position)
