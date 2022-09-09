@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import sortingview.views as vv
 import sortingview.views.franklab as vvf
 import xarray as xr
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
@@ -820,6 +821,51 @@ def create_interactive_2D_decoding_figurl(
     if results is not None:
         data['decodedData'] = process_decoded_data(results)
 
-    view = create_track_animation_object(static_track_animation=data)
+    decode_view = create_track_animation_object(static_track_animation=data)
+
+    probability_view = vv.PositionPlot(
+        timestamps=np.asarray(results.time),
+        positions=np.asarray(results.acausal_posterior.sum(
+            ['x_position', 'y_position']), dtype=np.float32),
+        dimension_labels=results.state.values.tolist(),
+    )
+
+    speed_view = vv.PositionPlot(
+        timestamps=np.asarray(position_info.index),
+        positions=np.asarray(position_info.head_speed, dtype=np.float32),
+        dimension_labels=['speed'],
+    )
+
+    view = vv.Box(
+        direction='horizontal',
+        items=[
+            vv.LayoutItem(
+                vv.Box(
+                    direction='horizontal',
+                    items=[
+                        vv.LayoutItem(
+                            decode_view,
+                            stretch=1
+                        ),
+                    ]
+                )
+            ),
+            vv.LayoutItem(
+                vv.Box(
+                    direction='vertical',
+                    items=[
+                        vv.LayoutItem(
+                            probability_view,
+                            stretch=1
+                        ),
+                        vv.LayoutItem(
+                            speed_view,
+                            stretch=1
+                        ),
+                    ]
+                )
+            ),
+        ]
+    )
 
     return view.url(label=label, local=local)
