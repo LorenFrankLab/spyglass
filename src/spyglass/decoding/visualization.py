@@ -467,7 +467,7 @@ def create_live_position_pdf_plot_h5(*, data: np.ndarray, segment_size: int, mul
         return h5_uri
 
 
-def create_figurl_decode_visualization(
+def create_interactive_1D_decoding_figurl(
         position_info,
         linear_position_info,
         classifier,
