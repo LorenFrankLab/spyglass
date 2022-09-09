@@ -539,6 +539,7 @@ def create_interactive_1D_decoding_figurl(
       binned_linear_position = (
         get_bin_ind(linear_position_info.linear_position,
                     classifier.edges_)[0]
+        - 1)
      
     panel = create_live_position_pdf_plot(
         linear_positions=binned_linear_position.astype(np.int32),
