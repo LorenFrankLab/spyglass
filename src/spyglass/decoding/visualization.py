@@ -530,10 +530,16 @@ def create_interactive_1D_decoding_figurl(
         segment_size=segment_size,
         multiscale_factor=multiscale_factor)
 
-    binned_linear_position = (
+    try:
+      binned_linear_position = (
         get_bin_ind(linear_position_info.linear_position,
                     classifier.environments[0].edges_)[0]
         - 1)
+    except AttributeError:
+      binned_linear_position = (
+        get_bin_ind(linear_position_info.linear_position,
+                    classifier.edges_)[0]
+     
     panel = create_live_position_pdf_plot(
         linear_positions=binned_linear_position.astype(np.int32),
         start_time_sec=time[0],
