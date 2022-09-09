@@ -22,7 +22,11 @@ from replay_trajectory_classification.initial_conditions import \
     UniformInitialConditions
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.common.dj_helper_fn import fetch_nwb
+from spyglass.decoding.core import (
+    convert_epoch_interval_name_to_position_interval_name,
+    convert_valid_times_to_slice, get_valid_ephys_position_times_by_epoch)
 from spyglass.decoding.dj_decoder_conversion import (convert_classes_to_dict,
                                                      restore_classes)
 from spyglass.spikesorting.spikesorting_curation import CuratedSpikeSorting
@@ -205,3 +209,42 @@ class SortedSpikesClassifierParameters(dj.Manual):
 
     def fetch1(self, *args, **kwargs):
         return restore_classes(super().fetch1(*args, **kwargs))
+
+
+def get_decoding_data_for_epoch(
+    nwb_file_name: str,
+    interval_list_name: str,
+    position_info_param_name='default_decoding',
+    additional_spike_keys={}
+):
+    valid_ephys_position_times_by_epoch = get_valid_ephys_position_times_by_epoch(
+        nwb_file_name)
+    valid_ephys_position_times = valid_ephys_position_times_by_epoch[interval_list_name]
+    valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
+    position_interval_name = convert_epoch_interval_name_to_position_interval_name(
+        interval_list_name)
+
+    position_info = (IntervalPositionInfo() &
+                     {'nwb_file_name': nwb_file_name,
+                      'interval_list_name': position_interval_name,
+                      'position_info_param_name': position_info_param_name}
+                     ).fetch1_dataframe()
+
+    position_info = pd.concat(
+        [position_info.loc[times] for times in valid_slices])
+
+    spikes = (
+        SortedSpikesIndicator & {
+            'nwb_file_name': nwb_file_name,
+            'interval_list_name': position_interval_name,
+            **additional_spike_keys
+        }).fetch_dataframe()
+    spikes = pd.concat(
+        [spikes.loc[times] for times in valid_slices])
+
+    # temporarily remove the bit where the animal is placed on the track
+    # ideally should use DIOs first poke event?
+    position_info = position_info.iloc[slice(20_000, -1)]
+    spikes = spikes.iloc[slice(20_000, -1)]
+
+    return position_info, spikes, valid_slices
