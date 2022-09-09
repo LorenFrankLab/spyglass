@@ -9,9 +9,9 @@ from .spikesorting_curation import (AutomaticCuration,
                                     CuratedSpikeSorting,
                                     CuratedSpikeSortingSelection, Curation,
                                     MetricParameters, MetricSelection,
-                                    QualityMetrics, UnitInclusionParameters, 
-                                    WaveformParameters,
-                                    Waveforms, WaveformSelection)
+                                    QualityMetrics, UnitInclusionParameters,
+                                    WaveformParameters, Waveforms,
+                                    WaveformSelection)
 from .spikesorting_recording import (SortGroup, SortInterval,
                                      SpikeSortingPreprocessingParameters,
                                      SpikeSortingRecording,
