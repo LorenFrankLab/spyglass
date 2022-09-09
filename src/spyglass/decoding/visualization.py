@@ -641,7 +641,7 @@ def get_observations_per_frame(i_trim: xr.Dataset, base_slice: xr.Dataset):
 def process_decoded_data(results):
     frame_step_size = 100_000
     location_lookup = {}
-    base_probabilities = cast(xr.Dataset, results.sum('state'))
+    base_probabilities = cast(xr.Dataset, results)
 
     (x_count, x_min, x_width, y_count, y_min,
      y_width) = get_base_track_information(base_probabilities)
@@ -796,11 +796,13 @@ def create_track_animation_object(*, static_track_animation: any):
 
 def create_interactive_2D_decoding_figurl(
     position_info,
+    marks,
+    results,
     bin_size,
-    results=None,
     position_names=['head_position_x', 'head_position_y'],
     head_direction_name='head_orientation',
     label='',
+    sampling_frequency=500,
     local=False,
 ):
 
@@ -820,8 +822,7 @@ def create_interactive_2D_decoding_figurl(
         head_dir=head_dir,
         compute_real_time_rate=True
     )
-    if results is not None:
-        data['decodedData'] = process_decoded_data(results)
+    data['decodedData'] = process_decoded_data(results.sum('state'))
 
     decode_view = create_track_animation_object(static_track_animation=data)
 
@@ -838,8 +839,20 @@ def create_interactive_2D_decoding_figurl(
         dimension_labels=['speed'],
     )
 
+    multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
+                        ).astype(float)
+    multiunit_firing_rate = get_multiunit_population_firing_rate(
+        multiunit_spikes, sampling_frequency)
+
+    multiunit_firing_rate_view = vv.PositionPlot(
+        timestamps=np.asarray(marks.time.values),
+        positions=np.asarray(multiunit_firing_rate, dtype=np.float32),
+        dimension_labels=['firing rate'],
+    )
+
     view = vv.Box(
         direction='horizontal',
+        show_titles=True,
         items=[
             vv.LayoutItem(
                 vv.Box(
@@ -847,7 +860,8 @@ def create_interactive_2D_decoding_figurl(
                     items=[
                         vv.LayoutItem(
                             decode_view,
-                            stretch=1
+                            stretch=1,
+                            title='Decode'
                         ),
                     ]
                 )
@@ -858,11 +872,18 @@ def create_interactive_2D_decoding_figurl(
                     items=[
                         vv.LayoutItem(
                             probability_view,
-                            stretch=1
+                            stretch=1,
+                            title='Probability of State'
                         ),
                         vv.LayoutItem(
                             speed_view,
-                            stretch=1
+                            stretch=1,
+                            title='Speed'
+                        ),
+                        vv.LayoutItem(
+                            multiunit_firing_rate_view,
+                            stretch=1,
+                            title='Multiunit'
                         ),
                     ]
                 )
