@@ -857,6 +857,7 @@ def create_interactive_2D_decoding_figurl(
             vv.LayoutItem(
                 vv.Box(
                     direction='horizontal',
+                    show_titles=True,
                     items=[
                         vv.LayoutItem(
                             decode_view,
@@ -869,6 +870,7 @@ def create_interactive_2D_decoding_figurl(
             vv.LayoutItem(
                 vv.Box(
                     direction='vertical',
+                    show_titles=True,
                     items=[
                         vv.LayoutItem(
                             probability_view,
