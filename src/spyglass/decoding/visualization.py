@@ -531,15 +531,17 @@ def create_interactive_1D_decoding_figurl(
         multiscale_factor=multiscale_factor)
 
     try:
-        binned_linear_position = (
-            get_bin_ind(linear_position_info.linear_position,
-                        classifier.environments[0].edges_)[0]
-            - 1)
+        edges = classifier.environments[0].edges_
+        is_track_interior = classifier.environments[0].is_track_interior_
     except AttributeError:
-        binned_linear_position = (
-            get_bin_ind(linear_position_info.linear_position,
-                        classifier.edges_)[0]
-            - 1)
+        edges = classifier.edges_
+        is_track_interior = classifier.is_track_interior_
+
+    binned_linear_position = (
+        get_bin_ind(linear_position_info.linear_position, edges)[0]
+        - 1)
+    not_track = ~np.isin(binned_linear_position, np.nonzero(is_track_interior))
+    binned_linear_position[not_track] -= 1
 
     panel = create_live_position_pdf_plot(
         linear_positions=binned_linear_position.astype(np.int32),
