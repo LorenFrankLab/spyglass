@@ -473,10 +473,12 @@ def create_interactive_1D_decoding_figurl(
         linear_position_info,
         classifier,
         results,
+        marks=None,
         spikes=None,
         visualization_name='test',
         segment_size=100000,
         multiscale_factor=3,
+        sampling_frequency=500,
 ):
 
     layout = MultiTimeseries(label=visualization_name)
@@ -494,6 +496,22 @@ def create_interactive_1D_decoding_figurl(
                 labels=cell_ids.astype(np.int32),
                 label='Spikes'
             )
+        )
+    if marks is not None:
+        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
+                            ).astype(float)
+        multiunit_firing_rate = get_multiunit_population_firing_rate(
+            multiunit_spikes, sampling_frequency)
+
+        layout.add_panel(
+            create_position_plot(
+                timestamps=np.asarray(
+                    marks.time.values - marks.time.values[0]),
+                positions=np.asarray(multiunit_firing_rate, dtype=np.float32),
+                dimension_labels=['firing rate'],
+                label='Firing Rate',
+                discontinuous=False
+            ), relative_height=1
         )
 
     # speed panel
