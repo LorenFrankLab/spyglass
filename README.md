@@ -28,3 +28,4 @@ License and Copyright notice can be found at [https://lorenfranklab.github.io/sp
 ## Citation
 
 Kyu Hyun Lee, Eric Denovellis, Ryan Ly, Jeremy Magland, Jeff Soules, Alison Comrie, Jennifer Guidera, Rhino Nevers, Daniel Gramling, Philip Adenekan, Ji Hyun Bak, Emily Monroe, Andrew Tritt, Oliver Rübel, Thinh Nguyen, Dimitri Yatsenko, Joshua Chu, Caleb Kemere, Samuel Garcia, Alessio Buccino, Emily Aery Jones, Lisa Giocomo, and Loren Frank. Spyglass: A Data Analysis Framework for Reproducible and Shareable Neuroscience Research. Neuroscience Meeting Planner. San Diego, CA: Society for Neuroscience, 2022.
+
