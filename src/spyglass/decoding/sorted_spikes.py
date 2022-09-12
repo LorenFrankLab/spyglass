@@ -242,9 +242,4 @@ def get_decoding_data_for_epoch(
     spikes = pd.concat(
         [spikes.loc[times] for times in valid_slices])
 
-    # temporarily remove the bit where the animal is placed on the track
-    # ideally should use DIOs first poke event?
-    position_info = position_info.iloc[slice(20_000, -1)]
-    spikes = spikes.iloc[slice(20_000, -1)]
-
     return position_info, spikes, valid_slices
