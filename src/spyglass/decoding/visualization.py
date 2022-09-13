@@ -822,6 +822,7 @@ def create_interactive_2D_decoding_figurl(
     position_names=['head_position_x', 'head_position_y'],
     head_direction_name='head_orientation',
     sampling_frequency=500,
+    view_height=800,
 ):
 
     positions = np.asarray(position_info[position_names])
@@ -887,6 +888,7 @@ def create_interactive_2D_decoding_figurl(
     view = vv.Box(
         direction='horizontal',
         show_titles=True,
+        height=view_height,
         items=[
             vv.LayoutItem(
                 vv.Box(
