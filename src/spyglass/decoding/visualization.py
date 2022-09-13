@@ -821,9 +821,7 @@ def create_interactive_2D_decoding_figurl(
     bin_size,
     position_names=['head_position_x', 'head_position_y'],
     head_direction_name='head_orientation',
-    label='',
     sampling_frequency=500,
-    local=False,
 ):
 
     positions = np.asarray(position_info[position_names])
@@ -846,17 +844,28 @@ def create_interactive_2D_decoding_figurl(
 
     decode_view = create_track_animation_object(static_track_animation=data)
 
-    probability_view = vv.PositionPlot(
-        timestamps=np.asarray(results.time),
-        positions=np.asarray(results.acausal_posterior.sum(
-            ['x_position', 'y_position']), dtype=np.float32),
-        dimension_labels=results.state.values.tolist(),
-    )
+    probability_view = vv.TimeseriesGraph()
+    COLOR_CYCLE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                   '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+    for state, color in zip(results.state.values, COLOR_CYCLE):
+        probability_view.add_line_series(
+            name=state,
+            t=np.asarray(results.time),
+            y=np.asarray(results.acausal_posterior.sel(state=state).sum(
+                ['x_position', 'y_position']), dtype=np.float32),
+            color=color,
+            width=1,
+        )
 
-    speed_view = vv.PositionPlot(
-        timestamps=np.asarray(position_info.index),
-        positions=np.asarray(position_info.head_speed, dtype=np.float32),
-        dimension_labels=['speed'],
+    speed_view = (
+        vv.TimeseriesGraph()
+        .add_line_series(
+            name='Speed [cm/s]',
+            t=np.asarray(position_info.index),
+            y=np.asarray(position_info.head_speed, dtype=np.float32),
+            color='black',
+            width=1,
+        )
     )
 
     multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)
@@ -864,10 +873,15 @@ def create_interactive_2D_decoding_figurl(
     multiunit_firing_rate = get_multiunit_population_firing_rate(
         multiunit_spikes, sampling_frequency)
 
-    multiunit_firing_rate_view = vv.PositionPlot(
-        timestamps=np.asarray(marks.time.values),
-        positions=np.asarray(multiunit_firing_rate, dtype=np.float32),
-        dimension_labels=['firing rate'],
+    multiunit_firing_rate_view = (
+        vv.TimeseriesGraph()
+        .add_line_series(
+            name='Multiunit Rate [spikes/s]',
+            t=np.asarray(marks.time.values),
+            y=np.asarray(multiunit_firing_rate, dtype=np.float32),
+            color='black',
+            width=1,
+        )
     )
 
     view = vv.Box(
@@ -913,4 +927,4 @@ def create_interactive_2D_decoding_figurl(
         ]
     )
 
-    return view.url(label=label, local=local)
+    return view
