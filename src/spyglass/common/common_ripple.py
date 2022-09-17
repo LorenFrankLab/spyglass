@@ -32,7 +32,7 @@ def interpolate_to_new_time(df, new_time, upsampling_interpolation_method='linea
 class RippleLFPSelection(dj.Manual):
     definition = """
      -> Session
-     brain_region = 'Hippocampus' : varchar(80)
+     group_name = 'CA1' : varchar(80)
      """
 
     class RippleLFPElectrode(dj.Part):
@@ -42,7 +42,7 @@ class RippleLFPSelection(dj.Manual):
         """
 
     @staticmethod
-    def set_lfp_electrodes(nwb_file_name, electrode_list, brain_region='Hippocampus'):
+    def set_lfp_electrodes(nwb_file_name, electrode_list, group_name='Hippocampus'):
         '''Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
 
         Parameters
@@ -51,11 +51,11 @@ class RippleLFPSelection(dj.Manual):
             The name of the nwb file for the desired session
         electrode_list : list
             list of electrodes to be used for LFP
-        brain_region : str, optional
+        group_name : str, optional
 
         '''
         RippleLFPSelection().insert1(
-            {'nwb_file_name': nwb_file_name, 'brain_region': brain_region}, skip_duplicates=True)
+            {'nwb_file_name': nwb_file_name, 'group_name': group_name}, skip_duplicates=True)
 
         electrode_keys = (pd.DataFrame(Electrode & {'nwb_file_name': nwb_file_name})
                           .set_index('electrode_id')
@@ -63,7 +63,7 @@ class RippleLFPSelection(dj.Manual):
                           .reset_index()
                           .loc[:, Electrode.primary_key]
                           )
-        electrode_keys['brain_region'] = brain_region
+        electrode_keys['group_name'] = group_name
         RippleLFPSelection().RippleLFPElectrode.insert(
             electrode_keys.to_dict(orient='records'), replace=True)
 
@@ -158,7 +158,7 @@ class RippleTimes(dj.Computed):
         nwb_file_name = key['nwb_file_name']
         interval_list_name = key['interval_list_name']
         position_info_param_name = key['position_info_param_name']
-        brain_region = key['brain_region']
+        group_name = key['group_name']
         ripple_params = (
             RippleParameters &
             {'ripple_param_name': key['ripple_param_name']}
@@ -169,7 +169,7 @@ class RippleTimes(dj.Computed):
 
         electrode_keys = (RippleLFPSelection() &
                           {'nwb_file_name': nwb_file_name,
-                          'brain_region': brain_region}
+                          'group_name': group_name}
                           ).RippleLFPElectrode().fetch('KEY')
 
         # warn/validate that there is only one wire per electrode
