@@ -42,7 +42,7 @@ class RippleLFPSelection(dj.Manual):
         """
 
     @staticmethod
-    def set_lfp_electrodes(nwb_file_name, electrode_list, group_name='Hippocampus'):
+    def set_lfp_electrodes(nwb_file_name, electrode_list, group_name='CA1'):
         '''Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
 
         Parameters
