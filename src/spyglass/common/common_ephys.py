@@ -161,8 +161,12 @@ class Raw(dj.Imported):
                 [[0, len(rawdata.data) / rawdata.rate]])
         else:
             # get the list of valid times given the specified sampling rate.
-            interval_dict['valid_times'] = get_valid_intervals(np.asarray(rawdata.timestamps), key['sampling_rate'],
-                                                               1.75, 0)
+            interval_dict['valid_times'] = get_valid_intervals(
+                timestamps=np.asarray(rawdata.timestamps),
+                sampling_rate=key['sampling_rate'],
+                gap_proportion=1.75,
+                min_valid_len=0
+            )
         IntervalList().insert1(interval_dict, skip_duplicates=True)
 
         # now insert each of the electrodes as an individual row, but with the same nwb_object_id
