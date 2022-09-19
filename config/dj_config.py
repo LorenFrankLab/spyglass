@@ -29,6 +29,7 @@ def generate_config_yaml(filename: str, **kwargs):
     config['database.host'] = kwargs['database_host'] if 'database_host' in kwargs else 'lmf-db.cin.ucsf.edu'
     config['database.port'] = kwargs['database_port'] if 'database_port' in kwargs else 3306
     config['database.use_tls'] = kwargs['database_use_tls'] if 'database.use_tls' in kwargs else True
+    config['filepath_checksum_size_limit'] = 1 * 1024**3
     config['enable_python_native_blobs'] = True
 
     # next, set up external stores
