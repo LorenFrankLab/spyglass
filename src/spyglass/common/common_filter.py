@@ -26,7 +26,7 @@ class FirFilter(dj.Manual):
     filter_high_stop = 0: float        # highest frequency for stop band of high frequency side of filter
     filter_comments: varchar(2000)     # comments about the filter
     filter_band_edges: blob            # numpy array containing the filter bands (redundant with individual parameters)
-    filter_coeff: longblob                 # numpy array containing the filter coefficients
+    filter_coeff: longblob             # numpy array containing the filter coefficients
     """
 
     def add_filter(self, filter_name, fs, filter_type, band_edges, comments=''):
