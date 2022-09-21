@@ -349,3 +349,18 @@ def get_nwb_copy_filename(nwb_file_name):
     filename, file_extension = os.path.splitext(nwb_file_name)
 
     return f'{filename}_{file_extension}'
+
+
+def change_group_permissions(subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"):
+    # Change to directory with analysis nwb files
+    os.chdir(analysis_dir)
+    # Get nwb file directories with specified subject ids
+    target_contents = [x for x in os.listdir(analysis_dir)
+                       if any([subject_id in x.split("_")[0] for subject_id in subject_ids])]
+    # Loop through nwb file directories and change group permissions
+    for target_content in target_contents:
+        print(f"For {target_content}, changing group to {set_group_name} and giving read/write/execute permissions")
+        # Change group
+        os.system(f"chgrp -R {set_group_name} {target_content}")
+        # Give read, write, execute permissions to group
+        os.system(f"chmod -R g+rwx {target_content}")
