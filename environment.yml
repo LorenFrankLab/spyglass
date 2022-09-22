@@ -25,7 +25,6 @@ dependencies:
   - pyfftw  # used by ghostipy. install from conda-forge so that it works on Mac ARM processors
   - pip:
     - pubnub<6.4.0
-    - mountainsort4
     - git+https://github.com/SpikeInterface/spikeinterface.git
     - pynwb>=2.0.0,<3
     - hdmf>=3.1.1,<=3.2.1
