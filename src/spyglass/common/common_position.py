@@ -159,8 +159,8 @@ class IntervalPositionInfo(dj.Computed):
 
         self.insert1(key)
 
+    @staticmethod
     def calculate_position_info_from_spatial_series(
-        self,
         spatial_series,
         max_LED_separation,
         max_plausible_speed,

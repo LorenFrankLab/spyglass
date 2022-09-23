@@ -74,13 +74,6 @@ def restore_classes(params):
         params['classifier_params']['observation_models'] = [ObservationModel(
             obs) for obs in params['classifier_params']['observation_models']]
 
-    model_types = []
-    try:
-        params['classifier_params']['clusterless_algorithm_params']['model'] = (
-            model_types[params['classifier_params']['clusterless_algorithm_params']['model']])
-    except KeyError:
-        pass
-
     return params
 
 
