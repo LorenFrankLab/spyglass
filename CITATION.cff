@@ -10,6 +10,6 @@ authors:
 - family-names: "Frank"
   given-names: "Loren"
 title: "spyglass"
-version: 0.3.0
-date-released: 2020-12-18
+version: 0.1.0
+date-released: 2022-09-01
 url: "https://github.com/LorenFrankLab/spyglass"

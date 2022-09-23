@@ -1,6 +1,5 @@
 # code to define filters that can be applied to continuous time data
 import datajoint as dj
-import ghostipy as gsp
 import matplotlib.pyplot as plt
 import numpy as np
 import pynwb
@@ -11,6 +10,14 @@ import warnings
 from .nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema('common_filter')
+
+
+def _import_ghostipy():
+    try:
+        import ghostipy as gsp
+    except ImportError:
+        print("You must install ghostipy to use filtering methods. Please note that to install ghostipy on "
+              "an Mac M1, you need to install pyfftw from conda-forge first.")
 
 
 @schema
@@ -26,10 +33,12 @@ class FirFilter(dj.Manual):
     filter_high_stop = 0: float        # highest frequency for stop band of high frequency side of filter
     filter_comments: varchar(2000)     # comments about the filter
     filter_band_edges: blob            # numpy array containing the filter bands (redundant with individual parameters)
-    filter_coeff: blob                 # numpy array containing the filter coefficients
+    filter_coeff: longblob             # numpy array containing the filter coefficients
     """
 
     def add_filter(self, filter_name, fs, filter_type, band_edges, comments=''):
+        _import_ghostipy()
+
         # add an FIR bandpass filter of the specified type ('lowpass', 'highpass', or 'bandpass').
         # band_edges should be as follows:
         #   low pass filter: [high_pass high_stop]
@@ -143,6 +152,7 @@ class FirFilter(dj.Manual):
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
         created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
         """
+        _import_ghostipy()
 
         data_on_disk = eseries.data
         timestamps_on_disk = eseries.timestamps
@@ -287,6 +297,7 @@ class FirFilter(dj.Manual):
         :param decimation: decimation factor
         :return: filtered_data, timestamps
         """
+        _import_ghostipy()
 
         n_dim = len(data.shape)
         n_samples = len(timestamps)
