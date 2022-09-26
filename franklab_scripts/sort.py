@@ -1,11 +1,8 @@
-from pathlib import Path
-import numpy as np
-import pynwb
 import os
-import datajoint as dj
+from pathlib import Path
+
 import spyglass as nd
-from ndx_franklab_novela import Probe
-import spiketoolkit as st
+
 
 def main():
 
@@ -19,7 +16,7 @@ def main():
     #session_id = 'jaq_01'
     #nwb_file_name = (nd.common.Session() & {'session_id': session_id}).fetch1('nwb_file_name')
     nwb_file_name = 'beans20190718-trim_.nwb'
-    
+
     nd.common.SpikeSorting().populate()
 
 if __name__ == '__main__':
