@@ -1,13 +1,13 @@
-import hither2 as hi
-import kachery_client as kc
 import multiprocessing
 import os
-from pymysql.err import OperationalError
+import time
 import traceback
 
-import time
-from ._config import DATAJOINT_SERVER_PORT
+import hither2 as hi
+import kachery_client as kc
+from pymysql.err import OperationalError
 
+from ._config import DATAJOINT_SERVER_PORT
 
 DOCKER_IMAGE_NAME = 'datajoint-server-pytest'
 

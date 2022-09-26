@@ -8,7 +8,7 @@ from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .nwb_helper_fn import get_data_interface, get_nwb_file
 
-schema = dj.schema('common_task')
+schema = dj.schema("common_task")
 
 
 @schema
@@ -30,9 +30,9 @@ class Task(dj.Manual):
         nwbf : pynwb.NWBFile
             The source NWB file object.
         """
-        tasks_mod = nwbf.processing.get('tasks')
+        tasks_mod = nwbf.processing.get("tasks")
         if tasks_mod is None:
-            print(f'No tasks processing module found in {nwbf}\n')
+            print(f"No tasks processing module found in {nwbf}\n")
             return
         for task in tasks_mod.data_interfaces.values():
             if cls.check_task_table(task):
@@ -52,8 +52,8 @@ class Task(dj.Manual):
         taskdf = task_table.to_dataframe()
         for task_entry in taskdf.iterrows():
             task_dict = dict()
-            task_dict['task_name'] = task_entry[1].task_name
-            task_dict['task_description'] = task_entry[1].task_description
+            task_dict["task_name"] = task_entry[1].task_name
+            task_dict["task_description"] = task_entry[1].task_description
             cls.insert1(task_dict, skip_duplicates=True)
 
     @classmethod
@@ -74,8 +74,11 @@ class Task(dj.Manual):
         bool
             Whether the DynamicTable conforms to the expected format for loading data into the Task table.
         """
-        return (isinstance(task_table, pynwb.core.DynamicTable) and hasattr(task_table, 'task_name') and
-                hasattr(task_table, 'task_description'))
+        return (
+            isinstance(task_table, pynwb.core.DynamicTable)
+            and hasattr(task_table, "task_name")
+            and hasattr(task_table, "task_description")
+        )
 
 
 @schema
@@ -92,7 +95,7 @@ class TaskEpoch(dj.Imported):
      """
 
     def make(self, key):
-        nwb_file_name = key['nwb_file_name']
+        nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
         camera_names = dict()
@@ -107,42 +110,47 @@ class TaskEpoch(dj.Imported):
 
         # find the task modules and for each one, add the task to the Task schema if it isn't there
         # and then add an entry for each epoch
-        tasks_mod = nwbf.processing.get('tasks')
+        tasks_mod = nwbf.processing.get("tasks")
         if tasks_mod is None:
-            print(f'No tasks processing module found in {nwbf}\n')
+            print(f"No tasks processing module found in {nwbf}\n")
             return
 
         for task in tasks_mod.data_interfaces.values():
             if self.check_task_table(task):
                 # check if the task is in the Task table and if not, add it
                 Task.insert_from_task_table(task)
-                key['task_name'] = task.task_name[0]
+                key["task_name"] = task.task_name[0]
 
                 # get the CameraDevice used for this task (primary key is camera name so we need
                 # to map from ID to name)
                 camera_id = int(task.camera_id[0])
                 if camera_id in camera_names:
-                    key['camera_name'] = camera_names[camera_id]
+                    key["camera_name"] = camera_names[camera_id]
                 else:
-                    print(f"No camera device found with ID {camera_id} in NWB file {nwbf}\n")
+                    print(
+                        f"No camera device found with ID {camera_id} in NWB file {nwbf}\n"
+                    )
 
                 # Add task environment
-                if hasattr(task, 'task_environment'):
+                if hasattr(task, "task_environment"):
                     key["task_environment"] = task.task_environment[0]
 
                 # get the interval list for this task, which corresponds to the matching epoch for the raw data.
                 # Users should define more restrictive intervals as required for analyses
-                session_intervals = (IntervalList() & {'nwb_file_name': nwb_file_name}).fetch(
-                    'interval_list_name')
+                session_intervals = (
+                    IntervalList() & {"nwb_file_name": nwb_file_name}
+                ).fetch("interval_list_name")
                 for epoch in task.task_epochs[0]:
                     # TODO in beans file, task_epochs[0] is 1x2 dset of ints, so epoch would be an int
-                    key['epoch'] = epoch
+                    key["epoch"] = epoch
                     target_interval = str(epoch).zfill(2)
                     for interval in session_intervals:
-                        if target_interval in interval:  # TODO this is not true for the beans file
+                        if (
+                            target_interval in interval
+                        ):  # TODO this is not true for the beans file
                             break
                     # TODO case when interval is not found is not handled
-                    key['interval_list_name'] = interval
+                    key["interval_list_name"] = interval
                     self.insert1(key)
 
     @classmethod
@@ -164,5 +172,8 @@ class TaskEpoch(dj.Imported):
         """
 
         # TODO this could be more strict and check data types, but really it should be schematized
-        return (Task.check_task_table(task_table) and hasattr(task_table, 'camera_id') and
-                hasattr(task_table, 'task_epochs'))
+        return (
+            Task.check_task_table(task_table)
+            and hasattr(task_table, "camera_id")
+            and hasattr(task_table, "task_epochs")
+        )

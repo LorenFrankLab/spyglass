@@ -14,9 +14,10 @@ def base_dir():
     Returns:
         str: The base directory
     """
-    p = os.getenv('SPYGLASS_BASE_DIR', None)
-    assert p is not None, '''
+    p = os.getenv("SPYGLASS_BASE_DIR", None)
+    assert (
+        p is not None
+    ), """
     You must set the SPYGLASS_BASE_DIR environment variable.
-    '''
+    """
     return p
-

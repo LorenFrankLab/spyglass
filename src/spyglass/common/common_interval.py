@@ -8,7 +8,7 @@ import pandas as pd
 
 from .common_session import Session  # noqa: F401
 
-schema = dj.schema('common_interval')
+schema = dj.schema("common_interval")
 
 # TODO: ADD export to NWB function to save relevant intervals in an NWB file
 
@@ -41,19 +41,19 @@ class IntervalList(dj.Manual):
             The file name of the NWB file, used as a primary key to the Session table.
         """
         if nwbf.epochs is None:
-            print('No epochs found in NWB file.')
+            print("No epochs found in NWB file.")
             return
         epochs = nwbf.epochs.to_dataframe()
         for epoch_index, epoch_data in epochs.iterrows():
             epoch_dict = dict()
-            epoch_dict['nwb_file_name'] = nwb_file_name
+            epoch_dict["nwb_file_name"] = nwb_file_name
             if epoch_data.tags[0]:
-                epoch_dict['interval_list_name'] = epoch_data.tags[0]
+                epoch_dict["interval_list_name"] = epoch_data.tags[0]
             else:
-                epoch_dict['interval_list_name'] = 'interval_' + \
-                    str(epoch_index)
-            epoch_dict['valid_times'] = np.asarray(
-                [[epoch_data.start_time, epoch_data.stop_time]])
+                epoch_dict["interval_list_name"] = "interval_" + str(epoch_index)
+            epoch_dict["valid_times"] = np.asarray(
+                [[epoch_data.start_time, epoch_data.stop_time]]
+            )
             cls.insert1(epoch_dict, skip_duplicates=True)
 
     def plot_intervals(self, figsize=(20, 5)):
@@ -63,53 +63,68 @@ class IntervalList(dj.Manual):
         for row in interval_list.itertuples(index=False):
             for interval in row.valid_times:
                 ax.plot(interval, [interval_count, interval_count])
-                ax.scatter(interval, [interval_count,
-                           interval_count], alpha=0.8, zorder=2)
+                ax.scatter(
+                    interval, [interval_count, interval_count], alpha=0.8, zorder=2
+                )
             interval_count += 1
         ax.set_yticks(np.arange(interval_list.shape[0]))
         ax.set_yticklabels(interval_list.interval_list_name)
-        ax.set_xlabel('Time [s]')
+        ax.set_xlabel("Time [s]")
         ax.grid(True)
 
     def plot_epoch_pos_raw_intervals(self, figsize=(20, 5)):
         interval_list = pd.DataFrame(self)
         fig, ax = plt.subplots(figsize=(30, 3))
 
-        raw_data_valid_times = interval_list.loc[interval_list.interval_list_name ==
-                                                 'raw data valid times'].valid_times
+        raw_data_valid_times = interval_list.loc[
+            interval_list.interval_list_name == "raw data valid times"
+        ].valid_times
         interval_y = 1
 
         for interval in np.asarray(raw_data_valid_times)[0]:
             ax.plot(interval, [interval_y, interval_y])
             ax.scatter(interval, [interval_y, interval_y], alpha=0.8, zorder=2)
 
-        epoch_valid_times = interval_list.set_index(
-            'interval_list_name').filter(regex=r'^[0-9]', axis=0).valid_times
+        epoch_valid_times = (
+            interval_list.set_index("interval_list_name")
+            .filter(regex=r"^[0-9]", axis=0)
+            .valid_times
+        )
         interval_y = 2
         for epoch, valid_times in zip(epoch_valid_times.index, epoch_valid_times):
             for interval in valid_times:
                 ax.plot(interval, [interval_y, interval_y])
-                ax.scatter(
-                    interval, [interval_y, interval_y], alpha=0.8, zorder=2)
-                ax.text(interval[0] + np.diff(interval)[0] / 2,
-                        interval_y, epoch, ha='center', va='bottom')
+                ax.scatter(interval, [interval_y, interval_y], alpha=0.8, zorder=2)
+                ax.text(
+                    interval[0] + np.diff(interval)[0] / 2,
+                    interval_y,
+                    epoch,
+                    ha="center",
+                    va="bottom",
+                )
 
-        pos_valid_times = interval_list.set_index(
-            'interval_list_name').filter(regex=r'^pos', axis=0).valid_times
+        pos_valid_times = (
+            interval_list.set_index("interval_list_name")
+            .filter(regex=r"^pos", axis=0)
+            .valid_times
+        )
         interval_y = 0
         for epoch, valid_times in zip(pos_valid_times.index, pos_valid_times):
             for interval in valid_times:
                 ax.plot(interval, [interval_y, interval_y])
-                ax.scatter(
-                    interval, [interval_y, interval_y], alpha=0.8, zorder=2)
-                ax.text(interval[0] + np.diff(interval)[0] / 2, interval_y,
-                        epoch.strip(' valid times'), ha='center', va='bottom')
+                ax.scatter(interval, [interval_y, interval_y], alpha=0.8, zorder=2)
+                ax.text(
+                    interval[0] + np.diff(interval)[0] / 2,
+                    interval_y,
+                    epoch.strip(" valid times"),
+                    ha="center",
+                    va="bottom",
+                )
 
         ax.set_ylim((-0.25, 2.25))
         ax.set_yticks(np.arange(3))
-        ax.set_yticklabels(
-            ['pos valid times', 'raw data valid times', 'epoch'])
-        ax.set_xlabel('Time [s]')
+        ax.set_yticklabels(["pos valid times", "raw data valid times", "epoch"])
+        ax.set_xlabel("Time [s]")
         ax.grid(True)
 
 
@@ -140,8 +155,11 @@ def interval_list_contains_ind(interval_list, timestamps):
     """
     ind = []
     for interval in interval_list:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= interval[0],
-                                                   timestamps <= interval[1]))).tolist()
+        ind += np.ravel(
+            np.argwhere(
+                np.logical_and(timestamps >= interval[0], timestamps <= interval[1])
+            )
+        ).tolist()
     return np.asarray(ind)
 
 
@@ -156,8 +174,11 @@ def interval_list_contains(interval_list, timestamps):
     """
     ind = []
     for interval in interval_list:
-        ind += np.ravel(np.argwhere(np.logical_and(timestamps >= interval[0],
-                                                   timestamps <= interval[1]))).tolist()
+        ind += np.ravel(
+            np.argwhere(
+                np.logical_and(timestamps >= interval[0], timestamps <= interval[1])
+            )
+        ).tolist()
     return timestamps[ind]
 
 
@@ -251,24 +272,25 @@ def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     for interval2 in interval_list2:
         for interval1 in interval_list1:
             if _intersection(interval2, interval1) is not None:
-                intersecting_intervals.append(
-                    _intersection(interval1, interval2))
+                intersecting_intervals.append(_intersection(interval1, interval2))
 
     # if no intersection, then return an empty list
     if not intersecting_intervals:
         return []
     else:
         intersecting_intervals = np.asarray(intersecting_intervals)
-        intersecting_intervals = intersecting_intervals[np.argsort(
-            intersecting_intervals[:, 0])]
+        intersecting_intervals = intersecting_intervals[
+            np.argsort(intersecting_intervals[:, 0])
+        ]
 
         return intervals_by_length(intersecting_intervals, min_length=min_length)
 
 
 def _intersection(interval1, interval2):
     "Takes the (set-theoretic) intersection of two intervals"
-    intersection = np.array([max([interval1[0], interval2[0]]),
-                             min([interval1[1], interval2[1]])])
+    intersection = np.array(
+        [max([interval1[0], interval2[0]]), min([interval1[1], interval2[1]])]
+    )
     if intersection[1] > intersection[0]:
         return intersection
     else:
@@ -280,8 +302,9 @@ def _union(interval1, interval2):
     if _intersection(interval1, interval2) is None:
         return np.array([interval1, interval2])
     else:
-        return np.array([min([interval1[0], interval2[0]]),
-                         max([interval1[1], interval2[1]])])
+        return np.array(
+            [min([interval1[0], interval2[0]]), max([interval1[1], interval2[1]])]
+        )
 
 
 def _union_concat(interval_list, interval):
@@ -319,17 +342,29 @@ def union_adjacent_index(interval1, interval2):
     if interval2.ndim == 1:
         interval2 = np.expand_dims(interval2, 0)
 
-    if interval1[-1][1] + 1 == interval2[0][0] or interval2[0][1] + 1 == interval1[-1][0]:
-        x = np.array([[np.min([interval1[-1][0], interval2[0][0]]),
-                       np.max([interval1[-1][1], interval2[0][1]])]])
+    if (
+        interval1[-1][1] + 1 == interval2[0][0]
+        or interval2[0][1] + 1 == interval1[-1][0]
+    ):
+        x = np.array(
+            [
+                [
+                    np.min([interval1[-1][0], interval2[0][0]]),
+                    np.max([interval1[-1][1], interval2[0][1]]),
+                ]
+            ]
+        )
         return np.concatenate((interval1[:-1], x), axis=0)
     else:
         return np.concatenate((interval1, interval2), axis=0)
 
+
 # TODO: test interval_list_union code
 
 
-def interval_list_union(interval_list1, interval_list2, min_length=0.0, max_length=1e10):
+def interval_list_union(
+    interval_list1, interval_list2, min_length=0.0, max_length=1e10
+):
     """Finds the union (all times in one or both) for two interval lists
 
     :param interval_list1: The first interval list
@@ -384,7 +419,8 @@ def interval_list_censor(interval_list, timestamps):
     """
     # check that all timestamps are in the interval list
     assert len(interval_list_contains_ind(interval_list, timestamps)) == len(
-        timestamps), 'interval_list must contain all timestamps'
+        timestamps
+    ), "interval_list must contain all timestamps"
 
     timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
     return interval_list_intersect(interval_list, timestamps_interval)
