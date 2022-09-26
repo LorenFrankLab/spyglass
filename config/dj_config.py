@@ -24,37 +24,40 @@ def generate_config_yaml(filename: str, **kwargs):
     """
     config = {}
     # define the hostname and port to connect
-    print('printing kwargs')
+    print("printing kwargs")
     print(kwargs)
-    config['database.host'] = kwargs['database_host'] if 'database_host' in kwargs else 'lmf-db.cin.ucsf.edu'
-    config['database.port'] = kwargs['database_port'] if 'database_port' in kwargs else 3306
-    config['database.use_tls'] = kwargs['database_use_tls'] if 'database.use_tls' in kwargs else True
-    config['filepath_checksum_size_limit'] = 1 * 1024**3
-    config['enable_python_native_blobs'] = True
+    config["database.host"] = (
+        kwargs["database_host"] if "database_host" in kwargs else "lmf-db.cin.ucsf.edu"
+    )
+    config["database.port"] = (
+        kwargs["database_port"] if "database_port" in kwargs else 3306
+    )
+    config["database.use_tls"] = (
+        kwargs["database_use_tls"] if "database.use_tls" in kwargs else True
+    )
+    config["filepath_checksum_size_limit"] = 1 * 1024 ** 3
+    config["enable_python_native_blobs"] = True
 
     # next, set up external stores
     # (read about them here: https://docs.datajoint.io/python/admin/5-blob-config.html)
 
-    assert os.getenv(
-        'SPYGLASS_BASE_DIR') is not None, 'environment variable SPYGLASS_BASE_DIR must be set'
+    assert (
+        os.getenv("SPYGLASS_BASE_DIR") is not None
+    ), "environment variable SPYGLASS_BASE_DIR must be set"
 
-    data_dir = pathlib.Path(os.environ['SPYGLASS_BASE_DIR'])
-    raw_dir = data_dir / 'raw'
-    analysis_dir = data_dir / 'analysis'
+    data_dir = pathlib.Path(os.environ["SPYGLASS_BASE_DIR"])
+    raw_dir = data_dir / "raw"
+    analysis_dir = data_dir / "analysis"
 
-    config['stores'] = {
-        'raw': {
-            'protocol': 'file',
-            'location': str(raw_dir),
-            'stage': str(raw_dir)
+    config["stores"] = {
+        "raw": {"protocol": "file", "location": str(raw_dir), "stage": str(raw_dir)},
+        "analysis": {
+            "protocol": "file",
+            "location": str(analysis_dir),
+            "stage": str(analysis_dir),
         },
-        'analysis': {
-            'protocol': 'file',
-            'location': str(analysis_dir),
-            'stage': str(analysis_dir)
-        }
     }
-    with open(filename, 'w') as outfile:
+    with open(filename, "w") as outfile:
         yaml.dump(config, outfile, default_flow_style=False)
 
 
