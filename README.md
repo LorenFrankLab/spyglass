@@ -7,7 +7,7 @@
 
 Documentation can be found at - [https://lorenfranklab.github.io/spyglass/](https://lorenfranklab.github.io/spyglass/)
 
-Note: if you want to using decoding functions on a GPU you need to install cupy with the following command: conda install cupy
+Note: if you want to using decoding functions on a GPU you need to install cupy with the following command: `conda install cupy`
 
 ### Installing from pip
 
