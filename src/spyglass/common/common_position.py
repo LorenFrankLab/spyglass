@@ -325,7 +325,7 @@ class IntervalPositionInfo(dj.Computed):
             sigma=speed_smoothing_std_dev,
             sampling_frequency=sampling_rate,
         )  # cm/s
-        speed = np.sqrt(np.sum(velocity ** 2, axis=1))  # cm/s
+        speed = np.sqrt(np.sum(velocity**2, axis=1))  # cm/s
 
         return {
             "time": time,
