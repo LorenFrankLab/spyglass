@@ -296,7 +296,7 @@ class Probe(dj.Manual):
                         # the next line will need to be fixed if we have different sized contacts on a shank
                         elect_dict[electrode.name] = {}
                         elect_dict[electrode.name]['probe_type'] = new_probe_dict['probe_type']
-                        elect_dict[electrode.name]['probe_shank'] = shank_dict['probe_shank']
+                        elect_dict[electrode.name]['probe_shank'] = shank_dict[shank.name]['probe_shank']
                         elect_dict[electrode.name]['contact_size'] = nwb_probe_obj.contact_size
                         elect_dict[electrode.name]['probe_electrode'] = int(electrode.name)
                         elect_dict[electrode.name]['rel_x'] = electrode.rel_x
