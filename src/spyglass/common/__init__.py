@@ -1,8 +1,8 @@
 import os
 
 from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
-from .common_behav import (HeadDir, LinPos, PositionSource, RawPosition, Speed,
-                           StateScriptFile, VideoFile)
+from .common_behav import (PositionSource, RawPosition, StateScriptFile,
+                           VideoFile)
 from .common_device import CameraDevice, DataAcquisitionDevice, Probe
 from .common_dio import DIOEvents
 from .common_ephys import (LFP, Electrode, ElectrodeGroup, LFPBand,

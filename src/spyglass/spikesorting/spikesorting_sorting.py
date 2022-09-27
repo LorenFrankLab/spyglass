@@ -80,14 +80,13 @@ class SpikeSorterParameters(dj.Manual):
             # Locally exclusive means one unit per spike detected
             method='locally_exclusive',
             peak_sign='neg',
-            n_shifts=2,
+            exclude_sweep_ms=0.1,
             local_radius_um=100,
             # noise levels needs to be 1.0 so the units are in uV and not MAD
             noise_levels=np.asarray([1.0]),
             random_chunk_kwargs={},
             # output needs to be set to sorting for the rest of the pipeline
             outputs='sorting',
-            localization_dict=None,
         )
         self.insert1([sorter, sorter_params_name, sorter_params],
                      skip_duplicates=True)
@@ -173,10 +172,11 @@ class SpikeSorting(dj.Computed):
         if sorter == 'clusterless_thresholder':
             # Detect peaks for clusterless decoding
             # need to remove tempdir
-            sorter_params.pop('tempdir',None)
+            sorter_params.pop('tempdir', None)
             detected_spikes = detect_peaks(recording, **sorter_params)
             sorting = si.NumpySorting.from_times_labels(times_list=detected_spikes['sample_ind'],
-                                                        labels_list=np.zeros(len(detected_spikes), dtype=np.int),
+                                                        labels_list=np.zeros(
+                                                            len(detected_spikes), dtype=np.int),
                                                         sampling_frequency=recording.get_sampling_frequency())
         else:
             sorting = sis.run_sorter(sorter, recording,
@@ -232,7 +232,7 @@ class SpikeSorting(dj.Computed):
     def fetch_nwb(self, *attrs, **kwargs):
         raise NotImplementedError
         return None
-        #return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+        # return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
     def nightly_cleanup(self):
         """Clean up spike sorting directories that are not in the SpikeSorting table.
@@ -249,6 +249,7 @@ class SpikeSorting(dj.Computed):
                 print(f'removing {full_path}')
                 shutil.rmtree(
                     str(Path(os.environ['SPYGLASS_SORTING_DIR']) / dir))
+
     @staticmethod
     def _get_sorting_name(key):
         recording_name = SpikeSortingRecording._get_recording_name(key)

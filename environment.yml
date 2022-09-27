@@ -32,6 +32,7 @@ dependencies:
     - ghostipy
     - pymysql>=1.0.*
     - sortingview>=0.8
+    - figurl-jupyter
     - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
     - pyyaml
     - click
