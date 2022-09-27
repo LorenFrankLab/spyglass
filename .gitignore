@@ -2,7 +2,6 @@ rec_to_nwb
 spyglass.code-workspace
 mountainsort4_output/
 .idea/
-.vscode/
 mysql_config
 
 # Notebooks
@@ -169,3 +168,6 @@ dj_local_conf.json
 *.pkl
 *.json
 *.gz
+
+!/.vscode/extensions.json
+!/.vscode/settings.json
