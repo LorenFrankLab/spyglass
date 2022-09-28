@@ -508,7 +508,7 @@ def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
     num_spikes = st.qualitymetrics.compute_num_spikes(waveform_extractor)
     # Calculate the fraction of ISIs that are violations
     isi_viol_frac_metric = {str(unit_id): isi_violation_counts[unit_id] /
-                            num_spikes[unit_id] - 1 for unit_id in waveform_extractor.sorting.get_unit_ids()}
+                                          (num_spikes[unit_id] - 1) for unit_id in waveform_extractor.sorting.get_unit_ids()}
     return isi_viol_frac_metric
 
 
