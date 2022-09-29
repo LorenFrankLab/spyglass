@@ -504,10 +504,11 @@ def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
         waveform_extractor, isi_threshold_ms=isi_threshold_ms,
         min_isi_ms=min_isi_ms).isi_violations_count
 
-    # Extract the total number of spikes from each unit
+    # Extract the total number of spikes from each unit. The number of ISIs is one less than this
     num_spikes = st.qualitymetrics.compute_num_spikes(waveform_extractor)
+    # Calculate the fraction of ISIs that are violations
     isi_viol_frac_metric = {str(unit_id): isi_violation_counts[unit_id] /
-                            num_spikes[unit_id] for unit_id in waveform_extractor.sorting.get_unit_ids()}
+                                          (num_spikes[unit_id] - 1) for unit_id in waveform_extractor.sorting.get_unit_ids()}
     return isi_viol_frac_metric
 
 
