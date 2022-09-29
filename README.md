@@ -7,8 +7,6 @@
 
 Documentation can be found at - [https://lorenfranklab.github.io/spyglass/](https://lorenfranklab.github.io/spyglass/)
 
-Note: if you want to using decoding functions on a GPU you need to install cupy with the following command: `conda install cupy`
-
 ### Installing from pip
 
 Install spyglass
@@ -39,6 +37,11 @@ WARNING: If you are on an M1 Mac, you need to install pyfftw via conda BEFORE in
 
 ```bash
 conda install -c conda-forge pyfftw
+```
+
+Finally, if you want to decode on the GPU, you must install cupy:
+```bash
+conda install -c conda-forge cupy
 ```
 
 ## Setup
