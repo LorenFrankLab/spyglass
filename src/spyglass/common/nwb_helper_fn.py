@@ -14,7 +14,7 @@ invalid_electrode_index = 99999999
 
 
 def get_nwb_file(nwb_file_path):
-    """Return an NWBFile object with the given file path in read mode. 
+    """Return an NWBFile object with the given file path in read mode.
        If the file is not found locally, this will check if it has been shared with kachery and if so, download it and open it.
 
     Parameters
@@ -27,24 +27,27 @@ def get_nwb_file(nwb_file_path):
     nwbfile : pynwb.NWBFile
         NWB file object for the given path opened in read mode.
     """
-    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None)) 
+    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
     nwb_uri = None
     nwb_raw_uri = None
     if nwbfile is None:
         print(nwb_file_path)
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
-            print(f'NWB file {nwb_file_path} does not exist locally; checking kachery')
+            print(f"NWB file {nwb_file_path} does not exist locally; checking kachery")
             # first try the analysis files
-            from ..sharing.sharing_kachery import NwbfileKachery, AnalysisNwbfileKachery
+            from ..sharing.sharing_kachery import AnalysisNwbfileKachery, NwbfileKachery
+
             # the download functions assume just the filename, so we need to get that from the path
-            if not AnalysisNwbfileKachery.download_file(os.path.basename(nwb_file_path)) \
-                      and not NwbfileKachery.download_file(os.path.basename(nwb_file_path)):
-                print(f'NWB file {nwb_file_path} is not available on kachery; aborting')
+            if not AnalysisNwbfileKachery.download_file(
+                os.path.basename(nwb_file_path)
+            ) and not NwbfileKachery.download_file(os.path.basename(nwb_file_path)):
+                print(f"NWB file {nwb_file_path} is not available on kachery; aborting")
                 return None
         # now open the file
-        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode='r',
-                            load_namespaces=True)  # keep file open
+        io = pynwb.NWBHDF5IO(
+            path=nwb_file_path, mode="r", load_namespaces=True
+        )  # keep file open
         nwbfile = io.read()
         __open_nwb_files[nwb_file_path] = (io, nwbfile)
 
@@ -84,13 +87,17 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
     for module in nwbfile.processing.values():
         match = module.data_interfaces.get(data_interface_name, None)
         if match is not None:
-            if data_interface_class is not None and not isinstance(match, data_interface_class):
+            if data_interface_class is not None and not isinstance(
+                match, data_interface_class
+            ):
                 continue
             ret.append(match)
     if len(ret) > 1:
-        warnings.warn(f"Multiple data interfaces with name '{data_interface_name}' "
-                      f"found in NWBFile with identifier {nwbfile.identifier}. Using the first one found. "
-                      "Use the data_interface_class argument to restrict the search.")
+        warnings.warn(
+            f"Multiple data interfaces with name '{data_interface_name}' "
+            f"found in NWBFile with identifier {nwbfile.identifier}. Using the first one found. "
+            "Use the data_interface_class argument to restrict the search."
+        )
     if len(ret) >= 1:
         return ret[0]
     else:
@@ -146,14 +153,16 @@ def estimate_sampling_rate(timestamps, multiplier):
     sample_diff = np.diff(timestamps[~np.isnan(timestamps)])
     if len(sample_diff) < 10:
         raise ValueError(
-            f'Only {len(sample_diff)} timestamps are valid. Check the data.')
+            f"Only {len(sample_diff)} timestamps are valid. Check the data."
+        )
     nsmooth = 10
     smoother = np.ones(nsmooth) / nsmooth
-    smooth_diff = np.convolve(sample_diff, smoother, mode='same')
+    smooth_diff = np.convolve(sample_diff, smoother, mode="same")
 
     # we histogram with 100 bins out to 3 * mean, which should be fine for any reasonable number of samples
-    hist, bins = np.histogram(smooth_diff, bins=100, range=[
-                              0, 3 * np.mean(smooth_diff)])
+    hist, bins = np.histogram(
+        smooth_diff, bins=100, range=[0, 3 * np.mean(smooth_diff)]
+    )
     mode = bins[np.where(hist == np.max(hist))]
 
     adjacent = sample_diff < mode[0] * multiplier
@@ -240,17 +249,22 @@ def get_electrode_indices(nwb_object, electrode_ids):
         # electrodes is a DynamicTableRegion which may contain a subset of the rows in NWBFile.electrodes
         # match against only the subset of electrodes referenced by this ElectricalSeries
         electrode_table_indices = nwb_object.electrodes.data[:]
-        selected_elect_ids = [nwb_object.electrodes.table.id[x]
-                              for x in electrode_table_indices]
+        selected_elect_ids = [
+            nwb_object.electrodes.table.id[x] for x in electrode_table_indices
+        ]
     elif isinstance(nwb_object, pynwb.NWBFile):
         # electrodes is a DynamicTable that contains all electrodes
         selected_elect_ids = list(nwb_object.electrodes.id[:])
     else:
-        raise ValueError(
-            'nwb_object must be of type ElectricalSeries or NWBFile')
+        raise ValueError("nwb_object must be of type ElectricalSeries or NWBFile")
 
     # for each electrode_id, find its index in selected_elect_ids and return that if it's there and invalid_electrode_index if not.
-    return [selected_elect_ids.index(elect_id) if elect_id in selected_elect_ids else invalid_electrode_index for elect_id in electrode_ids]
+    return [
+        selected_elect_ids.index(elect_id)
+        if elect_id in selected_elect_ids
+        else invalid_electrode_index
+        for elect_id in electrode_ids
+    ]
 
 
 def get_all_spatial_series(nwbf, verbose=False):
@@ -269,7 +283,7 @@ def get_all_spatial_series(nwbf, verbose=False):
         Dict mapping indices to a dict with keys 'valid_times' and 'raw_position_object_id'. Returns None if there
         is no position data in the file. The 'raw_position_object_id' is the object ID of the SpatialSeries object.
     """
-    position = get_data_interface(nwbf, 'position', pynwb.behavior.Position)
+    position = get_data_interface(nwbf, "position", pynwb.behavior.Position)
     if position is None:
         return None
 
@@ -292,38 +306,49 @@ def get_all_spatial_series(nwbf, verbose=False):
         timestamps = np.asarray(spatial_series.timestamps)
         sampling_rate = estimate_sampling_rate(timestamps, 1.75)
         if sampling_rate < 0:
-            raise ValueError(
-                f'Error adding position data for position epoch {index}')
+            raise ValueError(f"Error adding position data for position epoch {index}")
         if verbose:
-            print("Processing raw position data. Estimated sampling rate: {} Hz".format(
-                sampling_rate))
+            print(
+                "Processing raw position data. Estimated sampling rate: {} Hz".format(
+                    sampling_rate
+                )
+            )
         # add the valid intervals to the Interval list
-        pos_data_dict[index]['valid_times'] = get_valid_intervals(
-            timestamps, sampling_rate,
+        pos_data_dict[index]["valid_times"] = get_valid_intervals(
+            timestamps,
+            sampling_rate,
             gap_proportion=2.5,
-            min_valid_len=int(sampling_rate))
-        pos_data_dict[index]['raw_position_object_id'] = spatial_series.object_id
+            min_valid_len=int(sampling_rate),
+        )
+        pos_data_dict[index]["raw_position_object_id"] = spatial_series.object_id
 
     return pos_data_dict
 
 
 def get_nwb_copy_filename(nwb_file_name):
-    '''Get file name of copy of nwb file without the electrophys data'''
+    """Get file name of copy of nwb file without the electrophys data"""
 
     filename, file_extension = os.path.splitext(nwb_file_name)
 
-    return f'{filename}_{file_extension}'
+    return f"{filename}_{file_extension}"
 
 
-def change_group_permissions(subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"):
+def change_group_permissions(
+    subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
+):
     # Change to directory with analysis nwb files
     os.chdir(analysis_dir)
     # Get nwb file directories with specified subject ids
-    target_contents = [x for x in os.listdir(analysis_dir)
-                       if any([subject_id in x.split("_")[0] for subject_id in subject_ids])]
+    target_contents = [
+        x
+        for x in os.listdir(analysis_dir)
+        if any([subject_id in x.split("_")[0] for subject_id in subject_ids])
+    ]
     # Loop through nwb file directories and change group permissions
     for target_content in target_contents:
-        print(f"For {target_content}, changing group to {set_group_name} and giving read/write/execute permissions")
+        print(
+            f"For {target_content}, changing group to {set_group_name} and giving read/write/execute permissions"
+        )
         # Change group
         os.system(f"chgrp -R {set_group_name} {target_content}")
         # Give read, write, execute permissions to group

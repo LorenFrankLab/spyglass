@@ -1,0 +1,10 @@
+{
+    "editor.formatOnSave": true,
+    "files.trimTrailingWhitespace": true,
+    "files.trimFinalNewlines": true,
+    "editor.multiCursorModifier": "ctrlCmd",
+    "autoDocstring.docstringFormat": "numpy",
+    "python.formatting.provider": "black",
+    "remote.SSH.remoteServerListenOnSocket": true,
+    "git.confirmSync": false,
+}
