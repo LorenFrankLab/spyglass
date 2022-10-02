@@ -20,7 +20,7 @@ def hilbert_decomp(lfp_band_object, sampling_rate=1):
         name=eseries_name,
         data=np.abs(analytical_signal),
         electrodes=lfp_band_object.electrodes,
-        timestamps=lfp_band_object.timestamps
+        timestamps=lfp_band_object.timestamps,
     )
 
     eseries_name = "phase"
@@ -29,16 +29,17 @@ def hilbert_decomp(lfp_band_object, sampling_rate=1):
         name=eseries_name,
         data=instantaneous_phase,
         electrodes=lfp_band_object.electrodes,
-        timestamps=lfp_band_object.timestamps
+        timestamps=lfp_band_object.timestamps,
     )
 
     eseries_name = "frequency"
-    instantaneous_frequency = np.diff(
-        instantaneous_phase) / (2.0 * np.pi) * sampling_rate
+    instantaneous_frequency = (
+        np.diff(instantaneous_phase) / (2.0 * np.pi) * sampling_rate
+    )
     frequency = pynwb.ecephys.ElectricalSeries(
         name=eseries_name,
         data=instantaneous_frequency,
         electrodes=lfp_band_object.electrodes,
-        timestamps=lfp_band_object.timestamps
+        timestamps=lfp_band_object.timestamps,
     )
     return envelope, phase, frequency

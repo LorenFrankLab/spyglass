@@ -1,9 +1,9 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
 import inspect
+import os
 
 import datajoint as dj
 import numpy as np
-import os
 
 from .nwb_helper_fn import get_nwb_file
 
@@ -38,8 +38,7 @@ def dj_replace(original_table, new_values, key_column, replace_column):
         new_values = tmp
 
     new_val_array = np.asarray(new_values)
-    replace_ind = np.where(
-        np.isin(original_table[key_column], new_val_array[:, 0]))
+    replace_ind = np.where(np.isin(original_table[key_column], new_val_array[:, 0]))
     original_table[replace_column][replace_ind] = new_val_array[:, 1]
     return original_table
 
@@ -66,40 +65,53 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_objects : list
         List of dicts containing fetch results and NWB objects.
     """
-    kwargs['as_dict'] = True  # force return as dictionary
+    kwargs["as_dict"] = True  # force return as dictionary
     tbl, attr_name = nwb_master
 
     if not attrs:
         attrs = query_expression.heading.names
 
     # get the list of analysis or nwb files
-    file_name_str = 'analysis_file_name' if 'analysis' in nwb_master[1] else 'nwb_file_name'
-    #TODO: avoid this import?
+    file_name_str = (
+        "analysis_file_name" if "analysis" in nwb_master[1] else "nwb_file_name"
+    )
+    # TODO: avoid this import?
     from .common_nwbfile import AnalysisNwbfile, Nwbfile
-    file_path_fn = AnalysisNwbfile.get_abs_path if 'analysis' in nwb_master[1] else Nwbfile.get_abs_path
-        
-    nwb_files = (query_expression * tbl.proj(nwb2load_filepath=attr_name)).fetch(file_name_str)
+
+    file_path_fn = (
+        AnalysisNwbfile.get_abs_path
+        if "analysis" in nwb_master[1]
+        else Nwbfile.get_abs_path
+    )
+
+    nwb_files = (query_expression * tbl.proj(nwb2load_filepath=attr_name)).fetch(
+        file_name_str
+    )
     for file_name in nwb_files:
         file_path = file_path_fn(file_name)
         if not os.path.exists(file_path):
             # retrieve the file from kachery. This also opens the file and stores the file object
             get_nwb_file(file_path)
 
-    rec_dicts = (query_expression * tbl.proj(nwb2load_filepath=attr_name)
-                 ).fetch(*attrs, 'nwb2load_filepath', **kwargs)
+    rec_dicts = (query_expression * tbl.proj(nwb2load_filepath=attr_name)).fetch(
+        *attrs, "nwb2load_filepath", **kwargs
+    )
 
-    if not rec_dicts or not np.any(['object_id' in key for key in rec_dicts[0]]):
+    if not rec_dicts or not np.any(["object_id" in key for key in rec_dicts[0]]):
         return rec_dicts
 
     ret = []
     for rec_dict in rec_dicts:
-        nwbf = get_nwb_file(rec_dict.pop('nwb2load_filepath'))
+        nwbf = get_nwb_file(rec_dict.pop("nwb2load_filepath"))
         # for each attr that contains substring 'object_id', store key-value: attr name to NWB object
         # remove '_object_id' from attr name
         nwb_objs = {
-            id_attr.replace("_object_id", ""): _get_nwb_object(nwbf.objects, rec_dict[id_attr])
+            id_attr.replace("_object_id", ""): _get_nwb_object(
+                nwbf.objects, rec_dict[id_attr]
+            )
             for id_attr in attrs
-            if 'object_id' in id_attr and rec_dict[id_attr] != ''}
+            if "object_id" in id_attr and rec_dict[id_attr] != ""
+        }
         ret.append({**rec_dict, **nwb_objs})
     return ret
 
@@ -114,5 +126,12 @@ def _get_nwb_object(objects, object_id):
 
 def get_child_tables(table):
     table = table() if inspect.isclass(table) else table
-    return [dj.FreeTable(table.connection, s if not s.isdigit() else next(iter(table.connection.dependencies.children(s))))
-            for s in table.children()]
+    return [
+        dj.FreeTable(
+            table.connection,
+            s
+            if not s.isdigit()
+            else next(iter(table.connection.dependencies.children(s))),
+        )
+        for s in table.children()
+    ]

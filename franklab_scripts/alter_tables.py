@@ -1,9 +1,10 @@
 """Update the MySQL tables with the latest table definitions in each spyglass.common class."""
 
-import datajoint as dj
 import importlib
 import inspect
 import warnings
+
+import datajoint as dj
 
 # NOTE: for some reason, all classes need to be imported first for datajoint to be able to resolve foreign
 # key references properly in the code below
@@ -11,9 +12,9 @@ from spyglass.common import *  # noqa: F401,F403
 
 
 def main():
-    warnings.simplefilter('ignore', category=DeprecationWarning)
-    warnings.simplefilter('ignore', category=FutureWarning)
-    module = importlib.import_module('spyglass.common')
+    warnings.simplefilter("ignore", category=DeprecationWarning)
+    warnings.simplefilter("ignore", category=FutureWarning)
+    module = importlib.import_module("spyglass.common")
     for name, cls in inspect.getmembers(module, inspect.isclass):
         update_cls(cls)
         for attrname in dir(cls):
@@ -24,7 +25,7 @@ def main():
 
 def update_cls(cls):
     if issubclass(cls, (dj.Manual, dj.Lookup, dj.Imported, dj.Computed, dj.Part)):
-        print('Updating', cls)
+        print("Updating", cls)
         try:
             # NOTE: datajoint does not allow altering indexes yet
             # this should affect only AnalysisNwbfile
@@ -37,9 +38,9 @@ def update_cls(cls):
             # (other tables use this primary key, so constraints would probably have to be removed and readded)
             cls.alter()
         except Exception as e:
-            print('ERROR:', e)
+            print("ERROR:", e)
         print()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -7,44 +7,57 @@
 
 Documentation can be found at - [https://lorenfranklab.github.io/spyglass/](https://lorenfranklab.github.io/spyglass/)
 
-Note: if you want to using decoding functions on a GPU you need to install cupy with the following command: conda install cupy
-
 ### Installing from pip
+
 Install spyglass
+
 ```bash
 pip install spyglass-neuro
 ```
 
 Some functions may take advantage of the latest changes to spike interface, which currently has a slow release cycle. To get the latest changes:
+
 ```bash
 pip install git+https://github.com/SpikeInterface/spikeinterface.git
 ```
 
 The Frank Lab typically uses mountainsort, although spyglass uses spikeinterface, which allows for any spike sorter. To install mountainsort:
+
 ```bash
 pip install mountainsort4
 ```
 
 Spyglass uses the package `ghostipy` for filtering of signals:
+
 ```bash
 pip install ghostipy
 ```
 
 WARNING: If you are on an M1 Mac, you need to install pyfftw via conda BEFORE installing ghostipy
+
 ```bash
 conda install -c conda-forge pyfftw
 ```
 
+Finally, if you want to decode on the GPU, you must install cupy:
+```bash
+conda install -c conda-forge cupy
+```
+
 ## Setup
+
 See the documentation for setup instructions - [https://lorenfranklab.github.io/spyglass/type/html/installation.html](https://lorenfranklab.github.io/spyglass/type/html/installation.html)
 
 ## Tutorials
+
 The tutorials for `spyglass` is currently in the form of Jupyter Notebooks and can be found in the [notebooks](https://github.com/LorenFrankLab/spyglass/tree/master/notebooks) directory. We strongly recommend opening them in the context of `jupyterlab`.
 
 ## Contributing
+
 See the [Developer's Note](https://lorenfranklab.github.io/spyglass/type/html/developer_notes.html) for contributing instructions found at - [https://lorenfranklab.github.io/spyglass/type/html/how_to_contribute.html](https://lorenfranklab.github.io/spyglass/type/html/how_to_contribute.html)
 
 ## License/Copyright
+
 License and Copyright notice can be found at [https://lorenfranklab.github.io/spyglass/type/html/copyright.html](https://lorenfranklab.github.io/spyglass/type/html/copyright.html)
 
 ## Citation
