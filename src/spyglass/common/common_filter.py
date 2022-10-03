@@ -18,11 +18,11 @@ def _import_ghostipy():
         import ghostipy as gsp
 
         return gsp
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "You must install ghostipy to use filtering methods. Please note that to install ghostipy on "
-            "an Mac M1, you need to install pyfftw from conda-forge first."
-        )
+            "an Mac M1, you must first install pyfftw from conda-forge."
+        ) from e
 
 
 @schema
