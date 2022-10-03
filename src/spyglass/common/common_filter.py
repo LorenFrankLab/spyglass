@@ -16,6 +16,7 @@ schema = dj.schema("common_filter")
 def _import_ghostipy():
     try:
         import ghostipy as gsp
+
         return gsp
     except ImportError:
         raise ImportError(
