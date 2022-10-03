@@ -16,11 +16,13 @@ schema = dj.schema("common_filter")
 def _import_ghostipy():
     try:
         import ghostipy as gsp
-    except ImportError:
-        print(
+
+        return gsp
+    except ImportError as e:
+        raise ImportError(
             "You must install ghostipy to use filtering methods. Please note that to install ghostipy on "
-            "an Mac M1, you need to install pyfftw from conda-forge first."
-        )
+            "an Mac M1, you must first install pyfftw from conda-forge."
+        ) from e
 
 
 @schema
@@ -40,7 +42,7 @@ class FirFilter(dj.Manual):
     """
 
     def add_filter(self, filter_name, fs, filter_type, band_edges, comments=""):
-        _import_ghostipy()
+        gsp = _import_ghostipy()
 
         # add an FIR bandpass filter of the specified type ('lowpass', 'highpass', or 'bandpass').
         # band_edges should be as follows:
@@ -175,7 +177,7 @@ class FirFilter(dj.Manual):
         package, saving the result as a new electricalseries in the nwb_file_name, which should have previously been
         created and linked to the original NWB file using common_session.AnalysisNwbfile.create()
         """
-        _import_ghostipy()
+        gsp = _import_ghostipy()
 
         data_on_disk = eseries.data
         timestamps_on_disk = eseries.timestamps
@@ -353,7 +355,7 @@ class FirFilter(dj.Manual):
         :param decimation: decimation factor
         :return: filtered_data, timestamps
         """
-        _import_ghostipy()
+        gsp = _import_ghostipy()
 
         n_dim = len(data.shape)
         n_samples = len(timestamps)
