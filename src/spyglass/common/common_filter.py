@@ -109,7 +109,7 @@ class FirFilter(dj.Manual):
             filterdict["filter_low_pass"] = band_edges[1]
             filterdict["filter_high_pass"] = band_edges[2]
             filterdict["filter_high_stop"] = band_edges[3]
-
+        filterdict["filter_type"] = filter_type
         filterdict["filter_band_edges"] = np.asarray(band_edges)
         # create 1d array for coefficients
         filterdict["filter_coeff"] = np.array(
