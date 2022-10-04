@@ -185,13 +185,13 @@ def insert_spike_sorting_preprocessing_parameters(yaml_file_name: Union[str, Non
         x = yaml.safe_load(f)
     # restrict to relevant keys
     x = {k: x[k] for k in sample_spike_sorting_preprocessing_parameters.keys()}
-    nds.SpikeSortingPreprocessingParameters.insert1(x)
+    nds.SpikeSortingPreprocessingParameter.insert1(x)
 
 
 @click.command(help="List spike sorting preprocessing parameters.")
 def list_spike_sorting_preprocessing_parameters():
     import spyglass.spikesorting as nds
-    results = nds.SpikeSortingPreprocessingParameters & {}
+    results = nds.SpikeSortingPreprocessingParameter & {}
     print(results)
 
 
@@ -223,13 +223,13 @@ def insert_artifact_detection_parameters(yaml_file_name: Union[str, None]):
         x = yaml.safe_load(f)
     # restrict to relevant keys
     x = {k: x[k] for k in sample_artifact_detection_parameters.keys()}
-    nds.ArtifactDetectionParameters.insert1(x)
+    nds.ArtifactDetectionParameter.insert1(x)
 
 
 @click.command(help="List artifact detection parameters.")
 def list_artifact_detection_parameters():
     import spyglass.spikesorting as nds
-    results = nds.ArtifactDetectionParameters & {}
+    results = nds.ArtifactDetectionParameter & {}
     print(results)
 
 
@@ -329,13 +329,13 @@ def insert_spike_sorter_parameters(yaml_file_name: Union[str, None]):
     with open(yaml_file_name, 'r') as f:
         x = yaml.safe_load(f)
     x = {k: x[k] for k in sample_spike_sorter_params_key.keys()}
-    nds.SpikeSorterParameters.insert1(x)
+    nds.SpikeSorterParameter.insert1(x)
 
 
 @click.command(help="List spike sorter parameters.")
 def list_spike_sorter_parameters():
     import spyglass.spikesorting as nds
-    results = nds.SpikeSorterParameters & {}
+    results = nds.SpikeSorterParameter & {}
     print(results)
 
 
@@ -376,7 +376,7 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
         'artifact_removed_interval_list_name')
 
     sorter_params_name = x['sorter_params_name']
-    sorter = (nds.SpikeSorterParameters & {
+    sorter = (nds.SpikeSorterParameter & {
               'sorter_params_name': sorter_params_name}).fetch1('sorter')
 
     sorting_key = dict(spike_sorting_recording_key, **{

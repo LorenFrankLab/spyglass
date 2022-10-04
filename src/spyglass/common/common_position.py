@@ -15,7 +15,7 @@ from position_tools import (get_angle, get_centriod, get_distance, get_speed,
 from position_tools.core import gaussian_smooth
 from skan import skeleton_to_csgraph
 from skan.draw import _clean_positions_dict
-from spyglass.common.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_helper_fn import fetch_nwb
 from tqdm import tqdm_notebook as tqdm
 from track_linearization import (get_linearized_position, make_track_graph,
                                  plot_graph_as_1D, plot_track_graph)

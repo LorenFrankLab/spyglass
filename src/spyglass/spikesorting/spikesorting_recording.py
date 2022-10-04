@@ -17,8 +17,8 @@ from ..common.common_interval import (IntervalList, interval_list_intersect,
 from ..common.common_lab import LabTeam
 from ..common.common_nwbfile import Nwbfile
 from ..common.common_session import Session
-from ..common.dj_helper_fn import dj_replace
-from ..common.nwb_helper_fn import get_nwb_file
+from ..utils.dj_helper_fn import dj_replace
+from ..utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema('spikesorting_recording')
 
@@ -240,7 +240,7 @@ class SortInterval(dj.Manual):
 
 
 @schema
-class SpikeSortingPreprocessingParameters(dj.Manual):
+class SpikeSortingPreprocessingParameter(dj.Manual):
     definition = """
     preproc_params_name: varchar(200)
     ---
@@ -269,7 +269,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
     # Defines recordings to be sorted
     -> SortGroup
     -> SortInterval
-    -> SpikeSortingPreprocessingParameters
+    -> SpikeSortingPreprocessingParameter
     -> LabTeam
     ---
     -> IntervalList
@@ -363,7 +363,7 @@ class SpikeSortingRecording(dj.Computed):
         valid_sort_times = interval_list_intersect(
             sort_interval, valid_interval_times)
         # Exclude intervals shorter than specified length
-        params = (SpikeSortingPreprocessingParameters &
+        params = (SpikeSortingPreprocessingParameter &
                   key).fetch1('preproc_params')
         if 'min_segment_length' in params:
             valid_sort_times = intervals_by_length(valid_sort_times,
@@ -459,7 +459,7 @@ class SpikeSortingRecording(dj.Computed):
                 operator='median')
         # else:
         #     raise ValueError("Invalid reference channel ID")
-        filter_params = (SpikeSortingPreprocessingParameters &
+        filter_params = (SpikeSortingPreprocessingParameter &
                          key).fetch1('preproc_params')
         recording = si.preprocessing.bandpass_filter(
             recording,
