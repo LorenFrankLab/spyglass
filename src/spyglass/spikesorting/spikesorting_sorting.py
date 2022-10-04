@@ -8,21 +8,25 @@ from pathlib import Path
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
+import spikeinterface.extractors as se
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
-from ..common.common_lab import LabMember, LabTeam
-from ..common.common_nwbfile import AnalysisNwbfile
-from ..common.dj_helper_fn import fetch_nwb
 from .spikesorting_artifact import ArtifactRemovedIntervalList
 from .spikesorting_recording import (SpikeSortingRecording,
                                      SpikeSortingRecordingSelection)
+from .spikesorting_curation import Curation
+
+from ..common.common_lab import LabMember, LabTeam
+from ..common.common_nwbfile import Nwbfile
+
+from ..utils.dj_helper_fn import fetch_nwb
+from ..utils.nwb_helper_fn import get_data_interface, get_nwb_file
 
 schema = dj.schema('spikesorting_sorting')
 
-
 @schema
-class SpikeSorterParameters(dj.Manual):
+class SpikeSorterParameter(dj.Manual):
     definition = """
     sorter: varchar(200)
     sorter_params_name: varchar(200)
@@ -98,7 +102,7 @@ class SpikeSortingSelection(dj.Manual):
     definition = """
     # Table for holding selection of recording and parameters for each spike sorting run
     -> SpikeSortingRecording
-    -> SpikeSorterParameters
+    -> SpikeSorterParameter
     -> ArtifactRemovedIntervalList
     ---
     import_path = "": varchar(200)  # optional path to previous curated sorting output
@@ -162,7 +166,7 @@ class SpikeSorting(dj.Computed):
                 ms_before=None, ms_after=None, mode='zeros')
 
         print(f'Running spike sorting on {key}...')
-        sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
+        sorter, sorter_params = (SpikeSorterParameter & key).fetch1(
             'sorter', 'sorter_params')
 
         sorter_temp_dir = tempfile.TemporaryDirectory(
@@ -193,6 +197,12 @@ class SpikeSorting(dj.Computed):
             shutil.rmtree(key['sorting_path'])
         sorting = sorting.save(folder=key['sorting_path'])
         self.insert1(key)
+        
+        key['curation_id'] = uuid.uuid4()
+        Curation.insert1(dict(curation_id=key['curation_id'],
+                              description='from SpikeSorting',
+                              time_of_creation=int(time.time())))
+        Curation.SpikeSorting.insert1(key)
 
     def delete(self):
         """Extends the delete method of base class to implement permission checking.
@@ -256,7 +266,31 @@ class SpikeSorting(dj.Computed):
             + str(uuid.uuid4())[0:8] + '_spikesorting'
         return sorting_name
 
-    # TODO: write a function to import sortings done outside of dj
+@schema
+class ImportedSpikeSorting(dj.Computed):
+    definition = """
+    -> Session
+    ---
+    units_object_id: varchar(100)
+    """
+    
+    def make(self, key):
+        nwb_file_name = key['nwb_file_name']
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        nwbf = get_nwb_file(nwb_file_abspath)
+        key['units_object_id'] = nwbf.units.object_id
+        self.insert1(key)
 
-    def _import_sorting(self, key):
-        raise NotImplementedError
+        key['curation_id'] = uuid.uuid4()
+        Curation.insert1(dict(curation_id=key['curation_id'],
+                              description='from ImportedSpikeSorting',
+                              time_of_creation=int(time.time())))
+        Curation.ImportedSpikeSorting.insert1(key)
+        
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)
+    
+    @staticmethod
+    def load_spikeinterface_sorting(nwb_file_name):
+        sorting = se.read_nwb_sorting(nwb_file_name)
+        return sorting

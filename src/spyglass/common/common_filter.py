@@ -7,7 +7,7 @@ import scipy.signal as signal
 import psutil
 import warnings
 
-from .nwb_helper_fn import get_electrode_indices
+from ..utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema('common_filter')
 

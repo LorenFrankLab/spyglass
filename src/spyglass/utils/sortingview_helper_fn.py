@@ -1,7 +1,7 @@
 "Sortingview helper functions"
 
 from typing import List, Dict, Union
-from .merged_sorting_extractor import MergedSortingExtractor
+from ..spikesorting.merged_sorting_extractor import MergedSortingExtractor
 import spikeinterface as si
 import sortingview as sv
 import sortingview.views as vv

@@ -9,13 +9,13 @@ import spikeinterface as si
 from spikeinterface.core.job_tools import ensure_n_jobs, ChunkRecordingExecutor
 
 from ..common.common_interval import IntervalList, interval_from_inds, _union_concat, interval_list_intersect
-from ..common.nwb_helper_fn import get_valid_intervals
+from ..utils.nwb_helper_fn import get_valid_intervals
 from .spikesorting_recording import SpikeSortingRecording
 
 schema = dj.schema('spikesorting_artifact')
 
 @schema
-class ArtifactDetectionParameters(dj.Manual):
+class ArtifactDetectionParameter(dj.Manual):
     definition = """
     # Parameters for detecting artifact times within a sort group.
     artifact_params_name: varchar(200)
@@ -45,7 +45,7 @@ class ArtifactDetectionSelection(dj.Manual):
     definition = """
     # Specifies artifact detection parameters to apply to a sort group's recording.
     -> SpikeSortingRecording
-    -> ArtifactDetectionParameters
+    -> ArtifactDetectionParameter
     ---
     custom_artifact_detection=0 : tinyint
     """
@@ -65,7 +65,7 @@ class ArtifactDetection(dj.Computed):
     def make(self, key):
         if not (ArtifactDetectionSelection & key).fetch1("custom_artifact_detection"):
             # get the dict of artifact params associated with this artifact_params_name
-            artifact_params = (ArtifactDetectionParameters &
+            artifact_params = (ArtifactDetectionParameter &
                                key).fetch1("artifact_params")
 
             recording_path = (SpikeSortingRecording & key).fetch1('recording_path')
