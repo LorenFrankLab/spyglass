@@ -7,6 +7,9 @@ import pynwb
 
 from ..common import Nwbfile, get_raw_eseries, populate_all_common
 from .storage_dirs import check_env
+# from ..spikesorting.spikesorting_sorting import ImportedSpikeSorting
+from ..utils.nwb_helper_fn import get_nwb_file
+
 
 
 def insert_sessions(nwb_file_names: Union[str, List[str]]):
@@ -42,6 +45,11 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
         populate_all_common(out_nwb_file_name)
+        
+        # nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
+        # nwbf = get_nwb_file(nwb_file_abspath)
+        # if nwbf.units:
+        #     ImportedSpikeSorting.populate([(Nwbfile & {'nwb_file_name': nwb_file_name}).proj()])
 
 
 def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):

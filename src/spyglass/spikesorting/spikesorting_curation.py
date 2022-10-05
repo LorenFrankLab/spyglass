@@ -17,7 +17,7 @@ from ..common.common_nwbfile import AnalysisNwbfile
 from ..utils.dj_helper_fn import fetch_nwb
 from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SortInterval, SpikeSortingRecording
-from .spikesorting_sorting import SpikeSorting
+from .spikesorting_sorting import SpikeSorting, ImportedSpikeSorting
 
 schema = dj.schema('spikesorting_curation')
 
@@ -628,7 +628,7 @@ _comparison_to_function = {
 
 
 @schema
-class AutomaticCuration(dj.Computed):
+class MetricAutomaticCuration(dj.Computed):
     definition = """
     -> MetricAutomaticCurationSelection
     ---
@@ -765,90 +765,6 @@ class AutomaticCuration(dj.Computed):
                                 parent_labels[unit_id].extend(
                                     label_params[metric][2])
             return parent_labels
-
-@schema
-class ManualCuration(dj.Manual):
-    definition = """
-    manual_curation_id: uuid
-    """
-    class SortingviewWorkspace(dj.Part):
-        definition = """
-        -> master
-        ---
-        -> SortingviewWorkspace
-        """
-
-    @staticmethod
-    def insert_curation(
-            sorting_key: dict,
-            parent_curation_id: int = -1,
-            labels=None,
-            merge_groups=None,
-            metrics=None,
-            description=''):
-        """Given a key from an upstream table (SpikeSorting or ImportedSpikeSorting)
-        and the parent_sorting_id (and optional arguments) insert an entry into Curation.
-
-
-        Parameters
-        ----------
-        sorting_key : dict
-            The key for the original SpikeSorting
-        parent_curation_id : int, optional
-            The id of the parent sorting
-        labels : dict or None, optional
-        merge_groups : dict or None, optional
-        metrics : dict or None, optional
-            Computed metrics for sorting
-        description : str, optional
-            text description of this sort
-
-        Returns
-        -------
-        curation_key : dict
-
-        """
-        if parent_curation_id == -1:
-            # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
-            inserted_curation = (Curation & sorting_key).fetch("KEY")
-            if len(inserted_curation) > 0:
-                Warning(
-                    'Sorting has already been inserted, returning key to previously'
-                    'inserted curation')
-                return inserted_curation[0]
-
-        if labels is None:
-            labels = {}
-        if merge_groups is None:
-            merge_groups = []
-        if metrics is None:
-            metrics = {}
-
-        # generate a unique number for this curation
-        id = (Curation & sorting_key).fetch('curation_id')
-        if len(id) > 0:
-            curation_id = max(id) + 1
-        else:
-            curation_id = 0
-
-        # convert unit_ids in labels to integers for labels from sortingview.
-        new_labels = {int(unit_id): labels[unit_id] for unit_id in labels}
-
-        sorting_key['curation_id'] = curation_id
-        sorting_key['parent_curation_id'] = parent_curation_id
-        sorting_key['description'] = description
-        sorting_key['curation_labels'] = new_labels
-        sorting_key['merge_groups'] = merge_groups
-        sorting_key['quality_metrics'] = metrics
-        sorting_key['time_of_creation'] = int(time.time())
-
-        Curation.insert1(sorting_key)
-
-        # get the primary key for this curation
-        c_key = Curation.fetch("KEY")[0]
-        curation_key = {item: sorting_key[item] for item in c_key}
-
-        return curation_key
 
 @schema
 class CuratedSpikeSortingSelection(dj.Manual):

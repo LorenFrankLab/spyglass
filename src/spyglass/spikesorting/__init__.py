@@ -1,4 +1,7 @@
-from .sortingview import SortingviewWorkspace, SortingviewWorkspaceSelection
+from .spikesorting_recording import (SortGroup, SortInterval,
+                                     SpikeSortingPreprocessingParameter,
+                                     SpikeSortingRecording,
+                                     SpikeSortingRecordingSelection)
 from .spikesorting_artifact import (ArtifactDetection,
                                     ArtifactDetectionParameter,
                                     ArtifactDetectionSelection,
@@ -12,9 +15,7 @@ from .spikesorting_curation import (MetricAutomaticCuration,
                                     QualityMetric, UnitInclusionParameter, 
                                     WaveformParameter,
                                     Waveform, WaveformSelection)
-from .spikesorting_recording import (SortGroup, SortInterval,
-                                     SpikeSortingPreprocessingParameter,
-                                     SpikeSortingRecording,
-                                     SpikeSortingRecordingSelection)
 from .spikesorting_sorting import (SpikeSorterParameter, SpikeSorting,
-                                   SpikeSortingSelection)
+                                   SpikeSortingSelection, ImportedSpikeSorting)
+
+from .sortingview import SortingviewWorkspace, SortingviewWorkspaceSelection
