@@ -187,6 +187,42 @@ class SortingviewWorkspace(dj.Computed):
 
         return url
 
+    def url_trythis(self, key: dict, sortingview_sorting_id: str = None):
+        """Generate a URL for visualizing and curating a sorting on the web. Will print instructions on how to do the curation.
+
+        Parameters
+        ----------
+        key : dict
+            An entry from SortingviewWorkspace table
+        sortingview_sorting_id : str, optional
+            sortingview sorting ID to visualize; if None then chooses the first one
+
+        Returns
+        -------
+        url : str
+        """
+        workspace_uri = (self & key).fetch1("workspace_uri")
+        workspace = sv.load_workspace(workspace_uri)
+        recording_id = workspace.recording_ids[0]
+        if sortingview_sorting_id is None:
+            sortingview_sorting_id = workspace.sorting_ids[0]
+
+        R = self.get_recording_extractor(recording_id)
+        S = self.get_sorting_extractor(sortingview_sorting_id)
+
+        # This will print some instructions on how to do the curation
+        url = sv.trythis_start_sorting_curation(
+            recording=R,
+            sorting=S,
+            label='sorting-label-fill-this-in',
+            initial_curation={},
+            raster_plot_subsample_max_firing_rate=50,
+            spike_amplitudes_subsample_max_firing_rate=50,
+            unit_metrics=None
+        )
+
+        return url
+
     def insert_manual_curation(self, key: dict, description="manually curated"):
         """Based on information in key for an SortingviewWorkspace, loads the
         curated sorting from sortingview, saves it (with labels and the
