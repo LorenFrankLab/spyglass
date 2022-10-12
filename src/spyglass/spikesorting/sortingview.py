@@ -207,8 +207,8 @@ class SortingviewWorkspace(dj.Computed):
         if sortingview_sorting_id is None:
             sortingview_sorting_id = workspace.sorting_ids[0]
 
-        R = self.get_recording_extractor(recording_id)
-        S = self.get_sorting_extractor(sortingview_sorting_id)
+        R = workspace.get_recording_extractor(recording_id)
+        S = workspace.get_sorting_extractor(sortingview_sorting_id)
 
         # This will print some instructions on how to do the curation
         url = sv.trythis_start_sorting_curation(
