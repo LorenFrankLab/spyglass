@@ -275,7 +275,7 @@ class SpikeSorting(dj.Computed):
         return sorting_name
 
 @schema
-class ImportedSpikeSorting(dj.Computed):
+class ImportedSpikeSorting(dj.Imported):
     definition = """
     -> Session
     ---
@@ -286,13 +286,18 @@ class ImportedSpikeSorting(dj.Computed):
         nwb_file_name = key['nwb_file_name']
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
+        if nwbf.units is None or len(nwbf.units)==0:
+            print("Units missing in the NWB file.")
+            return
+        print(key)
         self.insert1(dict(units_object_id=nwbf.units.object_id, **key))
 
         curation_id = uuid.uuid4()
         spyglass.spikesorting.spikesorting_curation.Curation.insert1(dict(curation_id=curation_id,
                               description='from ImportedSpikeSorting',
                               time_of_creation=int(time.time())))
-        spyglass.spikesorting.spikesorting_curation.Curation.ImportedSpikeSorting.insert1(dict(curation_id=curation_id, **key))
+        spyglass.spikesorting.spikesorting_curation.Curation.ImportedSpikeSorting.insert1(dict(curation_id=curation_id,
+                                                                                               nwb_file_name=nwb_file_name))
         
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, 'nwb_file_abs_path'), *attrs, **kwargs)

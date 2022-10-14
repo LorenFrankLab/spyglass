@@ -8,6 +8,7 @@ from .common_nwbfile import Nwbfile
 # from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session
 from .common_task import TaskEpoch
+from ..spikesorting.spikesorting_sorting import ImportedSpikeSorting
 
 
 def populate_all_common(nwb_file_name):
@@ -63,11 +64,15 @@ def populate_all_common(nwb_file_name):
     VideoFile.populate(fp)
     print()
 
-    print('RawPosition...')
+    print('Populate RawPosition')
     PositionSource.insert_from_nwbfile(nwb_file_name)
     RawPosition.populate(fp)
     print()
 
+    print('Populate ImportedSpikeSorting')
+    ImportedSpikeSorting.populate(fp)
+    
+    
     # print('HeadDir...')
     # HeadDir().populate()
     # print('Speed...')

@@ -94,14 +94,14 @@ def close_nwb_files():
     __open_nwb_files.clear()
 
 
-def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
+def get_data_interface(nwbfile, data_interface_name=None, data_interface_class=None):
     """Search for a specified NWBDataInterface or DynamicTable in the processing modules of an NWB file.
 
     Parameters
     ----------
     nwbfile : pynwb.NWBFile
         The NWB file object to search in.
-    data_interface_name : str
+    data_interface_name : str, optional
         The name of the NWBDataInterface or DynamicTable to search for.
     data_interface_class : type, optional
         The class (or superclass) to search for. This argument helps to prevent accessing an object with the same
@@ -117,13 +117,19 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
     data_interface : NWBDataInterface
         The data interface object with the given name, or None if not found.
     """
+    assert data_interface_name is not None or data_interface_class is not None, "You must provided either the name or the class of the data interface."
     ret = []
     for module in nwbfile.processing.values():
-        match = module.data_interfaces.get(data_interface_name, None)
-        if match is not None:
-            if data_interface_class is not None and not isinstance(match, data_interface_class):
-                continue
-            ret.append(match)
+        if data_interface_name is not None:
+            match = module.data_interfaces.get(data_interface_name, None)
+            if match is not None:
+                if data_interface_class is not None and not isinstance(match, data_interface_class):
+                    continue
+                ret.append(match)
+        else:
+            for interface in module.data_interfaces.values():
+                if isinstance(interface, data_interface_class):
+                    ret.append(interface)
     if len(ret) > 1:
         warnings.warn(f"Multiple data interfaces with name '{data_interface_name}' "
                       f"found in NWBFile with identifier {nwbfile.identifier}. Using the first one found. "
@@ -306,38 +312,48 @@ def get_all_spatial_series(nwbf, verbose=False):
         Dict mapping indices to a dict with keys 'valid_times' and 'raw_position_object_id'. Returns None if there
         is no position data in the file. The 'raw_position_object_id' is the object ID of the SpatialSeries object.
     """
-    position = get_data_interface(nwbf, 'position', pynwb.behavior.Position)
+    position = get_data_interface(nwbf, None, pynwb.behavior.Position)
     if position is None:
         return None
 
     # for some reason the spatial_series do not necessarily come out in order, so we need to figure out the right order
     epoch_start_time = np.zeros(len(position.spatial_series.values()))
     for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
-        epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
+        if spatial_series.timestamps is not None:
+            epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
+        else:
+            epoch_start_time[pos_epoch] = spatial_series.starting_time
 
     sorted_order = np.argsort(epoch_start_time)
     pos_data_dict = dict()
 
     for index, orig_epoch in enumerate(sorted_order):
-
         spatial_series = list(position.spatial_series.values())[orig_epoch]
         pos_data_dict[index] = dict()
-        # get the valid intervals for the position data
 
         # estimate the sampling rate
-        timestamps = np.asarray(spatial_series.timestamps)
-        sampling_rate = estimate_sampling_rate(timestamps, 1.75)
-        if sampling_rate < 0:
-            raise ValueError(
-                f'Error adding position data for position epoch {index}')
-        if verbose:
-            print("Processing raw position data. Estimated sampling rate: {} Hz".format(
-                sampling_rate))
-        # add the valid intervals to the Interval list
-        pos_data_dict[index]['valid_times'] = get_valid_intervals(
-            timestamps, sampling_rate,
-            gap_proportion=2.5,
-            min_valid_len=int(sampling_rate))
+        if spatial_series.rate is not None:
+            sampling_rate = spatial_series.rate
+        else:
+            timestamps = np.asarray(spatial_series.timestamps)
+            sampling_rate = estimate_sampling_rate(timestamps, 1.75)
+            if sampling_rate < 0:
+                raise ValueError(
+                    f'Error adding position data for position epoch {index}')
+            if verbose:
+                print("Processing raw position data. Estimated sampling rate: {} Hz".format(
+                    sampling_rate))
+                
+        # get the valid intervals for the position data
+        if spatial_series.rate is not None:
+            pos_data_dict[index]['valid_times'] = np.array([[0, len(spatial_series.data)/spatial_series.rate]])
+
+        else:
+            pos_data_dict[index]['valid_times'] = get_valid_intervals(
+                timestamps, sampling_rate,
+                gap_proportion=2.5,
+                min_valid_len=int(sampling_rate))
+            
         pos_data_dict[index]['raw_position_object_id'] = spatial_series.object_id
 
     return pos_data_dict
