@@ -24,6 +24,7 @@ def create_probe(probe_json_path):
         if probe_dict["probe_type"] in Probe.fetch("probe_type"):
             continue  # skip the entire probe
 
+        print(f"Prepopulating table Probe with data {probe_dict}")
         Probe.insert1(probe_dict)
 
         shank_dict = dict()

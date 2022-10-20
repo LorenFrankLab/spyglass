@@ -23,27 +23,29 @@ class Subject(dj.Manual):
         """Get the subject information from the NWBFile and insert it into the Subject table."""
         sub = nwbf.subject
         if sub is None and "Subject" not in config:
-            print('No subject metadata found.\n')
+            print("No subject metadata found.\n")
             return None
 
         subject_dict = dict()
         if sub is not None:
-            subject_dict['subject_id'] = sub.subject_id
-            subject_dict['age'] = sub.age
-            subject_dict['description'] = sub.description
-            subject_dict['genotype'] = sub.genotype
-            if sub.sex in ('Male', 'male', 'M', 'm'):
-                sex = 'M'
-            elif sub.sex in ('Female', 'female', 'F', 'f'):
-                sex = 'F'
+            subject_dict["subject_id"] = sub.subject_id
+            subject_dict["age"] = sub.age
+            subject_dict["description"] = sub.description
+            subject_dict["genotype"] = sub.genotype
+            if sub.sex in ("Male", "male", "M", "m"):
+                sex = "M"
+            elif sub.sex in ("Female", "female", "F", "f"):
+                sex = "F"
             else:
-                sex = 'U'
-            subject_dict['sex'] = sex
-            subject_dict['species'] = sub.species
+                sex = "U"
+            subject_dict["sex"] = sex
+            subject_dict["species"] = sub.species
 
         if "Subject" in config:
             if "subject_id" not in subject_dict:
-                assert "subject_id" in config["Subject"], "Subject.subject_id is required if the file has no Subject"
+                assert (
+                    "subject_id" in config["Subject"]
+                ), "Subject.subject_id is required if the file has no Subject"
             subject_dict.update(config["Subject"])  # overwrite from config file
 
         cls._add_subject(subject_dict)
@@ -68,7 +70,7 @@ class Subject(dj.Manual):
         if subject_id not in cls.fetch("subject_id"):
             print(
                 f"The subject ID '{subject_id}' was not found in the database. "
-                f"Current values: {cls.fetch('subject_id').tolist()}. "
+                f"Existing subject IDs: {cls.fetch('subject_id').tolist()}.\n"
                 "Please ensure that the Subject you want to create does not already "
                 "exist in the database under a different name or spelling. "
                 "If you want to use an existing Subject in the database, "
@@ -76,11 +78,15 @@ class Subject(dj.Manual):
                 "change the subject ID in the NWB file. "
                 "Entering 'N' will raise an exception."
             )
-            val = input(f"Do you want to create a new Subject with properties '{subject_dict}'? (y/N)")
+            val = input(
+                f"Do you want to create a new Subject with properties: {subject_dict}? (y/N)"
+            )
             if val.lower() in ["y", "yes"]:
                 cls.insert1(subject_dict)
             else:
-                raise PopulateException(f"User chose not to create a new Subject with properties '{subject_dict}'.")
+                raise PopulateException(
+                    f"User chose not to create a new Subject with properties '{subject_dict}'."
+                )
         else:
             if subject_dict not in cls:
                 existing_subject = (cls & {"subject_id": subject_id}).fetch1()
