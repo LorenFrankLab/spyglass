@@ -10,7 +10,7 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 
 from ..common.common_device import Probe
-from ..common.common_ephys import Electrode, ElectrodeGroup
+from ..common.common_ephys import Electrode
 from ..common.common_interval import (
     IntervalList,
     interval_list_intersect,
@@ -70,52 +70,67 @@ class SortGroup(dj.Manual):
         omit_unitrode : bool
             Optional. If True, no sort groups are defined for unitrodes.
         """
-        probe_types = (Electrode & {'nwb_file_name': nwb_file_name}
-                                 & {'bad_channel': 'False'}).fetch('probe_type')
+        probe_types = (
+            Electrode & {"nwb_file_name": nwb_file_name} & {"bad_channel": "False"}
+        ).fetch("probe_type")
         probe_types = np.unique(probe_types)
-        
+
         for probe_type in probe_types:
-            probe_shanks = (Electrode & {'nwb_file_name': nwb_file_name}
-                                      & {'bad_channel': 'False'}
-                                      & {'probe_type': probe_type}).fetch('probe_shank')
+            probe_shanks = (
+                Electrode
+                & {"nwb_file_name": nwb_file_name}
+                & {"bad_channel": "False"}
+                & {"probe_type": probe_type}
+            ).fetch("probe_shank")
             probe_shanks = np.unique(probe_shanks)
-            
+
             for probe_shank in probe_shanks:
-                
+
                 sg_key = dict()
 
-                electrodes = (Electrode & {'nwb_file_name': nwb_file_name,
-                                           'bad_channel': 'False',
-                                           'probe_type': probe_type,
-                                           'probe_shank': probe_shank}).fetch()
+                electrodes = (
+                    Electrode
+                    & {
+                        "nwb_file_name": nwb_file_name,
+                        "bad_channel": "False",
+                        "probe_type": probe_type,
+                        "probe_shank": probe_shank,
+                    }
+                ).fetch()
                 if not references:
-                    shank_elect_ref = [e['original_reference_electrode'] for e in electrodes]
-                    if shank_elect_ref.count(shank_elect_ref[0]) == len(shank_elect_ref): # check if all same
-                        sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
+                    shank_elect_ref = [
+                        e["original_reference_electrode"] for e in electrodes
+                    ]
+                    if shank_elect_ref.count(shank_elect_ref[0]) == len(
+                        shank_elect_ref
+                    ):  # check if all same
+                        sg_key["sort_reference_electrode_id"] = shank_elect_ref[0]
                     else:
                         ValueError(
-                            f'Reference electrodes in shank {probe_shank} are not all the same.')
+                            f"Reference electrodes in shank {probe_shank} are not all the same."
+                        )
                 else:
                     if probe_shank in references.keys():
-                        sg_key['sort_reference_electrode_id'] = references[probe_shank]
+                        sg_key["sort_reference_electrode_id"] = references[probe_shank]
                     else:
                         raise ValueError(
-                                f"Reference electrodes for shank {probe_shank} missing.")
-                
+                            f"Reference electrodes for shank {probe_shank} missing."
+                        )
+
                 # get the next sort group id
                 sort_group_id = len(self)
-                
-                sg_key['nwb_file_name'] = nwb_file_name
-                sg_key['sort_group_id'] = sort_group_id
-                sg_key['probe_type'] = probe_type
-                sg_key['probe_shank'] = probe_shank
+
+                sg_key["nwb_file_name"] = nwb_file_name
+                sg_key["sort_group_id"] = sort_group_id
+                sg_key["probe_type"] = probe_type
+                sg_key["probe_shank"] = probe_shank
                 self.insert1(sg_key)
 
                 for electrode in electrodes:
                     sge_key = dict()
-                    sge_key['nwb_file_name'] = nwb_file_name
-                    sge_key['sort_group_id'] = sort_group_id
-                    sge_key['electrode_id'] = electrode['electrode_id']
+                    sge_key["nwb_file_name"] = nwb_file_name
+                    sge_key["sort_group_id"] = sort_group_id
+                    sge_key["electrode_id"] = electrode["electrode_id"]
                     self.SortGroupElectrode().insert1(sge_key)
 
     # def set_group_by_electrode_group(self, nwb_file_name: str):
@@ -393,11 +408,11 @@ class SpikeSortingRecording(dj.Computed):
         ).fetch1("valid_times")
         valid_sort_times = interval_list_intersect(sort_interval, valid_interval_times)
         # Exclude intervals shorter than specified length
-        params = (SpikeSortingPreprocessingParameter &
-                  key).fetch1('preproc_params')
-        if 'min_segment_length' in params:
-            valid_sort_times = intervals_by_length(valid_sort_times,
-                                                   min_length=params['min_segment_length'])
+        params = (SpikeSortingPreprocessingParameter & key).fetch1("preproc_params")
+        if "min_segment_length" in params:
+            valid_sort_times = intervals_by_length(
+                valid_sort_times, min_length=params["min_segment_length"]
+            )
         return valid_sort_times
 
     def _get_filtered_recording(self, key: dict):
@@ -417,24 +432,32 @@ class SpikeSortingRecording(dj.Computed):
         recording: si.Recording
         """
 
-        nwb_file_abs_path = Nwbfile().get_abs_path(key['nwb_file_name'])
-        raw_object_name = ((SortGroup.SortGroupElectrode * Electrode) & key).fetch('raw_object_name')
-        
+        nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
+        raw_object_name = ((SortGroup.SortGroupElectrode * Electrode) & key).fetch(
+            "raw_object_name"
+        )
+
         # electrode_ids = (SortGroup.SortGroupElectrode & key).fetch('electrode_id')
         # raw_object_name = (Electrode & {'nwb_file_name': key['nwb_file_name'], 'electrode_id':electrode_ids}).fetch('raw_object_name')
         raw_object_name = np.unique(raw_object_name)
-        assert len(raw_object_name)==1, "SortGroup has electrodes from different ElectricalSeries."
-        
-        recording = se.read_nwb_recording(nwb_file_abs_path, 
-                                          electrical_series_name= raw_object_name[0],
-                                          load_time_vector=True)
-        
+        assert (
+            len(raw_object_name) == 1
+        ), "SortGroup has electrodes from different ElectricalSeries."
+
+        recording = se.read_nwb_recording(
+            nwb_file_abs_path,
+            electrical_series_name=raw_object_name[0],
+            load_time_vector=True,
+        )
+
         # get electrodes associated with the ElectricalSeries
         nwbf = get_nwb_file(nwb_file_abs_path)
         es = nwbf.acquisition[raw_object_name[0]]
         new_channel_ids = [es.electrodes.table.id[x] for x in es.electrodes.data]
-         
-        recording = recording.channel_slice(recording.channel_ids, renamed_channel_ids=new_channel_ids)
+
+        recording = recording.channel_slice(
+            recording.channel_ids, renamed_channel_ids=new_channel_ids
+        )
 
         valid_sort_times = self._get_sort_interval_valid_times(key)
         # shape is (N, 2)
@@ -494,13 +517,13 @@ class SpikeSortingRecording(dj.Computed):
         else:
             recording = recording.channel_slice(channel_ids=channel_ids)
             recording = si.preprocessing.common_reference(
-                recording,
-                reference='global',
-                operator='median')
+                recording, reference="global", operator="median"
+            )
         # else:
         #     raise ValueError("Invalid reference channel ID")
-        filter_params = (SpikeSortingPreprocessingParameter &
-                         key).fetch1('preproc_params')
+        filter_params = (SpikeSortingPreprocessingParameter & key).fetch1(
+            "preproc_params"
+        )
         recording = si.preprocessing.bandpass_filter(
             recording,
             freq_min=filter_params["frequency_min"],
@@ -512,11 +535,29 @@ class SpikeSortingRecording(dj.Computed):
         probe_type = []
         probe_shank = []
         for channel_id in channel_ids:
-            probe_type.append((Electrode & {'nwb_file_name': key['nwb_file_name'],
-                                            'electrode_id': channel_id}).fetch1('probe_type'))
-            probe_shank.append((Electrode & {'nwb_file_name': key['nwb_file_name'],
-                                             'electrode_id': channel_id}).fetch1('probe_shank'))
-        if all(p=='tetrode_12.5' for p in probe_type) and len(probe_type)==4 and all(ps==probe_shank[0] for ps in probe_shank):
+            probe_type.append(
+                (
+                    Electrode
+                    & {
+                        "nwb_file_name": key["nwb_file_name"],
+                        "electrode_id": channel_id,
+                    }
+                ).fetch1("probe_type")
+            )
+            probe_shank.append(
+                (
+                    Electrode
+                    & {
+                        "nwb_file_name": key["nwb_file_name"],
+                        "electrode_id": channel_id,
+                    }
+                ).fetch1("probe_shank")
+            )
+        if (
+            all(p == "tetrode_12.5" for p in probe_type)
+            and len(probe_type) == 4
+            and all(ps == probe_shank[0] for ps in probe_shank)
+        ):
             tetrode = pi.Probe(ndim=2)
             position = [[0, 0], [0, 12.5], [12.5, 0], [12.5, 12.5]]
             tetrode.set_contacts(
