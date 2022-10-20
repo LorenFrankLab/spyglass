@@ -1,6 +1,6 @@
 import datajoint as dj
 
-schema = dj.schema('common_subject')
+schema = dj.schema("common_subject")
 
 
 @schema

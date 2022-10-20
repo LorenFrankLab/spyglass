@@ -4,7 +4,7 @@ import warnings
 
 from .errors import PopulateException
 
-schema = dj.schema('common_device')
+schema = dj.schema("common_device")
 
 
 @schema
@@ -119,7 +119,7 @@ class DataAcquisitionDevice(dj.Manual):
         if all_device_names:
             print(f'Inserted data acquisition devices {all_device_names}')
         else:
-            print('No conforming data acquisition device metadata found.')
+            print("No conforming data acquisition device metadata found.")
 
         return all_device_names
 
@@ -195,12 +195,12 @@ class CameraDevice(dj.Manual):
                 device_dict = dict()
                 # TODO ideally the ID is not encoded in the name formatted in a particular way
                 # device.name must have the form "[any string without a space, usually camera] [int]"
-                device_dict['camera_id'] = int(str.split(device.name)[1])
-                device_dict['camera_name'] = device.camera_name
-                device_dict['manufacturer'] = device.manufacturer
-                device_dict['model'] = device.model
-                device_dict['lens'] = device.lens
-                device_dict['meters_per_pixel'] = device.meters_per_pixel
+                device_dict["camera_id"] = int(str.split(device.name)[1])
+                device_dict["camera_name"] = device.camera_name
+                device_dict["manufacturer"] = device.manufacturer
+                device_dict["model"] = device.model
+                device_dict["lens"] = device.lens
+                device_dict["meters_per_pixel"] = device.meters_per_pixel
                 cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict['camera_name'])
 
@@ -211,9 +211,9 @@ class CameraDevice(dj.Manual):
             device_name_list.append(device_dict['camera_name'])
 
         if device_name_list:
-            print(f'Inserted camera devices {device_name_list}')
+            print(f"Inserted camera devices {device_name_list}")
         else:
-            print('No conforming camera device metadata found.')
+            print("No conforming camera device metadata found.")
         return device_name_list
 
 

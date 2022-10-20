@@ -7,7 +7,7 @@ from .common_nwbfile import Nwbfile
 from .common_subject import Subject
 from ..utils.nwb_helper_fn import get_nwb_file, get_config
 
-schema = dj.schema('common_session')
+schema = dj.schema("common_session")
 
 # TODO: figure out what to do about ExperimenterList
 class SessionDataAcquisitionDevice(dj.Manual):
@@ -39,9 +39,10 @@ class Session(dj.Imported):
         # These imports must go here to avoid cyclic dependencies
         # from .common_task import Task, TaskEpoch
         from .common_interval import IntervalList
+
         # from .common_ephys import Unit
 
-        nwb_file_name = key['nwb_file_name']
+        nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath)
@@ -110,12 +111,13 @@ class Session(dj.Imported):
         # interval lists depend on Session (as a primary key) but users may want to add these manually so this is
         # a manual table that is also populated from NWB files
 
-        print('IntervalList...')
+        print("IntervalList...")
         IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
         print()
 
         # print('Unit...')
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
+
 
 @schema
 class SessionDataAcquisitionDevice(dj.Manual):
@@ -139,9 +141,11 @@ class ExperimenterList(dj.Imported):
         """
 
     def make(self, key):
-        nwb_file_name = key['nwb_file_name']
+        nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        self.insert1({'nwb_file_name': nwb_file_name}, skip_duplicates=True)  # TODO is this necessary??
+        self.insert1(
+            {"nwb_file_name": nwb_file_name}, skip_duplicates=True
+        )  # TODO is this necessary??
         nwbf = get_nwb_file(nwb_file_abspath)
 
         if nwbf.experimenter is None:
@@ -150,9 +154,10 @@ class ExperimenterList(dj.Imported):
         for name in nwbf.experimenter:
             LabMember().insert_from_name(name)
             key = dict()
-            key['nwb_file_name'] = nwb_file_name
-            key['lab_member_name'] = name
+            key["nwb_file_name"] = nwb_file_name
+            key["lab_member_name"] = name
             self.Experimenter().insert1(key)
+
 
 @schema
 class SessionGroup(dj.Manual):
@@ -161,50 +166,72 @@ class SessionGroup(dj.Manual):
     ---
     session_group_description: varchar(2000)
     """
+
     @staticmethod
-    def add_group(session_group_name: str, session_group_description: str, *, skip_duplicates: bool=False):
-        SessionGroup.insert1({
-            'session_group_name': session_group_name,
-            'session_group_description': session_group_description
-        }, skip_duplicates=skip_duplicates)
+    def add_group(
+        session_group_name: str,
+        session_group_description: str,
+        *,
+        skip_duplicates: bool = False
+    ):
+        SessionGroup.insert1(
+            {
+                "session_group_name": session_group_name,
+                "session_group_description": session_group_description,
+            },
+            skip_duplicates=skip_duplicates,
+        )
+
     @staticmethod
-    def update_session_group_description(session_group_name: str, session_group_description):
-        SessionGroup.update1({
-            'session_group_name': session_group_name,
-            'session_group_description': session_group_description
-        })
+    def update_session_group_description(
+        session_group_name: str, session_group_description
+    ):
+        SessionGroup.update1(
+            {
+                "session_group_name": session_group_name,
+                "session_group_description": session_group_description,
+            }
+        )
+
     @staticmethod
-    def add_session_to_group(nwb_file_name: str, session_group_name: str, *, skip_duplicates: bool=False):
-        SessionGroupSession.insert1({
-            'session_group_name': session_group_name,
-            'nwb_file_name': nwb_file_name
-        }, skip_duplicates=skip_duplicates)
+    def add_session_to_group(
+        nwb_file_name: str, session_group_name: str, *, skip_duplicates: bool = False
+    ):
+        SessionGroupSession.insert1(
+            {"session_group_name": session_group_name, "nwb_file_name": nwb_file_name},
+            skip_duplicates=skip_duplicates,
+        )
+
     @staticmethod
     def remove_session_from_group(nwb_file_name: str, session_group_name: str):
-        query = {'session_group_name': session_group_name, 'nwb_file_name': nwb_file_name}
+        query = {
+            "session_group_name": session_group_name,
+            "nwb_file_name": nwb_file_name,
+        }
         (SessionGroupSession & query).delete()
+
     @staticmethod
     def delete_group(session_group_name: str):
-        query = {'session_group_name': session_group_name}
+        query = {"session_group_name": session_group_name}
         (SessionGroup & query).delete()
+
     @staticmethod
     def get_group_sessions(session_group_name: str):
-        results = (SessionGroupSession & {'session_group_name': session_group_name}).fetch(as_dict=True)
-        return [
-            {'nwb_file_name': result['nwb_file_name']}
-            for result in results
-        ]
+        results = (
+            SessionGroupSession & {"session_group_name": session_group_name}
+        ).fetch(as_dict=True)
+        return [{"nwb_file_name": result["nwb_file_name"]} for result in results]
+
     @staticmethod
     def create_spyglass_view(session_group_name: str):
         import figurl as fig
-        FIGURL_CHANNEL = os.getenv('FIGURL_CHANNEL')
-        assert FIGURL_CHANNEL, 'Environment variable not set: FIGURL_CHANNEL'
-        data = {
-            'type': 'spyglassview',
-            'sessionGroupName': session_group_name
-        }
-        F = fig.Figure(view_url='gs://figurl/spyglassview-1', data=data)
+
+        FIGURL_CHANNEL = os.getenv("FIGURL_CHANNEL")
+        assert FIGURL_CHANNEL, "Environment variable not set: FIGURL_CHANNEL"
+        data = {"type": "spyglassview", "sessionGroupName": session_group_name}
+        F = fig.Figure(view_url="gs://figurl/spyglassview-1", data=data)
         return F
+
 
 # The reason this is not implemented as a dj.Part is that
 # datajoint prohibits deleting from a subtable without

@@ -1,6 +1,6 @@
 import datajoint as dj
 
-schema = dj.schema('common_region')
+schema = dj.schema("common_region")
 
 
 @schema
@@ -37,11 +37,11 @@ class BrainRegion(dj.Lookup):
             The index of the region in the BrainRegion table.
         """
         key = dict()
-        key['region_name'] = region_name
-        key['subregion_name'] = subregion_name
-        key['subsubregion_name'] = subsubregion_name
+        key["region_name"] = region_name
+        key["subregion_name"] = subregion_name
+        key["subsubregion_name"] = subsubregion_name
         query = BrainRegion & key
         if not query:
             cls.insert1(key)
             query = BrainRegion & key
-        return query.fetch1('region_id')
+        return query.fetch1("region_id")
