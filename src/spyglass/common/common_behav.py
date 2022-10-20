@@ -1,7 +1,10 @@
+import os
 import datajoint as dj
 import ndx_franklab_novela
 import pandas as pd
 import pynwb
+import pathlib
+from typing import Dict
 
 from .common_ephys import Raw  # noqa: F401
 from .common_interval import IntervalList, interval_list_contains
@@ -214,3 +217,38 @@ class VideoFile(dj.Imported):
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
+
+    @classmethod
+    def get_abs_path(cls, key: Dict):
+        """Return the absolute path for a stored video file given a key with the nwb_file_name and epoch number
+
+        The SPYGLASS_BASE_DIR environment variable must be set.
+
+        Parameters
+        ----------
+        key : dict
+            dictionary with nwb_file_name and epoch as keys
+
+        Returns
+        -------
+        nwb_video_file_abspath : str
+            The absolute path for the given file name.
+        """
+        base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
+        assert (
+            base_dir is not None
+        ), "You must set SPYGLASS_BASE_DIR environment variable."
+        video_info = (cls & key).fetch1()
+        nwb_path = f"{base_dir}/raw/{video_info['nwb_file_name']}"
+        with pynwb.NWBHDF5IO(path=nwb_path, mode="r", load_namespaces=True) as io:
+            nwbf = io.read()
+            nwb_video = nwbf.objects[video_info["video_file_object_id"]]
+            video_filename = nwb_video.name
+        # see if the file exists and is stored in the base analysis dir
+        nwb_video_file_abspath = pathlib.Path(f"{base_dir}/video/{video_filename}")
+        if nwb_video_file_abspath.exists():
+            return nwb_video_file_abspath.as_posix()
+        else:
+            raise FileNotFoundError(
+                f"video file with filename: {video_filename} does not exist in {base_dir}/video/"
+            )
