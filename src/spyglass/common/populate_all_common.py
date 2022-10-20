@@ -1,11 +1,11 @@
 from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFile
 from .common_dio import DIOEvents
+
 # from .common_nwbfile import NwbfileKachery
 from .common_ephys import Electrode, Raw, SampleCount
 from .common_nwbfile import Nwbfile
 from .common_session import ExperimenterList, Session
 from .common_task import TaskEpoch
-from ..spikesorting.spikesorting_sorting import ImportedSpikeSorting
 
 
 def populate_all_common(nwb_file_name):
@@ -18,7 +18,7 @@ def populate_all_common(nwb_file_name):
     # print('Populate NwbfileKachery...')
     # NwbfileKachery.populate()
 
-    print('Populate ExperimenterList...')
+    print("Populate ExperimenterList...")
     ExperimenterList.populate(fp)
     print()
 
@@ -26,19 +26,19 @@ def populate_all_common(nwb_file_name):
     # ElectrodeGroup.populate(fp)
     # print()
 
-    print('Populate Raw...')
+    print("Populate Raw...")
     Raw.populate(fp)
     print()
 
-    print('Populate Electrode...')
+    print("Populate Electrode...")
     Electrode.populate(fp)
     print()
 
-    print('Populate SampleCount...')
+    print("Populate SampleCount...")
     SampleCount.populate(fp)
     print()
 
-    print('Populate DIOEvents...')
+    print("Populate DIOEvents...")
     DIOEvents.populate(fp)
     print()
 
@@ -48,26 +48,25 @@ def populate_all_common(nwb_file_name):
     # print('Populate SensorData')
     # SensorData.populate(fp)
 
-    print('Populate TaskEpoch')
+    print("Populate TaskEpoch")
     TaskEpoch.populate(fp)
     print()
 
-    print('Populate StateScriptFile')
+    print("Populate StateScriptFile")
     StateScriptFile.populate(fp)
     print()
 
-    print('Populate VideoFile')
+    print("Populate VideoFile")
     VideoFile.populate(fp)
     print()
 
-    print('Populate RawPosition')
+    print("Populate RawPosition")
     PositionSource.insert_from_nwbfile(nwb_file_name)
     RawPosition.populate(fp)
     print()
 
-    print('Populate ImportedSpikeSorting')
-    ImportedSpikeSorting.populate(fp)
-
+    print("Populate ImportedSpikeSorting")
+    spyglass.spikesorting.spikesorting_sorting.ImportedSpikeSorting.populate(fp)
 
     # print('HeadDir...')
     # HeadDir().populate()

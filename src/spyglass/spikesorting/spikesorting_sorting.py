@@ -12,11 +12,11 @@ import spikeinterface.extractors as se
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
-from .spikesorting_artifact import ArtifactRemovedIntervalList
 from .spikesorting_recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
+from .spikesorting_artifact import ArtifactRemovedIntervalList
 
 # from .spikesorting_curation import Curation
 import spyglass
