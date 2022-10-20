@@ -48,7 +48,7 @@ def populate_all_common(nwb_file_name):
     # print('Populate SensorData')
     # SensorData.populate(fp)
 
-    print('Populate TaskEpochs')
+    print('Populate TaskEpoch')
     TaskEpoch.populate(fp)
     print()
 
@@ -67,8 +67,8 @@ def populate_all_common(nwb_file_name):
 
     print('Populate ImportedSpikeSorting')
     ImportedSpikeSorting.populate(fp)
-    
-    
+
+
     # print('HeadDir...')
     # HeadDir().populate()
     # print('Speed...')
