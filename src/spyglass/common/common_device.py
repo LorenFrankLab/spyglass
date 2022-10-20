@@ -14,24 +14,6 @@ class DataAcquisitionDeviceSystem(dj.Manual):
     ---
     """
 
-    # these values are added to the table in prepopulate()
-    starting_opts = [
-        "SpikeGadgets",
-        "TDT_Rig1",
-        "TDT_Rig2",
-        "PCS",
-        "RCS",
-        "RNS",
-        "NeuroOmega",
-        "Unknown"
-    ]
-
-    # this is called in __init__.py
-    @classmethod
-    def prepopulate(cls):
-        for s in cls.starting_opts:
-            cls.insert1({"system": s}, skip_duplicates=True)
-
 
 @schema
 class DataAcquisitionDeviceAmplifier(dj.Manual):
@@ -39,20 +21,6 @@ class DataAcquisitionDeviceAmplifier(dj.Manual):
     amplifier: varchar(80)
     ---
     """
-
-    # these values are added to the table in prepopulate()
-    starting_opts = [
-        "Intan",
-        "PZ5_Amp1",
-        "PZ5_Amp2",
-        "Unknown"
-    ]
-
-    # this is called in __init__.py
-    @classmethod
-    def prepopulate(cls):
-        for s in cls.starting_opts:
-            cls.insert1({"amplifier": s}, skip_duplicates=True)
 
 
 @schema
