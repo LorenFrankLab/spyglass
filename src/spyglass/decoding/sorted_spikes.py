@@ -197,7 +197,7 @@ def make_default_decoding_parameters_gpu():
 
 
 @schema
-class SortedSpikesClassifierParameters(dj.Manual):
+class SortedSpikesClassifierParameter(dj.Manual):
     """Stores parameters for decoding with sorted spikes"""
 
     definition = """
@@ -245,6 +245,21 @@ class SortedSpikesClassifierParameters(dj.Manual):
     def fetch1(self, *args, **kwargs):
         return restore_classes(super().fetch1(*args, **kwargs))
 
+
+@schema
+class SortedSpikesClassifierSelection(dj.Manual):
+    definition = """
+    -> CuratedSpikeSorting
+    -> SortedSpikesClassifierParameter
+    """
+
+@schema
+class SortedSpikesClassifier(dj.Manual):
+    definition = """
+    -> SortedSpikesClassifierSelection
+    ---
+    sorted_spikes_classifier_path : varchar(1000)
+    """
 
 def get_decoding_data_for_epoch(
     nwb_file_name: str,
