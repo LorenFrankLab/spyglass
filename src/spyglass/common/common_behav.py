@@ -222,7 +222,7 @@ class VideoFile(dj.Imported):
     def get_abs_path(cls, key: Dict):
         """Return the absolute path for a stored video file given a key with the nwb_file_name and epoch number
 
-        The SPYGLASS_BASE_DIR environment variable must be set.
+        The SPYGLASS_VIDEO_DIR environment variable must be set.
 
         Parameters
         ----------
@@ -234,21 +234,20 @@ class VideoFile(dj.Imported):
         nwb_video_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
-        assert (
-            base_dir is not None
-        ), "You must set SPYGLASS_BASE_DIR environment variable."
+        video_dir = pathlib.Path(os.getenv("SPYGLASS_VIDEO_DIR", None))
+        assert video_dir is not None, "You must set SPYGLASS_VIDEO_DIR"
         video_info = (cls & key).fetch1()
-        nwb_path = f"{base_dir}/raw/{video_info['nwb_file_name']}"
-        with pynwb.NWBHDF5IO(path=nwb_path, mode="r", load_namespaces=True) as io:
-            nwbf = io.read()
-            nwb_video = nwbf.objects[video_info["video_file_object_id"]]
-            video_filename = nwb_video.name
+        nwb_path = Nwbfile.get_abs_path(key["nwb_file_name"])
+        nwbf = get_nwb_file(nwb_path)
+        nwb_video = nwbf.objects[video_info["video_file_object_id"]]
+        video_filename = nwb_video.name
         # see if the file exists and is stored in the base analysis dir
-        nwb_video_file_abspath = pathlib.Path(f"{base_dir}/video/{video_filename}")
+        nwb_video_file_abspath = pathlib.PurePath(
+            video_dir, pathlib.Path(video_filename)
+        )
         if nwb_video_file_abspath.exists():
             return nwb_video_file_abspath.as_posix()
         else:
             raise FileNotFoundError(
-                f"video file with filename: {video_filename} does not exist in {base_dir}/video/"
+                f"video file with filename: {video_filename} does not exist in {video_dir}/"
             )
