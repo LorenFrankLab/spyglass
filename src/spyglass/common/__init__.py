@@ -2,12 +2,17 @@ import os
 
 from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFile
-from .common_device import CameraDevice, DataAcquisitionDevice, DataAcquisitionDeviceSystem, DataAcquisitionDeviceAmplifier, Probe
+from .common_device import (
+    CameraDevice,
+    DataAcquisitionDevice,
+    DataAcquisitionDeviceSystem,
+    DataAcquisitionDeviceAmplifier,
+    Probe,
+)
 from .common_dio import DIOEvents
 from .common_ephys import (
     LFP,
     Electrode,
-    ElectrodeGroup,
     LFPBand,
     LFPBandSelection,
     LFPSelection,
@@ -45,7 +50,12 @@ from .common_position import (
 )
 from .common_region import BrainRegion
 from .common_sensors import SensorData
-from .common_session import ExperimenterList, Session, SessionGroup, SessionDataAcquisitionDevice
+from .common_session import (
+    ExperimenterList,
+    Session,
+    SessionGroup,
+    SessionDataAcquisitionDevice,
+)
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
 from ..utils.nwb_helper_fn import (
