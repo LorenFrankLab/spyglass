@@ -3,7 +3,7 @@ import warnings
 
 from .errors import PopulateException
 
-schema = dj.schema('common_subject')
+schema = dj.schema("common_subject")
 
 
 @schema

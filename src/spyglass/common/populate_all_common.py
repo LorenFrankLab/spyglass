@@ -1,11 +1,8 @@
-# HeadDir, Speed, LinPos,
-from .common_behav import (PositionSource, RawPosition, StateScriptFile,
-                           VideoFile)
+from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFile
 from .common_dio import DIOEvents
 # from .common_nwbfile import NwbfileKachery
 from .common_ephys import Electrode, Raw, SampleCount
 from .common_nwbfile import Nwbfile
-# from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session
 from .common_task import TaskEpoch
 from ..spikesorting.spikesorting_sorting import ImportedSpikeSorting
@@ -13,10 +10,9 @@ from ..spikesorting.spikesorting_sorting import ImportedSpikeSorting
 
 def populate_all_common(nwb_file_name):
     # Insert session one by one
-    fp = [(Nwbfile & {'nwb_file_name': nwb_file_name}).proj()]
-    print('Populate Session...')
+    fp = [(Nwbfile & {"nwb_file_name": nwb_file_name}).proj()]
+    print("Populate Session...")
     Session.populate(fp)
-    print()
 
     # If we use Kachery for data sharing we can uncomment the following two lines. TBD
     # print('Populate NwbfileKachery...')
@@ -52,7 +48,7 @@ def populate_all_common(nwb_file_name):
     # print('Populate SensorData')
     # SensorData.populate(fp)
 
-    print('Populate TaskEpochs')
+    print('Populate TaskEpoch')
     TaskEpoch.populate(fp)
     print()
 
@@ -71,8 +67,8 @@ def populate_all_common(nwb_file_name):
 
     print('Populate ImportedSpikeSorting')
     ImportedSpikeSorting.populate(fp)
-    
-    
+
+
     # print('HeadDir...')
     # HeadDir().populate()
     # print('Speed...')
