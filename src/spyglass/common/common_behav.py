@@ -249,5 +249,6 @@ class VideoFile(dj.Imported):
             return nwb_video_file_abspath.as_posix()
         else:
             raise FileNotFoundError(
-                f"video file with filename: {video_filename} does not exist in {video_dir}/"
+                f"video file with filename: {video_filename} "
+                f"does not exist in {video_dir}/"
             )
