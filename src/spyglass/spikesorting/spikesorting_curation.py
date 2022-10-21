@@ -400,6 +400,7 @@ class MetricParameters(dj.Manual):
             "seed": 0,
         },
         "peak_channel": {"peak_sign": "neg"},
+        "num_spikes": {},
     }
     # Example of peak_offset parameters 'peak_offset': {'peak_sign': 'neg'}
     available_metrics = [
@@ -409,6 +410,7 @@ class MetricParameters(dj.Manual):
         "nn_noise_overlap",
         "peak_offset",
         "peak_channel",
+        "num_spikes",
     ]
 
     def get_metric_default_params(self, metric: str):
@@ -590,6 +592,13 @@ def _get_peak_channel(
     return peak_channel
 
 
+def _get_num_spikes(waveform_extractor: si.WaveformExtractor, this_unit_id: int):
+    """Computes the number of spikes for each unit."""
+    all_spikes = st.qualitymetrics.compute_num_spikes(waveform_extractor)
+    cluster_spikes = all_spikes[this_unit_id]
+    return cluster_spikes
+
+
 _metric_name_to_func = {
     "snr": st.qualitymetrics.compute_snrs,
     "isi_violation": _compute_isi_violation_fractions,
@@ -597,6 +606,7 @@ _metric_name_to_func = {
     "nn_noise_overlap": st.qualitymetrics.nearest_neighbors_noise_overlap,
     "peak_offset": _get_peak_offset,
     "peak_channel": _get_peak_channel,
+    "num_spikes": _get_num_spikes,
 }
 
 
