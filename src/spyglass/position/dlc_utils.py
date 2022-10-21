@@ -13,7 +13,8 @@ import datajoint as dj
 
 def _set_permissions(directory, mode, username: str, groupname: str = None):
     """
-    Use to recursively set ownership and permissions for directories/files that result from the DLC pipeline
+    Use to recursively set ownership and permissions for
+    directories/files that result from the DLC pipeline
 
     Parameters
     ----------
@@ -40,7 +41,7 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
         gid = grp.getgrnam(groupname).gr_gid
     else:
         gid = None
-    for dirpath, dirnames, filenames in os.walk(directory):
+    for dirpath, _, filenames in os.walk(directory):
         os.chown(dirpath, uid, gid)
         os.chmod(dirpath, mode)
         for filename in filenames:
@@ -158,6 +159,8 @@ def get_video_path(key):
         filename of the video
     """
     from ..common.common_behav import VideoFile
+    from ..common.nwb_helper_fn import get_nwb_file
+    from ..common.common_nwbfile import Nwbfile
     import pynwb
 
     video_info = (

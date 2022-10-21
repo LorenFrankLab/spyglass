@@ -36,7 +36,7 @@ class DLCCentroidParams(dj.Manual):
     _two_pt_labels = ["point1", "point2"]
 
     @classmethod
-    def insert_default(cls):
+    def insert_default(cls, **kwargs):
         """
         Inserts default centroid parameters. Assumes 2 LEDs tracked
         """
@@ -48,7 +48,7 @@ class DLCCentroidParams(dj.Manual):
             },
             "speed_smoothing_std_dev": 0.100,
         }
-        cls.insert1({"dlc_centroid_params_name": "default", "params": params})
+        cls.insert1({"dlc_centroid_params_name": "default", "params": params}, **kwargs)
 
     @classmethod
     def get_default(cls):

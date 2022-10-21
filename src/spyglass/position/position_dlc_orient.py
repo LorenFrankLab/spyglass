@@ -25,11 +25,13 @@ class DLCOrientationParams(dj.Manual):
     """
 
     @classmethod
-    def insert_params(cls, params_name: str, params: dict):
-        cls.insert1({"dlc_orientation_params_name": params_name, "params": params})
+    def insert_params(cls, params_name: str, params: dict, **kwargs):
+        cls.insert1(
+            {"dlc_orientation_params_name": params_name, "params": params}, **kwargs
+        )
 
     @classmethod
-    def insert_default(cls):
+    def insert_default(cls, **kwargs):
         params = {
             "orient_method": "red_led_bisector",
             "led1": "redLED_L",
@@ -38,8 +40,7 @@ class DLCOrientationParams(dj.Manual):
             "orientation_smoothing_std_dev": 0.001,
         }
         cls.insert1(
-            {"dlc_orientation_params_name": "default", "params": params},
-            skip_duplicates=True,
+            {"dlc_orientation_params_name": "default", "params": params}, **kwargs
         )
 
     @classmethod
@@ -49,6 +50,7 @@ class DLCOrientationParams(dj.Manual):
             cls().insert_default(skip_duplicates=True)
             default = (cls & {"dlc_orientation_params_name": "default"}).fetch1()
         return default
+
 
 @schema
 class DLCOrientationSelection(dj.Manual):

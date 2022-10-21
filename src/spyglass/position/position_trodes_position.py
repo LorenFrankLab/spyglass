@@ -442,7 +442,10 @@ class TrodesPosVideo(dj.Computed):
         )[0].as_posix()
         nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
         current_dir = Path(os.getcwd())
-        output_video_filename = f"{current_dir.as_posix()}/{nwb_base_filename}_{epoch:02d}_{key['trodes_pos_params_name']}.mp4"
+        output_video_filename = (
+            f"{current_dir.as_posix()}/{nwb_base_filename}_"
+            f"{epoch:02d}_{key['trodes_pos_params_name']}.mp4"
+        )
         centroids = {
             "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
             "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),

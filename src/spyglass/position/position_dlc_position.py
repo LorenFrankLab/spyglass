@@ -46,15 +46,15 @@ class DLCSmoothInterpParams(dj.Manual):
     """
 
     @classmethod
-    def insert_params(cls, params_name: str, params: dict, skip_duplicates=True):
+    def insert_params(cls, params_name: str, params: dict, **kwargs):
 
         cls.insert1(
             {"dlc_si_params_name": params_name, "params": params},
-            skip_duplicates=skip_duplicates,
+            **kwargs,
         )
 
     @classmethod
-    def insert_default(cls):
+    def insert_default(cls, **kwargs):
         default_params = {
             "smoothing_params": {
                 "smoothing_duration": 0.05,
@@ -66,8 +66,7 @@ class DLCSmoothInterpParams(dj.Manual):
             "speed_smoothing_std_dev": 0.100,
         }
         cls.insert1(
-            {"dlc_si_params_name": "default", "params": default_params},
-            skip_duplicates=True,
+            {"dlc_si_params_name": "default", "params": default_params}, **kwargs
         )
 
     @classmethod

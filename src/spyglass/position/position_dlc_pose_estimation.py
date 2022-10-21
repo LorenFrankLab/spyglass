@@ -67,7 +67,8 @@ class DLCPoseEstimationSelection(dj.Manual):
             videotype, gputouse, save_as_csv, batchsize, cropping, TFGPUinference,
             dynamic, robust_nframes, allow_growth, use_shelve
         """
-        # TODO: figure out if a separate video_key is needed without portions of key that refer to model
+        # TODO: figure out if a separate video_key is needed
+        # without portions of key that refer to model
         from .dlc_utils import get_video_path, check_videofile
 
         video_path, video_filename, _, _ = get_video_path(key)
