@@ -219,8 +219,9 @@ def _create_spikesortingview_workspace(
     )
 
     sorting_curation_uri = workspace.get_sorting_curation_uri(sorting_id)
-    url = view.url(label=recording_label, sorting_curation_uri=sorting_curation_uri)
+    # we should comment out this line if we dont want to make the URL - this calls sortingview code
+    # url = view.url(label=recording_label, sorting_curation_uri=sorting_curation_uri)
 
-    print(f"figurl: {url}")
+    # print(f"figurl: {url}")
 
     return workspace.uri, recording_id, sorting_id

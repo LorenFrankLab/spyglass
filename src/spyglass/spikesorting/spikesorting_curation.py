@@ -115,7 +115,8 @@ class Curation(dj.Manual):
         sorting_key["quality_metrics"] = metrics
         sorting_key["time_of_creation"] = int(time.time())
 
-        Curation.insert1(sorting_key)
+        # mike: added skip duplicates
+        Curation.insert1(sorting_key, skip_duplicates=True)
 
         # get the primary key for this curation
         c_key = Curation.fetch("KEY")[0]

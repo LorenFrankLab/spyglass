@@ -162,32 +162,33 @@ class SortingviewWorkspace(dj.Computed):
         workspace = sv.load_workspace(workspace_uri)
         workspace.set_snippet_len(snippet_len)
 
-    def url(self, key: dict, sortingview_sorting_id: str = None):
-        """Generate a URL for visualizing the sorting on the web.
+    # remove this function
+    # def url(self, key: dict, sortingview_sorting_id: str = None):
+    #     """Generate a URL for visualizing the sorting on the web.
 
-        Parameters
-        ----------
-        key : dict
-            An entry from SortingviewWorkspace table
-        sortingview_sorting_id : str, optional
-            sortingview sorting ID to visualize; if None then chooses the first one
+    #     Parameters
+    #     ----------
+    #     key : dict
+    #         An entry from SortingviewWorkspace table
+    #     sortingview_sorting_id : str, optional
+    #         sortingview sorting ID to visualize; if None then chooses the first one
 
-        Returns
-        -------
-        url : str
-        """
-        workspace_uri = (self & key).fetch1("workspace_uri")
-        workspace = sv.load_workspace(workspace_uri)
-        recording_id = workspace.recording_ids[0]
-        if sortingview_sorting_id is None:
-            sortingview_sorting_id = workspace.sorting_ids[0]
-        url = workspace.spikesortingview(
-            recording_id=recording_id,
-            sorting_id=sortingview_sorting_id,
-            label=workspace.label,
-        )
+    #     Returns
+    #     -------
+    #     url : str
+    #     """
+    #     workspace_uri = (self & key).fetch1("workspace_uri")
+    #     workspace = sv.load_workspace(workspace_uri)
+    #     recording_id = workspace.recording_ids[0]
+    #     if sortingview_sorting_id is None:
+    #         sortingview_sorting_id = workspace.sorting_ids[0]
+    #     url = workspace.spikesortingview(
+    #         recording_id=recording_id,
+    #         sorting_id=sortingview_sorting_id,
+    #         label=workspace.label,
+    #     )
 
-        return url
+    #     return url
 
     def url_trythis(self, key: dict, sortingview_sorting_id: str = None):
         """Generate a URL for visualizing and curating a sorting on the web.
@@ -211,19 +212,30 @@ class SortingviewWorkspace(dj.Computed):
         R = workspace.get_recording_extractor(recording_id)
         S = workspace.get_sorting_extractor(sortingview_sorting_id)
 
+        initial_labels = (Curation & key).fetch("curation_labels")[0]
+        for k, v in initial_labels.items():
+            new_list = []
+            for item in v:
+                if item not in new_list:
+                    new_list.append(item)
+            initial_labels[k] = new_list
+        initial_curation = {"labelsByUnit": initial_labels}
+
         # This will print some instructions on how to do the curation
         url = sv.trythis_start_sorting_curation(
             recording=R,
             sorting=S,
-            label='sorting-label-fill-this-in',
-            initial_curation=(Curation & key).fetch('curation_labels')[0],
+            label=workspace.label,
+            initial_curation=initial_curation,
             raster_plot_subsample_max_firing_rate=50,
             spike_amplitudes_subsample_max_firing_rate=50,
-            unit_metrics=None
+            unit_metrics=None,
         )
         return url
 
-    def insert_manual_curation(self, key: dict, description="manually curated"):
+    def insert_manual_curation(
+        self, key: dict, url: str, description="manually curated"
+    ):
         """Based on information in key for an SortingviewWorkspace, loads the
         curated sorting from sortingview, saves it (with labels and the
         optional description) and inserts it to CuratedSorting
@@ -237,22 +249,25 @@ class SortingviewWorkspace(dj.Computed):
         description: str, optional
             description of curated sorting
         """
-        workspace_uri = (self & key).fetch("workspace_uri")
-        if workspace_uri.size == 0:
-            raise ValueError("First create a sortingview workspace for this entry.")
-        workspace = sv.load_workspace(workspace_uri=workspace_uri[0])
 
-        sortingview_sorting_id = (SortingviewWorkspace & key).fetch1(
-            "sortingview_sorting_id"
-        )
+        # remove next several lines
+        # workspace_uri = (self & key).fetch("workspace_uri")
+        # if workspace_uri.size == 0:
+        #     raise ValueError("First create a sortingview workspace for this entry.")
+        # workspace = sv.load_workspace(workspace_uri=workspace_uri[0])
+
+        # sortingview_sorting_id = (SortingviewWorkspace & key).fetch1(
+        #     "sortingview_sorting_id"
+        # )
 
         # get the labels and remove the non-primary merged units
-        #labels = workspace.get_sorting_curation(sorting_id=sortingview_sorting_id)
-        labels = sv.trythis_load_sorting_curation('jot://xTzzyDieQPkW')
+        # labels = workspace.get_sorting_curation(sorting_id=sortingview_sorting_id)
+        # labels = sv.trythis_load_sorting_curation('jot://xTzzyDieQPkW')
+        labels = sv.trythis_load_sorting_curation(url)
 
         # turn labels to list of str, only including accepted units.
-        #if bool(labels["mergeGroups"]):
-        if bool(labels.get('mergeGroups',[])):
+        # if bool(labels["mergeGroups"]):
+        if bool(labels.get("mergeGroups", [])):
             # clusters were merged, so we empty out metrics
             metrics = {}
         else:
@@ -264,7 +279,7 @@ class SortingviewWorkspace(dj.Computed):
             key,
             parent_curation_id=key["curation_id"],
             labels=labels["labelsByUnit"],
-            merge_groups=labels.get("mergeGroups",[]),
+            merge_groups=labels.get("mergeGroups", []),
             metrics=metrics,
             description=description,
         )
