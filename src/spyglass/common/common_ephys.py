@@ -238,9 +238,10 @@ class Electrode(dj.Imported):
                         if probe_type == device_name:
                             probe_type = replacement["Probe"]["probe_type"]  # replace
 
-            assert {
-                "probe_type": probe_type
-            } in Probe(), f"Probe type {probe_type} not found in Probe. Please insert this probe to the Probe table first"
+            assert {"probe_type": probe_type} in Probe(), (
+                f"Probe type {probe_type} not found in Probe. Please insert this probe to the "
+                "Probe table first."
+            )
 
             assert len(electrodes) == len(
                 (Probe.Electrode & {"probe_type": probe_type}).fetch("probe_electrode")
@@ -320,7 +321,8 @@ class Electrode(dj.Imported):
             key["z_warped"] = 0
             key["contacts"] = ""
             key["filtering"] = elect_data.filtering
-            key["impedance"] = elect_data.imp
+            if hasattr(elect_data, "imp"):
+                key["impedance"] = elect_data.imp
             self.insert1(key, skip_duplicates=True)
 
 

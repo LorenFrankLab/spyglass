@@ -1,5 +1,3 @@
-import os
-
 from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFile
 from .common_device import (
@@ -68,7 +66,6 @@ from ..utils.nwb_helper_fn import (
     get_valid_intervals,
 )
 from .populate_all_common import populate_all_common
+from .prepopulate.prepopulate import prepopulate
 
-
-DataAcquisitionDeviceSystem.prepopulate()
-DataAcquisitionDeviceAmplifier.prepopulate()
+prepopulate()

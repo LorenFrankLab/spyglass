@@ -65,7 +65,7 @@ class Session(dj.Imported):
         print()
 
         print('Subject...')
-        Subject().insert_from_nwbfile(nwbf, config)
+        subject_id = Subject().insert_from_nwbfile(nwbf, config)
         print()
 
         print('DataAcquisitionDevice...')
@@ -79,11 +79,6 @@ class Session(dj.Imported):
         print('Probe...')
         Probe().insert_from_nwbfile(nwbf, config)
         print()
-
-        if nwbf.subject is not None:
-            subject_id = nwbf.subject.subject_id
-        else:
-            subject_id = None
 
         Session().insert1({
             'nwb_file_name': nwb_file_name,
