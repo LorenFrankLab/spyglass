@@ -18,7 +18,7 @@ from .position_dlc_pose_estimation import (
 from .dlc_utils import get_video_path
 from .position_dlc_centroid import DLCCentroid
 from .position_dlc_orient import DLCOrientation
-from .position_dlc_position import DLCSmoothInterp
+from .position_dlc_position import DLCSmoothInterp, DLCSmoothInterpParams
 from .position_dlc_cohort import DLCSmoothInterpCohort
 
 schema = dj.schema("position_dlc_selection")
@@ -171,6 +171,74 @@ class DLCPos(dj.Computed):
             columns=COLUMNS,
             index=index,
         )
+
+    @classmethod
+    def evaluate_pose_estimation(key):
+        likelihood_thresh = []
+        centroid_bodyparts, centroid_si_params = (
+            DLCSmoothInterpCohort.BodyPart
+            & {"dlc_si_cohort_selection_name": key["dlc_si_cohort_centroid"]}
+        ).fetch("bodypart", "dlc_si_params_name")
+        orientation_bodyparts, orientation_si_params = (
+            DLCSmoothInterpCohort.BodyPart
+            & {"dlc_si_cohort_selection_name": key["dlc_si_cohort_orientation"]}
+        ).fetch("bodypart", "dlc_si_params_name")
+        for param in centroid_si_params + orientation_si_params:
+            likelihood_thresh.append(
+                (
+                    DLCSmoothInterpParams() & {"dlc_si_params_name": "JG_SI_params"}
+                ).fetch1("params")["interp_params"]["likelihood_thresh"]
+            )
+
+        if len(np.unique(likelihood_thresh)) > 1:
+            raise ValueError("more than one likelihood threshold used")
+        like_thresh = likelihood_thresh[0]
+        bodyparts = np.unique([*centroid_bodyparts, *orientation_bodyparts])
+        fields = list(DLCPoseEstimation.BodyPart.fetch().dtype.fields.keys())
+        pose_estimation_key = {k: v for k, v in key.items() if k in fields}
+        pose_estimation_df = pd.concat(
+            {
+                bodypart: (
+                    DLCPoseEstimation.BodyPart()
+                    & {**pose_estimation_key, **{"bodypart": bodypart}}
+                ).fetch1_dataframe()
+                for bodypart in bodyparts.tolist()
+            },
+            axis=1,
+        )
+        df_filter = {
+            bodypart: pose_estimation_df[bodypart]["likelihood"] < like_thresh
+            for bodypart in bodyparts
+            if bodypart in pose_estimation_df.columns
+        }
+        sub_thresh_dict = {
+            bodypart: {
+                "inds": np.where(
+                    ~np.isnan(
+                        pose_estimation_df[bodypart]["likelihood"].where(
+                            df_filter[bodypart]
+                        )
+                    )
+                )[0],
+                "percent": (
+                    len(
+                        np.where(
+                            ~np.isnan(
+                                pose_estimation_df[bodypart]["likelihood"].where(
+                                    df_filter[bodypart]
+                                )
+                            )
+                        )[0]
+                    )
+                    / len(pose_estimation_df)
+                )
+                * 100,
+                "span_length": [],
+                "span_inds": [],
+            }
+            for bodypart in bodyparts
+        }
+        return
 
 
 @schema
