@@ -35,13 +35,13 @@ class SortingviewWorkspace(dj.Computed):
 
     def make(self, key: dict):
         """Create a Sortingview workspace
-        
+
         Parameters
         ----------
         key : dict
             primary key of an entry from SortingviewWorkspaceSelection table
         """
-        
+
         # fetch
         recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
         sorting_path = (SpikeSorting & key).fetch1("sorting_path")
