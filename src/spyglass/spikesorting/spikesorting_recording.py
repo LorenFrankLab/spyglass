@@ -20,8 +20,8 @@ from ..common.common_interval import (
 from ..common.common_lab import LabTeam
 from ..common.common_nwbfile import Nwbfile
 from ..common.common_session import Session
-from ..utils.dj_helper_fn import dj_replace
-from ..utils.nwb_helper_fn import get_nwb_file
+from ..common.dj_helper_fn import dj_replace
+from ..common.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("spikesorting_recording")
 
