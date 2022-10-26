@@ -236,6 +236,8 @@ class VideoFile(dj.Imported):
         """
         video_dir = pathlib.Path(os.getenv("SPYGLASS_VIDEO_DIR", None))
         assert video_dir is not None, "You must set SPYGLASS_VIDEO_DIR"
+        if not video_dir.exists():
+            raise OSError("SPYGLASS_VIDEO_DIR does not exist")
         video_info = (cls & key).fetch1()
         nwb_path = Nwbfile.get_abs_path(key["nwb_file_name"])
         nwbf = get_nwb_file(nwb_path)
