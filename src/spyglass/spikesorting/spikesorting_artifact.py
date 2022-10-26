@@ -10,8 +10,8 @@ from spikeinterface.core.job_tools import ChunkRecordingExecutor, ensure_n_jobs
 
 from ..common.common_interval import (
     IntervalList,
-    interval_from_inds,
     _union_concat,
+    interval_from_inds,
     interval_list_intersect,
 )
 from ..utils.nwb_helper_fn import get_valid_intervals

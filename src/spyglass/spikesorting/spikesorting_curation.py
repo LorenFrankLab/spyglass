@@ -17,7 +17,7 @@ from ..common.common_nwbfile import AnalysisNwbfile
 from ..utils.dj_helper_fn import fetch_nwb
 from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SortInterval, SpikeSortingRecording
-from .spikesorting_sorting import SpikeSorting, ImportedSpikeSorting
+from .spikesorting_sorting import ImportedSpikeSorting, SpikeSorting
 
 schema = dj.schema("spikesorting_curation")
 

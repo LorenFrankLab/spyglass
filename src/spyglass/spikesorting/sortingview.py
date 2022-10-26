@@ -1,10 +1,9 @@
-import datajoint as dj
-
-import sortingview as sv
-
 from typing import Dict, List
 
-from ..common.common_lab import LabTeam, LabMember
+import datajoint as dj
+import sortingview as sv
+
+from ..common.common_lab import LabMember, LabTeam
 from ..utils.sortingview_helper_fn import (
     _add_metrics_to_sorting_in_workspace,
     _create_spikesortingview_workspace,

@@ -2,10 +2,9 @@
 
 from typing import Dict, List, Union
 
-import spikeinterface as si
-
 import sortingview as sv
 import sortingview.views as vv
+import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
 from .merged_sorting_extractor import MergedSortingExtractor

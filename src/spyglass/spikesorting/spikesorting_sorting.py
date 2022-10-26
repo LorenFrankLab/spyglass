@@ -12,14 +12,19 @@ import spikeinterface.extractors as se
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
+# from .spikesorting_curation import Curation
+import spyglass
+
+from ..common.common_lab import LabMember, LabTeam
+from ..common.common_nwbfile import Nwbfile
+from ..common.common_session import Session
+from ..utils.dj_helper_fn import fetch_nwb
+from ..utils.nwb_helper_fn import get_nwb_file
+from .spikesorting_artifact import ArtifactRemovedIntervalList
 from .spikesorting_recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
-from .spikesorting_artifact import ArtifactRemovedIntervalList
-
-# from .spikesorting_curation import Curation
-import spyglass
 
 # try:
 #     from .spikesorting_curation import Curation
@@ -27,12 +32,6 @@ import spyglass
 #     import sys
 #     Curation = sys.modules[__package__ + '.spikesorting.Curation']
 
-from ..common.common_session import Session
-from ..common.common_lab import LabMember, LabTeam
-from ..common.common_nwbfile import Nwbfile
-
-from ..utils.dj_helper_fn import fetch_nwb
-from ..utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("spikesorting_sorting")
 
