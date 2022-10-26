@@ -14,7 +14,7 @@ import spikeinterface.toolkit as st
 
 from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
-from ..utils.dj_helper_fn import fetch_nwb
+from ..common.dj_helper_fn import fetch_nwb
 from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SortInterval, SpikeSortingRecording
 from .spikesorting_sorting import ImportedSpikeSorting, SpikeSorting
