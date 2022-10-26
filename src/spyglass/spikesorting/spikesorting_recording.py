@@ -10,7 +10,7 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 
 from ..common.common_device import Probe
-from ..common.common_ephys import Electrode, ElectrodeGroup
+from ..common.common_ephys import Electrode
 from ..common.common_interval import (
     IntervalList,
     interval_list_intersect,
@@ -20,7 +20,8 @@ from ..common.common_interval import (
 from ..common.common_lab import LabTeam
 from ..common.common_nwbfile import Nwbfile
 from ..common.common_session import Session
-from ..common.dj_helper_fn import dj_replace
+from ..utils.dj_helper_fn import dj_replace
+from ..utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("spikesorting_recording")
 
@@ -32,6 +33,7 @@ class SortGroup(dj.Manual):
     -> Session
     sort_group_id: int  # identifier for a group of electrodes
     ---
+    -> [nullable] Probe.Shank
     sort_reference_electrode_id = -1: int  # the electrode to use for reference. -1: no reference, -2: common median
     """
 
@@ -51,10 +53,10 @@ class SortGroup(dj.Manual):
         """Divides electrodes into groups based on their shank position.
 
         * Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
-          single group
+          single sort group.
         * Electrodes from probes with multiple shanks (e.g. polymer probes) are
-          placed in one group per shank
-        * Bad channels are omitted
+          placed in one sort group per shank.
+        * Bad channels are omitted.
 
         Parameters
         ----------
@@ -62,139 +64,113 @@ class SortGroup(dj.Manual):
             the name of the NWB file whose electrodes should be put into sorting groups
         references : dict, optional
             If passed, used to set references. Otherwise, references set using
-            original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
+            original reference electrodes from NWB file. Keys: shank. Values: reference electrode.
         omit_ref_electrode_group : bool
             Optional. If True, no sort group is defined for electrode group of reference.
         omit_unitrode : bool
             Optional. If True, no sort groups are defined for unitrodes.
         """
-        # delete any current groups
-        (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
-        # get the electrodes from this NWB file
-        electrodes = (
-            Electrode() & {"nwb_file_name": nwb_file_name} & {"bad_channel": "False"}
-        ).fetch()
-        e_groups = list(np.unique(electrodes["electrode_group_name"]))
-        e_groups.sort(key=int)  # sort electrode groups numerically
-        sort_group = 0
-        sg_key = dict()
-        sge_key = dict()
-        sg_key["nwb_file_name"] = sge_key["nwb_file_name"] = nwb_file_name
-        for e_group in e_groups:
-            # for each electrode group, get a list of the unique shank numbers
-            shank_list = np.unique(
-                electrodes["probe_shank"][electrodes["electrode_group_name"] == e_group]
-            )
-            sge_key["electrode_group_name"] = e_group
-            # get the indices of all electrodes in this group / shank and set their sorting group
-            for shank in shank_list:
-                sg_key["sort_group_id"] = sge_key["sort_group_id"] = sort_group
-                # specify reference electrode. Use 'references' if passed, otherwise use reference from config
+        probe_types = (
+            Electrode & {"nwb_file_name": nwb_file_name} & {"bad_channel": "False"}
+        ).fetch("probe_type")
+        probe_types = np.unique(probe_types)
+
+        for probe_type in probe_types:
+            probe_shanks = (
+                Electrode
+                & {"nwb_file_name": nwb_file_name}
+                & {"bad_channel": "False"}
+                & {"probe_type": probe_type}
+            ).fetch("probe_shank")
+            probe_shanks = np.unique(probe_shanks)
+
+            for probe_shank in probe_shanks:
+
+                sg_key = dict()
+
+                electrodes = (
+                    Electrode
+                    & {
+                        "nwb_file_name": nwb_file_name,
+                        "bad_channel": "False",
+                        "probe_type": probe_type,
+                        "probe_shank": probe_shank,
+                    }
+                ).fetch()
                 if not references:
-                    shank_elect_ref = electrodes["original_reference_electrode"][
-                        np.logical_and(
-                            electrodes["electrode_group_name"] == e_group,
-                            electrodes["probe_shank"] == shank,
-                        )
+                    shank_elect_ref = [
+                        e["original_reference_electrode"] for e in electrodes
                     ]
-                    if np.max(shank_elect_ref) == np.min(shank_elect_ref):
+                    if shank_elect_ref.count(shank_elect_ref[0]) == len(
+                        shank_elect_ref
+                    ):  # check if all same
                         sg_key["sort_reference_electrode_id"] = shank_elect_ref[0]
                     else:
                         ValueError(
-                            f"Error in electrode group {e_group}: reference electrodes are not all the same"
+                            f"Reference electrodes in shank {probe_shank} are not all the same."
                         )
                 else:
-                    if e_group not in references.keys():
-                        raise Exception(
-                            f"electrode group {e_group} not a key in references, so cannot set reference"
-                        )
+                    if probe_shank in references.keys():
+                        sg_key["sort_reference_electrode_id"] = references[probe_shank]
                     else:
-                        sg_key["sort_reference_electrode_id"] = references[e_group]
-                # Insert sort group and sort group electrodes
-                reference_electrode_group = electrodes[
-                    electrodes["electrode_id"] == sg_key["sort_reference_electrode_id"]
-                ][
-                    "electrode_group_name"
-                ]  # reference for this electrode group
-                if len(reference_electrode_group) == 1:  # unpack single reference
-                    reference_electrode_group = reference_electrode_group[0]
-                elif (int(sg_key["sort_reference_electrode_id"]) > 0) and (
-                    len(reference_electrode_group) != 1
-                ):
-                    raise Exception(
-                        f"Should have found exactly one electrode group for reference electrode,"
-                        f"but found {len(reference_electrode_group)}."
-                    )
-                if omit_ref_electrode_group and (
-                    str(e_group) == str(reference_electrode_group)
-                ):
-                    print(
-                        f"Omitting electrode group {e_group} from sort groups because contains reference."
-                    )
-                    continue
-                shank_elect = electrodes["electrode_id"][
-                    np.logical_and(
-                        electrodes["electrode_group_name"] == e_group,
-                        electrodes["probe_shank"] == shank,
-                    )
-                ]
-                if (
-                    omit_unitrode and len(shank_elect) == 1
-                ):  # ommit unitrodes if indicated
-                    print(
-                        f"Omitting electrode group {e_group}, shank {shank} from sort groups because unitrode."
-                    )
-                    continue
+                        raise ValueError(
+                            f"Reference electrodes for shank {probe_shank} missing."
+                        )
+
+                # get the next sort group id
+                sort_group_id = len(self)
+
+                sg_key["nwb_file_name"] = nwb_file_name
+                sg_key["sort_group_id"] = sort_group_id
+                sg_key["probe_type"] = probe_type
+                sg_key["probe_shank"] = probe_shank
                 self.insert1(sg_key)
-                for elect in shank_elect:
-                    sge_key["electrode_id"] = elect
+
+                for electrode in electrodes:
+                    sge_key = dict()
+                    sge_key["nwb_file_name"] = nwb_file_name
+                    sge_key["sort_group_id"] = sort_group_id
+                    sge_key["electrode_id"] = electrode["electrode_id"]
                     self.SortGroupElectrode().insert1(sge_key)
-                sort_group += 1
 
-    def set_group_by_electrode_group(self, nwb_file_name: str):
-        """Assign groups to all non-bad channel electrodes based on their electrode group
-        and sets the reference for each group to the reference for the first channel of the group.
+    # def set_group_by_electrode_group(self, nwb_file_name: str):
+    #     """Assign groups to all non-bad channel electrodes based on their electrode group
+    #     and sets the reference for each group to the reference for the first channel of the group.
 
-        Parameters
-        ----------
-        nwb_file_name: str
-            the name of the nwb whose electrodes should be put into sorting groups
-        """
-        # delete any current groups
-        (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
-        # get the electrodes from this NWB file
-        electrodes = (
-            Electrode() & {"nwb_file_name": nwb_file_name} & {"bad_channel": "False"}
-        ).fetch()
-        e_groups = np.unique(electrodes["electrode_group_name"])
-        sg_key = dict()
-        sge_key = dict()
-        sg_key["nwb_file_name"] = sge_key["nwb_file_name"] = nwb_file_name
-        sort_group = 0
-        for e_group in e_groups:
-            sge_key["electrode_group_name"] = e_group
-            # sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
-            # TEST
-            sg_key["sort_group_id"] = sge_key["sort_group_id"] = int(e_group)
-            # get the list of references and make sure they are all the same
-            shank_elect_ref = electrodes["original_reference_electrode"][
-                electrodes["electrode_group_name"] == e_group
-            ]
-            if np.max(shank_elect_ref) == np.min(shank_elect_ref):
-                sg_key["sort_reference_electrode_id"] = shank_elect_ref[0]
-            else:
-                ValueError(
-                    f"Error in electrode group {e_group}: reference electrodes are not all the same"
-                )
-            self.insert1(sg_key)
+    #     Parameters
+    #     ----------
+    #     nwb_file_name: str
+    #         the name of the nwb whose electrodes should be put into sorting groups
+    #     """
+    #     # delete any current groups
+    #     (SortGroup & {'nwb_file_name': nwb_file_name}).delete()
+    #     # get the electrodes from this NWB file
+    #     electrodes = (Electrode() & {'nwb_file_name': nwb_file_name} & {
+    #                   'bad_channel': 'False'}).fetch()
+    #     e_groups = np.unique(electrodes['electrode_group_name'])
+    #     sg_key = dict()
+    #     sge_key = dict()
+    #     sg_key['nwb_file_name'] = sge_key['nwb_file_name'] = nwb_file_name
+    #     sort_group = 0
+    #     for e_group in e_groups:
+    #         sge_key['electrode_group_name'] = e_group
+    #         # sg_key['sort_group_id'] = sge_key['sort_group_id'] = sort_group
+    #         # TEST
+    #         sg_key['sort_group_id'] = sge_key['sort_group_id'] = int(e_group)
+    #         # get the list of references and make sure they are all the same
+    #         shank_elect_ref = electrodes['original_reference_electrode'][electrodes['electrode_group_name'] == e_group]
+    #         if np.max(shank_elect_ref) == np.min(shank_elect_ref):
+    #             sg_key['sort_reference_electrode_id'] = shank_elect_ref[0]
+    #         else:
+    #             ValueError(
+    #                 f'Error in electrode group {e_group}: reference electrodes are not all the same')
+    #         self.insert1(sg_key)
 
-            shank_elect = electrodes["electrode_id"][
-                electrodes["electrode_group_name"] == e_group
-            ]
-            for elect in shank_elect:
-                sge_key["electrode_id"] = elect
-                self.SortGroupElectrode().insert1(sge_key)
-            sort_group += 1
+    #         shank_elect = electrodes['electrode_id'][electrodes['electrode_group_name'] == e_group]
+    #         for elect in shank_elect:
+    #             sge_key['electrode_id'] = elect
+    #             self.SortGroupElectrode().insert1(sge_key)
+    #         sort_group += 1
 
     def set_reference_from_list(self, nwb_file_name, sort_group_ref_list):
         """
@@ -218,79 +194,68 @@ class SortGroup(dj.Manual):
                 replace="True",
             )
 
-    def get_geometry(self, sort_group_id, nwb_file_name):
-        """
-        Returns a list with the x,y coordinates of the electrodes in the sort group
-        for use with the SpikeInterface package.
+    # def get_geometry(self, sort_group_id, nwb_file_name):
+    #     """
+    #     Returns a list with the x,y coordinates of the electrodes in the sort group
+    #     for use with the SpikeInterface package.
 
-        Converts z locations to y where appropriate.
+    #     Converts z locations to y where appropriate.
 
-        Parameters
-        ----------
-        sort_group_id : int
-        nwb_file_name : str
-        prb_file_name : str
+    #     Parameters
+    #     ----------
+    #     sort_group_id : int
+    #     nwb_file_name : str
+    #     prb_file_name : str
 
-        Returns
-        -------
-        geometry : list
-            List of coordinate pairs, one per electrode
-        """
+    #     Returns
+    #     -------
+    #     geometry : list
+    #         List of coordinate pairs, one per electrode
+    #     """
 
-        # create the channel_groups dictiorary
-        channel_group = dict()
-        key = dict()
-        key["nwb_file_name"] = nwb_file_name
-        electrodes = (Electrode() & key).fetch()
+    #     # create the channel_groups dictiorary
+    #     channel_group = dict()
+    #     key = dict()
+    #     key['nwb_file_name'] = nwb_file_name
+    #     electrodes = (Electrode() & key).fetch()
 
-        key["sort_group_id"] = sort_group_id
-        sort_group_electrodes = (SortGroup.SortGroupElectrode() & key).fetch()
-        electrode_group_name = sort_group_electrodes["electrode_group_name"][0]
-        probe_type = (
-            ElectrodeGroup
-            & {
-                "nwb_file_name": nwb_file_name,
-                "electrode_group_name": electrode_group_name,
-            }
-        ).fetch1("probe_type")
-        channel_group[sort_group_id] = dict()
-        channel_group[sort_group_id]["channels"] = sort_group_electrodes[
-            "electrode_id"
-        ].tolist()
+    #     key['sort_group_id'] = sort_group_id
+    #     sort_group_electrodes = (SortGroup.SortGroupElectrode() & key).fetch()
+    #     electrode_group_name = sort_group_electrodes['electrode_group_name'][0]
+    #     probe_type = (ElectrodeGroup & {'nwb_file_name': nwb_file_name,
+    #                                     'electrode_group_name': electrode_group_name}).fetch1('probe_type')
+    #     channel_group[sort_group_id] = dict()
+    #     channel_group[sort_group_id]['channels'] = sort_group_electrodes['electrode_id'].tolist()
 
-        n_chan = len(channel_group[sort_group_id]["channels"])
+    #     n_chan = len(channel_group[sort_group_id]['channels'])
 
-        geometry = np.zeros((n_chan, 2), dtype="float")
-        tmp_geom = np.zeros((n_chan, 3), dtype="float")
-        for i, electrode_id in enumerate(channel_group[sort_group_id]["channels"]):
-            # get the relative x and y locations of this channel from the probe table
-            probe_electrode = int(
-                electrodes["probe_electrode"][
-                    electrodes["electrode_id"] == electrode_id
-                ]
-            )
-            rel_x, rel_y, rel_z = (
-                Probe().Electrode()
-                & {"probe_type": probe_type, "probe_electrode": probe_electrode}
-            ).fetch("rel_x", "rel_y", "rel_z")
-            # TODO: Fix this HACK when we can use probeinterface:
-            rel_x = float(rel_x)
-            rel_y = float(rel_y)
-            rel_z = float(rel_z)
-            tmp_geom[i, :] = [rel_x, rel_y, rel_z]
+    #     geometry = np.zeros((n_chan, 2), dtype='float')
+    #     tmp_geom = np.zeros((n_chan, 3), dtype='float')
+    #     for i, electrode_id in enumerate(channel_group[sort_group_id]['channels']):
+    #         # get the relative x and y locations of this channel from the probe table
+    #         probe_electrode = int(
+    #             electrodes['probe_electrode'][electrodes['electrode_id'] == electrode_id])
+    #         rel_x, rel_y, rel_z = (Probe().Electrode() &
+    #                                {'probe_type': probe_type,
+    #                                 'probe_electrode': probe_electrode}
+    #                                ).fetch('rel_x', 'rel_y', 'rel_z')
+    #         # TODO: Fix this HACK when we can use probeinterface:
+    #         rel_x = float(rel_x)
+    #         rel_y = float(rel_y)
+    #         rel_z = float(rel_z)
+    #         tmp_geom[i, :] = [rel_x, rel_y, rel_z]
 
-        # figure out which columns have coordinates
-        n_found = 0
-        for i in range(3):
-            if np.any(np.nonzero(tmp_geom[:, i])):
-                if n_found < 2:
-                    geometry[:, n_found] = tmp_geom[:, i]
-                    n_found += 1
-                else:
-                    Warning(
-                        "Relative electrode locations have three coordinates; only two are currenlty supported"
-                    )
-        return np.ndarray.tolist(geometry)
+    #     # figure out which columns have coordinates
+    #     n_found = 0
+    #     for i in range(3):
+    #         if np.any(np.nonzero(tmp_geom[:, i])):
+    #             if n_found < 2:
+    #                 geometry[:, n_found] = tmp_geom[:, i]
+    #                 n_found += 1
+    #             else:
+    #                 Warning(
+    #                     'Relative electrode locations have three coordinates; only two are currenlty supported')
+    #     return np.ndarray.tolist(geometry)
 
 
 @schema
@@ -304,7 +269,7 @@ class SortInterval(dj.Manual):
 
 
 @schema
-class SpikeSortingPreprocessingParameters(dj.Manual):
+class SpikeSortingPreprocessingParameter(dj.Manual):
     definition = """
     preproc_params_name: varchar(200)
     ---
@@ -335,7 +300,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
     # Defines recordings to be sorted
     -> SortGroup
     -> SortInterval
-    -> SpikeSortingPreprocessingParameters
+    -> SpikeSortingPreprocessingParameter
     -> LabTeam
     ---
     -> IntervalList
@@ -443,7 +408,7 @@ class SpikeSortingRecording(dj.Computed):
         ).fetch1("valid_times")
         valid_sort_times = interval_list_intersect(sort_interval, valid_interval_times)
         # Exclude intervals shorter than specified length
-        params = (SpikeSortingPreprocessingParameters & key).fetch1("preproc_params")
+        params = (SpikeSortingPreprocessingParameter & key).fetch1("preproc_params")
         if "min_segment_length" in params:
             valid_sort_times = intervals_by_length(
                 valid_sort_times, min_length=params["min_segment_length"]
@@ -468,7 +433,31 @@ class SpikeSortingRecording(dj.Computed):
         """
 
         nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
-        recording = se.read_nwb_recording(nwb_file_abs_path, load_time_vector=True)
+        raw_object_name = ((SortGroup.SortGroupElectrode * Electrode) & key).fetch(
+            "raw_object_name"
+        )
+
+        # electrode_ids = (SortGroup.SortGroupElectrode & key).fetch('electrode_id')
+        # raw_object_name = (Electrode & {'nwb_file_name': key['nwb_file_name'], 'electrode_id':electrode_ids}).fetch('raw_object_name')
+        raw_object_name = np.unique(raw_object_name)
+        assert (
+            len(raw_object_name) == 1
+        ), "SortGroup has electrodes from different ElectricalSeries."
+
+        recording = se.read_nwb_recording(
+            nwb_file_abs_path,
+            electrical_series_name=raw_object_name[0],
+            load_time_vector=True,
+        )
+
+        # get electrodes associated with the ElectricalSeries
+        nwbf = get_nwb_file(nwb_file_abs_path)
+        es = nwbf.acquisition[raw_object_name[0]]
+        new_channel_ids = [es.electrodes.table.id[x] for x in es.electrodes.data]
+
+        recording = recording.channel_slice(
+            recording.channel_ids, renamed_channel_ids=new_channel_ids
+        )
 
         valid_sort_times = self._get_sort_interval_valid_times(key)
         # shape is (N, 2)
@@ -515,7 +504,6 @@ class SpikeSortingRecording(dj.Computed):
             }
         ).fetch1("sort_reference_electrode_id")
         channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
-
         # include ref channel in first slice, then exclude it in second slice
         if ref_channel_id >= 0:
             channel_ids_ref = np.append(channel_ids, ref_channel_id)
@@ -525,14 +513,15 @@ class SpikeSortingRecording(dj.Computed):
                 recording, reference="single", ref_channel_ids=ref_channel_id
             )
             recording = recording.channel_slice(channel_ids=channel_ids)
-        elif ref_channel_id == -2:
+        # elif ref_channel_id == -2:
+        else:
             recording = recording.channel_slice(channel_ids=channel_ids)
             recording = si.preprocessing.common_reference(
                 recording, reference="global", operator="median"
             )
-        else:
-            raise ValueError("Invalid reference channel ID")
-        filter_params = (SpikeSortingPreprocessingParameters & key).fetch1(
+        # else:
+        #     raise ValueError("Invalid reference channel ID")
+        filter_params = (SpikeSortingPreprocessingParameter & key).fetch1(
             "preproc_params"
         )
         recording = si.preprocessing.bandpass_filter(
@@ -544,7 +533,7 @@ class SpikeSortingRecording(dj.Computed):
         # if the sort group is a tetrode, change the channel location
         # note that this is a workaround that would be deprecated when spikeinterface uses 3D probe locations
         probe_type = []
-        electrode_group = []
+        probe_shank = []
         for channel_id in channel_ids:
             probe_type.append(
                 (
@@ -555,19 +544,19 @@ class SpikeSortingRecording(dj.Computed):
                     }
                 ).fetch1("probe_type")
             )
-            electrode_group.append(
+            probe_shank.append(
                 (
                     Electrode
                     & {
                         "nwb_file_name": key["nwb_file_name"],
                         "electrode_id": channel_id,
                     }
-                ).fetch1("electrode_group_name")
+                ).fetch1("probe_shank")
             )
         if (
             all(p == "tetrode_12.5" for p in probe_type)
             and len(probe_type) == 4
-            and all(eg == electrode_group[0] for eg in electrode_group)
+            and all(ps == probe_shank[0] for ps in probe_shank)
         ):
             tetrode = pi.Probe(ndim=2)
             position = [[0, 0], [0, 12.5], [12.5, 0], [12.5, 12.5]]

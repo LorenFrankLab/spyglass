@@ -14,10 +14,10 @@ import spikeinterface.toolkit as st
 
 from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
-from ..common.dj_helper_fn import fetch_nwb
+from ..utils.dj_helper_fn import fetch_nwb
 from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SortInterval, SpikeSortingRecording
-from .spikesorting_sorting import SpikeSorting
+from .spikesorting_sorting import SpikeSorting, ImportedSpikeSorting
 
 schema = dj.schema("spikesorting_curation")
 
@@ -38,16 +38,30 @@ def apply_merge_groups_to_sorting(
 class Curation(dj.Manual):
     definition = """
     # Stores each spike sorting; similar to IntervalList
-    curation_id: int # a number correponding to the index of this curation
-    -> SpikeSorting
+    curation_id: uuid
     ---
-    parent_curation_id=-1: int
-    curation_labels: blob # a dictionary of labels for the units
-    merge_groups: blob # a list of merge groups for the units
-    quality_metrics: blob # a list of quality metrics for the units (if available)
+    parent_curation_id = NULL: uuid
+    automatic_curation_key = NULL: blob
+    curation_labels = NULL: blob # a dictionary of labels for the units
+    merge_groups = NULL: blob # a list of merge groups for the units
+    quality_metrics = NULL: blob # a list of quality metrics for the units (if available)
     description='': varchar(1000) #optional description for this curated sort
     time_of_creation: int   # in Unix time, to the nearest second
     """
+
+    class SpikeSorting(dj.Part):
+        definition = """
+        -> master
+        ---
+        -> SpikeSorting
+        """
+
+    class ImportedSpikeSorting(dj.Part):
+        definition = """
+        -> master
+        ---
+        -> ImportedSpikeSorting
+        """
 
     @staticmethod
     def insert_curation(
@@ -58,8 +72,8 @@ class Curation(dj.Manual):
         metrics=None,
         description="",
     ):
-        """Given a SpikeSorting key and the parent_sorting_id (and optional
-        arguments) insert an entry into Curation.
+        """Given a key from an upstream table (SpikeSorting or ImportedSpikeSorting)
+        and the parent_sorting_id (and optional arguments) insert an entry into Curation.
 
 
         Parameters
@@ -252,7 +266,7 @@ class Curation(dj.Manual):
 
 
 @schema
-class WaveformParameters(dj.Manual):
+class WaveformParameter(dj.Manual):
     definition = """
     waveform_params_name: varchar(80) # name of waveform extraction parameters
     ---
@@ -286,13 +300,13 @@ class WaveformParameters(dj.Manual):
 class WaveformSelection(dj.Manual):
     definition = """
     -> Curation
-    -> WaveformParameters
+    -> WaveformParameter
     ---
     """
 
 
 @schema
-class Waveforms(dj.Computed):
+class Waveform(dj.Computed):
     definition = """
     -> WaveformSelection
     ---
@@ -309,7 +323,7 @@ class Waveforms(dj.Computed):
         sorting = Curation.get_curated_sorting(key)
 
         print("Extracting waveforms...")
-        waveform_params = (WaveformParameters & key).fetch1("waveform_params")
+        waveform_params = (WaveformParameter & key).fetch1("waveform_params")
         if "whiten" in waveform_params:
             if waveform_params.pop("whiten"):
                 recording = si.preprocessing.whiten(recording)
@@ -342,8 +356,8 @@ class Waveforms(dj.Computed):
         Parameters
         ----------
         key : dict
-            Could be an entry in Waveforms, or some other key that uniquely defines
-            an entry in Waveforms
+            Could be an entry in Waveform, or some other key that uniquely defines
+            an entry in Waveform
 
         Returns
         -------
@@ -358,7 +372,7 @@ class Waveforms(dj.Computed):
         return NotImplementedError
 
     def _get_waveform_extractor_name(self, key):
-        waveform_params_name = (WaveformParameters & key).fetch1("waveform_params_name")
+        waveform_params_name = (WaveformParameter & key).fetch1("waveform_params_name")
 
         return (
             f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
@@ -367,7 +381,7 @@ class Waveforms(dj.Computed):
 
 
 @schema
-class MetricParameters(dj.Manual):
+class MetricParameter(dj.Manual):
     definition = """
     # Parameters for computing quality metrics of sorted units
     metric_params_name: varchar(200)
@@ -440,14 +454,14 @@ class MetricParameters(dj.Manual):
 @schema
 class MetricSelection(dj.Manual):
     definition = """
-    -> Waveforms
-    -> MetricParameters
+    -> Waveform
+    -> MetricParameter
     ---
     """
 
     def insert1(self, key, **kwargs):
-        waveform_params = (WaveformParameters & key).fetch1("waveform_params")
-        metric_params = (MetricParameters & key).fetch1("metric_params")
+        waveform_params = (WaveformParameter & key).fetch1("waveform_params")
+        metric_params = (MetricParameter & key).fetch1("metric_params")
         if "peak_offset" in metric_params:
             if waveform_params["whiten"]:
                 warnings.warn(
@@ -466,7 +480,7 @@ class MetricSelection(dj.Manual):
 
 
 @schema
-class QualityMetrics(dj.Computed):
+class QualityMetric(dj.Computed):
     definition = """
     -> MetricSelection
     ---
@@ -476,9 +490,9 @@ class QualityMetrics(dj.Computed):
     """
 
     def make(self, key):
-        waveform_extractor = Waveforms().load_waveforms(key)
+        waveform_extractor = Waveform().load_waveforms(key)
         qm = {}
-        params = (MetricParameters & key).fetch1("metric_params")
+        params = (MetricParameter & key).fetch1("metric_params")
         for metric_name, metric_params in params.items():
             metric = self._compute_metric(
                 waveform_extractor, metric_name, **metric_params
@@ -501,7 +515,7 @@ class QualityMetrics(dj.Computed):
         self.insert1(key)
 
     def _get_quality_metrics_name(self, key):
-        wf_name = Waveforms()._get_waveform_extractor_name(key)
+        wf_name = Waveform()._get_waveform_extractor_name(key)
         qm_name = wf_name + "_qm"
         return qm_name
 
@@ -600,7 +614,7 @@ _metric_name_to_func = {
 
 
 @schema
-class AutomaticCurationParameters(dj.Manual):
+class MetricAutomaticCurationParameter(dj.Manual):
     definition = """
     auto_curation_params_name: varchar(200)   # name of this parameter set
     ---
@@ -655,10 +669,10 @@ class AutomaticCurationParameters(dj.Manual):
 
 
 @schema
-class AutomaticCurationSelection(dj.Manual):
+class MetricAutomaticCurationSelection(dj.Manual):
     definition = """
-    -> QualityMetrics
-    -> AutomaticCurationParameters
+    -> QualityMetric
+    -> MetricAutomaticCurationParameter
     """
 
 
@@ -672,15 +686,15 @@ _comparison_to_function = {
 
 
 @schema
-class AutomaticCuration(dj.Computed):
+class MetricAutomaticCuration(dj.Computed):
     definition = """
-    -> AutomaticCurationSelection
+    -> MetricAutomaticCurationSelection
     ---
-    auto_curation_key: blob # the key to the curation inserted by make
+    output_curation_id: uuid
     """
 
     def make(self, key):
-        metrics_path = (QualityMetrics & key).fetch1("quality_metrics_path")
+        metrics_path = (QualityMetric & key).fetch1("quality_metrics_path")
         with open(metrics_path) as f:
             quality_metrics = json.load(f)
 
@@ -691,12 +705,12 @@ class AutomaticCuration(dj.Computed):
         parent_curation_id = parent_curation["curation_id"]
         parent_sorting = Curation.get_curated_sorting(key)
 
-        merge_params = (AutomaticCurationParameters & key).fetch1("merge_params")
+        merge_params = (MetricAutomaticCurationParameter & key).fetch1("merge_params")
         merge_groups, units_merged = self.get_merge_groups(
             parent_sorting, parent_merge_groups, quality_metrics, merge_params
         )
 
-        label_params = (AutomaticCurationParameters & key).fetch1("label_params")
+        label_params = (MetricAutomaticCurationParameter & key).fetch1("label_params")
         labels = self.get_labels(
             parent_sorting, parent_labels, quality_metrics, label_params
         )
@@ -704,20 +718,22 @@ class AutomaticCuration(dj.Computed):
         # keep the quality metrics only if no merging occurred.
         metrics = quality_metrics if not units_merged else None
 
-        # insert this sorting into the CuratedSpikeSorting Table
-        # first remove keys that aren't part of the Sorting (the primary key of curation)
-        c_key = (SpikeSorting & key).fetch("KEY")[0]
-        curation_key = {item: key[item] for item in key if item in c_key}
-        key["auto_curation_key"] = Curation.insert_curation(
-            curation_key,
-            parent_curation_id=parent_curation_id,
-            labels=labels,
+        output_curation_id = uuid.uuid4()
+
+        self.insert1(dict(output_curation_id=output_curation_id, **key))
+
+        curation_key = dict(
+            curation_id=output_curation_id,
+            parent_curation_id=key["curation_id"],
+            automatic_curation_key=key,
+            curation_labels=labels,
             merge_groups=merge_groups,
-            metrics=metrics,
-            description="auto curated",
+            quality_metrics=metrics,
+            description="from AutomaticCuration",
+            time_of_creation=int(time.time()),
         )
 
-        self.insert1(key)
+        Curation.insert1(curation_key)
 
     @staticmethod
     def get_merge_groups(sorting, parent_merge_groups, quality_metrics, merge_params):
@@ -940,7 +956,7 @@ class CuratedSpikeSorting(dj.Computed):
 
 
 @schema
-class UnitInclusionParameters(dj.Manual):
+class UnitInclusionParameter(dj.Manual):
     definition = """
     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
     ---
@@ -991,7 +1007,7 @@ class UnitInclusionParameters(dj.Manual):
         """
         curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
         inc_param_dict = (
-            UnitInclusionParameters
+            UnitInclusionParameter
             & {"unit_inclusion_param_name": unit_inclusion_param_name}
         ).fetch1("inclusion_param_dict")
         units = (CuratedSpikeSorting().Unit() & curated_sortings).fetch()

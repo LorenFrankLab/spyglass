@@ -2,8 +2,10 @@ import datajoint as dj
 
 import sortingview as sv
 
-from ..common.common_lab import LabMember, LabTeam
-from .sortingview_helper_fn import (
+from typing import Dict, List
+
+from ..common.common_lab import LabTeam, LabMember
+from ..utils.sortingview_helper_fn import (
     _add_metrics_to_sorting_in_workspace,
     _create_spikesortingview_workspace,
     _set_workspace_permission,
@@ -30,18 +32,9 @@ class SortingviewWorkspace(dj.Computed):
     workspace_uri: varchar(1000)
     sortingview_recording_id: varchar(30)
     sortingview_sorting_id: varchar(30)
-    channel = NULL : varchar(80)        # the name of kachery channel for data sharing (for kachery daemon, deprecated)
     """
 
     def make(self, key: dict):
-        """Create a Sortingview workspace
-
-        Parameters
-        ----------
-        key : dict
-            primary key of an entry from SortingviewWorkspaceSelection table
-        """
-
         # fetch
         recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
         sorting_path = (SpikeSorting & key).fetch1("sorting_path")
@@ -87,11 +80,8 @@ class SortingviewWorkspace(dj.Computed):
         key["sortingview_sorting_id"] = sorting_id
         self.insert1(key)
 
-    def remove_sorting_from_workspace(self, key):
-        return NotImplementedError
-
     def add_metrics_to_sorting(
-        self, key: dict, metrics: dict, sortingview_sorting_id: str = None
+        self, key: dict, metrics: Dict[str, Dict], sortingview_sorting_id: str = None
     ):
         """Adds a metrics to the specified sorting.
 
@@ -115,7 +105,7 @@ class SortingviewWorkspace(dj.Computed):
         # do
         _add_metrics_to_sorting_in_workspace(workspace, metrics, sortingview_sorting_id)
 
-    def set_workspace_permission(self, key, curators):
+    def set_workspace_permission(self, key, curators: List[str]):
         """Gives curation permission to lab members not in the team associated
         with the recording (team members are given permission by default).
 
@@ -187,10 +177,10 @@ class SortingviewWorkspace(dj.Computed):
 
         return url
 
-    def insert_manual_curation(self, key: dict, description="manually curated"):
+    def insert_manual_curation(self, key):
         """Based on information in key for an SortingviewWorkspace, loads the
         curated sorting from sortingview, saves it (with labels and the
-        optional description) and inserts it to CuratedSorting
+        optional description) and inserts it to Curation
 
         Assumes that the workspace corresponding to the recording and (original) sorting exists
 
@@ -220,6 +210,21 @@ class SortingviewWorkspace(dj.Computed):
         else:
             # get the metrics from the parent curation
             metrics = (Curation & key).fetch1("quality_metrics")
+
+        description = "from SortingviewWorkspace"
+
+        curation_key = dict(
+            curation_id=output_curation_id,
+            parent_curation_id=key["curation_id"],
+            automatic_curation_key=key,
+            curation_labels=labels,
+            merge_groups=merge_groups,
+            quality_metrics=metrics,
+            description="from AutomaticCuration",
+            time_of_creation=int(time.time()),
+        )
+
+        Curation.insert1(curation_key)
 
         # insert this curation into the  Table
         return Curation.insert_curation(
