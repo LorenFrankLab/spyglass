@@ -25,7 +25,30 @@ class BodyPart(dj.Manual):
     ---
     bodypart_description='' : varchar(80)
     """
-    # TODO: add option to insert from pre-exisiting model
+
+    @classmethod
+    def add_from_config(cls, bodyparts: List, descriptions: List = None):
+        """Given a list of bodyparts from the config and
+        an optional list of descriptions, inserts into BodyPart table.
+
+        Parameters
+        ----------
+        bodyparts : List
+            list of bodyparts from config
+        description : List, default None
+            optional list of descriptions for bodyparts.
+            If None, description is set to bodypart name
+        """
+        if descriptions is not None:
+            bodyparts_dict = [
+                {"bodypart": bp, "bodypart_description": desc}
+                for (bp, desc) in zip(bodyparts, descriptions)
+            ]
+        else:
+            bodyparts_dict = [
+                {"bodypart": bp, "bodypart_description": bp} for bp in bodyparts
+            ]
+        cls.insert(bodyparts_dict, skip_duplicates=True)
 
 
 @schema
@@ -106,6 +129,7 @@ class DLCProject(dj.Manual):
             bodypart for bodypart in bodyparts if bodypart not in cfg["bodyparts"]
         ]
         all_bodyparts = bodyparts_to_add + cfg["bodyparts"]
+        BodyPart.add_from_config(cfg["bodyparts"])
         for bodypart in all_bodyparts:
             if not bool(BodyPart() & {"bodypart": bodypart}):
                 raise ValueError(f"bodypart: {bodypart} not found in BodyPart table")
