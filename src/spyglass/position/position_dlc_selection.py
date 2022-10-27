@@ -51,9 +51,11 @@ class DLCPos(dj.Computed):
     position_object_id      : varchar(80)
     orientation_object_id   : varchar(80)
     velocity_object_id      : varchar(80)
+    pose_eval_result        : longblob
     """
 
     def make(self, key):
+        key["pose_eval_result"] = DLCPos.evaluate_pose_estimation(key)
         position_nwb_data = (DLCCentroid & key).fetch_nwb()[0]
         orientation_nwb_data = (DLCOrientation & key).fetch_nwb()[0]
         position_object = position_nwb_data["dlc_position"].spatial_series["position"]
@@ -125,6 +127,7 @@ class DLCPos(dj.Computed):
 
         key["source"] = "DLC"
         dlc_key = key.copy()
+        del dlc_key["pose_eval_result"]
         key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
         valid_fields = PosSource().fetch().dtype.fields.keys()
         entries_to_delete = [entry for entry in key.keys() if entry not in valid_fields]
@@ -173,7 +176,7 @@ class DLCPos(dj.Computed):
         )
 
     @classmethod
-    def evaluate_pose_estimation(key):
+    def evaluate_pose_estimation(cls, key):
         likelihood_thresh = []
         centroid_bodyparts, centroid_si_params = (
             DLCSmoothInterpCohort.BodyPart
@@ -211,7 +214,7 @@ class DLCPos(dj.Computed):
             for bodypart in bodyparts
             if bodypart in pose_estimation_df.columns
         }
-        sub_thresh_dict = {
+        sub_thresh_ind_dict = {
             bodypart: {
                 "inds": np.where(
                     ~np.isnan(
@@ -220,25 +223,67 @@ class DLCPos(dj.Computed):
                         )
                     )
                 )[0],
-                "percent": (
-                    len(
-                        np.where(
-                            ~np.isnan(
-                                pose_estimation_df[bodypart]["likelihood"].where(
-                                    df_filter[bodypart]
-                                )
-                            )
-                        )[0]
-                    )
-                    / len(pose_estimation_df)
-                )
-                * 100,
-                "span_length": [],
-                "span_inds": [],
             }
             for bodypart in bodyparts
         }
-        return
+        sub_thresh_percent_dict = {
+            bodypart: (
+                len(
+                    np.where(
+                        ~np.isnan(
+                            pose_estimation_df[bodypart]["likelihood"].where(
+                                df_filter[bodypart]
+                            )
+                        )
+                    )[0]
+                )
+                / len(pose_estimation_df)
+            )
+            * 100
+            for bodypart in bodyparts
+        }
+        return sub_thresh_percent_dict
+
+
+@schema
+class DLCPosVideoParams(dj.Manual):
+
+    definition = """
+    dlc_pos_video_params_name : varchar(50)
+    ---
+    params : blob
+    """
+
+    @classmethod
+    def insert_default(cls):
+        params = {
+            "percent_frames": 1,
+            "incl_likelihood": True,
+        }
+        cls.insert1(
+            {"dlc_pos_video_params_name": "default", "params": params},
+            skip_duplicates=True,
+        )
+
+    @classmethod
+    def get_default(cls):
+        query = cls & {"dlc_pos_video_params_name": "default"}
+        if not len(query) > 0:
+            cls().insert_default(skip_duplicates=True)
+            default = (cls & {"dlc_pos_video_params_name": "default"}).fetch1()
+        else:
+            default = query.fetch1()
+        return default
+
+
+@schema
+class DLCPosVideoSelection(dj.Manual):
+
+    definition = """
+    -> DLCPos
+    -> DLCPosVideoParams
+    ---
+    """
 
 
 @schema
@@ -249,13 +294,14 @@ class DLCPosVideo(dj.Computed):
     Use for debugging the effect of position extraction parameters."""
 
     definition = """
-    -> DLCPos
+    -> DLCPosVideoSelection
     ---
     """
 
     def make(self, key):
         from tqdm import tqdm as tqdm
 
+        params = (DLCPosVideoParams & key).fetch1("params")
         M_TO_CM = 100
         key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
         epoch = (
@@ -352,6 +398,7 @@ class DLCPosVideo(dj.Computed):
             orientation_mean,
             position_time,
             video_frame_inds,
+            percent_frames=params["percent_frames"],
             output_video_filename=output_video_filename,
             cm_to_pixels=cm_per_pixel,
             disable_progressbar=False,
@@ -395,6 +442,7 @@ class DLCPosVideo(dj.Computed):
         orientation_mean,
         position_time,
         video_frame_inds,
+        percent_frames,
         output_video_filename="output.mp4",
         cm_to_pixels=1.0,
         disable_progressbar=False,
@@ -434,7 +482,7 @@ class DLCPosVideo(dj.Computed):
         Writer = animation.writers["ffmpeg"]
         fps = int(np.round(frame_rate / video_slowdown))
         writer = Writer(fps=fps, bitrate=-1)
-        n_frames = len(video_frame_inds)
+        n_frames = int(len(video_frame_inds) * percent_frames)
         ret, frame = video.read()
         print(f"initial frame: {video.get(1)}")
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
