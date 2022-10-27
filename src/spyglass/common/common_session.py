@@ -19,6 +19,7 @@ class SessionDataAcquisitionDevice(dj.Manual):
     -> DataAcquisitionDevice
     """
 
+
 @schema
 class Session(dj.Imported):
     definition = """
@@ -38,7 +39,7 @@ class Session(dj.Imported):
     def make(self, key):
         # These imports must go here to avoid cyclic dependencies
         # from .common_task import Task, TaskEpoch
-        from .common_interval import IntervalList
+        # from .common_interval import IntervalList
 
         # from .common_ephys import Unit
 
@@ -52,67 +53,67 @@ class Session(dj.Imported):
         # e.g., a lab member may be associated with multiple experiments, so the lab member table should not
         # be dependent on (contain a primary key for) a session
 
-        print('Institution...')
-        institution_name = Institution().insert_from_nwbfile(nwbf, config)
+        # first, populate tables upstream of Session
+        print("Populate Institution...")
+        institution_name = Institution.insert_from_nwbfile(nwbf, config)
         print()
 
-        print('Lab...')
-        lab_name = Lab().insert_from_nwbfile(nwbf, config)
+        print("Populate Lab...")
+        lab_name = Lab.insert_from_nwbfile(nwbf, config)
         print()
 
-        print('LabMember...')
-        LabMember().insert_from_nwbfile(nwbf, config)
+        print("Populate Subject...")
+        subject_id = Subject.insert_from_nwbfile(nwbf, config)
         print()
 
-        print('Subject...')
-        subject_id = Subject().insert_from_nwbfile(nwbf, config)
+        # next, populate standalone tables
+        print("Populate LabMember...")
+        LabMember.insert_from_nwbfile(nwbf, config)
         print()
 
-        print('DataAcquisitionDevice...')
-        device_names = DataAcquisitionDevice().insert_from_nwbfile(nwbf, config)
+        print("Populate DataAcquisitionDevice...")
+        device_names = DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
         print()
 
-        print('CameraDevice...')
-        CameraDevice().insert_from_nwbfile(nwbf, config)
+        print("Populate CameraDevice...")
+        CameraDevice.insert_from_nwbfile(nwbf, config)
         print()
 
-        print('Probe...')
-        Probe().insert_from_nwbfile(nwbf, config)
+        print("Populate Probe...")
+        Probe.insert_from_nwbfile(nwbf, config)
         print()
 
-        Session().insert1({
-            'nwb_file_name': nwb_file_name,
-            'subject_id': subject_id,
-            'institution_name': institution_name,
-            'lab_name': lab_name,
-            'session_id': nwbf.session_id,
-            'session_description': nwbf.session_description,
-            'session_start_time': nwbf.session_start_time,
-            'timestamps_reference_time': nwbf.timestamps_reference_time,
-            'experiment_description': nwbf.experiment_description
-        }, skip_duplicates=True)
+        print("Populate Session...")
+        session_key = {
+            "nwb_file_name": nwb_file_name,
+            "subject_id": subject_id,
+            "institution_name": institution_name,
+            "lab_name": lab_name,
+            "session_id": nwbf.session_id,
+            "session_description": nwbf.session_description,
+            "session_start_time": nwbf.session_start_time,
+            "timestamps_reference_time": nwbf.timestamps_reference_time,
+            "experiment_description": nwbf.experiment_description,
+        }
+        Session.insert1(
+            session_key,
+            skip_duplicates=True,
+        )
+        print(session_key)
+        print()
 
         # populate join table between Session and DataAcquisitionDevice
+        print("Populate SessionDataAcquisitionDevice...")
         for device_name in device_names:
-            print(device_name)
-            SessionDataAcquisitionDevice.insert1({
-                'nwb_file_name': nwb_file_name,
-                'device_name': device_name
-            }, skip_duplicates=True)
-
-        print('Skipping Apparatus for now...')
-        # Apparatus().insert_from_nwbfile(nwbf)
-
-        # interval lists depend on Session (as a primary key) but users may want to add these manually so this is
-        # a manual table that is also populated from NWB files
-
-        print("IntervalList...")
-        IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
+            SessionDataAcquisitionDevice.insert1(
+                {"nwb_file_name": nwb_file_name, "device_name": device_name},
+                skip_duplicates=True,
+            )
+            print(f"Inserted {device_name}")
         print()
 
-        # print('Unit...')
-        # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
-
+        # print("Skipping Apparatus for now...")
+        # Apparatus().insert_from_nwbfile(nwbf)
 
 @schema
 class SessionDataAcquisitionDevice(dj.Manual):
@@ -122,6 +123,7 @@ class SessionDataAcquisitionDevice(dj.Manual):
     -> Session
     -> DataAcquisitionDevice
     """
+
 
 @schema
 class ExperimenterList(dj.Imported):
@@ -167,7 +169,7 @@ class SessionGroup(dj.Manual):
         session_group_name: str,
         session_group_description: str,
         *,
-        skip_duplicates: bool = False
+        skip_duplicates: bool = False,
     ):
         SessionGroup.insert1(
             {

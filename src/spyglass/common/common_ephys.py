@@ -102,7 +102,7 @@ schema = dj.schema("common_ephys")
 @schema
 class Raw(dj.Imported):
     definition = """
-    # Raw voltage timeseries data, ElectricalSeries in NWB.
+    # Raw voltage timeseries data (ElectricalSeries in NWB).
     -> Session
     raw_object_name: varchar(200)   # name of the raw data object (e.g. ElectricalSeries)
     ---
@@ -119,24 +119,17 @@ class Raw(dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         raw_interval_name = "raw data valid times"
         # get the acquisition object
-        # try:
-        # TODO this assumes there is a single item in NWBFile.acquisition
-        # rawdata = nwbf.get_acquisition()
         rawdata_list = get_raw_eseries(nwbf)
         assert rawdata_list, "No ElectricalSeries in the NWB file acquisition object."
-        # except (ValueError, AssertionError):
-        #     warnings.warn(f'Unable to get acquisition object in: {nwb_file_abspath}')
-        #     return
+
         for rawdata in rawdata_list:
             if rawdata.rate is not None:
                 sampling_rate = rawdata.rate
             else:
-                print("Estimating sampling rate...")
-                # NOTE: Only use first 1e6 timepoints to save time
+                # estimate sampling rate from first 1e6 timepoints
                 sampling_rate = estimate_sampling_rate(
                     np.asarray(rawdata.timestamps[: int(1e6)]), 1.5
                 )
-                print(f"Estimated sampling rate: {sampling_rate}")
             key["sampling_rate"] = sampling_rate
 
             interval_dict = dict()
@@ -151,10 +144,9 @@ class Raw(dj.Imported):
                 interval_dict["valid_times"] = get_valid_intervals(
                     np.asarray(rawdata.timestamps), key["sampling_rate"], 1.75, 0
                 )
-            IntervalList().insert1(interval_dict, skip_duplicates=True)
+            IntervalList.insert1(interval_dict, skip_duplicates=True)
 
             # now insert each of the electrodes as an individual row, but with the same nwb_object_id
-            key["raw_object_name"] = rawdata.name
             key["raw_object_id"] = rawdata.object_id
             key["sampling_rate"] = sampling_rate
             print(f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz')
@@ -324,7 +316,6 @@ class Electrode(dj.Imported):
             if hasattr(elect_data, "imp"):
                 key["impedance"] = elect_data.imp
             self.insert1(key, skip_duplicates=True)
-
 
 @schema
 class SampleCount(dj.Imported):

@@ -55,6 +55,7 @@ class IntervalList(dj.Manual):
                 [[epoch_data.start_time, epoch_data.stop_time]]
             )
             cls.insert1(epoch_dict, skip_duplicates=True)
+            print(f"Inserted epoch {epoch_dict['interval_list_name']}")
 
     def plot_intervals(self, figsize=(20, 5)):
         interval_list = pd.DataFrame(self)

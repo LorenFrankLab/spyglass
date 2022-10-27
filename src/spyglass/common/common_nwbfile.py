@@ -66,6 +66,7 @@ class Nwbfile(dj.Manual):
         key["nwb_file_name"] = nwb_file_name
         key["nwb_file_abs_path"] = nwb_file_abs_path
         cls.insert1(key, skip_duplicates=True)
+        return key
 
     @staticmethod
     def get_abs_path(nwb_file_name):

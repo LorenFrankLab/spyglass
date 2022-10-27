@@ -18,15 +18,6 @@ from .spikesorting_recording import (
 )
 from .spikesorting_artifact import ArtifactRemovedIntervalList
 
-# from .spikesorting_curation import Curation
-import spyglass
-
-# try:
-#     from .spikesorting_curation import Curation
-# except ImportError:
-#     import sys
-#     Curation = sys.modules[__package__ + '.spikesorting.Curation']
-
 from ..common.common_session import Session
 from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import Nwbfile
@@ -139,7 +130,7 @@ class SpikeSorting(dj.Computed):
            (this is redundant with 2; will change in the future)
 
         """
-
+        from .spikesorting_curation import Curation
         recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
         recording = si.load_extractor(recording_path)
 
@@ -232,14 +223,14 @@ class SpikeSorting(dj.Computed):
         self.insert1(key)
 
         key["curation_id"] = uuid.uuid4()
-        spyglass.spikesorting.spikesorting_curation.insert1(
+        Curation.insert1(
             dict(
                 curation_id=key["curation_id"],
                 description="from SpikeSorting",
                 time_of_creation=int(time.time()),
             )
         )
-        spyglass.spikesorting.spikesorting_curation.SpikeSorting.insert1(key)
+        Curation.SpikeSorting.insert1(key)
 
     def delete(self):
         """Extends the delete method of base class to implement permission checking.
@@ -313,6 +304,7 @@ class ImportedSpikeSorting(dj.Imported):
     """
 
     def make(self, key):
+        from .spikesorting_curation import Curation
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -320,16 +312,17 @@ class ImportedSpikeSorting(dj.Imported):
             print("Units missing in the NWB file.")
             return
         self.insert1(dict(units_object_id=nwbf.units.object_id, **key))
+        print(f"Inserted units from {nwb_file_name}")
 
         curation_id = uuid.uuid4()
-        spyglass.spikesorting.spikesorting_curation.Curation.insert1(
+        Curation.insert1(
             dict(
                 curation_id=curation_id,
                 description="from ImportedSpikeSorting",
                 time_of_creation=int(time.time()),
             )
         )
-        spyglass.spikesorting.spikesorting_curation.Curation.ImportedSpikeSorting.insert1(
+        Curation.ImportedSpikeSorting.insert1(
             dict(curation_id=curation_id, nwb_file_name=nwb_file_name)
         )
 

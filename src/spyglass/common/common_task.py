@@ -83,8 +83,8 @@ class Task(dj.Manual):
 
 @schema
 class TaskEpoch(dj.Imported):
-    # Tasks, session and time intervals
     definition = """
+     # Tasks, session and time intervals
      -> Session
      epoch: int  # the session epoch for this task and apparatus(1 based)
      ---
@@ -112,7 +112,7 @@ class TaskEpoch(dj.Imported):
         # and then add an entry for each epoch
         tasks_mod = nwbf.processing.get("tasks")
         if tasks_mod is None:
-            print(f"No tasks processing module found in {nwbf}\n")
+            print(f"No tasks processing module found in {nwb_file_name}")
             return
 
         for task in tasks_mod.data_interfaces.values():
@@ -128,7 +128,7 @@ class TaskEpoch(dj.Imported):
                     key["camera_name"] = camera_names[camera_id]
                 else:
                     print(
-                        f"No camera device found with ID {camera_id} in NWB file {nwbf}\n"
+                        f"No camera device found with ID {camera_id} in NWB file {nwb_file_name}"
                     )
 
                 # Add task environment

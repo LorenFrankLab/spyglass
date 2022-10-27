@@ -37,7 +37,6 @@ def get_nwb_file(nwb_file_path):
     nwb_uri = None
     nwb_raw_uri = None
     if nwbfile is None:
-        print(nwb_file_path)
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
             print(f"NWB file {nwb_file_path} does not exist locally; checking kachery")
@@ -355,7 +354,7 @@ def get_all_spatial_series(nwbf, verbose=False):
             if verbose:
                 print("Processing raw position data. Estimated sampling rate: {} Hz".format(
                     sampling_rate))
-                
+
         # get the valid intervals for the position data
         if spatial_series.rate is not None:
             pos_data_dict[index]['valid_times'] = np.array([[0, len(spatial_series.data)/spatial_series.rate]])
@@ -365,7 +364,7 @@ def get_all_spatial_series(nwbf, verbose=False):
                 timestamps, sampling_rate,
                 gap_proportion=2.5,
                 min_valid_len=int(sampling_rate))
-            
+
         pos_data_dict[index]['raw_position_object_id'] = spatial_series.object_id
 
     return pos_data_dict

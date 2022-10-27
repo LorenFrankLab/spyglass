@@ -4,12 +4,22 @@ import warnings
 from typing import List, Union
 
 import pynwb
+import datajoint as dj
 
-from ..common import Nwbfile, get_raw_eseries, populate_all_common
+from ..common import Nwbfile, get_raw_eseries
 from .storage_dirs import check_env
-# from ..spikesorting.spikesorting_sorting import ImportedSpikeSorting
-from ..utils.nwb_helper_fn import get_nwb_file
 
+from ..common.common_behav import (
+    PositionSource,
+    RawPosition,
+    StateScriptFile,
+    VideoFile,
+)
+from ..common.common_dio import DIOEvents
+from ..common.common_ephys import Electrode, Raw, SampleCount
+from ..common.common_nwbfile import Nwbfile
+from ..common.common_session import ExperimenterList, Session
+from ..common.common_task import TaskEpoch
 
 
 def insert_sessions(nwb_file_names: Union[str, List[str]]):
@@ -28,36 +38,120 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         nwb_file_names = [nwb_file_names]
 
     for nwb_file_name in nwb_file_names:
-        assert not nwb_file_name.startswith(
-            "/"
-        ), f"You must use relative paths. nwb_file_name: {nwb_file_name}"
+        assert not os.path.isabs(
+            nwb_file_name
+        ), f"You must provide the relative path for {nwb_file_name}."
 
-        # file name for the copied raw data
+        # File name for the copied raw data
         out_nwb_file_name = os.path.splitext(nwb_file_name)[0] + "_.nwb"
 
         # Check whether the file already exists in the Nwbfile table
-        if len(Nwbfile() & {"nwb_file_name": out_nwb_file_name}):
+        if len(Nwbfile & {"nwb_file_name": out_nwb_file_name}):
             warnings.warn(
-                f"Cannot insert data from {nwb_file_name}: {out_nwb_file_name} is already in Nwbfile table."
+                f"{out_nwb_file_name} is already in Nwbfile table, "
+                 "so skipping all downstream populate steps. If you want to insert this file anew, "
+                 "then first delete it from Nwbfile table."
             )
             continue
 
         # Make a copy of the NWB file that ends with '_'.
         # This has everything except the raw data but has a link to the raw data in the original file
         copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
-        Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
+        # conn = dj.conn()
+        # with conn.transaction:
         populate_all_common(out_nwb_file_name)
-        
-        # nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        # nwbf = get_nwb_file(nwb_file_abspath)
-        # if nwbf.units:
-        #     ImportedSpikeSorting.populate([(Nwbfile & {'nwb_file_name': nwb_file_name}).proj()])
+
+
+def populate_all_common(nwb_file_name: str):
+    """Populate tables in common from the NWB file.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        name of the nwb file (with _)
+    """
+    from ..spikesorting.spikesorting_sorting import ImportedSpikeSorting
+
+    # conn = dj.conn()
+
+    # with conn.transaction:
+    # Insert to Nwbfile table
+    print("Populate Nwbfile...")
+    nwbfile_key = Nwbfile.insert_from_relative_file_name(nwb_file_name)
+    print(nwbfile_key)
+    print()
+
+    fp = [(Nwbfile & {"nwb_file_name": nwb_file_name}).proj()]
+
+    Session.populate(fp)
+
+    # If we use Kachery for data sharing we can uncomment the following two lines. TBD
+    # print('Populate NwbfileKachery...')
+    # NwbfileKachery.populate()
+
+    print("Populate ExperimenterList...")
+    ExperimenterList.populate(fp)
+    print()
+
+    # print('Populate ElectrodeGroup...')
+    # ElectrodeGroup.populate(fp)
+    # print()
+
+    print("Populate Raw...")
+    Raw.populate(fp)
+    print()
+
+    print("Populate Electrode...")
+    Electrode.populate(fp)
+    print()
+
+    print("Populate SampleCount...")
+    SampleCount.populate(fp)
+    print()
+
+    print("Populate DIOEvents...")
+    DIOEvents.populate(fp)
+    print()
+
+    # sensor data (from analog ProcessingModule) is temporarily removed from NWBFile
+    # to reduce file size while it is not being used. add it back in by commenting out
+    # the removal code in spyglass/data_import/insert_sessions.py when ready
+    # print('Populate SensorData')
+    # SensorData.populate(fp)
+
+    print("Populate TaskEpoch...")
+    TaskEpoch.populate(fp)
+    print()
+
+    print("Populate StateScriptFile...")
+    StateScriptFile.populate(fp)
+    print()
+
+    print("Populate VideoFile...")
+    VideoFile.populate(fp)
+    print()
+
+    print("Populate RawPosition...")
+    PositionSource.insert_from_nwbfile(nwb_file_name)
+    RawPosition.populate(fp)
+    print()
+
+    print("Populate ImportedSpikeSorting...")
+    ImportedSpikeSorting.populate(fp)
+
+    # print('HeadDir...')
+    # HeadDir().populate()
+    # print('Speed...')
+    # Speed().populate()
+    # print('LinPos...')
+    # LinPos().populate()
 
 
 def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
     print(
         f"Creating a copy of NWB file {nwb_file_name} with link to raw ephys data: {out_nwb_file_name}"
     )
+    print()
 
     nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
     assert os.path.exists(

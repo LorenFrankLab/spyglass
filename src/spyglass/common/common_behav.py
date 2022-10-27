@@ -9,9 +9,14 @@ from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
 from .common_task import TaskEpoch
 from ..utils.dj_helper_fn import fetch_nwb
-from ..utils.nwb_helper_fn import get_all_spatial_series, get_data_interface, get_nwb_file
+from ..utils.nwb_helper_fn import (
+    get_all_spatial_series,
+    get_data_interface,
+    get_nwb_file,
+)
 
 schema = dj.schema("common_behav")
+
 
 @schema
 class PositionSource(dj.Manual):
@@ -152,6 +157,7 @@ class StateScriptFile(dj.Imported):
                 if str(key["epoch"]) in epoch_list:
                     key["file_object_id"] = associated_file_obj.object_id
                     self.insert1(key)
+                    print(f"Inserted StatescriptFile: {key}")
             else:
                 print("not a statescript file")
 
@@ -206,6 +212,7 @@ class VideoFile(dj.Imported):
             ):
                 key["video_file_object_id"] = video_obj.object_id
                 self.insert1(key)
+                print(f"Inserted VideoFile: {key}")
                 is_found = True
 
         if not is_found:

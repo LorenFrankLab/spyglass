@@ -12,7 +12,7 @@ from spyglass.decoding.clusterless import (
     populate_mark_indicators,
 )
 from spyglass.decoding.sorted_spikes import (
-    SortedSpikesClassifierParameters,
+    SortedSpikesClassifierParameter,
     SortedSpikesIndicator,
     SortedSpikesIndicatorSelection,
 )

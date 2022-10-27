@@ -65,7 +65,6 @@ from ..utils.nwb_helper_fn import (
     get_raw_eseries,
     get_valid_intervals,
 )
-from .populate_all_common import populate_all_common
 from .prepopulate.prepopulate import prepopulate
 
 prepopulate()

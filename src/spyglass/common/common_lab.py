@@ -36,29 +36,41 @@ class LabMember(dj.Manual):
             The NWB file with experimenter information.
         """
         if nwbf.experimenter is None and "LabMember" not in config:
-            print('No experimenter metadata found.\n')
+            print("No experimenter metadata found.\n")
             return None
 
         if nwbf.experimenter is not None and "LabMember" not in config:
+            print(f"{len(nwbf.experimenter)} experimenter(s) found.")
             for experimenter in nwbf.experimenter:
                 cls.insert_from_name(experimenter)
                 # each person is by default the member of their own LabTeam (same as their name)
-                LabTeam.create_new_team(team_name=experimenter, team_members=[experimenter])
+                LabTeam.create_new_team(
+                    team_name=experimenter, team_members=[experimenter]
+                )
+
         else:
             for lab_member in config["LabMember"]:
-                if (('first_name' in lab_member and 'last_name' not in lab_member) or
-                        ('first_name' not in lab_member and 'last_name' in lab_member)):
-                    warnings.warn("One but not both of first_name and last_name was specified. "
-                                  "Both first_name and last_name must be specified to use them both. "
-                                  "Otherwise, first name and last name will be parsed from lab_member_name.")
+                if ("first_name" in lab_member and "last_name" not in lab_member) or (
+                    "first_name" not in lab_member and "last_name" in lab_member
+                ):
+                    warnings.warn(
+                        "One but not both of first_name and last_name was specified. "
+                        "Both first_name and last_name must be specified to use them both. "
+                        "Otherwise, first name and last name will be parsed from lab_member_name."
+                    )
                 # if both first_name and last_name are provided, then used; otherwise inferred
-                if lab_member.get('first_name') is not None and lab_member.get('last_name') is not None:
+                if (
+                    lab_member.get("first_name") is not None
+                    and lab_member.get("last_name") is not None
+                ):
                     cls.insert1(lab_member)
                 else:
-                    cls.insert_from_name(lab_member['lab_member_name'])
+                    cls.insert_from_name(lab_member["lab_member_name"])
                 # each person is by default the member of their own LabTeam (same as their name)
-                LabTeam.create_new_team(team_name=lab_member['lab_member_name'],
-                                        team_members=[lab_member['lab_member_name']])
+                LabTeam.create_new_team(
+                    team_name=lab_member["lab_member_name"],
+                    team_members=[lab_member["lab_member_name"]],
+                )
 
     @classmethod
     def insert_from_name(cls, full_name):
@@ -78,6 +90,8 @@ class LabMember(dj.Manual):
         labmember_dict["first_name"] = " ".join(full_name_split[:-1])
         labmember_dict["last_name"] = full_name_split[-1]
         cls.insert1(labmember_dict, skip_duplicates=True)
+        print(labmember_dict)
+        return labmember_dict
 
 
 @schema
@@ -115,6 +129,7 @@ class LabTeam(dj.Manual):
         labteam_dict["team_name"] = team_name
         labteam_dict["team_description"] = team_description
         cls.insert1(labteam_dict, skip_duplicates=True)
+        print(labteam_dict)
 
         for team_member in team_members:
             LabMember.insert_from_name(team_member)
@@ -149,15 +164,16 @@ class Institution(dj.Manual):
             The NWB file with institution information.
         """
         if nwbf.institution is None and "Institution" not in config:
-            print('No institution metadata found.\n')
+            print("No institution metadata found.\n")
             return None
 
         if nwbf.institution is not None and "Institution" not in config:
             institution_name = nwbf.institution
         else:
-            institution_name = config["Institution"]['institution_name']
+            institution_name = config["Institution"]["institution_name"]
 
         cls.insert1(dict(institution_name=institution_name), skip_duplicates=True)
+        print(f"Inserted institution: {institution_name}")
         return institution_name
 
 
@@ -178,7 +194,7 @@ class Lab(dj.Manual):
             The NWB file with lab name information.
         """
         if nwbf.lab is None and "Lab" not in config:
-            print('No lab metadata found.\n')
+            print("No lab metadata found.\n")
             return None
 
         if nwbf.lab is not None and "Lab" not in config:
@@ -187,4 +203,5 @@ class Lab(dj.Manual):
             lab_name = config["Lab"]["lab_name"]
 
         cls.insert1(dict(lab_name=lab_name), skip_duplicates=True)
+        print(f"Inserted lab: {lab_name}")
         return lab_name

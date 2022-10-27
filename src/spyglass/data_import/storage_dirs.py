@@ -11,8 +11,10 @@ def check_env():
 def base_dir():
     """Get the base directory from $SPYGLASS_BASE_DIR
 
-    Returns:
-        str: The base directory
+    Returns
+    -------
+        p : str
+            The base directory
     """
     p = os.getenv("SPYGLASS_BASE_DIR", None)
     assert (
