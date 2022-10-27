@@ -58,6 +58,7 @@ class DLCSmoothInterpParams(dj.Manual):
         default_params = {
             "smoothing_params": {
                 "smoothing_duration": 0.05,
+                "smooth_method": "moving_avg",
             },
             "interp_params": {
                 "likelihood_thresh": 0.95,
@@ -78,6 +79,48 @@ class DLCSmoothInterpParams(dj.Manual):
         else:
             default = query.fetch1()
         return default
+
+    @staticmethod
+    def get_available_methods():
+        return _key_to_smooth_func_dict.keys()
+
+    def insert1(self, key, **kwargs):
+        if "params" in key:
+            if "smoothing_params" in key["params"]:
+                if "smooth_method" in key["params"]["smoothing_params"]:
+                    smooth_method = key["params"]["smoothing_params"]["smooth_method"]
+                    if smooth_method not in _key_to_smooth_func_dict:
+                        raise KeyError(
+                            f"smooth_method: {smooth_method} not an available method."
+                        )
+                if not "smoothing_duration" in key["params"]["smoothing_params"]:
+                    raise KeyError(
+                        "smoothing_duration must be passed as a smoothing_params within key['params']"
+                    )
+                else:
+                    assert isinstance(
+                        key["params"]["smoothing_params"]["smoothing_duration"],
+                        (float, int),
+                    ), "smoothing_duration must be a float or int"
+            else:
+                raise ValueError("smoothing_params not in key['params']")
+            if "interp_params" in key["params"]:
+                if "likelihood_thresh" in key["params"]["interp_params"]:
+                    assert isinstance(
+                        key["params"]["interp_params"]["likelihood_thresh"], float
+                    ), "likelihood_thresh must be a float"
+                    assert (
+                        0 < key["params"]["interp_params"]["likelihood_thresh"] < 1
+                    ), "likelihood_thresh must be between 0 and 1"
+                else:
+                    raise ValueError(
+                        "likelihood_thresh must be passed as an interp_params within key['params']"
+                    )
+            else:
+                raise ValueError("interp_params not in key['params']")
+        else:
+            raise KeyError("'params' must be in key")
+        super().insert1(key, **kwargs)
 
     # def delete(self, key, **kwargs):
     #     super().delete(key, **kwargs)
@@ -142,7 +185,10 @@ class DLCSmoothInterp(dj.Computed):
         dt = np.median(np.diff(dlc_df.index.to_numpy()))
         sampling_rate = 1 / dt
         print("smoothing position")
-        smooth_df = smooth_pos(
+        smooth_func = _key_to_smooth_func_dict[
+            params["smoothing_params"]["smooth_method"]
+        ]
+        smooth_df = smooth_func(
             interp_df,
             smoothing_duration=smoothing_duration,
             sampling_rate=sampling_rate,
@@ -238,7 +284,9 @@ def get_span_start_stop(sub_thresh_inds):
     return sub_thresh_spans
 
 
-def smooth_pos(interp_df, smoothing_duration: float, sampling_rate: int, **kwargs):
+def smooth_moving_avg(
+    interp_df, smoothing_duration: float, sampling_rate: int, **kwargs
+):
     idx = pd.IndexSlice
     moving_avg_window = int(smoothing_duration * sampling_rate)
     xy_arr = interp_df.loc[:, idx[("x", "y")]].values
@@ -249,3 +297,8 @@ def smooth_pos(interp_df, smoothing_duration: float, sampling_rate: int, **kwarg
         *zip(*smoothed_xy_arr.tolist())
     ]
     return interp_df
+
+
+_key_to_smooth_func_dict = {
+    "moving_avg": smooth_moving_avg,
+}
