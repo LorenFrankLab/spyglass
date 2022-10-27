@@ -144,11 +144,17 @@ class DLCProject(dj.Manual):
         dlc_project_path = os.environ["DLC_PROJECT_PATH"]
         if dlc_project_path not in project_path.as_posix():
             project_dirname = project_path.name
-            new_proj_dir = shutil.copytree(
-                src=project_path, dst=f"{dlc_project_path}/{project_dirname}/"
-            )
+            dest_folder = Path(f"{dlc_project_path}/{project_dirname}/")
+            if dest_folder.exists():
+                new_proj_dir = dest_folder.as_posix()
+            else:
+                new_proj_dir = shutil.copytree(
+                    src=project_path, dst=f"{dlc_project_path}/{project_dirname}/"
+                )
             new_config_path = Path(f"{new_proj_dir}/config.yaml")
-            assert new_config_path.exists(), "config.yaml did not copy to new location"
+            assert (
+                new_config_path.exists()
+            ), "config.yaml does not exist in new project directory"
             config_path = new_config_path
             add_to_config(config_path, **{"project_path": new_proj_dir})
         # TODO still need to copy videos over to video dir
@@ -156,7 +162,7 @@ class DLCProject(dj.Manual):
             "project_name": project_name,
             "team_name": lab_team,
             "bodyparts": bodyparts,
-            "config_path": config_path,
+            "config_path": config_path.as_posix(),
             "frames_per_video": frames_per_video,
         }
         cls.insert1(key, skip_duplicates=True)
@@ -168,6 +174,7 @@ class DLCProject(dj.Manual):
             del key["frames_per_video"]
             # Check for training files to add
             cls.add_training_files(key)
+        return {"project_name": project_name, "config_path": config_path.as_posix()}
 
     @classmethod
     def insert_new_project(
