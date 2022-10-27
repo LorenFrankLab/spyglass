@@ -87,6 +87,7 @@ class DLCPoseEstimationSelection(dj.Manual):
             },
             skip_duplicates=skip_duplicates,
         )
+        return {**key, "task_mode": task_mode}
 
 
 @schema
