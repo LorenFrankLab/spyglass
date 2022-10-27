@@ -19,3 +19,11 @@ from .spikesorting_sorting import (SpikeSorterParameter, SpikeSorting,
                                    SpikeSortingSelection, ImportedSpikeSorting)
 
 from .sortingview import SortingviewWorkspace, SortingviewWorkspaceSelection
+
+# populate the parameter tables with default parameters
+SpikeSortingPreprocessingParameter.insert_default()
+ArtifactDetectionParameter.insert_default()
+SpikeSorterParameter.insert_default()
+WaveformParameter.insert_default()
+MetricParameter.insert_default()
+MetricAutomaticCurationParameter.insert_default()

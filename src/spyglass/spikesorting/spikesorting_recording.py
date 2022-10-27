@@ -275,8 +275,8 @@ class SpikeSortingPreprocessingParameter(dj.Manual):
     ---
     preproc_params: blob
     """
-
-    def insert_default(self):
+    @classmethod
+    def insert_default(cls):
         # set up the default filter parameters
         freq_min = 300  # high pass filter value
         freq_max = 6000  # low pass filter value
@@ -291,7 +291,7 @@ class SpikeSortingPreprocessingParameter(dj.Manual):
             "margin_ms": margin_ms,
             "seed": seed,
         }
-        self.insert1(key, skip_duplicates=True)
+        cls.insert1(key, skip_duplicates=True)
 
 
 @schema

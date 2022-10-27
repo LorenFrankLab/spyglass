@@ -23,8 +23,8 @@ class ArtifactDetectionParameter(dj.Manual):
     ---
     artifact_params: blob  # dictionary of parameters
     """
-
-    def insert_default(self):
+    @classmethod
+    def insert_default(cls):
         """Insert the default artifact parameters with an appropriate parameter dict."""
         artifact_params = {}
         artifact_params["zscore_thresh"] = None  # must be None or >= 0
@@ -32,12 +32,12 @@ class ArtifactDetectionParameter(dj.Manual):
         # all electrodes of sort group
         artifact_params["proportion_above_thresh"] = 1.0
         artifact_params["removal_window_ms"] = 1.0  # in milliseconds
-        self.insert1(["default", artifact_params], skip_duplicates=True)
+        cls.insert1(["default", artifact_params], skip_duplicates=True)
 
         artifact_params_none = {}
         artifact_params_none["zscore_thresh"] = None
         artifact_params_none["amplitude_thresh"] = None
-        self.insert1(["none", artifact_params_none], skip_duplicates=True)
+        cls.insert1(["none", artifact_params_none], skip_duplicates=True)
 
 
 @schema

@@ -36,13 +36,13 @@ class SpikeSorterParameter(dj.Manual):
     ---
     sorter_params: blob
     """
-
-    def insert_default(self):
+    @classmethod
+    def insert_default(cls):
         """Default params from spike sorters available via spikeinterface"""
         sorters = sis.available_sorters()
         for sorter in sorters:
             sorter_params = sis.get_default_params(sorter)
-            self.insert1([sorter, "default", sorter_params], skip_duplicates=True)
+            cls.insert1([sorter, "default", sorter_params], skip_duplicates=True)
 
         # Insert Frank lab defaults
         # Hippocampus tetrode default
@@ -60,7 +60,7 @@ class SpikeSorterParameter(dj.Manual):
             "detect_threshold": 3,
             "detect_interval": 10,
         }
-        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+        cls.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
 
         # Cortical probe default
         sorter = "mountainsort4"
@@ -77,7 +77,7 @@ class SpikeSorterParameter(dj.Manual):
             "detect_threshold": 3,
             "detect_interval": 10,
         }
-        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+        cls.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
 
         # clusterless defaults
         sorter = "clusterless_thresholder"
@@ -95,7 +95,7 @@ class SpikeSorterParameter(dj.Manual):
             # output needs to be set to sorting for the rest of the pipeline
             outputs="sorting",
         )
-        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+        cls.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
 
 
 @schema

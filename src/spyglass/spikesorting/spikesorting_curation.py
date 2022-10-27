@@ -273,7 +273,8 @@ class WaveformParameter(dj.Manual):
     waveform_params: blob # a dict of waveform extraction parameters
     """
 
-    def insert_default(self):
+    @classmethod
+    def insert_default(cls):
         waveform_params_name = "default_not_whitened"
         waveform_params = {
             "ms_before": 0.5,
@@ -283,7 +284,7 @@ class WaveformParameter(dj.Manual):
             "total_memory": "5G",
             "whiten": False,
         }
-        self.insert1([waveform_params_name, waveform_params], skip_duplicates=True)
+        cls.insert1([waveform_params_name, waveform_params], skip_duplicates=True)
         waveform_params_name = "default_whitened"
         waveform_params = {
             "ms_before": 0.5,
@@ -293,7 +294,7 @@ class WaveformParameter(dj.Manual):
             "total_memory": "5G",
             "whiten": True,
         }
-        self.insert1([waveform_params_name, waveform_params], skip_duplicates=True)
+        cls.insert1([waveform_params_name, waveform_params], skip_duplicates=True)
 
 
 @schema
@@ -427,10 +428,10 @@ class MetricParameter(dj.Manual):
     def get_metric_default_params(self, metric: str):
         "Returns default params for the given metric"
         return self.metric_default_params(metric)
-
-    def insert_default(self):
-        self.insert1(
-            ["franklab_default", self.metric_default_params], skip_duplicates=True
+    @classmethod
+    def insert_default(cls):
+        cls.insert1(
+            ["franklab_default", cls.metric_default_params], skip_duplicates=True
         )
 
     def get_available_metrics(self):
@@ -646,8 +647,8 @@ class MetricAutomaticCurationParameter(dj.Manual):
                         f"not in list of valid labels: {valid_labels}"
                     )
         super().insert1(key, **kwargs)
-
-    def insert_default(self):
+    @classmethod
+    def insert_default(cls):
         # label_params parsing: Each key is the name of a metric,
         # the contents are a three value list with the comparison, a value,
         # and a list of labels to apply if the comparison is true
@@ -656,7 +657,7 @@ class MetricAutomaticCurationParameter(dj.Manual):
             "merge_params": {},
             "label_params": {"nn_noise_overlap": [">", 0.1, ["noise", "reject"]]},
         }
-        self.insert1(default_params, skip_duplicates=True)
+        cls.insert1(default_params, skip_duplicates=True)
 
         # Second default parameter set for not applying any labels,
         # or merges, but adding metrics
@@ -665,7 +666,7 @@ class MetricAutomaticCurationParameter(dj.Manual):
             "merge_params": {},
             "label_params": {},
         }
-        self.insert1(no_label_params, skip_duplicates=True)
+        cls.insert1(no_label_params, skip_duplicates=True)
 
 
 @schema
