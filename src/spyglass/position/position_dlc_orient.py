@@ -45,10 +45,12 @@ class DLCOrientationParams(dj.Manual):
 
     @classmethod
     def get_default(cls):
-        default = (cls & {"dlc_orientation_params_name": "default"}).fetch1()
-        if not len(default) > 0:
+        query = cls & {"dlc_orientation_params_name": "default"}
+        if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
             default = (cls & {"dlc_orientation_params_name": "default"}).fetch1()
+        else:
+            default = query.fetch1()
         return default
 
 
