@@ -32,7 +32,7 @@ class DLCCentroidParams(dj.Manual):
         "two_pt_centroid",
         "one_pt_centroid",
     ]
-    _four_led_labels = ["green_LED", "red_LED_L", "red_LED_C", "red_LED_R"]
+    _four_led_labels = ["greenLED", "redLED_L", "redLED_C", "redLED_R"]
     _two_pt_labels = ["point1", "point2"]
 
     @classmethod
@@ -141,43 +141,43 @@ class DLCCentroid(dj.Computed):
         # TODO, generalize key naming
         if centroid_method == "four_led_centroid":
             centroid_func = _key_to_func_dict[centroid_method]
-            if "green_LED" in params["points"]:
+            if "greenLED" in params["points"]:
                 assert (
-                    params["points"]["green_LED"] in bodyparts_avail
-                ), f'{params["points"]["green_LED"]} not a bodypart used in this model'
+                    params["points"]["greenLED"] in bodyparts_avail
+                ), f'{params["points"]["greenLED"]} not a bodypart used in this model'
             else:
                 raise ValueError(
                     "A green led needs to be specified for the 4 led centroid method"
                 )
-            if "red_LED_L" in params["points"]:
+            if "redLED_L" in params["points"]:
                 assert (
-                    params["points"]["red_LED_L"] in bodyparts_avail
-                ), f'{params["points"]["red_LED_L"]} not a bodypart used in this model'
+                    params["points"]["redLED_L"] in bodyparts_avail
+                ), f'{params["points"]["redLED_L"]} not a bodypart used in this model'
             else:
                 raise ValueError(
                     "A left red led needs to be specified for the 4 led centroid method"
                 )
-            if "red_LED_C" in params["points"]:
+            if "redLED_C" in params["points"]:
                 assert (
-                    params["points"]["red_LED_C"] in bodyparts_avail
-                ), f'{params["points"]["red_LED_C"]} not a bodypart used in this model'
+                    params["points"]["redLED_C"] in bodyparts_avail
+                ), f'{params["points"]["redLED_C"]} not a bodypart used in this model'
             else:
                 raise ValueError(
                     "A center red led needs to be specified for the 4 led centroid method"
                 )
-            if "red_LED_R" in params["points"]:
+            if "redLED_R" in params["points"]:
                 assert (
-                    params["points"]["red_LED_R"] in bodyparts_avail
-                ), f'{params["points"]["red_LED_R"]} not a bodypart used in this model'
+                    params["points"]["redLED_R"] in bodyparts_avail
+                ), f'{params["points"]["redLED_R"]} not a bodypart used in this model'
             else:
                 raise ValueError(
                     "A right red led needs to be specified for the 4 led centroid method"
                 )
             bodyparts_to_use = [
-                params["points"]["green_LED"],
-                params["points"]["red_LED_L"],
-                params["points"]["red_LED_C"],
-                params["points"]["red_LED_R"],
+                params["points"]["greenLED"],
+                params["points"]["redLED_L"],
+                params["points"]["redLED_C"],
+                params["points"]["redLED_R"],
             ]
 
         elif centroid_method == "two_pt_centroid":
@@ -338,18 +338,18 @@ class DLCCentroid(dj.Computed):
 def four_led_centroid(pos_df: pd.DataFrame, **params):
     """
     Determines the centroid of 4 LEDS on an implant LED ring.
-    Assumed to be the Green LED, and 3 red LEDs called: red_LED_C, red_LED_L, red_LED_R
-    By default, uses (green_led + red_LED_C) / 2 to calculate centroid
+    Assumed to be the Green LED, and 3 red LEDs called: redLED_C, redLED_L, redLED_R
+    By default, uses (greenled + redLED_C) / 2 to calculate centroid
     If Green LED is NaN, but red center LED is not,
         then the red center LED is called the centroid
     If green and red center LEDs are NaN, but red left and red right LEDs are not,
-        then the centroid is (red_LED_L + red_LED_R) / 2
+        then the centroid is (redLED_L + redLED_R) / 2
     If red center LED is NaN, but the other 3 LEDS are not,
-        then the centroid is (green_led + (red_LED_L + red_LED_R) / 2) / 2
+        then the centroid is (greenled + (redLED_L + redLED_R) / 2) / 2
     If red center and left LEDs are NaN, but green and red right LEDs are not,
-        then the centroid is (green_led + red_LED_R) / 2
+        then the centroid is (greenled + redLED_R) / 2
     If red center and right LEDs are NaN, but green and red left LEDs are not,
-        then the centroid is (green_led + red_LED_L) / 2
+        then the centroid is (greenled + redLED_L) / 2
     If all red LEDs are NaN, but green LED is not,
         then the green LED is called the centroid
     If all LEDs are NaN, then the centroid is NaN
@@ -360,7 +360,7 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         dataframe containing x and y position for each LED of interest,
         index is timestamps. Column names specified by params
     **kwargs : dict
-        contains 'green_LED' and 'red_LED_C', 'red_LED_R', 'red_LED_L' keys,
+        contains 'greenLED' and 'redLED_C', 'redLED_R', 'redLED_L' keys,
         whose values specify the column names in `pos_df`
 
     Returns
@@ -372,10 +372,10 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
     centroid = np.zeros(shape=(len(pos_df), 2))
     idx = pd.IndexSlice
     # TODO: this feels messy, clean-up
-    green_led = params.pop("green_LED", None)
-    red_led_C = params.pop("red_LED_C", None)
-    red_led_L = params.pop("red_LED_L", None)
-    red_led_R = params.pop("red_LED_R", None)
+    green_led = params.pop("greenLED", None)
+    red_led_C = params.pop("redLED_C", None)
+    red_led_L = params.pop("redLED_L", None)
+    red_led_R = params.pop("redLED_R", None)
     green_nans = pos_df.loc[:, idx[green_led, ("x", "y")]].isna().any(axis=1)
     red_C_nans = pos_df.loc[:, idx[red_led_C, ("x", "y")]].isna().any(axis=1)
     red_L_nans = pos_df.loc[:, idx[red_led_L, ("x", "y")]].isna().any(axis=1)
