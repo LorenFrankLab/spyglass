@@ -4,7 +4,7 @@ import shutil
 import os
 from itertools import combinations
 from typing import List, Dict
-from pathlib import Path
+from pathlib import Path, PosixPath
 import getpass
 import ruamel.yaml
 import numpy as np
@@ -298,6 +298,9 @@ class DLCProject(dj.Manual):
             del key["frames_per_video"]
             # Add videos to training files
             cls.add_training_files(key)
+        if isinstance(config_path, PosixPath):
+            config_path = config_path.as_posix()
+        return {"project_name": project_name, "config_path": config_path}
 
     @classmethod
     def add_training_files(cls, key):
