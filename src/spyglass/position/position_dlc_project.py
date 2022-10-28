@@ -80,7 +80,7 @@ class DLCProject(dj.Manual):
         definition = """
         # Paths of training files (e.g., labeled pngs, CSV or video)
         -> DLCProject
-        file_name: varchar(40) # Concise name to describe file
+        file_name: varchar(200) # Concise name to describe file
         file_ext : enum("mp4", "csv", "h5") # extension of file
         ---
         file_path: varchar(255)
