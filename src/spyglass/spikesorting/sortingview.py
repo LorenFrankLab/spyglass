@@ -35,6 +35,16 @@ class SortingviewWorkspace(dj.Computed):
     channel = NULL : varchar(80)        # the name of kachery channel for data sharing (for kachery daemon, deprecated)
     """
 
+    # make class for parts table to hold URLs
+    class URL(dj.Part):
+        # Table for holding URLs
+        definition = """
+        -> SortingviewWorkspace
+        ---
+        curation_url: varchar(1000)   # URL with sortingview data
+        curation_jot: varchar(200)   # URI for saving manual curation tags
+        """
+
     def make(self, key: dict):
         """Create a Sortingview workspace
 
@@ -88,6 +98,20 @@ class SortingviewWorkspace(dj.Computed):
         key["sortingview_recording_id"] = recording_id
         key["sortingview_sorting_id"] = sorting_id
         self.insert1(key)
+
+        # insert URLs
+        # remove non-primary keys
+        del key["workspace_uri"]
+        del key["sortingview_recording_id"]
+        del key["sortingview_sorting_id"]
+
+        # generate URLs and add to key
+        url = self.url_trythis(key)
+        print("URL:", url)
+        key["curation_url"] = url
+        key["curation_jot"] = "not ready yet"
+
+        SortingviewWorkspace.URL.insert1(key)
 
     def remove_sorting_from_workspace(self, key):
         return NotImplementedError
@@ -221,6 +245,9 @@ class SortingviewWorkspace(dj.Computed):
             initial_labels[k] = new_list
         initial_curation = {"labelsByUnit": initial_labels}
 
+        # custom metrics
+        unit_metrics = workspace.get_unit_metrics_for_sorting(sortingview_sorting_id)
+
         # This will print some instructions on how to do the curation
         url = sv.trythis_start_sorting_curation(
             recording=R,
@@ -229,7 +256,7 @@ class SortingviewWorkspace(dj.Computed):
             initial_curation=initial_curation,
             raster_plot_subsample_max_firing_rate=50,
             spike_amplitudes_subsample_max_firing_rate=50,
-            unit_metrics=None,
+            unit_metrics=unit_metrics,
         )
         return url
 

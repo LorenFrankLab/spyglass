@@ -143,18 +143,19 @@ def _create_spikesortingview_workspace(
 
     unit_metrics = workspace.get_unit_metrics_for_sorting(sorting_id)
 
-    print("Preparing spikesortingview data")
-    X = SpikeSortingView.create(
-        recording=recording,
-        sorting=sorting,
-        segment_duration_sec=60 * 20,
-        snippet_len=(20, 20),
-        max_num_snippets_per_segment=100,
-        channel_neighborhood_size=7,
-    )
+    # moved figURL creation to function called trythis_URL in osrtingview.py
+    # print("Preparing spikesortingview data")
+    # X = SpikeSortingView.create(
+    #     recording=recording,
+    #     sorting=sorting,
+    #     segment_duration_sec=60 * 20,
+    #     snippet_len=(20, 20),
+    #     max_num_snippets_per_segment=100,
+    #     channel_neighborhood_size=7,
+    # )
 
     # create a fake unit similiarity matrix
-    similarity_scores = []
+    # similarity_scores = []
     # for u1 in X.unit_ids:
     #     for u2 in X.unit_ids:
     #         similarity_scores.append(
@@ -172,54 +173,53 @@ def _create_spikesortingview_workspace(
 
     # Assemble the views in a layout
     # You can replace this with other layouts
-    view = vv.MountainLayout(
-        items=[
-            vv.MountainLayoutItem(label="Summary", view=X.sorting_summary_view()),
-            vv.MountainLayoutItem(
-                label="Units table",
-                view=X.units_table_view(unit_ids=X.unit_ids, unit_metrics=unit_metrics),
-            ),
-            vv.MountainLayoutItem(
-                label="Raster plot",
-                view=X.raster_plot_view(
-                    unit_ids=X.unit_ids,
-                    _subsample_max_firing_rate=raster_plot_subsample_max_firing_rate,
-                ),
-            ),
-            vv.MountainLayoutItem(
-                label="Spike amplitudes",
-                view=X.spike_amplitudes_view(
-                    unit_ids=X.unit_ids,
-                    _subsample_max_firing_rate=spike_amplitudes_subsample_max_firing_rate,
-                ),
-            ),
-            vv.MountainLayoutItem(
-                label="Autocorrelograms",
-                view=X.autocorrelograms_view(unit_ids=X.unit_ids),
-            ),
-            vv.MountainLayoutItem(
-                label="Cross correlograms",
-                view=X.cross_correlograms_view(unit_ids=X.unit_ids),
-            ),
-            vv.MountainLayoutItem(
-                label="Avg waveforms",
-                view=X.average_waveforms_view(unit_ids=X.unit_ids),
-            ),
-            vv.MountainLayoutItem(
-                label="Electrode geometry", view=X.electrode_geometry_view()
-            ),
-            # vv.MountainLayoutItem(
-            #    label='Unit similarity matrix',
-            #    view=unit_similarity_matrix_view
-            # ),
-            vv.MountainLayoutItem(
-                label="Curation", view=vv.SortingCuration(), is_control=True
-            ),
-        ]
-    )
+    # view = vv.MountainLayout(
+    #     items=[
+    #         vv.MountainLayoutItem(label="Summary", view=X.sorting_summary_view()),
+    #         vv.MountainLayoutItem(
+    #             label="Units table",
+    #             view=X.units_table_view(unit_ids=X.unit_ids, unit_metrics=unit_metrics),
+    #         ),
+    #         vv.MountainLayoutItem(
+    #             label="Raster plot",
+    #             view=X.raster_plot_view(
+    #                 unit_ids=X.unit_ids,
+    #                 _subsample_max_firing_rate=raster_plot_subsample_max_firing_rate,
+    #             ),
+    #         ),
+    #         vv.MountainLayoutItem(
+    #             label="Spike amplitudes",
+    #             view=X.spike_amplitudes_view(
+    #                 unit_ids=X.unit_ids,
+    #                 _subsample_max_firing_rate=spike_amplitudes_subsample_max_firing_rate,
+    #             ),
+    #         ),
+    #         vv.MountainLayoutItem(
+    #             label="Autocorrelograms",
+    #             view=X.autocorrelograms_view(unit_ids=X.unit_ids),
+    #         ),
+    #         vv.MountainLayoutItem(
+    #             label="Cross correlograms",
+    #             view=X.cross_correlograms_view(unit_ids=X.unit_ids),
+    #         ),
+    #         vv.MountainLayoutItem(
+    #             label="Avg waveforms",
+    #             view=X.average_waveforms_view(unit_ids=X.unit_ids),
+    #         ),
+    #         vv.MountainLayoutItem(
+    #             label="Electrode geometry", view=X.electrode_geometry_view()
+    #         ),
+    #         # vv.MountainLayoutItem(
+    #         #    label='Unit similarity matrix',
+    #         #    view=unit_similarity_matrix_view
+    #         # ),
+    #         vv.MountainLayoutItem(
+    #             label="Curation", view=vv.SortingCuration(), is_control=True
+    #         ),
+    #     ]
+    # )
 
-    sorting_curation_uri = workspace.get_sorting_curation_uri(sorting_id)
-    # we should comment out this line if we dont want to make the URL - this calls sortingview code
+    # sorting_curation_uri = workspace.get_sorting_curation_uri(sorting_id)
     # url = view.url(label=recording_label, sorting_curation_uri=sorting_curation_uri)
 
     # print(f"figurl: {url}")
