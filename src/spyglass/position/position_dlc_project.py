@@ -101,9 +101,9 @@ class DLCProject(dj.Manual):
     def insert_existing_project(
         cls,
         project_name: str,
-        bodyparts: List,
         lab_team: str,
         config_path: str,
+        bodyparts: List = None,
         frames_per_video: int = None,
         add_to_files: bool = True,
         **kwargs,
@@ -114,21 +114,25 @@ class DLCProject(dj.Manual):
         ----------
         project_name : str
             user-friendly name of project
-        bodyparts : list
-            list of bodyparts to label. Should match bodyparts in BodyPart table
         lab_team : str
             name of lab team. Should match an entry in LabTeam table
-        project_path : str
+        config_path : str
             path to project directory
+        bodyparts : list
+            optional list of bodyparts to label that
+            are not already in existing config
         """
         # Read config
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
         cfg = read_config(config_path)
-        bodyparts_to_add = [
-            bodypart for bodypart in bodyparts if bodypart not in cfg["bodyparts"]
-        ]
-        all_bodyparts = bodyparts_to_add + cfg["bodyparts"]
+        if bodyparts:
+            bodyparts_to_add = [
+                bodypart for bodypart in bodyparts if bodypart not in cfg["bodyparts"]
+            ]
+            all_bodyparts = bodyparts_to_add + cfg["bodyparts"]
+        else:
+            all_bodyparts = cfg["bodyparts"]
         BodyPart.add_from_config(cfg["bodyparts"])
         for bodypart in all_bodyparts:
             if not bool(BodyPart() & {"bodypart": bodypart}):
