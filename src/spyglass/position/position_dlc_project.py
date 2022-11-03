@@ -144,7 +144,8 @@ class DLCProject(dj.Manual):
         if frames_per_video:
             if frames_per_video != cfg["numframes2pick"]:
                 add_to_config(config_path, **{"numframes2pick": frames_per_video})
-        project_path = Path(config_path).parent
+        config_path = Path(config_path)
+        project_path = config_path.parent
         dlc_project_path = os.environ["DLC_PROJECT_PATH"]
         if dlc_project_path not in project_path.as_posix():
             project_dirname = project_path.name
