@@ -483,6 +483,7 @@ class DLCPosVideo(dj.Computed):
         fps = int(np.round(frame_rate / video_slowdown))
         writer = Writer(fps=fps, bitrate=-1)
         n_frames = int(len(video_frame_inds) * percent_frames)
+        print(f"video save path: {output_video_filename}\n{n_frames} frames in total.")
         ret, frame = video.read()
         print(f"initial frame: {video.get(1)}")
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
