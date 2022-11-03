@@ -33,10 +33,9 @@ class DLCOrientationParams(dj.Manual):
     @classmethod
     def insert_default(cls, **kwargs):
         params = {
-            "orient_method": "red_led_bisector",
-            "led1": "redLED_L",
-            "led2": "redLED_R",
-            "led3": "redLED_C",
+            "orient_method": "red_green_orientation",
+            "bodypart1": "greenLED",
+            "bodypart2": "redLED_C",
             "orientation_smoothing_std_dev": 0.001,
         }
         cls.insert1(
