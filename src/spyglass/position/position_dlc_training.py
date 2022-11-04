@@ -70,6 +70,19 @@ class DLCModelTrainingParams(dj.Lookup):
             )  # if duplicate, will raise duplicate error
             # if this will raise duplicate error, why is above check needed? @datajoint
 
+    @classmethod
+    def get_accepted_params(cls):
+        from deeplabcut import train_network, create_training_dataset
+
+        return list(
+            set(
+                [
+                    *list(inspect.signature(train_network).parameters),
+                    *list(inspect.signature(create_training_dataset).parameters),
+                ]
+            )
+        )
+
 
 @schema
 class DLCModelTrainingSelection(dj.Manual):
