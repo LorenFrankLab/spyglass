@@ -3,11 +3,12 @@ import glob
 import shutil
 import os
 from itertools import combinations
-from typing import List, Dict
+from typing import List, Dict, Union
 from pathlib import Path, PosixPath
 import getpass
 import ruamel.yaml
 import numpy as np
+import pandas as pd
 import datajoint as dj
 from ..common.common_lab import LabTeam
 from .dlc_utils import check_videofile, _set_permissions, get_video_path
@@ -345,34 +346,93 @@ class DLCProject(dj.Manual):
         else:
             Warning("No training files to add")
 
-    def run_extract_frames(self, key, **kwargs):
+    @classmethod
+    def run_extract_frames(cls, key, **kwargs):
         """Convenience function to launch DLC GUI for extracting frames.
         Must be run on local machine to access GUI,
         cannot be run through ssh tunnel
         """
-        config_path = (self & key).fetch1("config_path")
+        config_path = (cls & key).fetch1("config_path")
         from deeplabcut import extract_frames
 
         extract_frames(config_path, **kwargs)
 
-    def run_label_frames(self, key):
+    @classmethod
+    def run_label_frames(cls, key):
         """Convenience function to launch DLC GUI for labeling frames.
         Must be run on local machine to access GUI,
         cannot be run through ssh tunnel
         """
-        config_path = (self & key).fetch1("config_path")
+        config_path = (cls & key).fetch1("config_path")
         from deeplabcut import label_frames
 
         label_frames(config_path)
 
-    def check_labels(self, key, **kwargs):
+    @classmethod
+    def check_labels(cls, key, **kwargs):
         """Convenience function to check labels on
         previously extracted and labeled frames
         """
-        config_path = (self & key).fetch1("config_path")
+        config_path = (cls & key).fetch1("config_path")
         from deeplabcut import check_labels
 
         check_labels(config_path, **kwargs)
+
+    @classmethod
+    def import_labeled_frames(
+        cls,
+        key: Dict,
+        import_project_path: Union[str, PosixPath],
+        video_filenames: Union[str, List],
+    ):
+        """Function to import pre-labeled frames from an existing project into a new project
+
+        Parameters
+        ----------
+        key : Dict
+            key to specify entry in DLCProject table to add labeled frames to
+        import_project_path : str
+            absolute path to project directory containing labeled frames to import
+        video_filenames : str or List
+            filename or list of filenames of video(s) from which to import frames.
+            without file extension
+        """
+        project_entry = (cls & key).fetch1()
+        team_name = project_entry["team_name"]
+        current_project_path = Path(project_entry["config_path"]).parent
+        current_labeled_data_path = Path(
+            f"{current_project_path.as_posix()}/labeled-data"
+        )
+        if isinstance(import_project_path, PosixPath):
+            assert (
+                import_project_path.exists()
+            ), f"import_project_path: {import_project_path.as_posix()} does not exist"
+            import_labeled_data_path = Path(
+                f"{import_project_path.as_posix()}/labeled-data"
+            )
+        else:
+            assert Path(
+                import_project_path
+            ).exists(), f"import_project_path: {import_project_path} does not exist"
+            import_labeled_data_path = Path(f"{import_project_path}/labeled-data")
+        assert (
+            import_labeled_data_path.exists()
+        ), "import_project has no directory 'labeled-data'"
+        if not isinstance(video_filenames, List):
+            video_filenames = [video_filenames]
+        for video_file in video_filenames:
+            h5_file = glob.glob(
+                f"{import_labeled_data_path.as_posix()}/{video_file}/*.h5"
+            )[0]
+            dlc_df = pd.read_hdf(h5_file)
+            dlc_df.columns.set_levels([team_name], level=0, inplace=True)
+            dlc_df.to_hdf(
+                Path(
+                    f"{current_labeled_data_path.as_posix()}/{video_file}/CollectedData_{team_name}.h5"
+                ).as_posix(),
+                "df_with_missing",
+            )
+        cls.add_training_files(key)
 
 
 def add_to_config(config, bodyparts: List = None, skeleton_node: str = None, **kwargs):
