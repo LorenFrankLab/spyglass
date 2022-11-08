@@ -1,9 +1,10 @@
 "Sortingview helper functions"
 
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Any, Tuple
 
 import spikeinterface as si
 
+import kachery_cloud as kcl
 import sortingview as sv
 import sortingview.views as vv
 from sortingview.SpikeSortingView import SpikeSortingView
@@ -11,30 +12,30 @@ from sortingview.SpikeSortingView import SpikeSortingView
 from .merged_sorting_extractor import MergedSortingExtractor
 
 
-def _set_workspace_permission(
-    workspace: sv.Workspace,
-    google_user_ids: List[str],
-    sortingview_sorting_id: str = None,
-):
-    """Set permission to curate specified sorting on sortingview workspace based
-    on google ID
+# def _set_workspace_permission(
+#     workspace: sv.Workspace,
+#     google_user_ids: List[str],
+#     sortingview_sorting_id: str = None,
+# ):
+#     """Set permission to curate specified sorting on sortingview workspace based
+#     on google ID
 
-    Parameters
-    ----------
-    workspace_uri : sv.Workspace
-    team_members : List[str]
-        list of team members to be given permission to edit the workspace
-    sortingview_sorting_id : str
-    """
-    if sortingview_sorting_id is None:
-        sortingview_sorting_id = workspace.sorting_ids[0]
-    workspace.set_sorting_curation_authorized_users(
-        sorting_id=sortingview_sorting_id, user_ids=google_user_ids
-    )
-    print(
-        f"Permissions to curate sorting {sortingview_sorting_id} given to {google_user_ids}."
-    )
-    return workspace
+#     Parameters
+#     ----------
+#     workspace_uri : sv.Workspace
+#     team_members : List[str]
+#         list of team members to be given permission to edit the workspace
+#     sortingview_sorting_id : str
+#     """
+#     if sortingview_sorting_id is None:
+#         sortingview_sorting_id = workspace.sorting_ids[0]
+#     workspace.set_sorting_curation_authorized_users(
+#         sorting_id=sortingview_sorting_id, user_ids=google_user_ids
+#     )
+#     print(
+#         f"Permissions to curate sorting {sortingview_sorting_id} given to {google_user_ids}."
+#     )
+#     return workspace
 
 
 def _add_metrics_to_sorting_in_workspace(
@@ -143,16 +144,29 @@ def _create_spikesortingview_workspace(
 
     unit_metrics = workspace.get_unit_metrics_for_sorting(sorting_id)
 
-    # moved figURL creation to function called trythis_URL in osrtingview.py
-    # print("Preparing spikesortingview data")
-    # X = SpikeSortingView.create(
-    #     recording=recording,
-    #     sorting=sorting,
-    #     segment_duration_sec=60 * 20,
-    #     snippet_len=(20, 20),
-    #     max_num_snippets_per_segment=100,
-    #     channel_neighborhood_size=7,
-    # )
+    return workspace.uri, recording_id, sorting_id
+
+
+def _generate_url(
+    *,
+    recording: si.BaseRecording,
+    sorting: si.BaseSorting,
+    label: str,
+    initial_curation: dict = {},
+    raster_plot_subsample_max_firing_rate=50,
+    spike_amplitudes_subsample_max_firing_rate=50,
+    unit_metrics: Union[List[Any], None] = None,
+) -> Tuple[str, str]:
+    # moved figURL creation to function called trythis_URL in sosrtingview.py
+    print("Preparing spikesortingview data")
+    X = SpikeSortingView.create(
+        recording=recording,
+        sorting=sorting,
+        segment_duration_sec=60 * 20,
+        snippet_len=(20, 20),
+        max_num_snippets_per_segment=100,
+        channel_neighborhood_size=7,
+    )
 
     # create a fake unit similiarity matrix
     # similarity_scores = []
@@ -173,55 +187,68 @@ def _create_spikesortingview_workspace(
 
     # Assemble the views in a layout
     # You can replace this with other layouts
-    # view = vv.MountainLayout(
-    #     items=[
-    #         vv.MountainLayoutItem(label="Summary", view=X.sorting_summary_view()),
-    #         vv.MountainLayoutItem(
-    #             label="Units table",
-    #             view=X.units_table_view(unit_ids=X.unit_ids, unit_metrics=unit_metrics),
-    #         ),
-    #         vv.MountainLayoutItem(
-    #             label="Raster plot",
-    #             view=X.raster_plot_view(
-    #                 unit_ids=X.unit_ids,
-    #                 _subsample_max_firing_rate=raster_plot_subsample_max_firing_rate,
-    #             ),
-    #         ),
-    #         vv.MountainLayoutItem(
-    #             label="Spike amplitudes",
-    #             view=X.spike_amplitudes_view(
-    #                 unit_ids=X.unit_ids,
-    #                 _subsample_max_firing_rate=spike_amplitudes_subsample_max_firing_rate,
-    #             ),
-    #         ),
-    #         vv.MountainLayoutItem(
-    #             label="Autocorrelograms",
-    #             view=X.autocorrelograms_view(unit_ids=X.unit_ids),
-    #         ),
-    #         vv.MountainLayoutItem(
-    #             label="Cross correlograms",
-    #             view=X.cross_correlograms_view(unit_ids=X.unit_ids),
-    #         ),
-    #         vv.MountainLayoutItem(
-    #             label="Avg waveforms",
-    #             view=X.average_waveforms_view(unit_ids=X.unit_ids),
-    #         ),
-    #         vv.MountainLayoutItem(
-    #             label="Electrode geometry", view=X.electrode_geometry_view()
-    #         ),
-    #         # vv.MountainLayoutItem(
-    #         #    label='Unit similarity matrix',
-    #         #    view=unit_similarity_matrix_view
-    #         # ),
-    #         vv.MountainLayoutItem(
-    #             label="Curation", view=vv.SortingCuration(), is_control=True
-    #         ),
-    #     ]
-    # )
+    view = vv.MountainLayout(
+        items=[
+            vv.MountainLayoutItem(label="Summary", view=X.sorting_summary_view()),
+            vv.MountainLayoutItem(
+                label="Units table",
+                view=X.units_table_view(unit_ids=X.unit_ids, unit_metrics=unit_metrics),
+            ),
+            vv.MountainLayoutItem(
+                label="Raster plot",
+                view=X.raster_plot_view(
+                    unit_ids=X.unit_ids,
+                    _subsample_max_firing_rate=raster_plot_subsample_max_firing_rate,
+                ),
+            ),
+            vv.MountainLayoutItem(
+                label="Spike amplitudes",
+                view=X.spike_amplitudes_view(
+                    unit_ids=X.unit_ids,
+                    _subsample_max_firing_rate=spike_amplitudes_subsample_max_firing_rate,
+                ),
+            ),
+            vv.MountainLayoutItem(
+                label="Autocorrelograms",
+                view=X.autocorrelograms_view(unit_ids=X.unit_ids),
+            ),
+            vv.MountainLayoutItem(
+                label="Cross correlograms",
+                view=X.cross_correlograms_view(unit_ids=X.unit_ids),
+            ),
+            vv.MountainLayoutItem(
+                label="Avg waveforms",
+                view=X.average_waveforms_view(unit_ids=X.unit_ids),
+            ),
+            vv.MountainLayoutItem(
+                label="Electrode geometry", view=X.electrode_geometry_view()
+            ),
+            # vv.MountainLayoutItem(
+            #    label='Unit similarity matrix',
+            #    view=unit_similarity_matrix_view
+            # ),
+            vv.MountainLayoutItem(
+                label="Curation", view=vv.SortingCuration2(), is_control=True
+            ),
+        ]
+    )
 
+    # old
     # sorting_curation_uri = workspace.get_sorting_curation_uri(sorting_id)
     # url = view.url(label=recording_label, sorting_curation_uri=sorting_curation_uri)
 
-    # print(f"figurl: {url}")
+    if initial_curation is not None:
+        print("found initial curation")
+        sorting_curation_uri = kcl.store_json(initial_curation)
+    else:
+        sorting_curation_uri = None
+    url_state = (
+        {"sortingCuration": sorting_curation_uri}
+        if sorting_curation_uri is not None
+        else None
+    )
+    url = view.url(label=label, state=url_state)
 
-    return workspace.uri, recording_id, sorting_id
+    print(url)
+
+    return url
