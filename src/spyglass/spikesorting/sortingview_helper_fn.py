@@ -12,32 +12,6 @@ from sortingview.SpikeSortingView import SpikeSortingView
 from .merged_sorting_extractor import MergedSortingExtractor
 
 
-# def _set_workspace_permission(
-#     workspace: sv.Workspace,
-#     google_user_ids: List[str],
-#     sortingview_sorting_id: str = None,
-# ):
-#     """Set permission to curate specified sorting on sortingview workspace based
-#     on google ID
-
-#     Parameters
-#     ----------
-#     workspace_uri : sv.Workspace
-#     team_members : List[str]
-#         list of team members to be given permission to edit the workspace
-#     sortingview_sorting_id : str
-#     """
-#     if sortingview_sorting_id is None:
-#         sortingview_sorting_id = workspace.sorting_ids[0]
-#     workspace.set_sorting_curation_authorized_users(
-#         sorting_id=sortingview_sorting_id, user_ids=google_user_ids
-#     )
-#     print(
-#         f"Permissions to curate sorting {sortingview_sorting_id} given to {google_user_ids}."
-#     )
-#     return workspace
-
-
 def _add_metrics_to_sorting_in_workspace(
     workspace: sv.Workspace,
     metrics: Dict[str, Dict[str, float]],
@@ -232,10 +206,6 @@ def _generate_url(
             ),
         ]
     )
-
-    # old
-    # sorting_curation_uri = workspace.get_sorting_curation_uri(sorting_id)
-    # url = view.url(label=recording_label, sorting_curation_uri=sorting_curation_uri)
 
     if initial_curation is not None:
         print("found initial curation")
