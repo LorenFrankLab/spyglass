@@ -95,4 +95,4 @@ def set_configuration(user_name: str, file_name: str = None):
 
 
 if __name__ == "__main__":
-    set_configuration(sys.argv[1])
+    set_configuration(sys.argv[1], sys.argv[2])
