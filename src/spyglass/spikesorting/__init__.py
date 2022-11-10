@@ -1,4 +1,8 @@
 from .sortingview import SortingviewWorkspace, SortingviewWorkspaceSelection
+from .spikesorting_curation_figurl import (
+    CurationFigurlSelection,
+    CurationFigurl
+)
 from .spikesorting_artifact import (
     ArtifactDetection,
     ArtifactDetectionParameters,
