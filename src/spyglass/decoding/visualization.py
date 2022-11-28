@@ -713,18 +713,17 @@ def extract_slice_data(
 
 
 def discretize_and_trim(base_slice: xr.Dataset):
-    i = np.multiply(base_slice, 255).astype("int8")
+    i = np.multiply(base_slice, 255).astype("uint8")
     i_stack = i.stack(unified_index=["time", "y_position", "x_position"])
-    i_trim = i_stack.where(i_stack.acausal_posterior > 0, drop=True).astype("int8")
-    return i_trim
+
+    return i_stack.where(i_stack.acausal_posterior > 0, drop=True).astype("uint8")
 
 
 def get_positions(
     i_trim: xr.Dataset, linearization_fn: Callable[[Tuple[float, float]], int]
 ):
     linearizer_map = map(linearization_fn, i_trim.unified_index.data)
-    positions = np.array(list(linearizer_map), dtype="int16")
-    return positions
+    return np.array(list(linearizer_map), dtype="uint16")
 
 
 def get_observations_per_frame(i_trim: xr.Dataset, base_slice: xr.Dataset):
@@ -732,7 +731,7 @@ def get_observations_per_frame(i_trim: xr.Dataset, base_slice: xr.Dataset):
     time_counts = xr.DataArray(time_counts_np, coords={"time": times})
     raw_times = base_slice.time
     (_, good_counts) = xr.align(raw_times, time_counts, join="left", fill_value=0)
-    observations_per_frame = good_counts.data.astype("int8")
+    observations_per_frame = good_counts.data.astype("uint8")
     return observations_per_frame
 
 
@@ -749,14 +748,14 @@ def process_decoded_data(results):
     )
 
     total_frame_count = len(base_probabilities.time)
-    final_frame_bounds = np.zeros(total_frame_count, dtype="int8")
+    final_frame_bounds = np.zeros(total_frame_count, dtype="uint8")
     # intentionally oversized preallocation--will trim later
     # Note: By definition there can't be more than 255 observations per frame (since we drop any observation
     # lower than 1/255 and the probabilities for any frame sum to 1). However, this preallocation may be way
     # too big for memory for long recordings. We could use a smaller one, but would need to include logic
     # to expand the length of the array if its actual allocated bounds are exceeded.
-    final_values = np.zeros(total_frame_count * 255, dtype="int8")
-    final_locations = np.zeros(total_frame_count * 255, dtype="int16")
+    final_values = np.zeros(total_frame_count * 255, dtype="uint8")
+    final_locations = np.zeros(total_frame_count * 255, dtype="uint16")
 
     frames_done = 0
     total_observations = 0
@@ -824,9 +823,9 @@ def create_static_track_animation(
     *,
     track_rect_width: float,
     track_rect_height: float,
-    ul_corners,
-    timestamps,
-    positions,
+    ul_corners: np.ndarray,
+    timestamps: np.ndarray,
+    positions: np.ndarray,
     compute_real_time_rate: bool = False,
     head_dir=None,
 ):
