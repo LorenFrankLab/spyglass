@@ -32,3 +32,5 @@ from .spikesorting_sorting import (
     SpikeSorting,
     SpikeSortingSelection,
 )
+
+from .curation_figurl import CurationFigurlSelection, CurationFigurl
