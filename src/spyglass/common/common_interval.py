@@ -105,9 +105,9 @@ class IntervalList(dj.Manual):
 
         pos_valid_times = (
             interval_list.set_index("interval_list_name")
-            .filter(regex=r"^pos", axis=0)
+            .filter(regex=r"^pos \d+ valid times$", axis=0)
             .valid_times
-        )
+        ).sort_index(key=lambda index: [int(name.split()[1]) for name in index])
         interval_y = 0
         for epoch, valid_times in zip(pos_valid_times.index, pos_valid_times):
             for interval in valid_times:
