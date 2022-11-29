@@ -40,9 +40,20 @@ def get_trimmed_bin_center_index(
 
 def create_1D_decode_view(
     posterior: xr.DataArray,
-    linear_position=None,
+    linear_position: np.ndarray = None,
 ) -> vvf.DecodedLinearPositionData:
+    """Creates a view of an interactive heatmap of position vs. time.
 
+    Parameters
+    ----------
+    posterior : xr.DataArray, shape (n_time, n_position_bins)
+    linear_position : np.ndarray, shape (n_time, ), optional
+
+    Returns
+    -------
+    view : vvf.DecodedLinearPositionData
+
+    """
     if linear_position is not None:
         linear_position = np.asarray(linear_position)
 

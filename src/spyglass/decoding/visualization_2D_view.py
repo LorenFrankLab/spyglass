@@ -253,9 +253,9 @@ def get_ul_corners(width: float, height: float, centers):
     return ul.T
 
 
-def make_track(positions, bin_size: float = 1.0):
-    (edges, _, place_bin_centers, _) = get_grid(positions, bin_size)
-    is_track_interior = get_track_interior(positions, edges)
+def make_track(position, bin_size: float = 1.0):
+    (edges, _, place_bin_centers, _) = get_grid(position, bin_size)
+    is_track_interior = get_track_interior(position, edges)
 
     # bin dimensions are the difference between bin centers in the x and y directions.
     bin_width = np.max(np.diff(place_bin_centers, axis=0)[:, 0])
@@ -270,7 +270,28 @@ def make_track(positions, bin_size: float = 1.0):
     return bin_width, bin_height, upper_left_points
 
 
-def create_2D_decode_view(position_time, position, posterior, bin_size, head_dir=None):
+def create_2D_decode_view(
+    position_time: np.ndarray,
+    position: np.ndarray,
+    posterior: xr.DataArray,
+    bin_size: float,
+    head_dir: np.ndarray = None,
+) -> vvf.TrackPositionAnimationV1:
+    """Creates a 2D decoding movie view
+
+    Parameters
+    ----------
+    position_time : np.ndarray, shape (n_time,)
+    position : np.ndarray, shape (n_time, 2)
+    posterior : xr.DataArray, shape (n_time, n_position_bins)
+    bin_size : float
+    head_dir : np.ndarray, optional
+
+    Returns
+    -------
+    view : vvf.TrackPositionAnimationV1
+
+    """
     position_time = np.squeeze(np.asarray(position_time)).copy()
     position = np.asarray(position)
     if head_dir is not None:
