@@ -501,7 +501,7 @@ def create_interactive_1D_decoding_figurl(
         color="black",
         width=1,
     )
-    vertical_panel = [
+    vertical_panel_content = [
         vv.LayoutItem(decode_view, stretch=1, title="Decode"),
         vv.LayoutItem(probability_view, stretch=1, title="Probability of State"),
         vv.LayoutItem(speed_view, stretch=1, title="Speed"),
@@ -517,7 +517,7 @@ def create_interactive_1D_decoding_figurl(
                 vv.Box(
                     direction="vertical",
                     show_titles=True,
-                    items=vertical_panel,
+                    items=vertical_panel_content,
                 )
             ),
         ],
@@ -595,11 +595,11 @@ def create_interactive_2D_decoding_figurl(
         width=1,
     )
 
-    vertical_panel1 = [
+    vertical_panel1_content = [
         vv.LayoutItem(decode_view, stretch=1, title="Decode"),
     ]
 
-    vertical_panel2 = [
+    vertical_panel2_content = [
         vv.LayoutItem(probability_view, stretch=1, title="Probability of State"),
         vv.LayoutItem(speed_view, stretch=1, title="Speed"),
         vv.LayoutItem(multiunit_firing_rate_view, stretch=1, title="Multiunit"),
@@ -612,16 +612,16 @@ def create_interactive_2D_decoding_figurl(
         items=[
             vv.LayoutItem(
                 vv.Box(
-                    direction="horizontal",
+                    direction="vertical",
                     show_titles=True,
-                    items=vertical_panel1,
+                    items=vertical_panel1_content,
                 )
             ),
             vv.LayoutItem(
                 vv.Box(
                     direction="vertical",
                     show_titles=True,
-                    items=vertical_panel2,
+                    items=vertical_panel2_content,
                 )
             ),
         ],
