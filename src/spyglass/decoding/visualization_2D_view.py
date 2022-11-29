@@ -26,10 +26,10 @@ def create_static_track_animation(
         "type": "TrackAnimation",
         "trackBinWidth": track_rect_width,
         "trackBinHeight": track_rect_height,
-        "trackBinULCorners": ul_corners.astype("float32"),
+        "trackBinULCorners": ul_corners.astype(np.float32),
         "totalRecordingFrameLength": len(timestamps),
-        "timestamps": timestamps.astype("float32"),
-        "positions": positions.astype("float32"),
+        "timestamps": timestamps.astype(np.float32),
+        "positions": positions.astype(np.float32),
         "xmin": np.min(ul_corners[0]),
         "xmax": np.max(ul_corners[0]) + track_rect_width,
         "ymin": np.min(ul_corners[1]),
@@ -39,7 +39,7 @@ def create_static_track_animation(
     }
     if head_dir is not None:
         # print(f'Loading head direction: {head_dir}')
-        data["headDirection"] = head_dir.astype("float32")
+        data["headDirection"] = head_dir.astype(np.float32)
     if compute_real_time_rate:
         median_delta_t = np.median(np.diff(timestamps))
         sampling_frequency_Hz = 1 / median_delta_t
@@ -209,13 +209,23 @@ def create_track_animation_object(*, static_track_animation: any):
             y_count=decoded_data["ycount"],
             bin_width=decoded_data["binWidth"],
             bin_height=decoded_data["binHeight"],
-            values=decoded_data["values"].astype("int16"),
+            values=decoded_data["values"].astype(np.int16),
             locations=decoded_data["locations"],
-            frame_bounds=decoded_data["frameBounds"].astype("int16"),
+            frame_bounds=decoded_data["frameBounds"].astype(np.int16),
         )
     else:
         decoded_data_obj = None
 
+    timestamp_start = (
+        static_track_animation["timestampStart"]
+        if "timestampStart" in static_track_animation
+        else None
+    )
+    head_direction = (
+        static_track_animation["headDirection"]
+        if "headDirection" in static_track_animation
+        else None
+    )
     return vvf.TrackPositionAnimationV1(
         track_bin_width=static_track_animation["trackBinWidth"],
         track_bin_height=static_track_animation["trackBinHeight"],
@@ -223,9 +233,7 @@ def create_track_animation_object(*, static_track_animation: any):
         total_recording_frame_length=static_track_animation[
             "totalRecordingFrameLength"
         ],
-        timestamp_start=static_track_animation["timestampStart"]
-        if "timestampStart" in static_track_animation
-        else None,
+        timestamp_start=timestamp_start,
         timestamps=static_track_animation["timestamps"],
         positions=static_track_animation["positions"],
         x_min=static_track_animation["xmin"],
@@ -233,9 +241,7 @@ def create_track_animation_object(*, static_track_animation: any):
         y_min=static_track_animation["ymin"],
         y_max=static_track_animation["ymax"],
         sampling_frequency_hz=static_track_animation["samplingFrequencyHz"],
-        head_direction=static_track_animation["headDirection"]
-        if "headDirection" in static_track_animation
-        else None,
+        head_direction=head_direction,
         decoded_data=decoded_data_obj,
     )
 
@@ -259,8 +265,9 @@ def make_track(positions, bin_size: float = 1.0):
     # centered on the values of place_bin_centers where track_interior = true.
     # Note, the original code uses Fortran ordering.
     true_ctrs = place_bin_centers[is_track_interior.ravel(order="F")]
+    upper_left_points = get_ul_corners(bin_width, bin_height, true_ctrs)
 
-    return (bin_width, bin_height, get_ul_corners(bin_width, bin_height, true_ctrs))
+    return bin_width, bin_height, upper_left_points
 
 
 def create_2D_decode_view(position_time, position, posterior, bin_size, head_dir=None):
@@ -269,7 +276,7 @@ def create_2D_decode_view(position_time, position, posterior, bin_size, head_dir
     if head_dir is not None:
         head_dir = np.squeeze(np.asarray(head_dir))
 
-    (track_width, track_height, upper_left_points) = make_track(
+    track_width, track_height, upper_left_points = make_track(
         position, bin_size=bin_size
     )
 
