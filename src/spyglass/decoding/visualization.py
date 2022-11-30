@@ -446,7 +446,7 @@ def create_interactive_1D_decoding_figurl(
     linear_position_info,
     marks,
     results,
-    position_name=["linear_position"],
+    position_name="linear_position",
     speed_name="head_speed",
     posterior_type="acausal_posterior",
     sampling_frequency=500,
