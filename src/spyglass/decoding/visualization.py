@@ -503,7 +503,7 @@ def create_interactive_1D_decoding_figurl(
         width=1,
     )
     vertical_panel_content = [
-        vv.LayoutItem(decode_view, stretch=1, title="Decode"),
+        vv.LayoutItem(decode_view, stretch=3, title="Decode"),
         vv.LayoutItem(probability_view, stretch=1, title="Probability of State"),
         vv.LayoutItem(speed_view, stretch=1, title="Speed"),
         vv.LayoutItem(multiunit_firing_rate_view, stretch=1, title="Multiunit"),
