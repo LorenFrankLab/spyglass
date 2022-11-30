@@ -443,6 +443,7 @@ def make_multi_environment_movie(
 
 def create_interactive_1D_decoding_figurl(
     position_info,
+    linear_position_info,
     marks,
     results,
     position_name=["linear_position"],
@@ -453,7 +454,7 @@ def create_interactive_1D_decoding_figurl(
 ):
     decode_view = create_1D_decode_view(
         posterior=results[posterior_type].sum("state"),
-        linear_position=position_info[position_name],
+        linear_position=linear_position_info[position_name],
     )
 
     probability_view = vv.TimeseriesGraph()
