@@ -106,11 +106,11 @@ def generate_linearization_function(
     return inner
 
 
-def discretize_and_trim(base_slice: xr.Dataset):
+def discretize_and_trim(base_slice: xr.DataArray):
     i = np.multiply(base_slice, 255).astype(np.uint8)
     i_stack = i.stack(unified_index=["time", "y_position", "x_position"])
 
-    return i_stack.where(i_stack.acausal_posterior > 0, drop=True).astype(np.uint8)
+    return i_stack.where(i_stack > 0, drop=True).astype(np.uint8)
 
 
 def get_positions(
