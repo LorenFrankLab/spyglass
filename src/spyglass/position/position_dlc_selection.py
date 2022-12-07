@@ -314,7 +314,7 @@ class DLCPosVideo(dj.Computed):
         )
         pose_estimation_key = {
             "nwb_file_name": key["nwb_file_name"],
-            "interval_list_name": key["interval_list_name"],
+            "epoch": epoch,
             "dlc_model_name": key["dlc_model_name"],
             "dlc_model_params_name": key["dlc_model_params_name"],
         }
@@ -332,7 +332,7 @@ class DLCPosVideo(dj.Computed):
             DLCPos()
             & {
                 "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["interval_list_name"],
+                "epoch": epoch,
                 "dlc_si_cohort_centroid": key["dlc_si_cohort_centroid"],
                 "dlc_centroid_params_name": key["dlc_centroid_params_name"],
                 "dlc_si_cohort_orientation": key["dlc_si_cohort_orientation"],
@@ -398,6 +398,7 @@ class DLCPosVideo(dj.Computed):
             orientation_mean,
             position_time,
             video_frame_inds,
+            frames=np.arange(params["frames"][0], params["frames"][1]),
             percent_frames=params["percent_frames"],
             output_video_filename=output_video_filename,
             cm_to_pixels=cm_per_pixel,
@@ -442,6 +443,7 @@ class DLCPosVideo(dj.Computed):
         orientation_mean,
         position_time,
         video_frame_inds,
+        frames,
         percent_frames,
         output_video_filename="output.mp4",
         cm_to_pixels=1.0,
@@ -482,10 +484,13 @@ class DLCPosVideo(dj.Computed):
         Writer = animation.writers["ffmpeg"]
         fps = int(np.round(frame_rate / video_slowdown))
         writer = Writer(fps=fps, bitrate=-1)
-        n_frames = int(len(video_frame_inds) * percent_frames)
+        if frames is not None:
+            n_frames = len(frames)
+        else:
+            n_frames = int(len(video_frame_inds) * percent_frames)
+            frames = np.arange(0, n_frames)
         print(f"video save path: {output_video_filename}\n{n_frames} frames in total.")
         ret, frame = video.read()
-        print(f"initial frame: {video.get(1)}")
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         if crop:
             frame = frame[crop[2] : crop[3], crop[0] : crop[1]].copy()
@@ -600,6 +605,8 @@ class DLCPosVideo(dj.Computed):
             def _update_plot(time_ind):
                 if time_ind == 0:
                     video.set(1, time_ind + 1)
+                else:
+                    video.set(1, time_ind - 1)
                 ret, frame = video.read()
                 if ret:
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -693,7 +700,7 @@ class DLCPosVideo(dj.Computed):
             movie = animation.FuncAnimation(
                 fig,
                 _update_plot,
-                frames=np.arange(0, n_frames),
+                frames=frames,
                 interval=1000 / fps,
                 blit=True,
             )
