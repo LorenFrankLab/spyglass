@@ -37,7 +37,7 @@ class DLCSmoothInterpCohort(dj.Computed):
 
     class BodyPart(dj.Part):
         definition = """
-        -> DLCSmoothInterpCohortSelection
+        -> DLCSmoothInterpCohort
         -> DLCSmoothInterp
         ---
         -> AnalysisNwbfile
