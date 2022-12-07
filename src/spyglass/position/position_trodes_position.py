@@ -69,6 +69,11 @@ class TrodesPosParams(dj.Manual):
             default = query.fetch1()
         return default
 
+    @classmethod
+    def get_accepted_params(cls):
+        default = cls.get_default()
+        return list(default["params"].keys())
+
 
 @schema
 class TrodesPosSelection(dj.Manual):
