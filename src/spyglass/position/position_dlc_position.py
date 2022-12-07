@@ -62,6 +62,7 @@ class DLCSmoothInterpParams(dj.Manual):
             },
             "interp_params": {
                 "likelihood_thresh": 0.95,
+                "max_cm_between_pts": 20,
             },
             "max_plausible_speed": 300.0,
             "speed_smoothing_std_dev": 0.100,
@@ -173,10 +174,10 @@ class DLCSmoothInterp(dj.Computed):
         is_too_fast = LED_speed > max_plausible_speed
         dlc_df.loc[idx[is_too_fast], idx[("x", "y")]] = np.nan
         # Interpolate the NaN points
-        dlc_df.loc[:, idx[("x", "y")]] = interpolate_nan(
-            position=dlc_df.loc[:, idx[("x", "y")]].to_numpy(),
-            time=dlc_df.index.to_numpy(),
-        )
+        # dlc_df.loc[:, idx[("x", "y")]] = interpolate_nan(
+        #     position=dlc_df.loc[:, idx[("x", "y")]].to_numpy(),
+        #     time=dlc_df.index.to_numpy(),
+        # )
         # get interpolated points
         print("interpolating across low likelihood times")
         interp_df = interp_pos(dlc_df, **params["interp_params"])
@@ -194,6 +195,22 @@ class DLCSmoothInterp(dj.Computed):
             sampling_rate=sampling_rate,
             **params["smoothing_params"],
         )
+        idx = pd.IndexSlice
+        # Final check to make sure no large jumps between consecutive time points
+        if "max_cm_between_pts" in params["interp_params"]:
+            max_dist_between = params["interp_params"]["max_cm_between_pts"]
+            x_and_y_diff = np.abs(
+                np.diff(smooth_df.loc[:, idx[("x", "y")]].to_numpy(), axis=0)
+            )
+            dist_btw_consec_inds = np.asarray(
+                [
+                    np.linalg.norm(x1 - x0)
+                    for x0, x1 in zip(x_and_y_diff[:-1], x_and_y_diff[1:])
+                ]
+            )
+            too_much_jump_inds = np.where(dist_btw_consec_inds > max_dist_between)[0]
+            pts_to_nan = smooth_df.index[too_much_jump_inds]
+            smooth_df.loc[idx[pts_to_nan], idx[("x", "y")]] = np.nan
         final_df = smooth_df.drop(["likelihood"], axis=1)
         final_df = final_df.rename_axis("time").reset_index()
         key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
@@ -226,31 +243,38 @@ def interp_pos(dlc_df, **kwargs):
     )
     subthresh_spans = get_span_start_stop(subthresh_inds)
     for ind, (span_start, span_stop) in enumerate(subthresh_spans):
+        if (span_stop + 1) >= len(dlc_df):
+            dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
+            dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
+            print(f"ind: {ind} has no endpoint with which to interpolate")
+            continue
+        if span_start < 1:
+            dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
+            dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
+            print(f"ind: {ind} has no startpoint with which to interpolate")
+            continue
         x = [dlc_df["x"].iloc[span_start - 1], dlc_df["x"].iloc[span_stop + 1]]
         y = [dlc_df["y"].iloc[span_start - 1], dlc_df["y"].iloc[span_stop + 1]]
         span_len = int(span_stop - span_start + 1)
+        start_time = dlc_df.index[span_start]
+        stop_time = dlc_df.index[span_stop]
         # TODO: determine if necessary to allow for these parameters
         if "max_pts_to_interp" in kwargs:
             if span_len > kwargs["max_pts_to_interp"]:
-                if "max_cm_to_interp" in kwargs:
-                    if (
-                        np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
-                        < kwargs["max_cm_to_interp"]
-                    ):
-                        change = np.linalg.norm(
-                            np.array([x[0], y[0]]) - np.array([x[1], y[1]])
-                        )
-                        print(
-                            f"ind: {ind} length: "
-                            f"{span_len} interpolated because minimal change:\n {change}cm"
-                        )
-                    else:
-                        dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
-                        dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
-                        print(f"ind: {ind} length: {span_len} " f"not interpolated")
-                        continue
-        start_time = dlc_df.index[span_start]
-        stop_time = dlc_df.index[span_stop]
+                dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
+                dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
+                print(f"ind: {ind} length: {span_len} " f"not interpolated")
+        if "max_cm_to_interp" in kwargs:
+            if (
+                np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
+                < kwargs["max_cm_to_interp"]
+            ):
+                change = np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
+            else:
+                dlc_df.loc[idx[start_time:stop_time], idx["x"]] = np.nan
+                dlc_df.loc[idx[start_time:stop_time], idx["y"]] = np.nan
+                print(f"ind: {ind} length: {span_len} " f"not interpolated")
+                continue
         xnew = np.interp(
             x=dlc_df.index[span_start : span_stop + 1],
             xp=[start_time, stop_time],
@@ -263,6 +287,7 @@ def interp_pos(dlc_df, **kwargs):
         )
         dlc_df.loc[idx[start_time:stop_time], idx["x"]] = xnew
         dlc_df.loc[idx[start_time:stop_time], idx["y"]] = ynew
+
     return dlc_df
 
 
@@ -270,9 +295,12 @@ def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
     # Need to get likelihood threshold from kwargs or make it a specified argument
     df_filter = dlc_df["likelihood"] < likelihood_thresh
     sub_thresh_inds = np.where(~np.isnan(dlc_df["likelihood"].where(df_filter)))[0]
+    nan_inds = np.where(np.isnan(dlc_df["x"]))[0]
+    all_nan_inds = list(set(sub_thresh_inds).union(set(nan_inds)))
+    all_nan_inds.sort()
     sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
     # TODO: add option to return sub_thresh_percent
-    return sub_thresh_inds
+    return all_nan_inds
 
 
 def get_span_start_stop(sub_thresh_inds):
@@ -291,7 +319,7 @@ def smooth_moving_avg(
     moving_avg_window = int(smoothing_duration * sampling_rate)
     xy_arr = interp_df.loc[:, idx[("x", "y")]].values
     smoothed_xy_arr = bn.move_mean(
-        xy_arr, window=moving_avg_window, axis=0, min_count=1
+        xy_arr, window=moving_avg_window, axis=0, min_count=2
     )
     interp_df.loc[:, idx["x"]], interp_df.loc[:, idx["y"]] = [
         *zip(*smoothed_xy_arr.tolist())
