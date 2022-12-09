@@ -399,6 +399,23 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
             / 2,
         )
     ]
+    # If green LED and red center LED are both not NaN
+    green_red_C = np.logical_and(~green_nans, ~red_C_nans)
+    if np.sum(green_red_C) > 0:
+        centroid[green_red_C] = [
+            *zip(
+                (
+                    pos_df.loc[idx[green_red_C], idx[red_led_C, "x"]]
+                    + pos_df.loc[idx[green_red_C], idx[green_led, "x"]]
+                )
+                / 2,
+                (
+                    pos_df.loc[idx[green_red_C], idx[red_led_C, "y"]]
+                    + pos_df.loc[idx[green_red_C], idx[green_led, "y"]]
+                )
+                / 2,
+            )
+        ]
     # If all given LEDs are NaN
     all_bad_mask = reduce(
         np.logical_and, (green_nans, red_C_nans, red_L_nans, red_R_nans)
