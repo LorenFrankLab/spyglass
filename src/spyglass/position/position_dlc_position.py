@@ -4,10 +4,6 @@ import numpy as np
 import pandas as pd
 import datajoint as dj
 import bottleneck as bn
-from position_tools import (
-    get_speed,
-    interpolate_nan,
-)
 from ..common.dj_helper_fn import fetch_nwb
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.common_behav import RawPosition
