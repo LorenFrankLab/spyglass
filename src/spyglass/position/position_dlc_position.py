@@ -82,6 +82,8 @@ class DLCSmoothInterpParams(dj.Manual):
 
     def insert1(self, key, **kwargs):
         if "params" in key:
+            if not "max_cm_between_pts" in key["params"]:
+                raise KeyError("max_cm_between_pts is a required parameter")
             if "smoothing_params" in key["params"]:
                 if "smooth_method" in key["params"]["smoothing_params"]:
                     smooth_method = key["params"]["smoothing_params"]["smooth_method"]
@@ -147,69 +149,60 @@ class DLCSmoothInterp(dj.Computed):
     """
 
     def make(self, key):
-        # Get labels to smooth from Parameters table
-        params = (DLCSmoothInterpParams() & key).fetch1("params")
-        # Get DLC output dataframe
-        print("fetching Pose Estimation Dataframe")
-        dlc_df = (DLCPoseEstimation.BodyPart() & key).fetch1_dataframe()
-        dt = np.median(np.diff(dlc_df.index.to_numpy()))
-        sampling_rate = 1 / dt
-        idx = pd.IndexSlice
-        if "max_cm_between_pts" in params:
-            bad_inds = get_jump_points(dlc_df, params["max_cm_between_pts"])
-            pts_to_nan = dlc_df.index[bad_inds]
-            print(
-                f"{len(pts_to_nan)} pts with jump more than {params['max_cm_between_pts']} cm"
+        from .dlc_utils import OutputLogger, infer_output_dir
+        output_dir = infer_output_dir(key=key, makedir=False)
+        with OutputLogger(
+            name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
+            path=f"{output_dir.as_posix()}/log.log",
+            print_console=False,
+        ) as logger:
+            logger.logger.info("-----------------------")
+            logger.logger.info("Interpolation and Smoothing")
+            # Get labels to smooth from Parameters table
+            params = (DLCSmoothInterpParams() & key).fetch1("params")
+            # Get DLC output dataframe
+            logger.logger.info("fetching Pose Estimation Dataframe")
+            dlc_df = (DLCPoseEstimation.BodyPart() & key).fetch1_dataframe()
+            dt = np.median(np.diff(dlc_df.index.to_numpy()))
+            sampling_rate = 1 / dt
+            df_w_nans, bad_inds = nan_inds(
+                dlc_df.copy(),
+                params["max_cm_between_pts"],
+                likelihood_thresh=params["interp_params"].pop("likelihood_thresh"),
             )
-            dlc_df.loc[idx[pts_to_nan], idx[("x", "y")]] = np.nan
-        subthresh_inds = get_subthresh_inds(
-            dlc_df.copy(),
-            likelihood_thresh=params["interp_params"].pop("likelihood_thresh"),
-        )
-        subthresh_spans = get_span_start_stop(subthresh_inds)
-        # Check to make sure all inds from bad_inds are in final subthresh_inds
-        if len(bad_inds) > 0:
-            all_subthresh_inds = [
-                item
-                for entry in subthresh_spans
-                for item in list(range(entry[0], entry[1] + 1))
+            nan_spans = get_span_start_stop(np.where(bad_inds)[0])
+            logger.logger.info("interpolating across low likelihood times")
+            interp_df = interp_pos(df_w_nans.copy(), nan_spans, **params["interp_params"])
+            if "smoothing_duration" in params["smoothing_params"]:
+                smoothing_duration = params["smoothing_params"].pop("smoothing_duration")
+            dt = np.median(np.diff(dlc_df.index.to_numpy()))
+            sampling_rate = 1 / dt
+            logger.logger.info("smoothing position")
+            smooth_func = _key_to_smooth_func_dict[
+                params["smoothing_params"]["smooth_method"]
             ]
-            assert all(
-                item in all_subthresh_inds for item in bad_inds
-            ), "not all indices from get_jump_points in subthresh_spans"
-        # get interpolated points
-        print("interpolating across low likelihood times")
-        interp_df = interp_pos(
-            dlc_df.copy(), subthresh_spans, **params["interp_params"]
-        )
-        if "smoothing_duration" in params["smoothing_params"]:
-            smoothing_duration = params["smoothing_params"].pop("smoothing_duration")
-        dt = np.median(np.diff(dlc_df.index.to_numpy()))
-        sampling_rate = 1 / dt
-        print("smoothing position")
-        smooth_func = _key_to_smooth_func_dict[
-            params["smoothing_params"]["smooth_method"]
-        ]
-        smooth_df = smooth_func(
-            interp_df,
-            smoothing_duration=smoothing_duration,
-            sampling_rate=sampling_rate,
-            **params["smoothing_params"],
-        )
-        final_df = smooth_df.drop(["likelihood"], axis=1)
-        final_df = final_df.rename_axis("time").reset_index()
-        key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
-        # Add dataframe to AnalysisNwbfile
-        nwb_analysis_file = AnalysisNwbfile()
-        key["dlc_smooth_interp_object_id"] = nwb_analysis_file.add_nwb_object(
-            analysis_file_name=key["analysis_file_name"],
-            nwb_object=final_df,
-        )
-        nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=key["analysis_file_name"],
-        )
-        self.insert1(key)
+            logger.logger.info("Smoothing using method: %s", str(params["smoothing_params"]["smooth_method"]))
+            smooth_df = smooth_func(
+                interp_df,
+                smoothing_duration=smoothing_duration,
+                sampling_rate=sampling_rate,
+                **params["smoothing_params"],
+            )
+            final_df = smooth_df.drop(["likelihood"], axis=1)
+            final_df = final_df.rename_axis("time").reset_index()
+            key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+            # Add dataframe to AnalysisNwbfile
+            nwb_analysis_file = AnalysisNwbfile()
+            key["dlc_smooth_interp_object_id"] = nwb_analysis_file.add_nwb_object(
+                analysis_file_name=key["analysis_file_name"],
+                nwb_object=final_df,
+            )
+            nwb_analysis_file.add(
+                nwb_file_name=key["nwb_file_name"],
+                analysis_file_name=key["analysis_file_name"],
+            )
+            self.insert1(key)
+            logger.logger.info("inserted entry into DLCSmoothInterp")
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
@@ -239,23 +232,28 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
         span_len = int(span_stop - span_start + 1)
         start_time = dlc_df.index[span_start]
         stop_time = dlc_df.index[span_stop]
-        # TODO: determine if necessary to allow for these parameters
         if "max_pts_to_interp" in kwargs:
             if span_len > kwargs["max_pts_to_interp"]:
                 dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
                 dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
-                print(f"ind: {ind} length: {span_len} " f"not interpolated")
+                print(
+                    f"inds {span_start} to {span_stop} "
+                    f"length: {span_len} not interpolated"
+                )
         if "max_cm_to_interp" in kwargs:
             if (
                 np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
-                < kwargs["max_cm_to_interp"]
+                > kwargs["max_cm_to_interp"]
             ):
-                change = np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
-            else:
                 dlc_df.loc[idx[start_time:stop_time], idx["x"]] = np.nan
                 dlc_df.loc[idx[start_time:stop_time], idx["y"]] = np.nan
-                print(f"ind: {ind} length: {span_len} " f"not interpolated")
+                change = np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
+                print(
+                    f"inds {span_start} to {span_stop + 1} "
+                    f"with change in position: {change:.2f} not interpolated"
+                )
                 continue
+
         xnew = np.interp(
             x=dlc_df.index[span_start : span_stop + 1],
             xp=[start_time, stop_time],
@@ -273,7 +271,7 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
 
 
 def get_jump_points(dlc_df: pd.DataFrame, max_dist_between):
-
+    print("Getting indices that jump more than {max_dist_between}cm")
     idx = pd.IndexSlice
     total_diff = np.zeros(shape=(len(dlc_df)))
     total_diff[1:] = np.sqrt(
@@ -283,90 +281,147 @@ def get_jump_points(dlc_df: pd.DataFrame, max_dist_between):
         )
     )
     too_much_jump_inds = np.where(total_diff > max_dist_between)[0]
+    return too_much_jump_inds
+
+
+def get_jump_spans(jump_inds):
+    print("Getting spans of consecutive indices that jump")
     inds_that_jump = []
     # Get spans of consecutive indices that jump
-    for k, g in groupby(enumerate(too_much_jump_inds), lambda x: x[1] - x[0]):
+    for k, g in groupby(enumerate(jump_inds), lambda x: x[1] - x[0]):
         group = list(map(itemgetter(1), g))
         inds_that_jump.append((group[0], group[-1]))
     # see if spans are within 2 inds of each other and combine
-    modified_jump_spans = []
-    for (start1, stop1), (start2, stop2) in zip(
-        inds_that_jump[:-1], inds_that_jump[1:]
-    ):
-        check_existing = [
-            entry
-            for entry in modified_jump_spans
-            if start1 in range(entry[0] - 2, entry[1] + 2)
-        ]
-        if len(check_existing) > 0:
-            modify_ind = modified_jump_spans.index(check_existing[0])
+    if len(inds_that_jump) > 1:
+        modified_jump_spans = []
+        for (start1, stop1), (start2, stop2) in zip(
+            inds_that_jump[:-1], inds_that_jump[1:]
+        ):
+            check_existing = [
+                entry
+                for entry in modified_jump_spans
+                if start1 in range(entry[0] - 2, entry[1] + 2)
+            ]
+            if len(check_existing) > 0:
+                modify_ind = modified_jump_spans.index(check_existing[0])
+                if (start2 - stop1) <= 2:
+                    modified_jump_spans[modify_ind] = (check_existing[0][0], stop2)
+                else:
+                    modified_jump_spans[modify_ind] = (check_existing[0][0], stop1)
+                    modified_jump_spans.append((start2, stop2))
+                continue
             if (start2 - stop1) <= 2:
-                modified_jump_spans[modify_ind] = (check_existing[0][0], stop2)
+                modified_jump_spans.append((start1, stop2))
             else:
-                modified_jump_spans[modify_ind] = (check_existing[0][0], stop1)
+                modified_jump_spans.append((start1, stop1))
                 modified_jump_spans.append((start2, stop2))
-            continue
-        if (start2 - stop1) <= 2:
-            modified_jump_spans.append((start1, stop2))
-        else:
-            modified_jump_spans.append((start1, stop1))
-            modified_jump_spans.append((start2, stop2))
-    all_inds_that_jump = [
-        item for entry in inds_that_jump for item in list(range(entry[0], entry[1] + 1))
-    ]
-    all_modified_jump_spans = [
-        item
-        for entry in modified_jump_spans
-        for item in list(range(entry[0], entry[1] + 1))
-    ]
-    assert all(
-        item in all_modified_jump_spans for item in all_inds_that_jump
-    ), "not all entries to NaN are represented by modified_jump_spans"
+        all_inds_that_jump = [
+            item
+            for entry in inds_that_jump
+            for item in list(range(entry[0], entry[1] + 1))
+        ]
+        all_modified_jump_spans = [
+            item
+            for entry in modified_jump_spans
+            for item in list(range(entry[0], entry[1] + 1))
+        ]
+        assert all(
+            item in all_modified_jump_spans for item in all_inds_that_jump
+        ), "not all entries to NaN are represented by modified_jump_spans"
+        return modified_jump_spans
+    else:
+        return inds_that_jump
+
+
+def nan_inds(dlc_df: pd.DataFrame, max_dist_between, likelihood_thresh: float):
+    idx = pd.IndexSlice
+    # Could either NaN sub-likelihood threshold inds here and then not consider in jumping...
+    # OR just keep in back pocket when checking jumps against last good point
+    jump_points = get_jump_points(dlc_df, max_dist_between)
+    jump_spans = get_jump_spans(jump_points)
+    subthresh_inds = get_subthresh_inds(dlc_df, likelihood_thresh=likelihood_thresh)
+    df_subthresh_indices = dlc_df.index[subthresh_inds]
+    dlc_df.loc[idx[df_subthresh_indices], idx[("x", "y")]] = np.nan
     # To further determine which indices are the original point and which are jump points
     # There could be a more efficient method of doing this
-    bad_inds = []
-    for span in modified_jump_spans:
-        if span[0] <= 5:
-            x_mean, y_mean = np.nanmean(
-                dlc_df.loc[:, idx[("x", "y")]]
-                .iloc[span[1] + 1 : span[1] + 5]
-                .to_numpy(),
-                axis=0,
+    # screen inds for jumps to baseline
+    bad_inds_mask = np.zeros(len(dlc_df), dtype=bool)
+    bad_inds_mask[subthresh_inds] = True
+    for span in jump_spans:
+        previous_good_inds = np.where(
+            np.logical_and(
+                ~np.isnan(dlc_df.iloc[: span[0]].x), ~bad_inds_mask[: span[0]]
             )
-        if span[1] >= (len(dlc_df) - 5):
-            x_mean, y_mean = np.nanmean(
-                dlc_df.loc[:, idx[("x", "y")]]
-                .iloc[span[0] - 5 : span[0] - 1]
-                .to_numpy(),
-                axis=0,
-            )
+        )[0]
+        if len(previous_good_inds) > 1:
+            last_good_ind = np.max(previous_good_inds)
         else:
-            start_x, start_y = np.nanmean(
-                dlc_df.loc[:, idx[("x", "y")]]
-                .iloc[span[0] - 5 : span[0] - 1]
-                .to_numpy(),
-                axis=0,
-            )
-            stop_x, stop_y = np.nanmean(
-                dlc_df.loc[:, idx[("x", "y")]]
-                .iloc[span[1] + 1 : span[1] + 5]
-                .to_numpy(),
-                axis=0,
-            )
-            x_mean = np.nanmean([start_x, stop_x])
-            y_mean = np.nanmean([start_y, stop_y])
+            bad_inds_mask[np.arange(span[0], span[1] + 1)] = True
+            continue
+        good_x, good_y = dlc_df.loc[idx[dlc_df.index[last_good_ind]], ["x", "y"]]
         bad_x = np.where(
-            (dlc_df.x.iloc[span[0] : span[1] + 1] < int(x_mean - max_dist_between))
-            | (dlc_df.x.iloc[span[0] : span[1] + 1] > int(x_mean + max_dist_between))
+            (dlc_df.x.iloc[span[0] : span[1] + 1] < int(good_x - max_dist_between))
+            | (dlc_df.x.iloc[span[0] : span[1] + 1] > int(good_x + max_dist_between))
         )[0]
         bad_y = np.where(
-            (dlc_df.y.iloc[span[0] : span[1] + 1] < int(y_mean - max_dist_between))
-            | (dlc_df.y.iloc[span[0] : span[1] + 1] > int(y_mean + max_dist_between))
+            (dlc_df.y.iloc[span[0] : span[1] + 1] < int(good_y - max_dist_between))
+            | (dlc_df.y.iloc[span[0] : span[1] + 1] > int(good_y + max_dist_between))
         )[0]
-        bad_inds.extend(
+        bad_inds_mask[
             np.arange(span[0], span[1] + 1)[list(set(bad_x).union(set(bad_y)))]
-        )
-    return bad_inds
+        ] = True
+    print(
+        f"{np.sum(bad_inds_mask) - len(subthresh_inds)} pts with jump more than "
+        f"{max_dist_between} cm"
+    )
+    print(f"{len(subthresh_inds)} pts with low likelihood")
+    dlc_df.loc[bad_inds_mask, idx[("x", "y")]] = np.nan
+    return dlc_df, bad_inds_mask
+
+
+# def nan_inds(dlc_df: pd.DataFrame, max_dist_between, likelihood_thresh: float):
+#     temp_df = dlc_df.copy()
+#     idx = pd.IndexSlice
+#     # Could either NaN sub-likelihood threshold inds here and then not consider in jumping...
+#     # OR just keep in back pocket when checking jumps against last good point
+#     jump_points = get_jump_points(dlc_df, max_dist_between)
+#     jump_spans = get_jump_spans(jump_points)
+#     subthresh_inds = get_subthresh_inds(dlc_df, likelihood_thresh=likelihood_thresh)
+#     df_subthresh_indices = dlc_df.index[subthresh_inds]
+#     dlc_df.loc[idx[df_subthresh_indices], idx[("x", "y")]] = np.nan
+#     # To further determine which indices are the original point and which are jump points
+#     # There could be a more efficient method of doing this
+#     # screen inds for jumps to baseline
+#     bad_inds_mask = np.zeros(len(dlc_df), dtype=bool)
+#     bad_inds_mask[subthresh_inds] = True
+#     for span in jump_spans:
+#         previous_good_inds = np.logical_and(
+#             np.where(~dlc_df.iloc[: span[0]].loc[:, idx[("x", "y")]].isna())[0],
+#             ~bad_inds_mask,
+#         )
+
+#         if len(previous_good_inds) < 1:
+#             bad_inds_mask[np.arange(span[0], span[1] + 1)] = True
+#             continue
+#         last_good_ind = np.max(previous_good_inds)
+#         good_x, good_y = dlc_df.loc[idx[dlc_df.index[last_good_ind]], ["x", "y"]]
+#         bad_x = np.where(
+#             (dlc_df.x.iloc[span[0] : span[1] + 1] < int(good_x - max_dist_between))
+#             | (dlc_df.x.iloc[span[0] : span[1] + 1] > int(good_x + max_dist_between))
+#         )[0]
+#         bad_y = np.where(
+#             (dlc_df.y.iloc[span[0] : span[1] + 1] < int(good_y - max_dist_between))
+#             | (dlc_df.y.iloc[span[0] : span[1] + 1] > int(good_y + max_dist_between))
+#         )[0]
+#         bad_inds_mask[
+#             np.arange(span[0], span[1] + 1)[list(set(bad_x).union(set(bad_y)))]
+#         ] = True
+#     print(
+#         f"{np.sum(bad_inds_mask)} pts with jump more than "
+#         f"{max_dist_between} cm or low likelihood"
+#     )
+#     dlc_df.loc[bad_inds_mask, idx[("x", "y")]] = np.nan
+#     return dlc_df, bad_inds_mask
 
 
 def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
