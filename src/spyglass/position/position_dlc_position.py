@@ -150,6 +150,7 @@ class DLCSmoothInterp(dj.Computed):
 
     def make(self, key):
         from .dlc_utils import OutputLogger, infer_output_dir
+
         output_dir = infer_output_dir(key=key, makedir=False)
         with OutputLogger(
             name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
@@ -172,16 +173,23 @@ class DLCSmoothInterp(dj.Computed):
             )
             nan_spans = get_span_start_stop(np.where(bad_inds)[0])
             logger.logger.info("interpolating across low likelihood times")
-            interp_df = interp_pos(df_w_nans.copy(), nan_spans, **params["interp_params"])
+            interp_df = interp_pos(
+                df_w_nans.copy(), nan_spans, **params["interp_params"]
+            )
             if "smoothing_duration" in params["smoothing_params"]:
-                smoothing_duration = params["smoothing_params"].pop("smoothing_duration")
+                smoothing_duration = params["smoothing_params"].pop(
+                    "smoothing_duration"
+                )
             dt = np.median(np.diff(dlc_df.index.to_numpy()))
             sampling_rate = 1 / dt
             logger.logger.info("smoothing position")
             smooth_func = _key_to_smooth_func_dict[
                 params["smoothing_params"]["smooth_method"]
             ]
-            logger.logger.info("Smoothing using method: %s", str(params["smoothing_params"]["smooth_method"]))
+            logger.logger.info(
+                "Smoothing using method: %s",
+                str(params["smoothing_params"]["smooth_method"]),
+            )
             smooth_df = smooth_func(
                 interp_df,
                 smoothing_duration=smoothing_duration,

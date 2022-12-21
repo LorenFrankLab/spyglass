@@ -54,6 +54,7 @@ class DLCSmoothInterpCohort(dj.Computed):
 
     def make(self, key):
         from .dlc_utils import OutputLogger, infer_output_dir
+
         output_dir = infer_output_dir(key=key, makedir=False)
         with OutputLogger(
             name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
