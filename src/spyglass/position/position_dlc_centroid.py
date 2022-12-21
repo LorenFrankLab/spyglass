@@ -5,7 +5,7 @@ import datajoint as dj
 import pynwb
 from ..common.dj_helper_fn import fetch_nwb
 from ..common.common_nwbfile import AnalysisNwbfile
-from position_tools import get_velocity
+from position_tools import get_velocity, get_distance
 from .position_dlc_position import DLCSmoothInterpParams
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from ..common.common_behav import RawPosition
@@ -46,6 +46,7 @@ class DLCCentroidParams(dj.Manual):
                 "point1": "greenLED",
                 "point2": "redLED_C",
             },
+            "max_LED_separation": 12,
             "speed_smoothing_std_dev": 0.100,
         }
         cls.insert1({"dlc_centroid_params_name": "default", "params": params}, **kwargs)
@@ -100,6 +101,14 @@ class DLCCentroidParams(dj.Manual):
         else:
             raise KeyError("'centroid_method' needs to be provided as a parameter")
 
+        if "max_LED_separation" in params:
+            if not isinstance(params["max_LED_separation"], (int, float)):
+                raise TypeError(
+                    f"parameter 'max_LED_separation' is type: "
+                    f"{type(params['max_LED_separation'])}, "
+                    f"it should be one of type (float, int)"
+                )
+
         super().insert1(key, **kwargs)
 
 
@@ -132,172 +141,196 @@ class DLCCentroid(dj.Computed):
     """
 
     def make(self, key):
-        # Get labels to smooth from Parameters table
-        cohort_entries = DLCSmoothInterpCohort.BodyPart & key
-        params = (DLCCentroidParams() & key).fetch1("params")
-        centroid_method = params.pop("centroid_method")
-        bodyparts_avail = cohort_entries.fetch("bodypart")
-        speed_smoothing_std_dev = params.pop("speed_smoothing_std_dev")
-        # TODO, generalize key naming
-        if centroid_method == "four_led_centroid":
-            centroid_func = _key_to_func_dict[centroid_method]
-            if "greenLED" in params["points"]:
-                assert (
-                    params["points"]["greenLED"] in bodyparts_avail
-                ), f'{params["points"]["greenLED"]} not a bodypart used in this model'
-            else:
-                raise ValueError(
-                    "A green led needs to be specified for the 4 led centroid method"
-                )
-            if "redLED_L" in params["points"]:
-                assert (
-                    params["points"]["redLED_L"] in bodyparts_avail
-                ), f'{params["points"]["redLED_L"]} not a bodypart used in this model'
-            else:
-                raise ValueError(
-                    "A left red led needs to be specified for the 4 led centroid method"
-                )
-            if "redLED_C" in params["points"]:
-                assert (
-                    params["points"]["redLED_C"] in bodyparts_avail
-                ), f'{params["points"]["redLED_C"]} not a bodypart used in this model'
-            else:
-                raise ValueError(
-                    "A center red led needs to be specified for the 4 led centroid method"
-                )
-            if "redLED_R" in params["points"]:
-                assert (
-                    params["points"]["redLED_R"] in bodyparts_avail
-                ), f'{params["points"]["redLED_R"]} not a bodypart used in this model'
-            else:
-                raise ValueError(
-                    "A right red led needs to be specified for the 4 led centroid method"
-                )
-            bodyparts_to_use = [
-                params["points"]["greenLED"],
-                params["points"]["redLED_L"],
-                params["points"]["redLED_C"],
-                params["points"]["redLED_R"],
-            ]
+        from .dlc_utils import OutputLogger, infer_output_dir
 
-        elif centroid_method == "two_pt_centroid":
-            centroid_func = _key_to_func_dict[centroid_method]
-            if "point1" in params["points"]:
-                assert (
-                    params["points"]["point1"] in bodyparts_avail
-                ), f'{params["points"]["point1"]} not a bodypart used in this model'
+        output_dir = infer_output_dir(key=key, makedir=False)
+        with OutputLogger(
+            name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
+            path=f"{output_dir.as_posix()}/log.log",
+            print_console=False,
+        ) as logger:
+            logger.logger.info("-----------------------")
+            logger.logger.info("Centroid Caluclation")
+            # Get labels to smooth from Parameters table
+            cohort_entries = DLCSmoothInterpCohort.BodyPart & key
+            params = (DLCCentroidParams() & key).fetch1("params")
+            centroid_method = params.pop("centroid_method")
+            bodyparts_avail = cohort_entries.fetch("bodypart")
+            speed_smoothing_std_dev = params.pop("speed_smoothing_std_dev")
+            # TODO, generalize key naming
+            if centroid_method == "four_led_centroid":
+                centroid_func = _key_to_func_dict[centroid_method]
+                if "greenLED" in params["points"]:
+                    assert (
+                        params["points"]["greenLED"] in bodyparts_avail
+                    ), f'{params["points"]["greenLED"]} not a bodypart used in this model'
+                else:
+                    raise ValueError(
+                        "A green led needs to be specified for the 4 led centroid method"
+                    )
+                if "redLED_L" in params["points"]:
+                    assert (
+                        params["points"]["redLED_L"] in bodyparts_avail
+                    ), f'{params["points"]["redLED_L"]} not a bodypart used in this model'
+                else:
+                    raise ValueError(
+                        "A left red led needs to be specified for the 4 led centroid method"
+                    )
+                if "redLED_C" in params["points"]:
+                    assert (
+                        params["points"]["redLED_C"] in bodyparts_avail
+                    ), f'{params["points"]["redLED_C"]} not a bodypart used in this model'
+                else:
+                    raise ValueError(
+                        "A center red led needs to be specified for the 4 led centroid method"
+                    )
+                if "redLED_R" in params["points"]:
+                    assert (
+                        params["points"]["redLED_R"] in bodyparts_avail
+                    ), f'{params["points"]["redLED_R"]} not a bodypart used in this model'
+                else:
+                    raise ValueError(
+                        "A right red led needs to be specified for the 4 led centroid method"
+                    )
+                bodyparts_to_use = [
+                    params["points"]["greenLED"],
+                    params["points"]["redLED_L"],
+                    params["points"]["redLED_C"],
+                    params["points"]["redLED_R"],
+                ]
+
+            elif centroid_method == "two_pt_centroid":
+                centroid_func = _key_to_func_dict[centroid_method]
+                if "point1" in params["points"]:
+                    assert (
+                        params["points"]["point1"] in bodyparts_avail
+                    ), f'{params["points"]["point1"]} not a bodypart used in this model'
+                else:
+                    raise ValueError(
+                        "point1 needs to be specified for the 2 pt centroid method"
+                    )
+                if "point2" in params["points"]:
+                    assert (
+                        params["points"]["point2"] in bodyparts_avail
+                    ), f'{params["points"]["point2"]} not a bodypart used in this model'
+                else:
+                    raise ValueError(
+                        "point2 needs to be specified for the 2 pt centroid method"
+                    )
+                bodyparts_to_use = [
+                    params["points"]["point1"],
+                    params["points"]["point2"],
+                ]
+
+            elif centroid_method == "one_pt_centroid":
+                centroid_func = _key_to_func_dict[centroid_method]
+                if "point1" in params["points"]:
+                    assert (
+                        params["points"]["point1"] in bodyparts_avail
+                    ), f'{params["points"]["point1"]} not a bodypart used in this model'
+                else:
+                    raise ValueError(
+                        "point1 needs to be specified for the 1 pt centroid method"
+                    )
+                bodyparts_to_use = [params["points"]["point1"]]
+
             else:
-                raise ValueError(
-                    "point1 needs to be specified for the 2 pt centroid method"
-                )
-            if "point2" in params["points"]:
-                assert (
-                    params["points"]["point2"] in bodyparts_avail
-                ), f'{params["points"]["point2"]} not a bodypart used in this model'
-            else:
-                raise ValueError(
-                    "point2 needs to be specified for the 2 pt centroid method"
-                )
-            bodyparts_to_use = [params["points"]["point1"], params["points"]["point2"]]
+                raise ValueError("Please specify a centroid method to use.")
+            pos_df = pd.concat(
+                {
+                    bodypart: (
+                        DLCSmoothInterpCohort.BodyPart
+                        & {**key, **{"bodypart": bodypart}}
+                    ).fetch1_dataframe()
+                    for bodypart in bodyparts_to_use
+                },
+                axis=1,
+            )
+            dt = np.median(np.diff(pos_df.index.to_numpy()))
+            sampling_rate = 1 / dt
+            logger.logger.info("Calculating centroid with %s", str(centroid_method))
+            centroid = centroid_func(pos_df, **params)
+            logger.logger.info("getting velocity")
+            velocity = get_velocity(
+                centroid,
+                time=pos_df.index.to_numpy(),
+                sigma=speed_smoothing_std_dev,
+                sampling_frequency=sampling_rate,
+            )  # cm/s
+            speed = np.sqrt(np.sum(velocity**2, axis=1))  # cm/s
+            # Create dataframe
+            velocity_df = pd.DataFrame(
+                np.concatenate((velocity, speed[:, np.newaxis]), axis=1),
+                columns=["velocity_x", "velocity_y", "speed"],
+                index=pos_df.index.to_numpy(),
+            )
+            final_df = pd.DataFrame(
+                centroid,
+                columns=["position_x", "position_y"],
+                index=pos_df.index.to_numpy(),
+            )
+            idx = pd.IndexSlice
+            total_nan = np.sum(
+                final_df.loc[:, idx[("position_x", "position_y")]].isna().any(axis=1)
+            )
+            pretrack_nan = np.sum(
+                final_df.iloc[:1000]
+                .loc[:, idx[("position_x", "position_y")]]
+                .isna()
+                .any(axis=1)
+            )
+            logger.logger.info("total NaNs in centroid dataset: %d", total_nan)
+            logger.logger.info(
+                "NaNs in centroid dataset before ind 1000: %d", pretrack_nan
+            )
+            position = pynwb.behavior.Position()
+            velocity = pynwb.behavior.BehavioralTimeSeries()
+            spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
+            METERS_PER_CM = 0.01
+            position.create_spatial_series(
+                name="position",
+                timestamps=final_df.index.to_numpy(),
+                conversion=METERS_PER_CM,
+                data=final_df.loc[:, idx[("position_x", "position_y")]].to_numpy(),
+                reference_frame=spatial_series.reference_frame,
+                comments=spatial_series.comments,
+                description="x_position, y_position",
+            )
+            velocity.create_timeseries(
+                name="velocity",
+                timestamps=velocity_df.index.to_numpy(),
+                conversion=METERS_PER_CM,
+                unit="m/s",
+                data=velocity_df.loc[
+                    :, idx[("velocity_x", "velocity_y", "speed")]
+                ].to_numpy(),
+                comments=spatial_series.comments,
+                description="x_velocity, y_velocity, speed",
+            )
+            velocity.create_timeseries(
+                name="video_frame_ind",
+                unit="index",
+                timestamps=final_df.index.to_numpy(),
+                data=pos_df[pos_df.columns.levels[0][0]].video_frame_ind.to_numpy(),
+                description="video_frame_ind",
+                comments="no comments",
+            )
+            # Add to Analysis NWB file
+            key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+            nwb_analysis_file = AnalysisNwbfile()
+            key["dlc_position_object_id"] = nwb_analysis_file.add_nwb_object(
+                key["analysis_file_name"], position
+            )
+            key["dlc_velocity_object_id"] = nwb_analysis_file.add_nwb_object(
+                key["analysis_file_name"], velocity
+            )
 
-        elif centroid_method == "one_pt_centroid":
-            centroid_func = _key_to_func_dict[centroid_method]
-            if "point1" in params["points"]:
-                assert (
-                    params["points"]["point1"] in bodyparts_avail
-                ), f'{params["points"]["point1"]} not a bodypart used in this model'
-            else:
-                raise ValueError(
-                    "point1 needs to be specified for the 1 pt centroid method"
-                )
-            bodyparts_to_use = [params["points"]["point1"]]
-
-        else:
-            raise ValueError("Please specify a centroid method to use.")
-        pos_df = pd.concat(
-            {
-                bodypart: (
-                    DLCSmoothInterpCohort.BodyPart & {**key, **{"bodypart": bodypart}}
-                ).fetch1_dataframe()
-                for bodypart in bodyparts_to_use
-            },
-            axis=1,
-        )
-        dt = np.median(np.diff(pos_df.index.to_numpy()))
-        sampling_rate = 1 / dt
-        # TODO: not sure where to implement the distance check given potentially 4 bodyparts
-        # dist_between_LEDs = get_distance(back_LED, front_LED)
-        # is_too_separated = dist_between_LEDs >= max_LED_separation
-
-        # back_LED[is_too_separated] = np.nan
-        # front_LED[is_too_separated] = np.nan
-        centroid = centroid_func(pos_df, **params["points"])
-        velocity = get_velocity(
-            centroid,
-            time=pos_df.index.to_numpy(),
-            sigma=speed_smoothing_std_dev,
-            sampling_frequency=sampling_rate,
-        )  # cm/s
-        speed = np.sqrt(np.sum(velocity**2, axis=1))  # cm/s
-        # Create dataframe
-        velocity_df = pd.DataFrame(
-            np.concatenate((velocity, speed[:, np.newaxis]), axis=1),
-            columns=["velocity_x", "velocity_y", "speed"],
-            index=pos_df.index.to_numpy(),
-        )
-        final_df = pd.DataFrame(
-            centroid,
-            columns=["position_x", "position_y"],
-            index=pos_df.index.to_numpy(),
-        )
-        position = pynwb.behavior.Position()
-        velocity = pynwb.behavior.BehavioralTimeSeries()
-        spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
-        METERS_PER_CM = 0.01
-        idx = pd.IndexSlice
-        position.create_spatial_series(
-            name="position",
-            timestamps=final_df.index.to_numpy(),
-            conversion=METERS_PER_CM,
-            data=final_df.loc[:, idx[("position_x", "position_y")]].to_numpy(),
-            reference_frame=spatial_series.reference_frame,
-            comments=spatial_series.comments,
-            description="x_position, y_position",
-        )
-        velocity.create_timeseries(
-            name="velocity",
-            timestamps=velocity_df.index.to_numpy(),
-            conversion=METERS_PER_CM,
-            unit="m/s",
-            data=velocity_df.loc[
-                :, idx[("velocity_x", "velocity_y", "speed")]
-            ].to_numpy(),
-            comments=spatial_series.comments,
-            description="x_velocity, y_velocity, speed",
-        )
-        velocity.create_timeseries(
-            name="video_frame_ind",
-            unit="index",
-            timestamps=final_df.index.to_numpy(),
-            data=pos_df[pos_df.columns.levels[0][0]].video_frame_ind.to_numpy(),
-            description="video_frame_ind",
-            comments="no comments",
-        )
-        # Add to Analysis NWB file
-        key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
-        nwb_analysis_file = AnalysisNwbfile()
-        key["dlc_position_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], position
-        )
-        key["dlc_velocity_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], velocity
-        )
-
-        nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=key["analysis_file_name"],
-        )
-        self.insert1(key)
+            nwb_analysis_file.add(
+                nwb_file_name=key["nwb_file_name"],
+                analysis_file_name=key["analysis_file_name"],
+            )
+            self.insert1(key)
+            logger.logger.info("inserted entry into DLCCentroid")
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
@@ -372,18 +405,24 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
     centroid = np.zeros(shape=(len(pos_df), 2))
     idx = pd.IndexSlice
     # TODO: this feels messy, clean-up
-    green_led = params.pop("greenLED", None)
-    red_led_C = params.pop("redLED_C", None)
-    red_led_L = params.pop("redLED_L", None)
-    red_led_R = params.pop("redLED_R", None)
+    green_led = params["points"].pop("greenLED", None)
+    red_led_C = params["points"].pop("redLED_C", None)
+    red_led_L = params["points"].pop("redLED_L", None)
+    red_led_R = params["points"].pop("redLED_R", None)
     green_nans = pos_df.loc[:, idx[green_led, ("x", "y")]].isna().any(axis=1)
     red_C_nans = pos_df.loc[:, idx[red_led_C, ("x", "y")]].isna().any(axis=1)
     red_L_nans = pos_df.loc[:, idx[red_led_L, ("x", "y")]].isna().any(axis=1)
     red_R_nans = pos_df.loc[:, idx[red_led_R, ("x", "y")]].isna().any(axis=1)
     # TODO: implement checks to make sure not rewriting previously set index in centroid
     # If all given LEDs are not NaN
+    dist_between_green_red = get_distance(
+        pos_df.loc[:, idx[red_led_C, ("x", "y")]].to_numpy(),
+        pos_df.loc[:, idx[green_led, ("x", "y")]].to_numpy(),
+    )
+    g_c_is_too_separated = dist_between_green_red >= params["max_LED_separation"]
     all_good_mask = reduce(
-        np.logical_and, (~green_nans, ~red_C_nans, ~red_L_nans, ~red_R_nans)
+        np.logical_and,
+        (~green_nans, ~red_C_nans, ~red_L_nans, ~red_R_nans, ~g_c_is_too_separated),
     )
     centroid[all_good_mask] = [
         *zip(
@@ -400,7 +439,7 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         )
     ]
     # If green LED and red center LED are both not NaN
-    green_red_C = np.logical_and(~green_nans, ~red_C_nans)
+    green_red_C = np.logical_and(~green_nans, ~red_C_nans, ~g_c_is_too_separated)
     if np.sum(green_red_C) > 0:
         centroid[green_red_C] = [
             *zip(
@@ -431,8 +470,14 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
             )
         ]
     # If green and red center LEDs are NaN, but red left and red right LEDs are not
+    dist_between_left_right = get_distance(
+        pos_df.loc[:, idx[red_led_L, ("x", "y")]].to_numpy(),
+        pos_df.loc[:, idx[red_led_R, ("x", "y")]].to_numpy(),
+    )
+    l_r_is_too_separated = dist_between_left_right >= params["max_LED_separation"]
     no_green_no_red_C_red_L_red_R = reduce(
-        np.logical_and, (green_nans, red_C_nans, ~red_L_nans, ~red_R_nans)
+        np.logical_and,
+        (green_nans, red_C_nans, ~red_L_nans, ~red_R_nans, ~l_r_is_too_separated),
     )
     if np.sum(no_green_no_red_C_red_L_red_R) > 0:
         centroid[no_green_no_red_C_red_L_red_R] = [
@@ -454,8 +499,27 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
             )
         ]
     # If red center LED is NaN, but green, red left, and right LEDs are not
+    dist_between_left_green = get_distance(
+        pos_df.loc[:, idx[red_led_L, ("x", "y")]].to_numpy(),
+        pos_df.loc[:, idx[green_led, ("x", "y")]].to_numpy(),
+    )
+    dist_between_right_green = get_distance(
+        pos_df.loc[:, idx[red_led_R, ("x", "y")]].to_numpy(),
+        pos_df.loc[:, idx[green_led, ("x", "y")]].to_numpy(),
+    )
+    l_g_is_too_separated = dist_between_left_green >= params["max_LED_separation"]
+    r_g_is_too_separated = dist_between_right_green >= params["max_LED_separation"]
     green_red_L_red_R_no_red_C = reduce(
-        np.logical_and, (~green_nans, red_C_nans, ~red_L_nans, ~red_R_nans)
+        np.logical_and,
+        (
+            ~green_nans,
+            red_C_nans,
+            ~red_L_nans,
+            ~red_R_nans,
+            ~l_r_is_too_separated,
+            ~l_g_is_too_separated,
+            ~r_g_is_too_separated,
+        ),
     )
     if np.sum(green_red_L_red_R_no_red_C) > 0:
         midpoint = (
@@ -486,7 +550,8 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         ]
     # If red center and left LED is NaN, but green and red right LED are not
     green_red_R_no_red_C_no_red_L = reduce(
-        np.logical_and, (~green_nans, red_C_nans, red_L_nans, ~red_R_nans)
+        np.logical_and,
+        (~green_nans, red_C_nans, red_L_nans, ~red_R_nans, ~r_g_is_too_separated),
     )
     if np.sum(green_red_R_no_red_C_no_red_L) > 0:
         centroid[green_red_R_no_red_C_no_red_L] = [
@@ -509,7 +574,8 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         ]
     # If red center and right LED is NaN, but green and red left LED are not
     green_red_L_no_red_C_no_red_R = reduce(
-        np.logical_and, (~green_nans, red_C_nans, ~red_L_nans, red_R_nans)
+        np.logical_and,
+        (~green_nans, red_C_nans, ~red_L_nans, red_R_nans, ~l_g_is_too_separated),
     )
     if np.sum(green_red_L_no_red_C_no_red_R) > 0:
         centroid[green_red_L_no_red_C_no_red_R] = [
@@ -530,6 +596,28 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
                 / 2,
             )
         ]
+    # If all LEDS are NaN except red left LED
+    red_L_no_green_no_red_C_no_red_R = reduce(
+        np.logical_and, (green_nans, red_C_nans, ~red_L_nans, red_R_nans)
+    )
+    if np.sum(red_L_no_green_no_red_C_no_red_R) > 0:
+        centroid[red_L_no_green_no_red_C_no_red_R] = [
+            *zip(
+                pos_df.loc[idx[red_L_no_green_no_red_C_no_red_R], idx[red_led_L, "x"]],
+                pos_df.loc[idx[red_L_no_green_no_red_C_no_red_R], idx[red_led_L, "y"]],
+            )
+        ]
+    # If all LEDS are NaN except red right LED
+    red_R_no_green_no_red_C_no_red_L = reduce(
+        np.logical_and, (green_nans, red_C_nans, red_L_nans, ~red_R_nans)
+    )
+    if np.sum(red_R_no_green_no_red_C_no_red_L) > 0:
+        centroid[red_R_no_green_no_red_C_no_red_L] = [
+            *zip(
+                pos_df.loc[idx[red_R_no_green_no_red_C_no_red_L], idx[red_led_R, "x"]],
+                pos_df.loc[idx[red_R_no_green_no_red_C_no_red_L], idx[red_led_R, "y"]],
+            )
+        ]
     # If all red LEDs are NaN, but green LED is not
     green_no_red = reduce(
         np.logical_and, (~green_nans, red_C_nans, red_L_nans, red_R_nans)
@@ -541,6 +629,17 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
                 pos_df.loc[idx[green_no_red], idx[green_led, "y"]],
             )
         ]
+    too_separated_inds = reduce(
+        np.logical_or,
+        (
+            g_c_is_too_separated,
+            l_r_is_too_separated,
+            l_g_is_too_separated,
+            r_g_is_too_separated,
+        ),
+    )
+    if np.sum(too_separated_inds) > 0:
+        centroid[too_separated_inds, :] = np.nan
     return centroid
 
 
@@ -569,11 +668,16 @@ def two_pt_centroid(pos_df: pd.DataFrame, **params):
 
     idx = pd.IndexSlice
     centroid = np.zeros(shape=(len(pos_df), 2))
-    PT1 = params.pop("point1", None)
-    PT2 = params.pop("point2", None)
+    PT1 = params["points"].pop("point1", None)
+    PT2 = params["points"].pop("point2", None)
     pt1_nans = pos_df.loc[:, idx[PT1, ("x", "y")]].isna().any(axis=1)
     pt2_nans = pos_df.loc[:, idx[PT2, ("x", "y")]].isna().any(axis=1)
-    all_good_mask = np.logical_and(~pt1_nans, ~pt2_nans)
+    dist_between_points = get_distance(
+        pos_df.loc[:, idx[PT1, ("x", "y")]].to_numpy(),
+        pos_df.loc[:, idx[PT2, ("x", "y")]].to_numpy(),
+    )
+    is_too_separated = dist_between_points >= params["max_LED_separation"]
+    all_good_mask = np.logical_and(~pt1_nans, ~pt2_nans, ~is_too_separated)
     centroid[all_good_mask] = [
         *zip(
             (
@@ -610,6 +714,9 @@ def two_pt_centroid(pos_df: pd.DataFrame, **params):
     all_bad_mask = np.logical_and(pt1_nans, pt2_nans)
     if np.sum(all_bad_mask) > 0:
         centroid[all_bad_mask, :] = np.nan
+    # If LEDs are too far apart
+    if np.sum(is_too_separated) > 0:
+        centroid[is_too_separated, :] = np.nan
 
     return centroid
 
@@ -636,7 +743,7 @@ def one_pt_centroid(pos_df: pd.DataFrame, **params):
         centroid[0] is the x coord and centroid[1] is the y coord
     """
     idx = pd.IndexSlice
-    PT1 = params.pop("point1", None)
+    PT1 = params["points"].pop("point1", None)
     centroid = pos_df.loc[:, idx[PT1, ("x", "y")]].to_numpy()
     return centroid
 
