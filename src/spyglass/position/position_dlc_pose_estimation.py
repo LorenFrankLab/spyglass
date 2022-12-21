@@ -1,13 +1,16 @@
 from pathlib import Path
 import os
 from datetime import datetime
+import matplotlib.pyplot as plt
 import pandas as pd
 import datajoint as dj
+from IPython.display import display
 from ..common.dj_helper_fn import fetch_nwb
 from ..common.common_behav import VideoFile, RawPosition
 from ..common.common_nwbfile import AnalysisNwbfile
 from .position_dlc_project import BodyPart
 from .position_dlc_model import DLCModel
+from .dlc_utils import OutputLogger, infer_output_dir
 
 schema = dj.schema("position_dlc_pose_estimation")
 
@@ -24,28 +27,31 @@ class DLCPoseEstimationSelection(dj.Manual):
     pose_estimation_params=null  : longblob     # analyze_videos params, if not default
     """
 
-    # I think it makes more sense to just use a set output directory of 'nimbus/deeplabcut/output/'
-    # Could also make it a subfolder of the project if that seems simpler...
     @classmethod
-    def infer_output_dir(cls, key, video_filename: str):
-        """Return the expected pose_estimation_output_dir.
+    def get_video_crop(cls, video_path):
+        import cv2
+        import matplotlib.pyplot as plt
+        import numpy as np
 
-        Parameters
-        ----------
-        key: DataJoint key specifying a pairing of VideoFile and Model.
-        relative (bool): Report directory relative to get_dlc_processed_data_dir().
-        mkdir (bool): Default False. Make directory if it doesn't exist.
-        """
-        # TODO: add check to make sure interval_list_name refers to a single epoch
-        # Or make key include epoch in and of itself instead of interval_list_name
-        if ".h264" in video_filename:
-            video_filename = video_filename.split(".")[0]
-        output_dir = Path(os.getenv("DLC_OUTPUT_PATH")) / Path(
-            f"{video_filename}_model_" + key["dlc_model_name"].replace(" ", "-")
+        cap = cv2.VideoCapture(video_path)
+        ret, frame = cap.read()
+        fig, ax = plt.subplots(figsize=(20, 10))
+        ax.imshow(frame)
+        xlims = ax.get_xlim()
+        ylims = ax.get_ylim()
+        ax.set_xticks(np.arange(xlims[0], xlims[-1], 50))
+        ax.set_yticks(np.arange(ylims[0], ylims[-1], -50))
+        ax.grid(visible=True, color="white", lw=0.5, alpha=0.5)
+        display(fig)
+        crop_input = input(
+            "Please enter the crop parameters for your video in format xmin, xmax, ymin, ymax, or 'none'\n"
         )
-        if not os.path.exists(output_dir):
-            output_dir.mkdir(parents=True, exist_ok=True)
-        return output_dir
+        plt.close()
+        if crop_input.lower() == "none":
+            return None
+        crop_ints = [int(val) for val in crop_input.split(",")]
+        assert all(isinstance(val, int) for val in crop_ints)
+        return crop_ints
 
     @classmethod
     def insert_estimation_task(
@@ -53,11 +59,12 @@ class DLCPoseEstimationSelection(dj.Manual):
         key,
         task_mode="trigger",
         params: dict = None,
+        check_crop=None,
         skip_duplicates=True,
     ):
-        """Insert PoseEstimationTask in inferred output dir.
-
-        Based on the convention / video_dir / device_{}_recording_{}_model_{}
+        """
+        Insert PoseEstimationTask in inferred output dir.
+        From Datajoint Elements
 
         Parameters
         ----------
@@ -67,26 +74,35 @@ class DLCPoseEstimationSelection(dj.Manual):
             videotype, gputouse, save_as_csv, batchsize, cropping, TFGPUinference,
             dynamic, robust_nframes, allow_growth, use_shelve
         """
-        # TODO: figure out if a separate video_key is needed
-        # without portions of key that refer to model
         from .dlc_utils import get_video_path, check_videofile
 
         video_path, video_filename, _, _ = get_video_path(key)
-        output_dir = cls.infer_output_dir(key, video_filename=video_filename)
-        video_dir = os.path.dirname(video_path) + "/"
-        video_path = check_videofile(
-            video_path=video_dir, video_filename=video_filename
-        )[0]
-        cls.insert1(
-            {
-                **key,
-                "task_mode": task_mode,
-                "pose_estimation_params": params,
-                "video_path": video_path,
-                "pose_estimation_output_dir": output_dir,
-            },
-            skip_duplicates=skip_duplicates,
-        )
+        output_dir = infer_output_dir(key)
+        with OutputLogger(
+            name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
+            path=f"{output_dir.as_posix()}/log.log",
+        ) as logger:
+            logger.logger.info("Pose Estimation Selection")
+            video_dir = os.path.dirname(video_path) + "/"
+            logger.logger.info("video_dir: %s", video_dir)
+            video_path = check_videofile(
+                video_path=video_dir, video_filename=video_filename
+            )[0]
+            if check_crop is not None:
+                params["cropping"] = cls.get_video_crop(
+                    video_path=video_path.as_posix()
+                )
+            cls.insert1(
+                {
+                    **key,
+                    "task_mode": task_mode,
+                    "pose_estimation_params": params,
+                    "video_path": video_path,
+                    "pose_estimation_output_dir": output_dir,
+                },
+                skip_duplicates=skip_duplicates,
+            )
+        logger.logger.info("inserted entry into Pose Estimation Selection")
         return {**key, "task_mode": task_mode}
 
 
@@ -120,85 +136,99 @@ class DLCPoseEstimation(dj.Computed):
         """.populate() method will launch training for each PoseEstimationTask"""
         from . import dlc_reader
 
-        # ID model and directories
-        dlc_model = (DLCModel & key).fetch1()
-        bodyparts = (DLCModel.BodyPart & key).fetch("bodypart")
-        task_mode, analyze_video_params, video_path, output_dir = (
-            DLCPoseEstimationSelection & key
-        ).fetch1(
-            "task_mode",
-            "pose_estimation_params",
-            "video_path",
-            "pose_estimation_output_dir",
-        )
-        analyze_video_params = analyze_video_params or {}
-
-        project_path = dlc_model["project_path"]
-
-        # Trigger PoseEstimation
-        if task_mode == "trigger":
-            dlc_reader.do_pose_estimation(
-                video_path,
-                dlc_model,
-                project_path,
-                output_dir,
-                **analyze_video_params,
+        output_dir = infer_output_dir(key=key, makedir=False)
+        with OutputLogger(
+            name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
+            path=f"{output_dir.as_posix()}/log.log",
+        ) as logger:
+            logger.logger.info("----------------------")
+            logger.logger.info("Pose Estimation")
+            # ID model and directories
+            dlc_model = (DLCModel & key).fetch1()
+            bodyparts = (DLCModel.BodyPart & key).fetch("bodypart")
+            task_mode, analyze_video_params, video_path, output_dir = (
+                DLCPoseEstimationSelection & key
+            ).fetch1(
+                "task_mode",
+                "pose_estimation_params",
+                "video_path",
+                "pose_estimation_output_dir",
             )
-        dlc_result = dlc_reader.PoseEstimation(output_dir)
-        creation_time = datetime.fromtimestamp(dlc_result.creation_time).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+            analyze_video_params = analyze_video_params or {}
 
-        print("getting raw position")
-        interval_list_name = f"pos {key['epoch']-1} valid times"
-        raw_position = (
-            RawPosition()
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": interval_list_name,
-            }
-        ).fetch_nwb()[0]
-        raw_pos_df = pd.DataFrame(
-            data=raw_position["raw_position"].data,
-            index=pd.Index(raw_position["raw_position"].timestamps, name="time"),
-            columns=raw_position["raw_position"].description.split(", "),
-        )
-        # TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,
-        # which also has timestamps
-        key["meters_per_pixel"] = raw_position["raw_position"].conversion
+            project_path = dlc_model["project_path"]
 
-        # Insert entry into DLCPoseEstimation
-        self.insert1({**key, "pose_estimation_time": creation_time})
-        meters_per_pixel = key["meters_per_pixel"]
-        del key["meters_per_pixel"]
-        body_parts = dlc_result.df.columns.levels[0]
-        body_parts_df = {}
-        # Insert dlc pose estimation into analysis NWB file for each body part.
-        for body_part in bodyparts:
-            if body_part in body_parts:
-                body_parts_df[body_part] = pd.DataFrame.from_dict(
-                    {
-                        c: dlc_result.df.get(body_part).get(c).values
-                        for c in dlc_result.df.get(body_part).columns
-                    }
+            # Trigger PoseEstimation
+            if task_mode == "trigger":
+                dlc_reader.do_pose_estimation(
+                    video_path,
+                    dlc_model,
+                    project_path,
+                    output_dir,
+                    **analyze_video_params,
                 )
-        for body_part, part_df in body_parts_df.items():
-            print("converting to cm")
-            part_df = convert_to_cm(part_df, meters_per_pixel)
-            print("adding timestamps to DataFrame")
-            part_df = add_timestamps(part_df, raw_pos_df.copy())
-            key["bodypart"] = body_part
-            key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
-            nwb_analysis_file = AnalysisNwbfile()
-            key["dlc_pose_estimation_object_id"] = nwb_analysis_file.add_nwb_object(
-                analysis_file_name=key["analysis_file_name"],
-                nwb_object=part_df,
+            dlc_result = dlc_reader.PoseEstimation(output_dir)
+            creation_time = datetime.fromtimestamp(dlc_result.creation_time).strftime(
+                "%Y-%m-%d %H:%M:%S"
             )
-            nwb_analysis_file.add(
-                nwb_file_name=key["nwb_file_name"],
-                analysis_file_name=key["analysis_file_name"],
+
+            logger.logger.info("getting raw position")
+            interval_list_name = f"pos {key['epoch']-1} valid times"
+            raw_position = (
+                RawPosition()
+                & {
+                    "nwb_file_name": key["nwb_file_name"],
+                    "interval_list_name": interval_list_name,
+                }
+            ).fetch_nwb()[0]
+            raw_pos_df = pd.DataFrame(
+                data=raw_position["raw_position"].data,
+                index=pd.Index(raw_position["raw_position"].timestamps, name="time"),
+                columns=raw_position["raw_position"].description.split(", "),
             )
-            self.BodyPart.insert1(key)
+            # TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,
+            # which also has timestamps
+            key["meters_per_pixel"] = raw_position["raw_position"].conversion
+
+            # Insert entry into DLCPoseEstimation
+            logger.logger.info(
+                "Inserting %s, epoch %02d into DLCPoseEsimation",
+                key["nwb_file_name"],
+                key["epoch"],
+            )
+            self.insert1({**key, "pose_estimation_time": creation_time})
+            meters_per_pixel = key["meters_per_pixel"]
+            del key["meters_per_pixel"]
+            body_parts = dlc_result.df.columns.levels[0]
+            body_parts_df = {}
+            # Insert dlc pose estimation into analysis NWB file for each body part.
+            for body_part in bodyparts:
+                if body_part in body_parts:
+                    body_parts_df[body_part] = pd.DataFrame.from_dict(
+                        {
+                            c: dlc_result.df.get(body_part).get(c).values
+                            for c in dlc_result.df.get(body_part).columns
+                        }
+                    )
+            for body_part, part_df in body_parts_df.items():
+                logger.logger.info("converting to cm")
+                part_df = convert_to_cm(part_df, meters_per_pixel)
+                logger.logger.info("adding timestamps to DataFrame")
+                part_df = add_timestamps(part_df, raw_pos_df.copy())
+                key["bodypart"] = body_part
+                key["analysis_file_name"] = AnalysisNwbfile().create(
+                    key["nwb_file_name"]
+                )
+                nwb_analysis_file = AnalysisNwbfile()
+                key["dlc_pose_estimation_object_id"] = nwb_analysis_file.add_nwb_object(
+                    analysis_file_name=key["analysis_file_name"],
+                    nwb_object=part_df,
+                )
+                nwb_analysis_file.add(
+                    nwb_file_name=key["nwb_file_name"],
+                    analysis_file_name=key["analysis_file_name"],
+                )
+                self.BodyPart.insert1(key)
 
     def fetch_dataframe(self, *attrs, **kwargs):
         entries = (self.BodyPart & self).fetch("KEY")
