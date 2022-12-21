@@ -122,6 +122,7 @@ class DLCModelTraining(dj.Computed):
         """Launch training for each train.TrainingTask training_id via `.populate()`."""
         # Not sure what either of these accomplish
         model_prefix = (DLCModelTrainingSelection & key).fetch1("model_prefix")
+        from .dlc_utils import OutputLogger
         from deeplabcut import train_network, create_training_dataset
         from . import dlc_reader
         from deeplabcut.utils.auxiliaryfunctions import (
@@ -137,83 +138,97 @@ class DLCModelTraining(dj.Computed):
             from deeplabcut.utils.auxiliaryfunctions import (
                 GetModelFolder as get_model_folder,
             )
-        config_path = (DLCProject() & key).fetch1("config_path")
-        dlc_config = read_config(config_path)
-        project_path = dlc_config["project_path"]
-        key["project_path"] = project_path
-        # ---- Build and save DLC configuration (yaml) file ----
-        _, dlc_config = dlc_reader.read_yaml(project_path)
-        if not dlc_config:
+        config_path, project_name = (DLCProject() & key).fetch1(
+            "config_path", "project_name"
+        )
+        with OutputLogger(
+            name="DLC_project_{project_name}_training",
+            path=f"{os.path.dirname(config_path)}/log.log",
+            print_console=True,
+        ) as logger:
             dlc_config = read_config(config_path)
-        dlc_config.update((DLCModelTrainingParams & key).fetch1("params"))
-        dlc_config.update(
-            {
-                "project_path": Path(project_path).as_posix(),
-                "modelprefix": model_prefix,
-                "train_fraction": dlc_config["TrainingFraction"][
-                    int(dlc_config["trainingsetindex"])
-                ],
-                "training_filelist_datajoint": [  # don't overwrite origin video_sets
-                    Path(fp).as_posix()
-                    for fp in (DLCProject.File & key).fetch("file_path")
-                ],
+            project_path = dlc_config["project_path"]
+            key["project_path"] = project_path
+            # ---- Build and save DLC configuration (yaml) file ----
+            _, dlc_config = dlc_reader.read_yaml(project_path)
+            if not dlc_config:
+                dlc_config = read_config(config_path)
+            dlc_config.update((DLCModelTrainingParams & key).fetch1("params"))
+            dlc_config.update(
+                {
+                    "project_path": Path(project_path).as_posix(),
+                    "modelprefix": model_prefix,
+                    "train_fraction": dlc_config["TrainingFraction"][
+                        int(dlc_config["trainingsetindex"])
+                    ],
+                    "training_filelist_datajoint": [  # don't overwrite origin video_sets
+                        Path(fp).as_posix()
+                        for fp in (DLCProject.File & key).fetch("file_path")
+                    ],
+                }
+            )
+            # Write dlc config file to base project folder
+            # TODO: need to make sure this will work
+            dlc_cfg_filepath = dlc_reader.save_yaml(project_path, dlc_config)
+            # ---- create training dataset ----
+            training_dataset_input_args = list(
+                inspect.signature(create_training_dataset).parameters
+            )
+            training_dataset_kwargs = {
+                k: v for k, v in dlc_config.items() if k in training_dataset_input_args
             }
-        )
-        # Write dlc config file to base project folder
-        # TODO: need to make sure this will work
-        dlc_cfg_filepath = dlc_reader.save_yaml(project_path, dlc_config)
-        # ---- create training dataset ----
-        training_dataset_input_args = list(
-            inspect.signature(create_training_dataset).parameters
-        )
-        training_dataset_kwargs = {
-            k: v for k, v in dlc_config.items() if k in training_dataset_input_args
-        }
-        create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
-        # ---- Trigger DLC model training job ----
-        train_network_input_args = list(inspect.signature(train_network).parameters)
-        train_network_kwargs = {
-            k: v for k, v in dlc_config.items() if k in train_network_input_args
-        }
-        for k in ["shuffle", "trainingsetindex", "maxiters"]:
-            if k in train_network_kwargs:
-                train_network_kwargs[k] = int(train_network_kwargs[k])
-        try:
-            train_network(dlc_cfg_filepath, **train_network_kwargs)
-        except KeyboardInterrupt:  # Instructions indicate to train until interrupt
-            print("DLC training stopped via Keyboard Interrupt")
+            create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
+            # ---- Trigger DLC model training job ----
+            train_network_input_args = list(inspect.signature(train_network).parameters)
+            train_network_kwargs = {
+                k: v for k, v in dlc_config.items() if k in train_network_input_args
+            }
+            for k in ["shuffle", "trainingsetindex", "maxiters"]:
+                if k in train_network_kwargs:
+                    train_network_kwargs[k] = int(train_network_kwargs[k])
+            try:
+                train_network(dlc_cfg_filepath, **train_network_kwargs)
+            except KeyboardInterrupt:  # Instructions indicate to train until interrupt
+                logger.logger.info("DLC training stopped via Keyboard Interrupt")
 
-        snapshots = list(
-            (
-                project_path
-                / get_model_folder(
-                    trainFraction=dlc_config["train_fraction"],
-                    shuffle=dlc_config["shuffle"],
-                    cfg=dlc_config,
-                    modelprefix=dlc_config["modelprefix"],
-                )
-                / "train"
-            ).glob("*index*")
-        )
-        max_modified_time = 0
-        # DLC goes by snapshot magnitude when judging 'latest' for evaluation
-        # Here, we mean most recently generated
-        for snapshot in snapshots:
-            modified_time = os.path.getmtime(snapshot)
-            if modified_time > max_modified_time:
-                latest_snapshot = int(snapshot.stem[9:])
-                max_modified_time = modified_time
+            snapshots = list(
+                (
+                    project_path
+                    / get_model_folder(
+                        trainFraction=dlc_config["train_fraction"],
+                        shuffle=dlc_config["shuffle"],
+                        cfg=dlc_config,
+                        modelprefix=dlc_config["modelprefix"],
+                    )
+                    / "train"
+                ).glob("*index*")
+            )
+            max_modified_time = 0
+            # DLC goes by snapshot magnitude when judging 'latest' for evaluation
+            # Here, we mean most recently generated
+            for snapshot in snapshots:
+                modified_time = os.path.getmtime(snapshot)
+                if modified_time > max_modified_time:
+                    latest_snapshot = int(snapshot.stem[9:])
+                    max_modified_time = modified_time
 
-        self.insert1(
-            {**key, "latest_snapshot": latest_snapshot, "config_template": dlc_config}
-        )
-        from .position_dlc_model import DLCModelSource
+            self.insert1(
+                {
+                    **key,
+                    "latest_snapshot": latest_snapshot,
+                    "config_template": dlc_config,
+                }
+            )
+            from .position_dlc_model import DLCModelSource
 
-        dlc_model_name = f"{key['project_name']}_{key['dlc_training_params_name']}_{key['training_id']:02d}"
-        DLCModelSource.insert_entry(
-            dlc_model_name=dlc_model_name,
-            project_name=key["project_name"],
-            source="FromUpstream",
-            key=key,
-            skip_duplicates=True,
+            dlc_model_name = f"{key['project_name']}_{key['dlc_training_params_name']}_{key['training_id']:02d}"
+            DLCModelSource.insert_entry(
+                dlc_model_name=dlc_model_name,
+                project_name=key["project_name"],
+                source="FromUpstream",
+                key=key,
+                skip_duplicates=True,
+            )
+        print(
+            f"Inserted {dlc_model_name} from {key['project_name']} into DLCModelSource"
         )
