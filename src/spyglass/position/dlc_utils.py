@@ -7,6 +7,8 @@ import pwd
 import grp
 from collections import abc
 from typing import Union
+from contextlib import redirect_stdout
+import logging
 import numpy as np
 import datajoint as dj
 
@@ -47,6 +49,83 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
         for filename in filenames:
             os.chown(os.path.join(dirpath, filename), uid, gid)
             os.chmod(os.path.join(dirpath, filename), mode)
+
+
+class OutputLogger:
+    def __init__(self, name, path, level="INFO", **kwargs):
+        self.logger = self.setup_logger(name, path, **kwargs)
+        self.name = self.logger.name
+        self.level = getattr(logging, level)
+
+    def setup_logger(self, name_logfile, path_logfile, print_console=False):
+        """
+        Sets up a logger for each function that outputs to a file
+        and optionally, the console
+        """
+        logger = logging.getLogger(name_logfile)
+        # check to see if handlers already exist for this logger
+        if logger.handlers:
+            for handler in logger.handlers:
+                # if it's a file handler
+                # type is used instead of isinstance,
+                # which doesn't work properly with logging.StreamHandler
+                if type(handler) == logging.FileHandler:
+                    # if paths don't match, change file handler path
+                    if not os.path.samefile(handler.baseFilename, path_logfile):
+                        handler.close()
+                        logger.removeHandler(handler)
+                        file_handler = self.get_file_handler(path_logfile)
+                        logger.addHandler(file_handler)
+                # if a stream handler exists and
+                # if print_console is False remove streamHandler
+                if type(handler) == logging.StreamHandler:
+                    if not print_console:
+                        handler.close()
+                        logger.removeHandler(handler)
+            if print_console and not any(
+                type(handler) == logging.StreamHandler for handler in logger.handlers
+            ):
+                logger.addHandler(self.get_stream_handler())
+
+        else:
+            file_handler = self.get_file_handler(path_logfile)
+            logger.addHandler(file_handler)
+            if print_console:
+                logger.addHandler(self.get_stream_handler())
+        logger.setLevel(logging.INFO)
+        return logger
+
+    def get_file_handler(self, path):
+        file_handler = logging.FileHandler(path, mode="a")
+        file_handler.setFormatter(self.get_formatter())
+        return file_handler
+
+    def get_stream_handler(self):
+        streamHandler = logging.StreamHandler()
+        streamHandler.setFormatter(self.get_formatter())
+        return streamHandler
+
+    def get_formatter(self):
+        return logging.Formatter(
+            "[%(asctime)s] in %(pathname)s, line %(lineno)d: %(message)s",
+            datefmt="%d-%b-%y %H:%M:%S",
+        )
+
+    def write(self, msg):
+        if msg and not msg.isspace():
+            self.logger.log(self.level, msg)
+
+    def flush(self):
+        pass
+
+    def __enter__(self):
+        self._redirector = redirect_stdout(self)
+        self._redirector.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # let contextlib do any exception handling here
+        self._redirector.__exit__(exc_type, exc_value, traceback)
 
 
 def get_dlc_root_data_dir():
@@ -132,6 +211,26 @@ def find_root_directory(root_directories, full_path):
             "No valid root directory found (from {})"
             " for {}".format(root_directories, full_path)
         )
+
+
+def infer_output_dir(key, makedir=True):
+    """Return the expected pose_estimation_output_dir.
+
+    Parameters
+    ----------
+    key: DataJoint key specifying a pairing of VideoFile and Model.
+    """
+    # TODO: add check to make sure interval_list_name refers to a single epoch
+    # Or make key include epoch in and of itself instead of interval_list_name
+    nwb_file_name = key["nwb_file_name"].split("_.")[0]
+    output_dir = pathlib.Path(os.getenv("DLC_OUTPUT_PATH")) / pathlib.Path(
+        f"{nwb_file_name}/{nwb_file_name}_{key['epoch']:02}"
+        f"_model_" + key["dlc_model_name"].replace(" ", "-")
+    )
+    if makedir is True:
+        if not os.path.exists(output_dir):
+            output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def _to_Path(path):
@@ -265,11 +364,20 @@ def _convert_mp4(
     if ".1" in dest_filename:
         dest_filename = os.path.splitext(dest_filename)[0]
     dest_path = pathlib.Path(f"{dest_path}/{dest_filename}.{videotype}")
-    convert_command = (
-        f"ffmpeg -vsync passthrough -i {video_path.as_posix()} "
-        f"-codec copy {dest_path.as_posix()}"
+    convert_command = [
+        "ffmpeg",
+        "-vsync",
+        "passthrough",
+        "-i",
+        f"{video_path.as_posix()}",
+        "-codec",
+        "copy",
+        f"{dest_path.as_posix()}",
+    ]
+    p1 = subprocess.Popen(
+        convert_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
     )
-    os.system(convert_command)
+    out, err = p1.communicate()
     print(f"finished converting {filename}")
     print(
         f"Checking that number of packets match between {orig_filename} and {dest_filename}"
@@ -304,11 +412,11 @@ def _convert_mp4(
         ]
         if count_frames:
             p = subprocess.Popen(
-                frames_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                frames_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
             )
         else:
             p = subprocess.Popen(
-                packets_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                packets_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
             )
         out, err = p.communicate()
         num_packets.append(int(out.decode("utf-8").split("\n")[0]))
