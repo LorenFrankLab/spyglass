@@ -99,6 +99,7 @@ There are a few places where a name needs to be given to objects. Follow these r
    - This step requires a [GPG signing key](https://docs.github.com/en/authentication/managing-commit-signature-verification/generating-a-new-gpg-key).
 5. Publish the new release tag. Run `git push origin ${release}`.
 6. Generate distribution packages and upload them to PyPI following [these instructions](https://packaging.python.org/en/latest/tutorials/packaging-projects/#generating-distribution-archives).
+7. Make a new release on GitHub with the new release tag: https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository
 
 
 ### TODO
