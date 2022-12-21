@@ -41,7 +41,7 @@ from ripple_detection import (
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.common.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.decoding.core import (
     convert_epoch_interval_name_to_position_interval_name,
     convert_valid_times_to_slice,

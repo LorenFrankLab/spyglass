@@ -48,7 +48,7 @@ from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session, SessionGroup
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
-from .nwb_helper_fn import (
+from ..utils.nwb_helper_fn import (
     close_nwb_files,
     estimate_sampling_rate,
     get_data_interface,

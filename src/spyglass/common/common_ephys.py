@@ -17,8 +17,8 @@ from .common_interval import (
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_region import BrainRegion  # noqa: F401
 from .common_session import Session  # noqa: F401
-from .dj_helper_fn import fetch_nwb  # dj_replace
-from .nwb_helper_fn import (
+from ..utils.dj_helper_fn import fetch_nwb  # dj_replace
+from ..utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_data_interface,
     get_electrode_indices,
