@@ -5,7 +5,7 @@ from .common_device import CameraDevice, DataAcquisitionDevice, Probe
 from .common_lab import Institution, Lab, LabMember
 from .common_nwbfile import Nwbfile
 from .common_subject import Subject
-from .nwb_helper_fn import get_nwb_file
+from ..utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_session")
 
