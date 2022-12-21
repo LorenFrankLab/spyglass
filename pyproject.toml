@@ -66,6 +66,6 @@ position = [
     "ffmpeg",
     "torchvision",
     "torchaudio",
-    "cudatoolkit=11.3",
+    "cudatoolkit==11.3",
     "deeplabcut",
 ]
