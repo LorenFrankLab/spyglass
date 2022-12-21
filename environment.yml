@@ -11,7 +11,7 @@ dependencies:
   - dask>=2.30
   - pip>=20.2.*
   - position_tools
-  - track_linearization
+  - track_linearization>=2.3
   - replay_trajectory_classification
   - ripple_detection
   - trajectory_analysis_tools
