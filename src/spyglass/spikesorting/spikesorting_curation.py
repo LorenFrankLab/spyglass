@@ -10,6 +10,8 @@ from typing import List
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
+import spikeinterface.preprocessing as sp
+import spikeinterface.qualitymetrics as sq
 
 from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
@@ -312,7 +314,7 @@ class Waveforms(dj.Computed):
         waveform_params = (WaveformParameters & key).fetch1("waveform_params")
         if "whiten" in waveform_params:
             if waveform_params.pop("whiten"):
-                recording = si.preprocessing.whiten(recording)
+                recording = sp.whiten(recording)
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key["waveform_extractor_path"] = str(
@@ -550,12 +552,12 @@ def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
     min_isi_ms = metric_params["min_isi_ms"]
 
     # Extract the total number of spikes that violated the isi_threshold for each unit
-    isi_violation_counts = si.qualitymetrics.compute_isi_violations(
+    isi_violation_counts = sq.compute_isi_violations(
         waveform_extractor, isi_threshold_ms=isi_threshold_ms, min_isi_ms=min_isi_ms
     ).isi_violations_count
 
     # Extract the total number of spikes from each unit. The number of ISIs is one less than this
-    num_spikes = si.qualitymetrics.compute_num_spikes(waveform_extractor)
+    num_spikes = sq.compute_num_spikes(waveform_extractor)
 
     # Calculate the fraction of ISIs that are violations
     isi_viol_frac_metric = {
@@ -593,16 +595,16 @@ def _get_peak_channel(
 
 def _get_num_spikes(waveform_extractor: si.WaveformExtractor, this_unit_id: int):
     """Computes the number of spikes for each unit."""
-    all_spikes = st.qualitymetrics.compute_num_spikes(waveform_extractor)
+    all_spikes = sq.compute_num_spikes(waveform_extractor)
     cluster_spikes = all_spikes[this_unit_id]
     return cluster_spikes
 
 
 _metric_name_to_func = {
-    "snr": si.qualitymetrics.compute_snrs,
+    "snr": sq.compute_snrs,
     "isi_violation": _compute_isi_violation_fractions,
-    "nn_isolation": si.qualitymetrics.nearest_neighbors_isolation,
-    "nn_noise_overlap": si.qualitymetrics.nearest_neighbors_noise_overlap,
+    "nn_isolation": sq.nearest_neighbors_isolation,
+    "nn_noise_overlap": sq.nearest_neighbors_noise_overlap,
     "peak_offset": _get_peak_offset,
     "peak_channel": _get_peak_channel,
     "num_spikes": _get_num_spikes,
