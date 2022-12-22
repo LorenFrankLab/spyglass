@@ -1,0 +1,71 @@
+# This file should live in the SPYGLASS BASE directory.
+
+# This YAML will be used to populate spyglass tables when the spyglass.common module is loaded.
+# This is an easy way to populate the tables, especially with controlled vocabularies.
+# This helps ensure that a preferred term or definition is used, e.g. "SpikeGadgets" and not "spikegadgets",
+# and Neuropixels 1.0 is defined with a particular (x,y) layout and not another (x,y) layout.
+# Each item under the table name is read as an entry (entity) to be added.
+# Duplicates (entries where the primary key already exists in the table) are skipped.
+# Only Manual and Lookup tables can be populated this way.
+# Part tables cannot be populated this way.
+# All required fields for a table must be provided. Optional fields are optional.
+
+DataAcquisitionDeviceSystem:
+- system: SpikeGadgets
+- system: TDT_Rig1
+- system: TDT_Rig2
+- system: PCS
+- system: RCS
+- system: RNS
+- system: NeuroOmega
+- system: Neuralynx
+- system: ABC
+- system: Unknown
+
+DataAcquisitionDeviceAmplifier:
+- amplifier: Intan
+- amplifier: PZ5_Amp1
+- amplifier: PZ5_Amp2
+- amplifier: Unknown
+
+# `system` and `amplifier` are foreign keys to DataAcquisitionDeviceAmplifier and DataAcquisitionDeviceSystem.
+# They must be added in the tables above first (order matters).
+DataAcquisitionDevice:
+- device_name: SpikeGadgets_Intan
+  system: SpikeGadgets
+  amplifier: Intan
+  adc_circuit: Intan
+
+ProbeType:
+- probe_type: Neuropixels 1.0
+  probe_description: A Neuropixels 1.0 probe
+  manufacturer: imec
+  num_shanks: 1
+- probe_type: 128c-4s6mm6cm-15um-26um-sl
+  probe_description: A Livermore flexible probe with 128 channels, 4 shanks, 6 mm shank length, 6 cm ribbon length. 15 um contact diameter, 26 um center-to-center distance (pitch), single-line configuration.
+  manufacturer: Lawrence Livermore National Lab
+  num_shanks: 4
+- probe_type: A1x32-6mm-50-177-H32_21mm
+  probe_description: A NeuroNexus probe with 32 channels, 6 mm shank length, 50 um site spacing, 177 um^2 site area, with the H32 package with a 21mm cable
+  manufacturer: NeuroNexus
+  num_shanks: 1
+
+Institution:
+- institution_name: University of California, San Francisco
+
+Lab:
+- lab_name: Loren Frank
+
+LabMember:
+- lab_member_name: Kyu Hyun Lee
+  first_name: Kyu Hyun
+  last_name: Lee
+- lab_member_name: Eric Denovellis
+  first_name: Eric
+  last_name: Denovellis
+- lab_member_name: Ryan Ly
+  first_name: Ryan
+  last_name: Ly
+- lab_member_name: Loren Frank
+  first_name: Loren
+  last_name: Frank
