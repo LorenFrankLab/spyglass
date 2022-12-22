@@ -123,7 +123,7 @@ class Electrode(dj.Imported):
             key["z_warped"] = 0
             key["contacts"] = ""
             key["filtering"] = elect_data.filtering
-            key["impedance"] = elect_data.imp
+            key["impedance"] = elect_data.get("imp")
             self.insert1(key, skip_duplicates=True)
 
 

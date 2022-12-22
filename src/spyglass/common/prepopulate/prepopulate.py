@@ -26,7 +26,9 @@ def prepopulate():
                 k: v for k, v in entry_dict.items() if k in cls.primary_key
             }
             if primary_key_values not in cls.fetch(*cls.primary_key, as_dict=True):
-                print(f"Prepopulating table {cls.__name__} with data {entry_dict}")
-                cls.insert1(entry_dict, skip_duplicates=True)
+                print(f"Prepoulate: Prepopulating table {cls.__name__} with data {entry_dict}")
+                cls.insert1(entry_dict)
+            # else:
+                # print(f"Prepoulate: Entry in {cls.__name__} with primary keys {primary_key_values} already exists.")
 
     # create_probes()

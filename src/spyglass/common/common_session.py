@@ -39,6 +39,7 @@ class Session(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath)
+        print(config)
 
         # certain data are not associated with a single NWB file / session because they may apply to
         # multiple sessions. these data go into dj.Manual tables

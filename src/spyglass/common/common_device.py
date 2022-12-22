@@ -209,13 +209,15 @@ class CameraDevice(dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert camera devices from an NWB file
 
         Parameters
         ----------
         nwbf : pynwb.NWBFile
             The source NWB file object.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to replace in the NWB file.
 
         Returns
         -------
@@ -296,6 +298,8 @@ class Probe(dj.Manual):
         ----------
         nwbf : pynwb.NWBFile
             The source NWB file object.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to replace in the NWB file.
 
         Returns
         -------
@@ -325,8 +329,10 @@ class Probe(dj.Manual):
             new_probe_dict = dict()
             shank_dict = dict()
             elect_dict = dict()
+            num_shanks = 0
 
             if probe_type in ndx_probes:
+                # if the probe is defined in the NWB file
                 nwb_probe_obj = ndx_probes[probe_type]
 
                 # construct dictionary of values to add to ProbeType
@@ -338,6 +344,7 @@ class Probe(dj.Manual):
                     "probe_description"
                 ] = nwb_probe_obj.probe_description
                 new_probe_type_dict["num_shanks"] = len(nwb_probe_obj.shanks)
+                num_shanks = new_probe_type_dict["num_shanks"]
 
                 # check that the probe type value is allowed and create a ProbeType if requested
                 new_probe_dict["probe_type"] = cls._add_probe_type(new_probe_type_dict)
@@ -376,7 +383,8 @@ class Probe(dj.Manual):
 
             if (
                 probe_type in config_probes
-            ):  # override new_device_dict with values from config if specified
+            ):
+                # override new_device_dict with values from config if specified
 
                 config_probe_dict = config_probes[probe_type]
                 config_probe_type = config_probe_dict["probe_type"]
@@ -386,16 +394,15 @@ class Probe(dj.Manual):
                         "Please first add the probe type and its information to the database before proceeding."
                     )
 
-                nwb_device_name = getattr(
-                    config_probe_dict, "device_name_to_read_from_nwb_file"
-                )
+                nwb_device_name = config_probe_dict.pop("device_name_to_read_from_nwb_file")
                 if nwb_device_name is not None:
                     # read the shank and electrode configuration from the NWB file Electrodes table and ElectrodeGroup
                     # objects
                     print(
                         "TODO: read the shank and electrode configuration from the NWB file."
                     )
-                    pass
+                    new_probe_dict.update(config_probe_dict)
+                    num_shanks = 0  # TODO
                 else:
                     # the user specifies Shank and Electrode information manually in the config YAML file
                     shanks = config_probe_dict.pop("Shank")
@@ -419,7 +426,7 @@ class Probe(dj.Manual):
                             ] = shank["probe_shank"]
                             elect_dict[electrode["probe_electrode"]].update(electrode)
 
-            assert new_probe_dict["num_shanks"] == len(
+            assert num_shanks == 0 or num_shanks == len(
                 shank_dict
             ), "`num_shanks` is not equal to the number of shanks."
             cls.insert1(new_probe_dict, skip_duplicates=True)
