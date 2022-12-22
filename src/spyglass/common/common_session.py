@@ -5,7 +5,7 @@ from .common_device import CameraDevice, DataAcquisitionDevice, Probe
 from .common_lab import Institution, Lab, LabMember
 from .common_nwbfile import Nwbfile
 from .common_subject import Subject
-from .nwb_helper_fn import get_nwb_file
+from .nwb_helper_fn import get_nwb_file, get_config
 
 schema = dj.schema("common_session")
 
@@ -38,6 +38,7 @@ class Session(dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
+        config = get_config(nwb_file_abspath)
 
         # certain data are not associated with a single NWB file / session because they may apply to
         # multiple sessions. these data go into dj.Manual tables
@@ -56,14 +57,17 @@ class Session(dj.Imported):
         print("Subject...")
         Subject().insert_from_nwbfile(nwbf)
 
-        print("DataAcquisitionDevice...")
-        DataAcquisitionDevice().insert_from_nwbfile(nwbf)
+        print("Populate DataAcquisitionDevice...")
+        device_names = DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
+        print()
 
-        print("CameraDevice...")
-        CameraDevice().insert_from_nwbfile(nwbf)
+        print("Populate CameraDevice...")
+        CameraDevice.insert_from_nwbfile(nwbf, config)
+        print()
 
-        print("Probe...")
-        Probe().insert_from_nwbfile(nwbf)
+        print("Populate Probe...")
+        Probe.insert_from_nwbfile(nwbf, config)
+        print()
 
         if nwbf.subject is not None:
             subject_id = nwbf.subject.subject_id
@@ -94,8 +98,28 @@ class Session(dj.Imported):
         print("IntervalList...")
         IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
+        # populate join table between Session and DataAcquisitionDevice
+        print("Populate SessionDataAcquisitionDevice...")
+        for device_name in device_names:
+            SessionDataAcquisitionDevice.insert1(
+                {"nwb_file_name": nwb_file_name, "device_name": device_name},
+                skip_duplicates=True,
+            )
+            print(f"Inserted {device_name}")
+        print()
+
         # print('Unit...')
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
+
+
+@schema
+class SessionDataAcquisitionDevice(dj.Manual):
+    # join table for Session and DataAcquisitionDevice
+    # each session can be associated with multiple data acquisition devices
+    definition = """
+    -> Session
+    -> DataAcquisitionDevice
+    """
 
 
 @schema
@@ -142,7 +166,7 @@ class SessionGroup(dj.Manual):
         session_group_name: str,
         session_group_description: str,
         *,
-        skip_duplicates: bool = False
+        skip_duplicates: bool = False,
     ):
         SessionGroup.insert1(
             {
