@@ -3,7 +3,7 @@ import pathlib
 import yaml
 import sys
 
-from .probe import create_probes
+# from .probe import create_probes
 
 
 def prepopulate():
@@ -29,4 +29,4 @@ def prepopulate():
                 print(f"Prepopulating table {cls.__name__} with data {entry_dict}")
                 cls.insert1(entry_dict, skip_duplicates=True)
 
-    create_probes()
+    # create_probes()

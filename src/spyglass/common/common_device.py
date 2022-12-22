@@ -3,9 +3,6 @@ import ndx_franklab_novela
 import warnings
 
 from .errors import PopulateException
-from .prepopulate.prepopulate import prepopulate
-
-prepopulate()
 
 schema = dj.schema("common_device")
 

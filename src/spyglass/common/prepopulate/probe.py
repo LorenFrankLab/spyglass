@@ -2,7 +2,7 @@ import numpy as np
 import pathlib
 import probeinterface as pi
 
-from spyglass.common import Probe
+# from spyglass.common import Probe
 
 
 def create_probe(probe_json_path: str):
