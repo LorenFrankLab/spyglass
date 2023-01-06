@@ -129,8 +129,8 @@ class DataAcquisitionDevice(dj.Manual):
             system = "SpikeGadgets"
 
         if {"system": system} not in DataAcquisitionDeviceSystem():
-            warnings.warn(
-                f"Device system '{system}' not found in database. Current values: "
+            print(
+                f"\nDevice system '{system}' not found in database. Current values: "
                 f"{DataAcquisitionDeviceSystem.fetch('system').tolist()}. "
                 "Please ensure that the device system you want to add does not already "
                 "exist in the database under a different name or spelling. "
@@ -172,8 +172,8 @@ class DataAcquisitionDevice(dj.Manual):
             The amplifier value that was added to the database.
         """
         if {"amplifier": amplifier} not in DataAcquisitionDeviceAmplifier():
-            warnings.warn(
-                f"Device amplifier '{amplifier}' not found in database. Current values: "
+            print(
+                f"\nDevice amplifier '{amplifier}' not found in database. Current values: "
                 f"{DataAcquisitionDeviceAmplifier.fetch('amplifier').tolist()}. "
                 "Please ensure that the device amplifier you want to add does not already "
                 "exist in the database under a different name or spelling. "
@@ -381,9 +381,7 @@ class Probe(dj.Manual):
                         elect_dict[electrode.name]["rel_y"] = electrode.rel_y
                         elect_dict[electrode.name]["rel_z"] = electrode.rel_z
 
-            if (
-                probe_type in config_probes
-            ):
+            if probe_type in config_probes:
                 # override new_device_dict with values from config if specified
 
                 config_probe_dict = config_probes[probe_type]
@@ -394,8 +392,10 @@ class Probe(dj.Manual):
                         "Please first add the probe type and its information to the database before proceeding."
                     )
 
-                nwb_device_name = config_probe_dict.pop("device_name_to_read_from_nwb_file")
-                if nwb_device_name is not None:
+                if "device_name_to_read_from_nwb_file" in config_probe_dict:
+                    nwb_device_name = config_probe_dict.pop(
+                        "device_name_to_read_from_nwb_file"
+                    )
                     # read the shank and electrode configuration from the NWB file Electrodes table and ElectrodeGroup
                     # objects
                     print(
@@ -470,8 +470,8 @@ class Probe(dj.Manual):
         if fetched_probe_type_dict:
             # check whether the values provided match the values stored in the database
             if fetched_probe_type_dict != probe_type_dict:
-                warnings.warn(
-                    f"The probe type information for key '{probe_type}' in the database "
+                print(
+                    f"\nThe probe type information for key '{probe_type}' in the database "
                     "does not match the probe type information provided: "
                     f"{fetched_probe_type_dict} != {probe_type_dict}. Do you want to use "
                     "the probe type "
@@ -489,8 +489,8 @@ class Probe(dj.Manual):
                         "already in the database."
                     )
         else:
-            warnings.warn(
-                f"Probe type '{probe_type}' not found in database. Current values: "
+            print(
+                f"\nProbe type '{probe_type}' not found in database. Current values: "
                 f"{ProbeType.fetch('probe_type').tolist()}. "
                 "Please ensure that the probe type you want to add does not already "
                 "exist in the database under a different name or spelling. "

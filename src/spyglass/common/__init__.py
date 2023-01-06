@@ -2,7 +2,14 @@ import os
 
 from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFile
-from .common_device import CameraDevice, DataAcquisitionDevice, DataAcquisitionDeviceSystem, DataAcquisitionDeviceAmplifier, Probe, ProbeType
+from .common_device import (
+    CameraDevice,
+    DataAcquisitionDevice,
+    DataAcquisitionDeviceSystem,
+    DataAcquisitionDeviceAmplifier,
+    Probe,
+    ProbeType,
+)
 from .common_dio import DIOEvents
 from .common_ephys import (
     LFP,
@@ -59,5 +66,6 @@ from .nwb_helper_fn import (
 )
 from .populate_all_common import populate_all_common
 
-from .prepopulate.prepopulate import prepopulate
-prepopulate()
+from .prepopulate import prepopulate_default, prepopulate
+
+prepopulate_default()
