@@ -103,7 +103,7 @@ class Session(dj.Imported):
         print("Populate SessionDataAcquisitionDevice...")
         for device_name in device_names:
             SessionDataAcquisitionDevice.insert1(
-                {"nwb_file_name": nwb_file_name, "device_name": device_name},
+                {"nwb_file_name": nwb_file_name, "data_acquisition_device_name": device_name},
                 skip_duplicates=True,
             )
             print(f"Inserted {device_name}")
