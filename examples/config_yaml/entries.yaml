@@ -11,29 +11,30 @@
 # All required fields for a table must be provided. Optional fields are optional.
 
 DataAcquisitionDeviceSystem:
-- system: SpikeGadgets
-- system: TDT_Rig1
-- system: TDT_Rig2
-- system: PCS
-- system: RCS
-- system: RNS
-- system: NeuroOmega
-- system: Neuralynx
-- system: ABC
-- system: Unknown
+- data_acquisition_device_system: SpikeGadgets
+- data_acquisition_device_system: TDT_Rig1
+- data_acquisition_device_system: TDT_Rig2
+- data_acquisition_device_system: PCS
+- data_acquisition_device_system: RCS
+- data_acquisition_device_system: RNS
+- data_acquisition_device_system: NeuroOmega
+- data_acquisition_device_system: Neuralynx
+- data_acquisition_device_system: ABC
+- data_acquisition_device_system: Unknown
 
 DataAcquisitionDeviceAmplifier:
-- amplifier: Intan
-- amplifier: PZ5_Amp1
-- amplifier: PZ5_Amp2
-- amplifier: Unknown
+- data_acquisition_device_amplifier: Intan
+- data_acquisition_device_amplifier: PZ5_Amp1
+- data_acquisition_device_amplifier: PZ5_Amp2
+- data_acquisition_device_amplifier: Unknown
 
-# `system` and `amplifier` are foreign keys to DataAcquisitionDeviceAmplifier and DataAcquisitionDeviceSystem.
+# `data_acquisition_device_system` and `data_acquisition_device_amplifier` are foreign keys to
+# DataAcquisitionDeviceAmplifier and DataAcquisitionDeviceSystem.
 # They must be added in the tables above first (order matters).
 DataAcquisitionDevice:
-- device_name: SpikeGadgets_Intan
-  system: SpikeGadgets
-  amplifier: Intan
+- data_acquisition_device_name: SpikeGadgets_Intan
+  data_acquisition_device_system: SpikeGadgets
+  data_acquisition_device_amplifier: Intan
   adc_circuit: Intan
 
 ProbeType:
