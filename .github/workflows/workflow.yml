@@ -37,6 +37,7 @@ jobs:
       with:
         activate-environment: spyglass
         environment-file: environment.yml
+        mamba-version: "*"
     - name: Install test requirements
       shell: bash -l {0}
       run: |
