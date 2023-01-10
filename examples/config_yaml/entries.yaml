@@ -21,21 +21,26 @@ DataAcquisitionDeviceSystem:
 - data_acquisition_device_system: Neuralynx
 - data_acquisition_device_system: ABC
 - data_acquisition_device_system: Unknown
+- data_acquisition_device_system: Neuropixels Acquisition System
 
 DataAcquisitionDeviceAmplifier:
 - data_acquisition_device_amplifier: Intan
 - data_acquisition_device_amplifier: PZ5_Amp1
 - data_acquisition_device_amplifier: PZ5_Amp2
 - data_acquisition_device_amplifier: Unknown
+- data_acquisition_device_name: Neuropixels Recording Device
 
 # `data_acquisition_device_system` and `data_acquisition_device_amplifier` are foreign keys to
-# DataAcquisitionDeviceAmplifier and DataAcquisitionDeviceSystem.
-# They must be added in the tables above first (order matters).
+# DataAcquisitionDeviceAmplifier and DataAcquisitionDeviceSystem. They must be added first.
 DataAcquisitionDevice:
 - data_acquisition_device_name: SpikeGadgets_Intan
   data_acquisition_device_system: SpikeGadgets
   data_acquisition_device_amplifier: Intan
   adc_circuit: Intan
+- data_acquisition_device_name: Neuropixels Recording Device
+  data_acquisition_device_system: Neuropixels Acquisition System
+  data_acquisition_device_amplifier: Neuropixels Headstage
+  # adc_circuit is optional
 
 ProbeType:
 - probe_type: Neuropixels 1.0
@@ -50,6 +55,33 @@ ProbeType:
   probe_description: A NeuroNexus probe with 32 channels, 6 mm shank length, 50 um site spacing, 177 um^2 site area, with the H32 package with a 21mm cable
   manufacturer: NeuroNexus
   num_shanks: 1
+- probe_type: My Custom Probe
+  probe_description: My custom probe from Loren Frank's lab
+  manufacturer: Frank Lab
+  num_shanks: 2
+
+# `probe_type` is a foreign key to ProbeType. It must be added first.
+Probe:
+- probe_id: My Custom Probe
+  probe_type: My Custom Probe
+  contact_side_numbering: True
+  Shank:
+  - probe_shank: 0
+    Electrode:
+    - probe_electrode: 0
+      rel_x: 0
+      rel_y: 0
+    - probe_electrode: 1
+      rel_x: 10
+      rel_y: 10
+  - probe_shank: 1
+    Electrode:
+    - probe_electrode: 2
+      rel_x: 20
+      rel_y: 20
+    - probe_electrode: 3
+      rel_x: 30
+      rel_y: 30
 
 Institution:
 - institution_name: University of California, San Francisco

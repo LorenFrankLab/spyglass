@@ -616,3 +616,49 @@ class Probe(dj.Manual):
                     f"User chose not to add probe type '{probe_type}' to the database."
                 )
         return probe_type
+
+    def create_probe_from_nwb_file(nwbf, device_name):
+        # TODO finish refactoring this
+        nwb_device_name = config_probe_dict.pop("device_name_to_read_from_nwb_file")
+        # if the probe_id exists in the database, note that they may not match the values read from
+        # the file....
+
+        print(
+            "TODO: read the shank and electrode configuration from the NWB file."
+        )
+        new_probe_dict.update(config_probe_dict)
+
+        # read the shank and electrode configuration from the NWB file Electrodes table and ElectrodeGroup
+        # objects
+        print("TODO write a warning")
+
+        created_shanks = dict()  # map device name to shank_index (int)
+        for elec_index in range(len(nwbf.electrodes)):
+            electrode_group = nwbf.electrodes[elec_index, "group"]
+            eg_device_name = electrode_group.device.name
+            if eg_device_name == nwb_device_name:
+                # only look at electrodes where the associated device is the one specified
+                if eg_device_name not in created_shanks:
+                    # if a Shank has not yet been created from the electrode group
+                    shank_index = len(created_shanks)
+                    created_shanks[eg_device_name] = shank_index
+
+                    # build the dictionary of Probe.Shank data
+                    shank_dict[shank_index] = dict()
+                    shank_dict[shank_index]["probe_id"] = new_probe_dict["probe_id"]
+                    shank_dict[shank_index]["probe_shank"] = shank_index
+
+                # get the probe shank index associated with this Electrode
+                probe_shank = created_shanks[eg_device_name]
+
+                # build the dictionary of Probe.Electrode data
+                elect_dict[elec_index] = dict()
+                elect_dict[elec_index]["probe_id"] = new_probe_dict["probe_id"]
+                elect_dict[elec_index]["probe_shank"] = probe_shank
+                elect_dict[elec_index]["probe_electrode"] = elec_index
+                if "rel_x" in nwbf.electrodes[elec_index]:
+                    elect_dict[elec_index]["rel_x"] = nwbf.electrodes[elec_index, "rel_x"]
+                if "rel_y" in nwbf.electrodes[elec_index]:
+                    elect_dict[elec_index]["rel_y"] = nwbf.electrodes[elec_index, "rel_y"]
+                if "rel_z" in nwbf.electrodes[elec_index]:
+                    elect_dict[elec_index]["rel_z"] = nwbf.electrodes[elec_index, "rel_z"]
