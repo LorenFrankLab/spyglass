@@ -1,10 +1,16 @@
-name: PR Test
+name: Run tests
 
-on: push
+on:
+  push:
+  schedule:  # once a day at midnight UTC
+    - cron: '0 0 * * *'
 
 jobs:
   run-tests:
     runs-on: ${{ matrix.os }}
+    defaults:
+     run:
+       shell: bash -l {0}
     strategy:
       matrix:
         os: [ubuntu-latest]  #, macos-latest, windows-latest]
@@ -23,29 +29,28 @@ jobs:
     #       -e MYSQL_ROOT_PASSWORD=tutorial
     steps:
     - name: Cancel Workflow Action
-      uses: styfle/cancel-workflow-action@0.6.0
+      uses: styfle/cancel-workflow-action@0.11.0
       with:
         access_token: ${{ github.token }}
+        all_but_latest: true
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
-        python-version: 3.8
+        python-version: $PYTHON
     - name: Set up conda environment
       uses: conda-incubator/setup-miniconda@v2
       with:
         activate-environment: spyglass
         environment-file: environment.yml
+        mamba-version: "*"
     - name: Install test requirements
-      shell: bash -l {0}
       run: |
         pip install -r requirements-dev.txt
     - name: Install spyglass
-      shell: bash -l {0}
       run: |
         pip install -e .
     - name: Run tests
-      shell: bash -l {0}
       run: |
         pytest -rP  # env vars are set within certain tests
