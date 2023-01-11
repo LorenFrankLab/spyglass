@@ -31,7 +31,7 @@ dependencies:
     - datajoint>=0.13.6
     - ghostipy
     - pymysql>=1.0.*
-    - sortingview>=0.8
+    - sortingview>=0.11
     - figurl-jupyter
     - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
     - pyyaml

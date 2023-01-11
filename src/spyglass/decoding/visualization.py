@@ -1,8 +1,3 @@
-from math import ceil, floor
-from typing import Callable, Dict, Tuple, cast
-
-import h5py
-import kachery_cloud as kcl
 import matplotlib.animation as animation
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
@@ -10,22 +5,12 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import sortingview.views as vv
-import sortingview.views.franklab as vvf
-import xarray as xr
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-from replay_trajectory_classification.environments import (
-    get_bin_ind,
-    get_grid,
-    get_track_interior,
-)
 from ripple_detection import get_multiunit_population_firing_rate
-from sortingview.SpikeSortingView import (
-    MultiTimeseries,
-    create_live_position_pdf_plot,
-    create_position_plot,
-    create_spike_raster_plot,
-)
 from tqdm.auto import tqdm
+
+from spyglass.decoding.visualization_1D_view import create_1D_decode_view
+from spyglass.decoding.visualization_2D_view import create_2D_decode_view
 
 
 def make_single_environment_movie(
@@ -456,486 +441,21 @@ def make_multi_environment_movie(
         return fig, movie
 
 
-def create_live_position_pdf_plot_h5(
-    *, data: np.ndarray, segment_size: int, multiscale_factor: int
-):
-    data_uri = kcl.store_npy(data)
-    key = {
-        "type": "live_position_plot_h5",
-        "version": 5,
-        "data_uri": data_uri,
-        "segment_size": segment_size,
-        "multiscale_factor": multiscale_factor,
-    }
-    key_str = f"@create_live_position_pdf_plot_h5/{kcl.sha1_of_dict(key)}"
-    a = kcl.get_mutable_local(key_str)
-    if a and kcl.load_file(a):
-        return a
-
-    num_times = data.shape[0]
-    num_positions = data.shape[1]
-
-    def fetch_segment(istart: int, iend: int):
-        return np.nan_to_num(data[istart:iend])
-
-    with kcl.TemporaryDirectory() as tmpdir:
-        print(tmpdir)
-        output_file_name = tmpdir + "/live_position_pdf_plot.h5"
-        with h5py.File(output_file_name, "w") as f:
-            downsample_factor = 1
-            while downsample_factor < num_times:
-                num_segments = ceil(floor(num_times / downsample_factor) / segment_size)
-                for iseg in range(num_segments):
-                    i1 = iseg * segment_size
-                    i2 = min(i1 + segment_size, floor(num_times / downsample_factor))
-                    if downsample_factor == 1:
-                        A = fetch_segment(istart=i1, iend=i2)
-                        B = A / np.reshape(
-                            np.repeat(np.max(A, axis=1), A.shape[1]), A.shape
-                        )
-                        B = (B * 100).astype(np.uint8)
-                    else:
-                        prev_downsample_factor = floor(
-                            downsample_factor / multiscale_factor
-                        )
-                        B_prev_list = [
-                            np.array(
-                                f.get(
-                                    f"segment/{prev_downsample_factor}/{iseg * multiscale_factor + offset}"
-                                )
-                            )
-                            for offset in range(multiscale_factor)
-                            if (iseg * multiscale_factor + offset)
-                            * segment_size
-                            * prev_downsample_factor
-                            < num_times
-                        ]
-                        B_prev = np.concatenate(B_prev_list, axis=0).astype(np.float32)
-                        N_prev = B_prev.shape[0]
-                        if N_prev % multiscale_factor != 0:
-                            N_prev = (
-                                floor(N_prev / multiscale_factor) * multiscale_factor
-                            )
-                            B_prev = B_prev[:N_prev]
-                        B: np.ndarray = np.mean(
-                            np.reshape(
-                                B_prev,
-                                (
-                                    floor(N_prev / multiscale_factor),
-                                    multiscale_factor,
-                                    num_positions,
-                                ),
-                            ),
-                            axis=1,
-                        )
-                        B = B / np.reshape(
-                            np.repeat(np.max(B, axis=1), B.shape[1]), B.shape
-                        )
-                        B = np.floor(B).astype(np.uint8)
-                    print("Creating", f"segment/{downsample_factor}/{iseg}")
-                    f.create_dataset(f"segment/{downsample_factor}/{iseg}", data=B)
-                downsample_factor *= multiscale_factor
-
-        h5_uri = kcl.store_file(output_file_name)
-        kcl.set_mutable_local(key_str, h5_uri)
-
-        return h5_uri
-
-
 def create_interactive_1D_decoding_figurl(
     position_info,
     linear_position_info,
-    classifier,
-    results,
-    marks=None,
-    spikes=None,
-    visualization_name="test",
-    segment_size=100000,
-    multiscale_factor=3,
-    sampling_frequency=500,
-):
-
-    layout = MultiTimeseries(label=visualization_name)
-
-    # spikes panel
-    if spikes is not None:
-        cell_ids, spike_ind = np.nonzero(spikes)
-        time = np.asarray(results.time)
-        spike_times = np.asarray(time[spike_ind] - time[0], dtype=np.float32)
-        layout.add_panel(
-            create_spike_raster_plot(
-                times=np.asarray(spike_times - results.time[0], dtype=np.float32),
-                labels=cell_ids.astype(np.int32),
-                label="Spikes",
-            )
-        )
-    if marks is not None:
-        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(float)
-        multiunit_firing_rate = get_multiunit_population_firing_rate(
-            multiunit_spikes, sampling_frequency
-        )
-
-        layout.add_panel(
-            create_position_plot(
-                timestamps=np.asarray(marks.time.values - marks.time.values[0]),
-                positions=np.asarray(multiunit_firing_rate, dtype=np.float32),
-                dimension_labels=["firing rate"],
-                label="Firing Rate",
-                discontinuous=False,
-            ),
-            relative_height=1,
-        )
-
-    # speed panel
-    layout.add_panel(
-        create_position_plot(
-            timestamps=np.asarray(
-                position_info.index - position_info.index[0], dtype=np.float32
-            ),
-            positions=np.asarray(position_info.head_speed, dtype=np.float32),
-            dimension_labels=["Speed"],
-            label="Speed",
-            discontinuous=False,
-        ),
-        relative_height=1,
-    )
-    try:
-        posterior = np.asarray(
-            results.acausal_posterior.sum("state").where(
-                classifier.environments[0].is_track_interior_
-            ),
-            dtype=np.float32,
-        )
-    except AttributeError:
-        posterior = np.asarray(
-            results.acausal_posterior.sum("state").where(classifier.is_track_interior_),
-            dtype=np.float32,
-        )
-    time = np.asarray(results.time - results.time[0], dtype=np.float32)
-
-    h5_uri = create_live_position_pdf_plot_h5(
-        data=posterior, segment_size=segment_size, multiscale_factor=multiscale_factor
-    )
-
-    try:
-        edges = classifier.environments[0].edges_
-        is_track_interior = classifier.environments[0].is_track_interior_
-    except AttributeError:
-        edges = classifier.edges_
-        is_track_interior = classifier.is_track_interior_
-
-    binned_linear_position = (
-        get_bin_ind(linear_position_info.linear_position, edges)[0] - 1
-    )
-    not_track = ~np.isin(binned_linear_position, np.nonzero(is_track_interior))
-    binned_linear_position[not_track] -= 1
-
-    panel = create_live_position_pdf_plot(
-        linear_positions=binned_linear_position.astype(np.int32),
-        start_time_sec=time[0],
-        end_time_sec=time[-1],
-        sampling_frequency=(len(time) - 1) / (time[-1] - time[0]),
-        num_positions=posterior.shape[1],
-        pdf_object={"format": "position_pdf_h5_v1", "uri": h5_uri},
-        segment_size=segment_size,
-        multiscale_factor=multiscale_factor,
-        label="Position probability",
-    )
-    layout.add_panel(panel, relative_height=3)
-
-    return layout.get_composite_figure().url()
-
-
-def get_base_track_information(base_probabilities: xr.Dataset):
-    x_count = len(base_probabilities.x_position)
-    y_count = len(base_probabilities.y_position)
-    x_min = np.min(base_probabilities.x_position).item()
-    y_min = np.min(base_probabilities.y_position).item()
-    x_width = round(
-        (np.max(base_probabilities.x_position).item() - x_min) / (x_count - 1), 6
-    )
-    y_width = round(
-        (np.max(base_probabilities.y_position).item() - y_min) / (y_count - 1), 6
-    )
-    return (x_count, x_min, x_width, y_count, y_min, y_width)
-
-
-def generate_linearization_function(
-    location_lookup: Dict[Tuple[float, float], int],
-    x_count: int,
-    x_min: float,
-    x_width: float,
-    y_min: float,
-    y_width: float,
-):
-
-    args = {
-        "location_lookup": location_lookup,
-        "x_count": x_count,
-        "x_min": x_min,
-        "x_width": x_width,
-        "y_min": y_min,
-        "y_width": y_width,
-    }
-
-    def inner(t: Tuple[float, float, float]):
-        return memo_linearize(t, **args)
-
-    return inner
-
-
-def memo_linearize(
-    t: Tuple[float, float, float],
-    /,
-    location_lookup: Dict[Tuple[float, float], int],
-    x_count: int,
-    x_min: float,
-    x_width: float,
-    y_min: float,
-    y_width: float,
-):
-    (_, y, x) = t
-    my_tuple = (x, y)
-    if my_tuple not in location_lookup:
-        lin = x_count * round((y - y_min) / y_width) + round((x - x_min) / x_width)
-        location_lookup[my_tuple] = lin
-    return location_lookup[my_tuple]
-
-
-def extract_slice_data(
-    base_slice: xr.Dataset, location_fn: Callable[[Tuple[float, float]], int]
-):
-    i_trim = discretize_and_trim(base_slice)
-    observations = i_trim.acausal_posterior.values
-    positions = get_positions(i_trim, location_fn)
-    observations_per_frame = get_observations_per_frame(i_trim, base_slice)
-    return (observations, positions, observations_per_frame)
-
-
-def discretize_and_trim(base_slice: xr.Dataset):
-    i = np.multiply(base_slice, 255).astype("uint8")
-    i_stack = i.stack(unified_index=["time", "y_position", "x_position"])
-
-    return i_stack.where(i_stack.acausal_posterior > 0, drop=True).astype("uint8")
-
-
-def get_positions(
-    i_trim: xr.Dataset, linearization_fn: Callable[[Tuple[float, float]], int]
-):
-    linearizer_map = map(linearization_fn, i_trim.unified_index.data)
-    return np.array(list(linearizer_map), dtype="uint16")
-
-
-def get_observations_per_frame(i_trim: xr.Dataset, base_slice: xr.Dataset):
-    (times, time_counts_np) = np.unique(i_trim.time.data, return_counts=True)
-    time_counts = xr.DataArray(time_counts_np, coords={"time": times})
-    raw_times = base_slice.time
-    (_, good_counts) = xr.align(raw_times, time_counts, join="left", fill_value=0)
-    observations_per_frame = good_counts.data.astype("uint8")
-    return observations_per_frame
-
-
-def process_decoded_data(results):
-    frame_step_size = 100_000
-    location_lookup = {}
-    base_probabilities = cast(xr.Dataset, results)
-
-    (x_count, x_min, x_width, y_count, y_min, y_width) = get_base_track_information(
-        base_probabilities
-    )
-    location_fn = generate_linearization_function(
-        location_lookup, x_count, x_min, x_width, y_min, y_width
-    )
-
-    total_frame_count = len(base_probabilities.time)
-    final_frame_bounds = np.zeros(total_frame_count, dtype="uint8")
-    # intentionally oversized preallocation--will trim later
-    # Note: By definition there can't be more than 255 observations per frame (since we drop any observation
-    # lower than 1/255 and the probabilities for any frame sum to 1). However, this preallocation may be way
-    # too big for memory for long recordings. We could use a smaller one, but would need to include logic
-    # to expand the length of the array if its actual allocated bounds are exceeded.
-    final_values = np.zeros(total_frame_count * 255, dtype="uint8")
-    final_locations = np.zeros(total_frame_count * 255, dtype="uint16")
-
-    frames_done = 0
-    total_observations = 0
-    while frames_done <= total_frame_count:
-        base_slice = base_probabilities.isel(
-            time=slice(frames_done, frames_done + frame_step_size)
-        )
-        (observations, positions, observations_per_frame) = extract_slice_data(
-            base_slice, location_fn
-        )
-        final_frame_bounds[
-            frames_done : frames_done + len(observations_per_frame)
-        ] = observations_per_frame
-        final_values[
-            total_observations : total_observations + len(observations)
-        ] = observations
-        final_locations[
-            total_observations : total_observations + len(observations)
-        ] = positions
-        total_observations += len(observations)
-        frames_done += frame_step_size
-    # These were intentionally oversized in preallocation; trim to the number of actual values.
-    final_values.resize(total_observations)
-    final_locations.resize(total_observations)
-
-    return {
-        "type": "DecodedPositionData",
-        "xmin": x_min,
-        "binWidth": x_width,
-        "xcount": x_count,
-        "ymin": y_min,
-        "binHeight": y_width,
-        "ycount": y_count,
-        "uniqueLocations": np.unique(final_locations),
-        "values": final_values,
-        "locations": final_locations,
-        "frameBounds": final_frame_bounds,
-    }
-
-
-def make_track(positions, bin_size: float = 1.0):
-    (edges, _, place_bin_centers, _) = get_grid(positions, bin_size)
-    is_track_interior = get_track_interior(positions, edges)
-
-    # bin dimensions are the difference between bin centers in the x and y directions.
-    bin_width = np.max(np.diff(place_bin_centers, axis=0)[:, 0])
-    bin_height = np.max(np.diff(place_bin_centers, axis=0)[:, 1])
-
-    # so we can represent the track as a collection of rectangles of width bin_width and height bin_height,
-    # centered on the values of place_bin_centers where track_interior = true.
-    # Note, the original code uses Fortran ordering.
-    true_ctrs = place_bin_centers[is_track_interior.ravel(order="F")]
-
-    return (bin_width, bin_height, get_ul_corners(bin_width, bin_height, true_ctrs))
-
-
-def get_ul_corners(width: float, height: float, centers):
-    ul = np.subtract(centers, (width / 2, -height / 2))
-
-    # Reshape so we have an x array and a y array
-    return np.transpose(ul)
-
-
-def create_static_track_animation(
-    *,
-    track_rect_width: float,
-    track_rect_height: float,
-    ul_corners: np.ndarray,
-    timestamps: np.ndarray,
-    positions: np.ndarray,
-    compute_real_time_rate: bool = False,
-    head_dir=None,
-):
-    # float32 gives about 7 digits of decimal precision; we want 3 digits right of the decimal.
-    # So need to compress-store the timestamp if the start is greater than say 5000.
-    first_timestamp = 0
-    if timestamps[0] > 5000:
-        first_timestamp = timestamps[0]
-        timestamps -= first_timestamp
-    data = {
-        "type": "TrackAnimation",
-        "trackBinWidth": track_rect_width,
-        "trackBinHeight": track_rect_height,
-        "trackBinULCorners": ul_corners.astype("float32"),
-        "totalRecordingFrameLength": len(timestamps),
-        "timestamps": timestamps.astype("float32"),
-        "positions": positions.astype("float32"),
-        "xmin": np.min(ul_corners[0]),
-        "xmax": np.max(ul_corners[0]) + track_rect_width,
-        "ymin": np.min(ul_corners[1]),
-        "ymax": np.max(ul_corners[1]) + track_rect_height
-        # Speed: should this be displayed?
-        # TODO: Better approach for accommodating further data streams
-    }
-    if head_dir is not None:
-        # print(f'Loading head direction: {head_dir}')
-        data["headDirection"] = head_dir.astype("float32")
-    if compute_real_time_rate:
-        median_delta_t = np.median(np.diff(timestamps))
-        sampling_frequency_Hz = 1 / median_delta_t
-        data["samplingFrequencyHz"] = sampling_frequency_Hz
-    if first_timestamp > 0:
-        data["timestampStart"] = first_timestamp
-
-    return data
-
-
-def create_track_animation_object(*, static_track_animation: any):
-    if "decodedData" in static_track_animation:
-        decoded_data = static_track_animation["decodedData"]
-        decoded_data_obj = vvf.DecodedPositionData(
-            x_min=decoded_data["xmin"],
-            x_count=decoded_data["xcount"],
-            y_min=decoded_data["ymin"],
-            y_count=decoded_data["ycount"],
-            bin_width=decoded_data["binWidth"],
-            bin_height=decoded_data["binHeight"],
-            values=decoded_data["values"].astype("int16"),
-            locations=decoded_data["locations"],
-            frame_bounds=decoded_data["frameBounds"].astype("int16"),
-        )
-    else:
-        decoded_data_obj = None
-
-    view = vvf.TrackPositionAnimationV1(
-        track_bin_width=static_track_animation["trackBinWidth"],
-        track_bin_height=static_track_animation["trackBinHeight"],
-        track_bin_ul_corners=static_track_animation["trackBinULCorners"],
-        total_recording_frame_length=static_track_animation[
-            "totalRecordingFrameLength"
-        ],
-        timestamp_start=static_track_animation["timestampStart"]
-        if "timestampStart" in static_track_animation
-        else None,
-        timestamps=static_track_animation["timestamps"],
-        positions=static_track_animation["positions"],
-        x_min=static_track_animation["xmin"],
-        x_max=static_track_animation["xmax"],
-        y_min=static_track_animation["ymin"],
-        y_max=static_track_animation["ymax"],
-        sampling_frequency_hz=static_track_animation["samplingFrequencyHz"],
-        head_direction=static_track_animation["headDirection"]
-        if "headDirection" in static_track_animation
-        else None,
-        decoded_data=decoded_data_obj,
-    )
-    return view
-
-
-def create_interactive_2D_decoding_figurl(
-    position_info,
     marks,
     results,
-    bin_size,
-    position_names=["head_position_x", "head_position_y"],
-    head_direction_name="head_orientation",
+    position_name="linear_position",
+    speed_name="head_speed",
+    posterior_type="acausal_posterior",
     sampling_frequency=500,
     view_height=800,
 ):
-
-    positions = np.asarray(position_info[position_names])
-    (track_width, track_height, upper_left_points) = make_track(
-        positions, bin_size=bin_size
+    decode_view = create_1D_decode_view(
+        posterior=results[posterior_type].sum("state"),
+        linear_position=linear_position_info[position_name],
     )
-    timestamps = np.squeeze(np.asarray(position_info.index)).copy()
-
-    head_dir = np.squeeze(np.asarray(position_info[head_direction_name]))
-
-    data = create_static_track_animation(
-        ul_corners=upper_left_points,
-        track_rect_height=track_height,
-        track_rect_width=track_width,
-        timestamps=timestamps,
-        positions=positions.T,
-        head_dir=head_dir,
-        compute_real_time_rate=True,
-    )
-    data["decodedData"] = process_decoded_data(results.sum("state"))
-
-    decode_view = create_track_animation_object(static_track_animation=data)
 
     probability_view = vv.TimeseriesGraph()
     COLOR_CYCLE = [
@@ -955,9 +475,7 @@ def create_interactive_2D_decoding_figurl(
             name=state,
             t=np.asarray(results.time),
             y=np.asarray(
-                results.acausal_posterior.sel(state=state).sum(
-                    ["x_position", "y_position"]
-                ),
+                results[posterior_type].sel(state=state).sum("position"),
                 dtype=np.float32,
             ),
             color=color,
@@ -967,7 +485,100 @@ def create_interactive_2D_decoding_figurl(
     speed_view = vv.TimeseriesGraph().add_line_series(
         name="Speed [cm/s]",
         t=np.asarray(position_info.index),
-        y=np.asarray(position_info.head_speed, dtype=np.float32),
+        y=np.asarray(position_info[speed_name], dtype=np.float32),
+        color="black",
+        width=1,
+    )
+
+    multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(float)
+    multiunit_firing_rate = get_multiunit_population_firing_rate(
+        multiunit_spikes, sampling_frequency
+    )
+
+    multiunit_firing_rate_view = vv.TimeseriesGraph().add_line_series(
+        name="Multiunit Rate [spikes/s]",
+        t=np.asarray(marks.time.values),
+        y=np.asarray(multiunit_firing_rate, dtype=np.float32),
+        color="black",
+        width=1,
+    )
+    vertical_panel_content = [
+        vv.LayoutItem(decode_view, stretch=3, title="Decode"),
+        vv.LayoutItem(probability_view, stretch=1, title="Probability of State"),
+        vv.LayoutItem(speed_view, stretch=1, title="Speed"),
+        vv.LayoutItem(multiunit_firing_rate_view, stretch=1, title="Multiunit"),
+    ]
+
+    view = vv.Box(
+        direction="horizontal",
+        show_titles=True,
+        height=view_height,
+        items=[
+            vv.LayoutItem(
+                vv.Box(
+                    direction="vertical",
+                    show_titles=True,
+                    items=vertical_panel_content,
+                )
+            ),
+        ],
+    )
+
+    return view
+
+
+def create_interactive_2D_decoding_figurl(
+    position_info,
+    marks,
+    results,
+    bin_size,
+    position_name=["head_position_x", "head_position_y"],
+    head_direction_name="head_orientation",
+    speed_name="head_speed",
+    posterior_type="acausal_posterior",
+    sampling_frequency=500,
+    view_height=800,
+):
+
+    decode_view = create_2D_decode_view(
+        position_time=position_info.index,
+        position=position_info[position_name],
+        posterior=results[posterior_type].sum("state"),
+        bin_size=bin_size,
+        head_dir=position_info[head_direction_name],
+    )
+
+    probability_view = vv.TimeseriesGraph()
+    COLOR_CYCLE = [
+        "#1f77b4",
+        "#ff7f0e",
+        "#2ca02c",
+        "#d62728",
+        "#9467bd",
+        "#8c564b",
+        "#e377c2",
+        "#7f7f7f",
+        "#bcbd22",
+        "#17becf",
+    ]
+    for state, color in zip(results.state.values, COLOR_CYCLE):
+        probability_view.add_line_series(
+            name=state,
+            t=np.asarray(results.time),
+            y=np.asarray(
+                results[posterior_type]
+                .sel(state=state)
+                .sum(["x_position", "y_position"]),
+                dtype=np.float32,
+            ),
+            color=color,
+            width=1,
+        )
+
+    speed_view = vv.TimeseriesGraph().add_line_series(
+        name="Speed [cm/s]",
+        t=np.asarray(position_info.index),
+        y=np.asarray(position_info[speed_name], dtype=np.float32),
         color="black",
         width=1,
     )
@@ -985,6 +596,16 @@ def create_interactive_2D_decoding_figurl(
         width=1,
     )
 
+    vertical_panel1_content = [
+        vv.LayoutItem(decode_view, stretch=1, title="Decode"),
+    ]
+
+    vertical_panel2_content = [
+        vv.LayoutItem(probability_view, stretch=1, title="Probability of State"),
+        vv.LayoutItem(speed_view, stretch=1, title="Speed"),
+        vv.LayoutItem(multiunit_firing_rate_view, stretch=1, title="Multiunit"),
+    ]
+
     view = vv.Box(
         direction="horizontal",
         show_titles=True,
@@ -992,26 +613,16 @@ def create_interactive_2D_decoding_figurl(
         items=[
             vv.LayoutItem(
                 vv.Box(
-                    direction="horizontal",
+                    direction="vertical",
                     show_titles=True,
-                    items=[
-                        vv.LayoutItem(decode_view, stretch=1, title="Decode"),
-                    ],
+                    items=vertical_panel1_content,
                 )
             ),
             vv.LayoutItem(
                 vv.Box(
                     direction="vertical",
                     show_titles=True,
-                    items=[
-                        vv.LayoutItem(
-                            probability_view, stretch=1, title="Probability of State"
-                        ),
-                        vv.LayoutItem(speed_view, stretch=1, title="Speed"),
-                        vv.LayoutItem(
-                            multiunit_firing_rate_view, stretch=1, title="Multiunit"
-                        ),
-                    ],
+                    items=vertical_panel2_content,
                 )
             ),
         ],
