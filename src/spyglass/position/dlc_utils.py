@@ -5,6 +5,7 @@ import pathlib
 import os
 import pwd
 import grp
+import subprocess
 from collections import abc
 from typing import Union
 from contextlib import redirect_stdout
@@ -52,16 +53,63 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
 
 
 class OutputLogger:
+    """
+    A class to wrap a logging.Logger object in order to provide context manager capabilities.
+
+    This class uses contextlib.redirect_stdout to temporarily redirect sys.stdout and thus
+    print statements to the log file instead of, or as well as the console.
+
+    Attributes
+    ----------
+    logger : logging.Logger
+        logger object
+    name : str
+        name of logger
+    level : int
+        level of logging that the logger is set to handle
+
+    Methods
+    -------
+    setup_logger(name_logfile, path_logfile, print_console=False)
+        initialize or get logger object with name_logfile
+        that writes to path_logfile
+
+    Examples
+    --------
+    >>> with OutputLogger(name, path, print_console=True) as logger:
+    ...    print("this will print to logfile")
+    ...    logger.logger.info("this will log to the logfile")
+    ... print("this will print to the console")
+    ... logger.logger.info("this will log to the logfile")
+
+    """
+
     def __init__(self, name, path, level="INFO", **kwargs):
         self.logger = self.setup_logger(name, path, **kwargs)
         self.name = self.logger.name
         self.level = getattr(logging, level)
 
-    def setup_logger(self, name_logfile, path_logfile, print_console=False):
+    def setup_logger(
+        self, name_logfile, path_logfile, print_console=False
+    ) -> logging.Logger:
         """
-        Sets up a logger for each function that outputs to a file
-        and optionally, the console
+        Sets up a logger for that outputs to a file, and optionally, the console
+
+        Parameters
+        ----------
+        name_logfile : str
+            name of the logfile to use
+        path_logfile : str
+            path to the file that should be used as the file handler
+        print_console : bool, default-False
+            if True, prints to console as well as log file.
+
+        Returns
+        -------
+        logger : logging.Logger
+            the logger object with specified handlers
         """
+
         logger = logging.getLogger(name_logfile)
         # check to see if handlers already exist for this logger
         if logger.handlers:
@@ -74,7 +122,7 @@ class OutputLogger:
                     if not os.path.samefile(handler.baseFilename, path_logfile):
                         handler.close()
                         logger.removeHandler(handler)
-                        file_handler = self.get_file_handler(path_logfile)
+                        file_handler = self._get_file_handler(path_logfile)
                         logger.addHandler(file_handler)
                 # if a stream handler exists and
                 # if print_console is False remove streamHandler
@@ -85,27 +133,27 @@ class OutputLogger:
             if print_console and not any(
                 type(handler) == logging.StreamHandler for handler in logger.handlers
             ):
-                logger.addHandler(self.get_stream_handler())
+                logger.addHandler(self._get_stream_handler())
 
         else:
-            file_handler = self.get_file_handler(path_logfile)
+            file_handler = self._get_file_handler(path_logfile)
             logger.addHandler(file_handler)
             if print_console:
-                logger.addHandler(self.get_stream_handler())
+                logger.addHandler(self._get_stream_handler())
         logger.setLevel(logging.INFO)
         return logger
 
-    def get_file_handler(self, path):
+    def _get_file_handler(self, path):
         file_handler = logging.FileHandler(path, mode="a")
-        file_handler.setFormatter(self.get_formatter())
+        file_handler.setFormatter(self._get_formatter())
         return file_handler
 
-    def get_stream_handler(self):
-        streamHandler = logging.StreamHandler()
-        streamHandler.setFormatter(self.get_formatter())
-        return streamHandler
+    def _get_stream_handler(self):
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(self._get_formatter())
+        return stream_handler
 
-    def get_formatter(self):
+    def _get_formatter(self):
         return logging.Formatter(
             "[%(asctime)s] in %(pathname)s, line %(lineno)d: %(message)s",
             datefmt="%d-%b-%y %H:%M:%S",
@@ -157,6 +205,7 @@ def get_dlc_processed_data_dir() -> str:
 
 def find_full_path(root_directories, relative_path):
     """
+    from Datajoint Elements - unused
     Given a relative path, search and return the full-path
      from provided potential root directories (in the given order)
         :param root_directories: potential root directories
@@ -177,13 +226,13 @@ def find_full_path(root_directories, relative_path):
             return _to_Path(root_dir) / relative_path
 
     raise FileNotFoundError(
-        "No valid full-path found (from {})"
-        " for {}".format(root_directories, relative_path)
+        f"No valid full-path found (from {root_directories})" f" for {relative_path}"
     )
 
 
 def find_root_directory(root_directories, full_path):
     """
+    From datajoint elements - unused
     Given multiple potential root directories and a full-path,
     search and return one directory that is the parent of the given path
         :param root_directories: potential root directories
@@ -206,11 +255,11 @@ def find_root_directory(root_directories, full_path):
             if _to_Path(root_dir) in set(full_path.parents)
         )
 
-    except StopIteration:
+    except StopIteration as exc:
         raise FileNotFoundError(
-            "No valid root directory found (from {})"
-            " for {}".format(root_directories, full_path)
-        )
+            f"No valid root directory found (from {root_directories})"
+            f" for {full_path}"
+        ) from exc
 
 
 def infer_output_dir(key, makedir=True):
@@ -250,6 +299,7 @@ def get_video_path(key):
     ----------
     key : dict
         Dictionary containing nwb_file_name and interval_list_name as keys
+
     Returns
     -------
     video_filepath : str
@@ -258,16 +308,14 @@ def get_video_path(key):
         filename of the video
     """
     from ..common.common_behav import VideoFile
-    from ..common.nwb_helper_fn import get_nwb_file
-    from ..common.common_nwbfile import Nwbfile
     import pynwb
 
     video_info = (
         VideoFile() & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
     ).fetch1()
     nwb_path = f"{os.getenv('SPYGLASS_BASE_DIR')}/raw/{video_info['nwb_file_name']}"
-    with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as io:
-        nwb_file = io.read()
+    with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
+        nwb_file = in_out.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
         video_filepath = VideoFile.get_abs_path(
             {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
@@ -354,8 +402,6 @@ def _convert_mp4(
         if True returns the destination filename
     """
 
-    import subprocess
-
     orig_filename = filename
     video_path = pathlib.PurePath(pathlib.Path(video_path), pathlib.Path(filename))
     if videotype not in ["mp4"]:
@@ -374,16 +420,22 @@ def _convert_mp4(
         "copy",
         f"{dest_path.as_posix()}",
     ]
-    p1 = subprocess.Popen(
-        convert_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-    )
-    out, err = p1.communicate()
+    try:
+        convert_process = subprocess.Popen(
+            convert_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        )
+    except subprocess.CalledProcessError as err:
+        raise RuntimeError(
+            f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+        ) from err
+    out, _ = convert_process.communicate()
+    print(out.decode("utf-8"))
     print(f"finished converting {filename}")
     print(
         f"Checking that number of packets match between {orig_filename} and {dest_filename}"
     )
     num_packets = []
-    for ind, file in enumerate([video_path, dest_path]):
+    for file in [video_path, dest_path]:
         packets_command = [
             "ffprobe",
             "-v",
@@ -411,14 +463,24 @@ def _convert_mp4(
             file.as_posix(),
         ]
         if count_frames:
-            p = subprocess.Popen(
-                frames_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-            )
+            try:
+                check_process = subprocess.Popen(
+                    frames_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                )
+            except subprocess.CalledProcessError as err:
+                raise RuntimeError(
+                    f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+                ) from err
         else:
-            p = subprocess.Popen(
-                packets_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-            )
-        out, err = p.communicate()
+            try:
+                check_process = subprocess.Popen(
+                    packets_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                )
+            except subprocess.CalledProcessError as err:
+                raise RuntimeError(
+                    f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+                ) from err
+        out, _ = check_process.communicate()
         num_packets.append(int(out.decode("utf-8").split("\n")[0]))
     print(
         f"Number of packets in {orig_filename}: {num_packets[0]}, {dest_filename}: {num_packets[1]}"
@@ -426,3 +488,33 @@ def _convert_mp4(
     assert num_packets[0] == num_packets[1]
     if return_output:
         return dest_path
+
+
+def get_gpu_memory():
+    """Queries the gpu cluster and returns the memory use for each core.
+    This is used to evaluate which GPU cores are available to run jobs on
+    (i.e. pose estimation, DLC model training)
+
+    Returns
+    -------
+    memory_use_values : dict
+        dictionary with core number as key and memory in use as value.
+
+    Raises
+    ------
+    RuntimeError
+        if subproccess command errors.
+    """
+
+    output_to_list = lambda x: x.decode("ascii").split("\n")[:-1]
+    query_cmd = "nvidia-smi --query-gpu=memory.used --format=csv"
+    try:
+        memory_use_info = output_to_list(
+            subprocess.check_output(query_cmd.split(), stderr=subprocess.STDOUT)
+        )[1:]
+    except subprocess.CalledProcessError as err:
+        raise RuntimeError(
+            f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+        ) from err
+    memory_use_values = {i: int(x.split()[0]) for i, x in enumerate(memory_use_info)}
+    return memory_use_values
