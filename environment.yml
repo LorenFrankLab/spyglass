@@ -10,6 +10,7 @@ dependencies:
   - pydotplus>=2.0.*
   - dask>=2.30
   - pip>=20.2.*
+  - networkx<=2.6.3
   - position_tools
   - track_linearization>=2.3
   - replay_trajectory_classification
