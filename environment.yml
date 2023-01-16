@@ -1,9 +1,9 @@
 name: spyglass
 channels:
   - conda-forge
+  - defaults
   - franklab
   - edeno
-  - defaults
 dependencies:
   - python>=3.8,<3.10
   - jupyterlab>=3.*
