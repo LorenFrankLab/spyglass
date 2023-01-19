@@ -34,7 +34,6 @@ keywords = [
     "sortingview",
 ]
 dependencies = [
-    "jupyterlab>=3.*",
     "pydotplus>=2.0.*",
     "dask>=2.30",
     "position_tools",
