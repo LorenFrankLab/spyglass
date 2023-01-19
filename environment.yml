@@ -8,7 +8,7 @@ dependencies:
   - python>=3.8,<3.10
   - jupyterlab>=3.*
   - pydotplus>=2.0.*
-  - dask>=2.30
+  - dask
   - pip>=20.2.*
   - ipympl
   - tqdm
