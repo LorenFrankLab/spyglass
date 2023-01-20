@@ -8,7 +8,3 @@ dependencies:
   - python>=3.8,<3.10
   - jupyterlab>=3.*
   - pydotplus>=2.0.*
-  - dask
-  - ipympl
-  - tqdm
-  - nb_conda
