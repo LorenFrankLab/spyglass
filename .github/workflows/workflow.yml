@@ -44,7 +44,8 @@ jobs:
       with:
         activate-environment: spyglass
         environment-file: environment.yml
-        mamba-version: "*"
+        miniforge-variant: Mambaforge
+        miniforge-version: latest
     - name: Install test requirements
       run: |
         pip install -r requirements-dev.txt
