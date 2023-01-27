@@ -1,3 +1,5 @@
+"Schema for digital or analog auxiliary input and output."
+
 import datajoint as dj
 import pynwb
 
@@ -8,11 +10,11 @@ from .common_session import Session  # noqa: F401
 from ..utils.dj_helper_fn import fetch_nwb  # dj_replace
 from ..utils.nwb_helper_fn import get_data_interface, get_nwb_file
 
-schema = dj.schema("common_dio")
+schema = dj.schema("common_aux")
 
 
 @schema
-class DIOEvents(dj.Imported):
+class DigitalAux(dj.Imported):
     definition = """
     -> Session
     dio_event_name: varchar(80)   # the name assigned to this DIO event
@@ -43,6 +45,36 @@ class DIOEvents(dj.Imported):
             key["dio_event_name"] = event_series.name
             key["dio_object_id"] = event_series.object_id
             self.insert1(key, skip_duplicates=True)
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
+
+
+@schema
+class AnalogAux(dj.Imported):
+    definition = """
+    -> Session
+    ---
+    sensor_data_object_id: varchar(40)  # object id of the data in the NWB file
+    -> IntervalList                     # the list of intervals for this object
+    """
+
+    def make(self, key):
+        nwb_file_name = key["nwb_file_name"]
+        nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
+        nwbf = get_nwb_file(nwb_file_abspath)
+
+        sensor = get_data_interface(nwbf, "analog", pynwb.behavior.BehavioralEvents)
+        if sensor is None:
+            print(f"No conforming sensor data found in {nwb_file_name}\n")
+            return
+
+        key["sensor_data_object_id"] = sensor.time_series["analog"].object_id
+        # the valid times for these data are the same as the valid times for the raw ephys data
+        key["interval_list_name"] = (Raw & {"nwb_file_name": nwb_file_name}).fetch1(
+            "interval_list_name"
+        )
+        self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
