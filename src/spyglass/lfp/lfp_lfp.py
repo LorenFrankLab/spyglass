@@ -1,4 +1,3 @@
-
 import warnings
 
 import datajoint as dj
@@ -7,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pynwb
 
-from ..common.common_filter import FirFilter
+from .lfp_filter import FirFilter
 from ..common.common_interval import (
     IntervalList,
     interval_list_censor,  # noqa: F401
@@ -23,6 +22,7 @@ from ..utils.nwb_helper_fn import (
 )
 
 schema = dj.schema("lfp_lfp")
+
 
 @schema
 class LFPSelection(dj.Manual):

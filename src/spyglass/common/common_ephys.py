@@ -7,7 +7,7 @@ import pandas as pd
 import pynwb
 
 from .common_device import Probe  # noqa: F401
-from .common_filter import FirFilter
+from ..lfp.lfp_filter import FirFilter
 from .common_interval import (
     IntervalList,
     interval_list_censor,  # noqa: F401
@@ -232,8 +232,6 @@ class SampleCount(dj.Imported):
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
-
-
 
 
 @schema

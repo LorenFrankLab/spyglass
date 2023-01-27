@@ -10,7 +10,7 @@ import scipy.signal as signal
 
 from ..utils.nwb_helper_fn import get_electrode_indices
 
-schema = dj.schema("common_filter")
+schema = dj.schema("lfp_filter")
 
 
 def _import_ghostipy():
