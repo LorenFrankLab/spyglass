@@ -7,7 +7,7 @@
 # Each item under the table name is read as an entry (entity) to be added to that table.
 # Duplicates (entries where the primary key already exists in the table) are skipped, so this YAML file can be used
 # to reload the same entries repeatedly.
-# Only Manual, Lookup tables can be populated this way.
+# Only Manual, Lookup, and Part tables can be populated this way.
 # All required fields for a table must be provided. Optional fields are optional.
 # This YAML should be edited by hand only very carefully because the foreign keys have to be set up and referenced
 # just right. Often, it is simply better to add these entries programmatically.

@@ -1,6 +1,6 @@
 import datajoint as dj
 import ndx_franklab_novela
-import warnings
+import pynwb
 
 from .errors import PopulateException
 
@@ -340,7 +340,7 @@ class Probe(dj.Manual):
 
     @classmethod
     def insert_from_nwbfile(cls, nwbf, config):
-        """Insert probe devices from an NWB file
+        """Insert probe devices from an NWB file.
 
         Parameters
         ----------
@@ -617,31 +617,73 @@ class Probe(dj.Manual):
                 )
         return probe_type
 
-    def create_probe_from_nwb_file(nwbf, device_name):
-        # TODO finish refactoring this
-        nwb_device_name = config_probe_dict.pop("device_name_to_read_from_nwb_file")
-        # if the probe_id exists in the database, note that they may not match the values read from
-        # the file....
+    @classmethod
+    def create_from_nwbfile(cls, nwbfile: pynwb.NWBFile, nwb_device_name: str, probe_id: str, probe_type: ProbeType,
+            contact_side_numbering: bool):
+        """Create a Probe entry using the data in the NWB file.
 
-        print(
-            "TODO: read the shank and electrode configuration from the NWB file."
+        The electrodes in the electrodes table, electrode groups (often shanks), and devices (often probes) in the
+        NWB file that are associated with the given NWB device name will be parsed.
+
+        Note that this code assumes the relatively standard convention where the NWB device corresponds to a Probe,
+        the NWB electrode group corresponds to a Shank, and the NWB electrode corresponds to an Electrode.
+
+        Example usage:
+        ```
+        import pynwb
+        with pynwb.NWBHDF5IO(sgc.Nwbfile.get_abs_path(nwb_file_name), mode="r") as io:
+            nwbfile = io.read()
+            print(nwbfile.electrode_groups["shank0"])
+            sgc.Probe.create_from_nwbfile(
+                nwbfile=nwbfile,
+                nwb_device_name="Device",
+                probe_id="Neuropixels 1.0 Giocomo Lab Configuration",
+                probe_type="Neuropixels 1.0",
+                contact_side_numbering=True
+            )
+        ```
+
+        Parameters
+        ----------
+        nwbfile : pynwb.NWBFile
+            The PyNWB NWB file object.
+        nwb_device_name : str
+            The name of the PyNWB Device object that represents the probe to read in the NWB file.
+        probe_id : str
+            A unique ID for the probe and its configuration, to be used as the primary key for the new Probe entry.
+        probe_type : ProbeType
+            The existing ProbeType entry that represents the type of probe being created.
+        contact_side_numbering : bool
+            Whether the electrode contacts are facing you when numbering them. Stored in the new Probe entry.
+        """
+
+        new_probe_dict = dict()
+        shank_dict = dict()
+        elect_dict = dict()
+
+        new_probe_dict["probe_id"] = probe_id
+        new_probe_dict["probe_type"] = probe_type
+        new_probe_dict["contact_side_numbering"] = (
+            "True" if contact_side_numbering else "False"
         )
-        new_probe_dict.update(config_probe_dict)
 
-        # read the shank and electrode configuration from the NWB file Electrodes table and ElectrodeGroup
-        # objects
-        print("TODO write a warning")
-
+        # iterate through the electrodes table in the NWB file
+        # and use the group column (ElectrodeGroup) to create shanks
+        # and use the device attribute of each ElectrodeGroup to create a probe
         created_shanks = dict()  # map device name to shank_index (int)
-        for elec_index in range(len(nwbf.electrodes)):
-            electrode_group = nwbf.electrodes[elec_index, "group"]
+        device_found = False
+        for elec_index in range(len(nwbfile.electrodes)):
+            electrode_group = nwbfile.electrodes[elec_index, "group"]
             eg_device_name = electrode_group.device.name
+
+            # only look at electrodes where the associated device is the one specified
             if eg_device_name == nwb_device_name:
-                # only look at electrodes where the associated device is the one specified
-                if eg_device_name not in created_shanks:
-                    # if a Shank has not yet been created from the electrode group
+                device_found = True
+
+                # if a Shank has not yet been created from the electrode group, then create it
+                if electrode_group.name not in created_shanks:
                     shank_index = len(created_shanks)
-                    created_shanks[eg_device_name] = shank_index
+                    created_shanks[electrode_group.name] = shank_index
 
                     # build the dictionary of Probe.Shank data
                     shank_dict[shank_index] = dict()
@@ -649,16 +691,26 @@ class Probe(dj.Manual):
                     shank_dict[shank_index]["probe_shank"] = shank_index
 
                 # get the probe shank index associated with this Electrode
-                probe_shank = created_shanks[eg_device_name]
+                probe_shank = created_shanks[electrode_group.name]
 
                 # build the dictionary of Probe.Electrode data
                 elect_dict[elec_index] = dict()
                 elect_dict[elec_index]["probe_id"] = new_probe_dict["probe_id"]
                 elect_dict[elec_index]["probe_shank"] = probe_shank
                 elect_dict[elec_index]["probe_electrode"] = elec_index
-                if "rel_x" in nwbf.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_x"] = nwbf.electrodes[elec_index, "rel_x"]
-                if "rel_y" in nwbf.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_y"] = nwbf.electrodes[elec_index, "rel_y"]
-                if "rel_z" in nwbf.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_z"] = nwbf.electrodes[elec_index, "rel_z"]
+                if "rel_x" in nwbfile.electrodes[elec_index]:
+                    elect_dict[elec_index]["rel_x"] = nwbfile.electrodes[elec_index, "rel_x"]
+                if "rel_y" in nwbfile.electrodes[elec_index]:
+                    elect_dict[elec_index]["rel_y"] = nwbfile.electrodes[elec_index, "rel_y"]
+                if "rel_z" in nwbfile.electrodes[elec_index]:
+                    elect_dict[elec_index]["rel_z"] = nwbfile.electrodes[elec_index, "rel_z"]
+
+        if not device_found:
+            print(f"No electrodes in the NWB file were associated with a device named '{nwb_device_name}'.")
+
+        cls.insert1(new_probe_dict, skip_duplicates=True)
+
+        for shank in shank_dict.values():
+            cls.Shank.insert1(shank, skip_duplicates=True)
+        for electrode in elect_dict.values():
+            cls.Electrode.insert1(electrode, skip_duplicates=True)
