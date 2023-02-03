@@ -37,14 +37,31 @@ def populate_from_yaml(yaml_path: str):
                     f"Prepopulate YAML ('{yaml_path}') contains table '{table_name}' that cannot be "
                     "prepopulated. Only Manual and Lookup tables can be prepopulated."
                 )
+            if hasattr(table_cls, "fetch_add"):
+                # if the table has defined a fetch_add method, use that instead of insert1. this is useful for
+                # tables where the primary key is an ID that auto-increments.
+                # first check whether an entry exists with the same information.
+                query = table_cls & entry_dict
+                if not query:
+                    print(
+                        f"Populate: Populating table {table_cls.__name__} with data {entry_dict} using fetch_add."
+                    )
+                    table_cls.fetch_add(**entry_dict)
+                continue
+
             primary_key_values = {
                 k: v for k, v in entry_dict.items() if k in table_cls.primary_key
             }
+            if not primary_key_values:
+                print(
+                    f"Populate: No primary key provided in data {entry_dict} for table {table_cls.__name__}"
+                )
+                continue
             if primary_key_values not in table_cls.fetch(
                 *table_cls.primary_key, as_dict=True
             ):
                 print(
-                    f"Populate: Populating table {table_cls.__name__} with data {entry_dict}"
+                    f"Populate: Populating table {table_cls.__name__} with data {entry_dict} using insert1."
                 )
                 table_cls.insert1(entry_dict)
             else:
