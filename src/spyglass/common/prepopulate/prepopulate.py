@@ -5,8 +5,6 @@ import pathlib
 import yaml
 import sys
 
-# from .probe import create_probes
-
 
 def prepopulate_default():
     """Prepopulate the database with the default values in SPYGLASS_BASE_DIR/entries.yaml."""
@@ -17,8 +15,6 @@ def prepopulate_default():
 
     yaml_path = pathlib.Path(base_dir) / "entries.yaml"
     populate_from_yaml(yaml_path)
-
-    # create_probes()
 
 
 def populate_from_yaml(yaml_path: str):
