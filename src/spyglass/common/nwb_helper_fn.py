@@ -37,7 +37,6 @@ def get_nwb_file(nwb_file_path):
     nwb_uri = None
     nwb_raw_uri = None
     if nwbfile is None:
-        print(nwb_file_path)
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
             print(f"NWB file {nwb_file_path} does not exist locally; checking kachery")

@@ -1,8 +1,9 @@
 import datajoint as dj
 import ndx_franklab_novela
-import pynwb
 
 from .errors import PopulateException
+from .nwb_helper_fn import get_nwb_file
+
 
 schema = dj.schema("common_device")
 
@@ -618,7 +619,7 @@ class Probe(dj.Manual):
         return probe_type
 
     @classmethod
-    def create_from_nwbfile(cls, nwbfile: pynwb.NWBFile, nwb_device_name: str, probe_id: str, probe_type: ProbeType,
+    def create_from_nwbfile(cls, nwb_file_name: str, nwb_device_name: str, probe_id: str, probe_type: str,
             contact_side_numbering: bool):
         """Create a Probe entry using the data in the NWB file.
 
@@ -630,32 +631,37 @@ class Probe(dj.Manual):
 
         Example usage:
         ```
-        import pynwb
-        with pynwb.NWBHDF5IO(sgc.Nwbfile.get_abs_path(nwb_file_name), mode="r") as io:
-            nwbfile = io.read()
-            print(nwbfile.electrode_groups["shank0"])
-            sgc.Probe.create_from_nwbfile(
-                nwbfile=nwbfile,
-                nwb_device_name="Device",
-                probe_id="Neuropixels 1.0 Giocomo Lab Configuration",
-                probe_type="Neuropixels 1.0",
-                contact_side_numbering=True
-            )
+        sgc.Probe.create_from_nwbfile(
+            nwbfile=nwb_file_name,
+            nwb_device_name="Device",
+            probe_id="Neuropixels 1.0 Giocomo Lab Configuration",
+            probe_type="Neuropixels 1.0",
+            contact_side_numbering=True
+        )
         ```
 
         Parameters
         ----------
-        nwbfile : pynwb.NWBFile
-            The PyNWB NWB file object.
+        nwb_file_name : str
+            The name of the NWB file.
         nwb_device_name : str
             The name of the PyNWB Device object that represents the probe to read in the NWB file.
         probe_id : str
             A unique ID for the probe and its configuration, to be used as the primary key for the new Probe entry.
-        probe_type : ProbeType
-            The existing ProbeType entry that represents the type of probe being created.
+        probe_type : str
+            The existing ProbeType entry that represents the type of probe being created. It must exist.
         contact_side_numbering : bool
             Whether the electrode contacts are facing you when numbering them. Stored in the new Probe entry.
         """
+
+        from .common_nwbfile import Nwbfile
+        nwb_file_path = Nwbfile.get_abs_path(nwb_file_name)
+        nwbfile = get_nwb_file(nwb_file_path)
+
+        fetched_probe_type_dict = (ProbeType & {"probe_type": probe_type}).fetch1()
+        if not fetched_probe_type_dict:
+            print(f"No ProbeType found with probe_type '{probe_type}'. Aborting.")
+            return
 
         new_probe_dict = dict()
         shank_dict = dict()
@@ -707,7 +713,9 @@ class Probe(dj.Manual):
 
         if not device_found:
             print(f"No electrodes in the NWB file were associated with a device named '{nwb_device_name}'.")
+            return
 
+        # insert the Probe, then the Shank parts, and then the Electrode parts
         cls.insert1(new_probe_dict, skip_duplicates=True)
 
         for shank in shank_dict.values():
