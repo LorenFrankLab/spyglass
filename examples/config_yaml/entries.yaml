@@ -1,16 +1,23 @@
 # This file should live in the SPYGLASS BASE directory.
 
 # This YAML is used to populate spyglass tables when the spyglass.common module is loaded.
-# This is an easy way to populate the tables, especially with controlled vocabularies.
-# This helps ensure that a preferred term or definition is used, e.g. "SpikeGadgets" and not "spikegadgets",
-# and Neuropixels 1.0 is defined with a particular (x,y) layout and not another (x,y) layout.
+# This is an easy way to pre-populate the tables, especially with controlled vocabularies (preferred terms
+# for a set of concepts).
+# Using controlled vocabularies helps ensure that a preferred term or definition is used,
+# e.g. "SpikeGadgets" and not "spikegadgets". Using inconsistent terms for the same concept creates confusion and
+# makes search queries on the concept difficult.
+#
+# Format:
+# Top-level keys are table names.
 # Each item under the table name is read as an entry (entity) to be added to that table.
 # Duplicates (entries where the primary key already exists in the table) are skipped, so this YAML file can be used
 # to reload the same entries repeatedly.
 # Only Manual, Lookup, and Part tables can be populated this way.
-# All required fields for a table must be provided. Optional fields are optional.
-# This YAML should be edited by hand only very carefully because the foreign keys have to be set up and referenced
-# just right. Often, it is simply better to add these entries programmatically.
+# All required fields, such as primary keys, for a table must be provided. Optional fields are optional.
+# If a table has a `fetch_add` method defined (e.g., BrainRegion), then the primary key is not required, and
+# `fetch_add` will be called on the key-value pairs provided.
+# Editing this YAML by hand should be done very carefully because the foreign keys have to be set up before they
+# are referenced. Often, it is easier and less error-prone to add these entries programmatically in DataJoint.
 
 DataAcquisitionDeviceSystem:
 - data_acquisition_device_system: SpikeGadgets
@@ -33,8 +40,8 @@ DataAcquisitionDeviceAmplifier:
 - data_acquisition_device_amplifier: Neuropixels Headstage
 
 # `data_acquisition_device_system` and `data_acquisition_device_amplifier` are foreign keys to
-# DataAcquisitionDeviceAmplifier and DataAcquisitionDeviceSystem.
-# They must be added in the tables above first before they can be referenced in an entry below.
+# `DataAcquisitionDeviceAmplifier` and `DataAcquisitionDeviceSystem`.
+# They must be added in the tables above before they can be referenced in an entry below.
 DataAcquisitionDevice:
 - data_acquisition_device_name: SpikeGadgets_Intan
   data_acquisition_device_system: SpikeGadgets
@@ -63,17 +70,21 @@ ProbeType:
   manufacturer: Frank Lab
   num_shanks: 2
 
+# `probe_type` is a foreign key to `ProbeType`
 Probe:
 - probe_id: My Custom Probe Configuration 1
   probe_type: My Custom Probe
   contact_side_numbering: True
 
+# `Probe.Shank` is a part table of `Probe` and has a foreign key to `Probe`.
 Probe.Shank:
 - probe_id: My Custom Probe Configuration 1
   probe_shank: 0
 - probe_id: My Custom Probe Configuration 1
   probe_shank: 1
 
+# `Probe.Shank` is a part table of `Probe` and has a foreign key to `Probe`.
+# `Probe.Electrode` is a part table of `Probe` and has foreign keys to `Probe` and `Probe.Shank`.
 Probe.Electrode:
 - probe_id: My Custom Probe Configuration 1
   probe_shank: 0
@@ -115,3 +126,6 @@ LabMember:
 - lab_member_name: Loren Frank
   first_name: Loren
   last_name: Frank
+
+BrainRegion:
+- region_name: medial entorhinal cortex
