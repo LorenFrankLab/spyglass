@@ -1,15 +1,18 @@
 import os
 import datajoint as dj
 
-from .common_device import CameraDevice, DataAcquisitionDevice, Probe
+from .common_device import (
+    CameraDevice,
+    DataAcquisitionDevice,
+    Probe,
+    SessionDataAcquisitionDevice,
+)
 from .common_lab import Institution, Lab, LabMember
 from .common_nwbfile import Nwbfile
 from .common_subject import Subject
 from .nwb_helper_fn import get_nwb_file, get_config
 
 schema = dj.schema("common_session")
-
-# TODO: figure out what to do about ExperimenterList
 
 
 @schema
@@ -39,12 +42,15 @@ class Session(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath)
-        print(config)
 
         # certain data are not associated with a single NWB file / session because they may apply to
-        # multiple sessions. these data go into dj.Manual tables
+        # multiple sessions. these data go into dj.Manual tables.
         # e.g., a lab member may be associated with multiple experiments, so the lab member table should not
-        # be dependent on (contain a primary key for) a session
+        # be dependent on (contain a primary key for) a session.
+
+        # here, we create new entries in these dj.Manual tables based on the values read from the NWB file
+        # then, they are linked to the session via fields of Session (Subject, Institution, Lab) or join
+        # tables (e.g., SessionDataAcquisitionDevice).
 
         print("Institution...")
         Institution().insert_from_nwbfile(nwbf)
@@ -63,7 +69,7 @@ class Session(dj.Imported):
         print()
 
         print("Populate CameraDevice...")
-        CameraDevice.insert_from_nwbfile(nwbf, config)
+        CameraDevice.insert_from_nwbfile(nwbf)
         print()
 
         print("Populate Probe...")
@@ -99,32 +105,44 @@ class Session(dj.Imported):
         print("IntervalList...")
         IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
-        # populate join table between Session and DataAcquisitionDevice
-        print("Populate SessionDataAcquisitionDevice...")
-        for device_name in device_names:
-            SessionDataAcquisitionDevice.insert1(
-                {"nwb_file_name": nwb_file_name, "data_acquisition_device_name": device_name},
-                skip_duplicates=True,
-            )
-            print(f"Inserted {device_name}")
-        print()
-
         # print('Unit...')
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
 
 @schema
-class SessionDataAcquisitionDevice(dj.Manual):
-    # join table for Session and DataAcquisitionDevice
+class DataAcquisitionDeviceList(dj.Imported):
+    # effectively a table for Session and DataAcquisitionDevice
     # each session can be associated with multiple data acquisition devices
     definition = """
     -> Session
-    -> DataAcquisitionDevice
     """
+
+    class SessionDataAcquisitionDevice(dj.Part):
+        definition = """
+        -> DataAcquisitionDeviceList
+        -> DataAcquisitionDevice
+        """
+
+    def make(self, key):
+        nwb_file_name = key["nwb_file_name"]
+        nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
+        self.insert1({"nwb_file_name": nwb_file_name}, skip_duplicates=True)
+        nwbf = get_nwb_file(nwb_file_abspath)
+        config = get_config(nwb_file_abspath)
+
+        device_names = DataAcquisitionDevice.get_all_device_names(nwbf, config)
+        # it is assumed that the device names returned here now exist in DataAcquisitionDevice
+        for device_name in device_names:
+            key = dict()
+            key["nwb_file_name"] = nwb_file_name
+            key["data_acquisition_device_name"] = device_name
+            self.SessionDataAcquisitionDevice().insert1(key)
 
 
 @schema
 class ExperimenterList(dj.Imported):
+    # effectively a join table for Session and LabMember
+    # each session can be associated with multiple lab members
     definition = """
     -> Session
     """
@@ -138,16 +156,14 @@ class ExperimenterList(dj.Imported):
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        self.insert1(
-            {"nwb_file_name": nwb_file_name}, skip_duplicates=True
-        )  # TODO is this necessary??
+        self.insert1({"nwb_file_name": nwb_file_name}, skip_duplicates=True)
         nwbf = get_nwb_file(nwb_file_abspath)
 
         if nwbf.experimenter is None:
             return
 
         for name in nwbf.experimenter:
-            LabMember().insert_from_name(name)
+            LabMember().insert_from_name(name)  # NOTE: lab member should have already been created in Session.make
             key = dict()
             key["nwb_file_name"] = nwb_file_name
             key["lab_member_name"] = name
@@ -178,9 +194,7 @@ class SessionGroup(dj.Manual):
         )
 
     @staticmethod
-    def update_session_group_description(
-        session_group_name: str, session_group_description
-    ):
+    def update_session_group_description(session_group_name: str, session_group_description):
         SessionGroup.update1(
             {
                 "session_group_name": session_group_name,
@@ -189,9 +203,7 @@ class SessionGroup(dj.Manual):
         )
 
     @staticmethod
-    def add_session_to_group(
-        nwb_file_name: str, session_group_name: str, *, skip_duplicates: bool = False
-    ):
+    def add_session_to_group(nwb_file_name: str, session_group_name: str, *, skip_duplicates: bool = False):
         SessionGroupSession.insert1(
             {"session_group_name": session_group_name, "nwb_file_name": nwb_file_name},
             skip_duplicates=skip_duplicates,
@@ -212,9 +224,7 @@ class SessionGroup(dj.Manual):
 
     @staticmethod
     def get_group_sessions(session_group_name: str):
-        results = (
-            SessionGroupSession & {"session_group_name": session_group_name}
-        ).fetch(as_dict=True)
+        results = (SessionGroupSession & {"session_group_name": session_group_name}).fetch(as_dict=True)
         return [{"nwb_file_name": result["nwb_file_name"]} for result in results]
 
     @staticmethod

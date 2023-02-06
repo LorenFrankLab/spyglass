@@ -62,7 +62,7 @@ ProbeType:
   manufacturer: Lawrence Livermore National Lab
   num_shanks: 4
 - probe_type: A1x32-6mm-50-177-H32_21mm
-  probe_description: A NeuroNexus probe with 32 channels, 6 mm shank length, 50 um site spacing, 177 um^2 site area, the H32 package, and a 21 vmm cable
+  probe_description: A NeuroNexus probe with 32 channels, 6 mm shank length, 50 um site spacing, 177 um^2 site area, the H32 package, and a 21 mm cable
   manufacturer: NeuroNexus
   num_shanks: 1
 - probe_type: My Custom Probe
@@ -85,7 +85,7 @@ Probe.Shank:
 
 # `Probe.Shank` is a part table of `Probe` and has a foreign key to `Probe`.
 # `Probe.Electrode` is a part table of `Probe` and has foreign keys to `Probe` and `Probe.Shank`.
-# NOTE: Defining electrodes this way can be tedious. Programmatically defining the electrodes or loading
+# Defining electrodes this way is tedious. Programmatically defining the electrodes or loading
 # the electrode configuration from probeinterface may be more efficient.
 Probe.Electrode:
 - probe_id: My Custom Probe Configuration 1
@@ -128,6 +128,11 @@ LabMember:
 - lab_member_name: Loren Frank
   first_name: Loren
   last_name: Frank
+
+LabMember.LabMemberInfo:
+- lab_member_name: Ryan Ly
+  google_user_name: rly@lbl.gov
+  datajoint_user_name: rly
 
 BrainRegion:
 - region_name: medial entorhinal cortex
