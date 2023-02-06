@@ -1,4 +1,4 @@
-"""Schema for institution name, lab name, and lab members (experimenters)."""
+"""Schema for institution name, lab team, lab name, and lab members (independent of a session)."""
 import datajoint as dj
 
 schema = dj.schema("common_lab")

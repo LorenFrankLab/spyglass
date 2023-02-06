@@ -79,8 +79,12 @@ class DataAcquisitionDevice(dj.Manual):
             if device_name in ndx_devices:
                 nwb_device_obj = ndx_devices[device_name]
                 new_device_dict["data_acquisition_device_name"] = nwb_device_obj.name
-                new_device_dict["data_acquisition_device_system"] = nwb_device_obj.system
-                new_device_dict["data_acquisition_device_amplifier"] = nwb_device_obj.amplifier
+                new_device_dict[
+                    "data_acquisition_device_system"
+                ] = nwb_device_obj.system
+                new_device_dict[
+                    "data_acquisition_device_amplifier"
+                ] = nwb_device_obj.amplifier
                 new_device_dict["adc_circuit"] = nwb_device_obj.adc_circuit
 
             # override new_device_dict with values from config if specified
@@ -89,7 +93,9 @@ class DataAcquisitionDevice(dj.Manual):
                 new_device_dict.update(device_config)
 
             # check that the system value is allowed and override
-            new_device_dict["data_acquisition_device_system"] = cls._add_system(new_device_dict["data_acquisition_device_system"])
+            new_device_dict["data_acquisition_device_system"] = cls._add_system(
+                new_device_dict["data_acquisition_device_system"]
+            )
 
             # check that the amplifier value is allowed and override if necessary
             new_device_dict["data_acquisition_device_amplifier"] = cls._add_amplifier(
@@ -129,7 +135,9 @@ class DataAcquisitionDevice(dj.Manual):
         if system == "MCU":
             system = "SpikeGadgets"
 
-        if {"data_acquisition_device_system": system} not in DataAcquisitionDeviceSystem():
+        if {
+            "data_acquisition_device_system": system
+        } not in DataAcquisitionDeviceSystem():
             print(
                 f"\nData acquisition device system '{system}' not found in database. Current values: "
                 f"{DataAcquisitionDeviceSystem.fetch('data_acquisition_device_system').tolist()}. "
@@ -172,7 +180,9 @@ class DataAcquisitionDevice(dj.Manual):
         amplifier : str
             The amplifier value that was added to the database.
         """
-        if {"data_acquisition_device_amplifier": amplifier} not in DataAcquisitionDeviceAmplifier():
+        if {
+            "data_acquisition_device_amplifier": amplifier
+        } not in DataAcquisitionDeviceAmplifier():
             print(
                 f"\nData acquisition device amplifier '{amplifier}' not found in database. Current values: "
                 f"{DataAcquisitionDeviceAmplifier.fetch('data_acquisition_device_amplifier').tolist()}. "
@@ -188,7 +198,8 @@ class DataAcquisitionDevice(dj.Manual):
             )
             if val.lower() in ["y", "yes"]:
                 DataAcquisitionDeviceAmplifier.insert1(
-                    {"data_acquisition_device_amplifier": amplifier}, skip_duplicates=True
+                    {"data_acquisition_device_amplifier": amplifier},
+                    skip_duplicates=True,
                 )
             else:
                 raise PopulateException(
@@ -299,8 +310,7 @@ class ProbeType(dj.Manual):
                 f"Do you want to add probe type '{probe_type}' to the database? (y/N)"
             )
             if val.lower() in ["y", "yes"]:
-                ProbeType.insert1(probe_dict, skip_duplicates=True
-                )
+                ProbeType.insert1(probe_dict, skip_duplicates=True)
             else:
                 raise PopulateException(
                     f"User chose not to add probe type '{probe_type}' to the database."
@@ -381,159 +391,45 @@ class Probe(dj.Manual):
             elect_dict = dict()
             num_shanks = 0
 
+            # if the probe is defined in the NWB file
             if probe_type in ndx_probes:
-                # if the probe is defined in the NWB file
                 nwb_probe_obj = ndx_probes[probe_type]
-
-                # construct dictionary of values to add to ProbeType
-                new_probe_type_dict["manufacturer"] = getattr(
-                    nwb_probe_obj, "manufacturer"
+                cls.__read_ndx_probe_data(
+                    nwb_probe_obj,
+                    new_probe_type_dict,
+                    new_probe_dict,
+                    shank_dict,
+                    elect_dict,
                 )
-                new_probe_type_dict["probe_type"] = nwb_probe_obj.probe_type
-                new_probe_type_dict[
-                    "probe_description"
-                ] = nwb_probe_obj.probe_description
-                new_probe_type_dict["num_shanks"] = len(nwb_probe_obj.shanks)
-                num_shanks = new_probe_type_dict["num_shanks"]
-
-                # check that the probe type value is allowed and create a ProbeType if requested
-                new_probe_dict["probe_type"] = cls._add_probe_type(new_probe_type_dict)
-
-                new_probe_dict["contact_side_numbering"] = (
-                    "True" if nwb_probe_obj.contact_side_numbering else "False"
-                )
-
-                new_probe_dict["probe_id"] = new_probe_dict["probe_type"]
-
-                # go through the shanks and add each one to the Shank table
-                for shank in nwb_probe_obj.shanks.values():
-                    shank_dict[shank.name] = dict()
-                    shank_dict[shank.name]["probe_type"] = new_probe_dict["probe_type"]
-                    shank_dict[shank.name]["probe_shank"] = int(shank.name)
-
-                    # go through the electrodes and add each one to the Electrode table
-                    for electrode in shank.shanks_electrodes.values():
-                        # the next line will need to be fixed if we have different sized contacts on a shank
-                        elect_dict[electrode.name] = dict()
-                        elect_dict[electrode.name]["probe_type"] = new_probe_dict[
-                            "probe_type"
-                        ]
-                        elect_dict[electrode.name]["probe_shank"] = shank_dict[
-                            shank.name
-                        ]["probe_shank"]
-                        elect_dict[electrode.name][
-                            "contact_size"
-                        ] = nwb_probe_obj.contact_size
-                        elect_dict[electrode.name]["probe_electrode"] = int(
-                            electrode.name
-                        )
-                        elect_dict[electrode.name]["rel_x"] = electrode.rel_x
-                        elect_dict[electrode.name]["rel_y"] = electrode.rel_y
-                        elect_dict[electrode.name]["rel_z"] = electrode.rel_z
 
             # add any ProbeType objects defined in the config YAML
-            ProbeType.insert_from_config(config)
+            # ProbeType.insert_from_config(config)
 
+            # if probe type is defined in the config YAML (regardless of whether it is also defined in
+            # the NWB file), override dicts with values from config
             if probe_type in config_probes:
-                # if probe type is defined in the config YAML (regardless of whether it is also defined in
-                # the NWB file), override new_device_dict with values from config
-
                 config_probe_dict = config_probes[probe_type]
-                config_probe_type = config_probe_dict["probe_type"]
+                cls.__read_probe_config_data(
+                    config_probe_dict,
+                    nwb_probe_obj,
+                    new_probe_type_dict,
+                    new_probe_dict,
+                    shank_dict,
+                    elect_dict,
+                )
 
-                # check whether the probe type exists in the database
-                # users are currently not allowed to specify a probe type in the YAML that does not exist in the DB
-                query = (ProbeType & {"probe_type": config_probe_type})
-                if len(query) == 0:
-                    raise PopulateException(
-                        f"Probe type '{config_probe_type}' does not exist in the database. "
-                        "Please first add the probe type and its information to the database before proceeding."
-                    )
-
-                # if the config YAML contains this special key "device_name_to_read_from_nwb_file",
-                # then use the Device object with the given name from the NWB file as a Probe
-                # and use the config YAML dict as Probe properties
-                if "device_name_to_read_from_nwb_file" in config_probe_dict:
-                    nwb_device_name = config_probe_dict.pop(
-                        "device_name_to_read_from_nwb_file"
-                    )
-                    # if the probe_id exists in the database, note that they may not match the values read from
-                    # the file....
-
-                    print(
-                        "TODO: read the shank and electrode configuration from the NWB file."
-                    )
-                    new_probe_dict.update(config_probe_dict)
-
-                    # read the shank and electrode configuration from the NWB file Electrodes table and ElectrodeGroup
-                    # objects
-                    print("TODO write a warning")
-
-                    created_shanks = dict()  # map device name to shank_index (int)
-                    for elec_index in range(len(nwbf.electrodes)):
-                        electrode_group = nwbf.electrodes[elec_index, "group"]
-                        eg_device_name = electrode_group.device.name
-                        if eg_device_name == nwb_device_name:
-                            # only look at electrodes where the associated device is the one specified
-                            if eg_device_name not in created_shanks:
-                                # if a Shank has not yet been created from the electrode group
-                                shank_index = len(created_shanks)
-                                created_shanks[eg_device_name] = shank_index
-
-                                # build the dictionary of Probe.Shank data
-                                shank_dict[shank_index] = dict()
-                                shank_dict[shank_index]["probe_id"] = new_probe_dict["probe_id"]
-                                shank_dict[shank_index]["probe_shank"] = shank_index
-
-                            # get the probe shank index associated with this Electrode
-                            probe_shank = created_shanks[eg_device_name]
-
-                            # build the dictionary of Probe.Electrode data
-                            elect_dict[elec_index] = dict()
-                            elect_dict[elec_index]["probe_id"] = new_probe_dict["probe_id"]
-                            elect_dict[elec_index]["probe_shank"] = probe_shank
-                            elect_dict[elec_index]["probe_electrode"] = elec_index
-                            if "rel_x" in nwbf.electrodes[elec_index]:
-                                elect_dict[elec_index]["rel_x"] = nwbf.electrodes[elec_index, "rel_x"]
-                            if "rel_y" in nwbf.electrodes[elec_index]:
-                                elect_dict[elec_index]["rel_y"] = nwbf.electrodes[elec_index, "rel_y"]
-                            if "rel_z" in nwbf.electrodes[elec_index]:
-                                elect_dict[elec_index]["rel_z"] = nwbf.electrodes[elec_index, "rel_z"]
-
-                    num_shanks = len(created_shanks)
-                else:
-                    # the user specifies Shank and Electrode information manually in the config YAML file
-                    shanks = config_probe_dict.pop("Shank")
-                    num_shanks = len(shanks)
-                    new_probe_dict.update(config_probe_dict)
-                    for shank in shanks:
-                        if shank["probe_shank"] not in shank_dict:
-                            shank_dict[shank["probe_shank"]] = dict()
-                        shank_dict[shank["probe_shank"]]["probe_id"] = new_probe_dict[
-                            "probe_id"
-                        ]
-                        electrodes = shank.pop("Electrode")
-                        shank_dict[shank["probe_shank"]].update(shank)
-                        for electrode in electrodes:
-                            if electrode["probe_electrode"] not in elect_dict:
-                                elect_dict[electrode["probe_electrode"]] = dict()
-                            elect_dict[electrode["probe_electrode"]][
-                                "probe_id"
-                            ] = new_probe_dict["probe_id"]
-                            elect_dict[electrode["probe_electrode"]][
-                                "probe_shank"
-                            ] = shank["probe_shank"]
-                            elect_dict[electrode["probe_electrode"]].update(electrode)
-
+            num_shanks = new_probe_type_dict["num_shanks"]
             assert num_shanks == 0 or num_shanks == len(
                 shank_dict
             ), "`num_shanks` is not equal to the number of shanks."
 
             # if probe id already exists, do not overwrite anything or create new Shanks and Electrodes
-            query = (Probe & {"probe_id": new_probe_dict["probe_id"]})
+            query = Probe & {"probe_id": new_probe_dict["probe_id"]}
             if len(query) > 0:
-                print(f"Probe ID '{new_probe_dict['probe_id']}' already exists in the database. Spyglass will use "
-                       "that and not create a new Probe, Shanks, or Electrodes.")
+                print(
+                    f"Probe ID '{new_probe_dict['probe_id']}' already exists in the database. Spyglass will use "
+                    "that and not create a new Probe, Shanks, or Electrodes."
+                )
                 continue
 
             cls.insert1(new_probe_dict, skip_duplicates=True)
@@ -549,6 +445,88 @@ class Probe(dj.Manual):
             print("No conforming probe metadata found.")
 
         return all_probes_types
+
+    @classmethod
+    def __read_ndx_probe_data(
+        cls,
+        nwb_probe_obj: ndx_franklab_novela.Probe,
+        new_probe_type_dict: dict,
+        new_probe_dict: dict,
+        shank_dict: dict,
+        elect_dict: dict,
+    ):
+        # construct dictionary of values to add to ProbeType
+        new_probe_type_dict["manufacturer"] = getattr(nwb_probe_obj, "manufacturer")
+        new_probe_type_dict["probe_type"] = nwb_probe_obj.probe_type
+        new_probe_type_dict["probe_description"] = nwb_probe_obj.probe_description
+        new_probe_type_dict["num_shanks"] = len(nwb_probe_obj.shanks)
+
+        # check that the probe type value is allowed and create a ProbeType if requested
+        new_probe_dict["probe_type"] = cls._add_probe_type(new_probe_type_dict)
+
+        new_probe_dict["contact_side_numbering"] = (
+            "True" if nwb_probe_obj.contact_side_numbering else "False"
+        )
+
+        new_probe_dict["probe_id"] = new_probe_dict["probe_type"]
+
+        # go through the shanks and add each one to the Shank table
+        for shank in nwb_probe_obj.shanks.values():
+            shank_dict[shank.name] = dict()
+            shank_dict[shank.name]["probe_type"] = new_probe_dict["probe_type"]
+            shank_dict[shank.name]["probe_shank"] = int(shank.name)
+
+            # go through the electrodes and add each one to the Electrode table
+            for electrode in shank.shanks_electrodes.values():
+                # the next line will need to be fixed if we have different sized contacts on a shank
+                elect_dict[electrode.name] = dict()
+                elect_dict[electrode.name]["probe_type"] = new_probe_dict["probe_type"]
+                elect_dict[electrode.name]["probe_shank"] = shank_dict[shank.name][
+                    "probe_shank"
+                ]
+                elect_dict[electrode.name]["contact_size"] = nwb_probe_obj.contact_size
+                elect_dict[electrode.name]["probe_electrode"] = int(electrode.name)
+                elect_dict[electrode.name]["rel_x"] = electrode.rel_x
+                elect_dict[electrode.name]["rel_y"] = electrode.rel_y
+                elect_dict[electrode.name]["rel_z"] = electrode.rel_z
+
+    @classmethod
+    def __read_probe_config_data(cls, config_probe_dict):
+        config_probe_type = config_probe_dict["probe_type"]
+
+        # check whether the probe type exists in the database.
+        # users are currently not allowed to specify a probe type in the YAML that does not exist in the DB.
+        query = ProbeType & {"probe_type": config_probe_type}
+        if len(query) == 0:
+            raise PopulateException(
+                f"Probe type '{config_probe_type}' does not exist in the database. "
+                "Please first add the probe type and its information to the database before proceeding."
+            )
+
+        # if the config YAML contains this special key "device_name_to_read_from_nwb_file",
+        # then use the Device object with the given name from the NWB file as a Probe
+        # and use the config YAML dict as Probe properties
+
+        # the user specifies Shank and Electrode information manually in the config YAML file
+        # shanks = config_probe_dict.pop("Shank")
+        # num_shanks = len(shanks)
+        # new_probe_dict.update(config_probe_dict)
+        # for shank in shanks:
+        #     if shank["probe_shank"] not in shank_dict:
+        #         shank_dict[shank["probe_shank"]] = dict()
+        #     shank_dict[shank["probe_shank"]]["probe_id"] = new_probe_dict["probe_id"]
+        #     electrodes = shank.pop("Electrode")
+        #     shank_dict[shank["probe_shank"]].update(shank)
+        #     for electrode in electrodes:
+        #         if electrode["probe_electrode"] not in elect_dict:
+        #             elect_dict[electrode["probe_electrode"]] = dict()
+        #         elect_dict[electrode["probe_electrode"]]["probe_id"] = new_probe_dict[
+        #             "probe_id"
+        #         ]
+        #         elect_dict[electrode["probe_electrode"]]["probe_shank"] = shank[
+        #             "probe_shank"
+        #         ]
+        #         elect_dict[electrode["probe_electrode"]].update(electrode)
 
     @classmethod
     def _add_probe_type(cls, probe_type_dict):
@@ -596,31 +574,18 @@ class Probe(dj.Manual):
                         "already in the database."
                     )
         else:
-            print(
-                f"\nProbe type '{probe_type}' not found in database. Current values: "
-                f"{ProbeType.fetch('probe_type').tolist()}. "
-                "Please ensure that the probe type you want to add does not already "
-                "exist in the database under a different name or spelling. "
-                "If you want to use an existing name in the database, "
-                "please specify that name for the probe 'probe_type' key in the config YAML or "
-                "change the corresponding Device object in the NWB file. "
-                f"Do you want to add probe type '{probe_type}' to the database? "
-                "Entering 'N' will raise an exception."
-            )
-            val = input(
-                f"Do you want to add probe type '{probe_type}' to the database? (y/N)"
-            )
-            if val.lower() in ["y", "yes"]:
-                ProbeType.insert1(**probe_type_dict, skip_duplicates=True)
-            else:
-                raise PopulateException(
-                    f"User chose not to add probe type '{probe_type}' to the database."
-                )
+            ProbeType._add_probe_type(probe_type_dict)
         return probe_type
 
     @classmethod
-    def create_from_nwbfile(cls, nwb_file_name: str, nwb_device_name: str, probe_id: str, probe_type: str,
-            contact_side_numbering: bool):
+    def create_from_nwbfile(
+        cls,
+        nwb_file_name: str,
+        nwb_device_name: str,
+        probe_id: str,
+        probe_type: str,
+        contact_side_numbering: bool,
+    ):
         """Create a Probe entry using the data in the NWB file.
 
         The electrodes in the electrodes table, electrode groups (often shanks), and devices (often probes) in the
@@ -655,6 +620,7 @@ class Probe(dj.Manual):
         """
 
         from .common_nwbfile import Nwbfile
+
         nwb_file_path = Nwbfile.get_abs_path(nwb_file_name)
         nwbfile = get_nwb_file(nwb_file_path)
 
@@ -705,14 +671,22 @@ class Probe(dj.Manual):
                 elect_dict[elec_index]["probe_shank"] = probe_shank
                 elect_dict[elec_index]["probe_electrode"] = elec_index
                 if "rel_x" in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_x"] = nwbfile.electrodes[elec_index, "rel_x"]
+                    elect_dict[elec_index]["rel_x"] = nwbfile.electrodes[
+                        elec_index, "rel_x"
+                    ]
                 if "rel_y" in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_y"] = nwbfile.electrodes[elec_index, "rel_y"]
+                    elect_dict[elec_index]["rel_y"] = nwbfile.electrodes[
+                        elec_index, "rel_y"
+                    ]
                 if "rel_z" in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_z"] = nwbfile.electrodes[elec_index, "rel_z"]
+                    elect_dict[elec_index]["rel_z"] = nwbfile.electrodes[
+                        elec_index, "rel_z"
+                    ]
 
         if not device_found:
-            print(f"No electrodes in the NWB file were associated with a device named '{nwb_device_name}'.")
+            print(
+                f"No electrodes in the NWB file were associated with a device named '{nwb_device_name}'."
+            )
             return
 
         # insert the Probe, then the Shank parts, and then the Electrode parts

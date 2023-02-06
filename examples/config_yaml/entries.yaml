@@ -85,6 +85,8 @@ Probe.Shank:
 
 # `Probe.Shank` is a part table of `Probe` and has a foreign key to `Probe`.
 # `Probe.Electrode` is a part table of `Probe` and has foreign keys to `Probe` and `Probe.Shank`.
+# NOTE: Defining electrodes this way can be tedious. Programmatically defining the electrodes or loading
+# the electrode configuration from probeinterface may be more efficient.
 Probe.Electrode:
 - probe_id: My Custom Probe Configuration 1
   probe_shank: 0

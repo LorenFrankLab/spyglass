@@ -2,19 +2,18 @@
 # existing entities.
 # - If the entity does not exist, then the user will be prompted to create a new entity.
 # - If the entity exists, then values that are not primary keys will be ignored.
+# Subject:
+# - subject_id: My Subject  # this value is used instead of the subject_id in the NWB file
+#   age: 7 months  # if `subject_id: My Subject` does not already exist in Subject, then this is used to define the new entity
 
-Subject:
-  subject_id: My Subject  # this value is used instead of the subject_id in the NWB file
-  age: 7 months  # if `subject_id: My Subject` does not already exist in Subject, then this is used to define the new entity
+# Institution:
+# - institution_name: DEF University  # this value is used instead of the subject_id in the NWB file
 
-Institution:
-  institution_name: DEF University  # this value is used instead of the subject_id in the NWB file
+# Lab:
+# - lab_name: ABC Lab  # this value is used instead of the subject_id in the NWB file
 
-Lab:
-  lab_name: ABC Lab  # this value is used instead of the subject_id in the NWB file
-
-LabMember:
-- lab_member_name: Grad Student One  # this value is used instead of the subject_id in the NWB file
+# LabMember:
+# - lab_member_name: Grad Student One  # this value is used instead of the subject_id in the NWB file
 
 
 # the user has two options to associate the NWB file with a "Neuropixels Recording Device" data acquisition device
