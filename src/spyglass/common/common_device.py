@@ -37,6 +37,49 @@ class DataAcquisitionDevice(dj.Manual):
     """
 
     @classmethod
+    def insert_from_nwbfile(cls, nwbf, config):
+        """Insert data acquisition devices from an NWB file.
+
+        Note that this does not link the DataAcquisitionDevices with a Session. For that,
+        see DataAcquisitionDeviceList.
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            The source NWB file object.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to replace in the NWB file.
+        """
+        _, ndx_devices, _ = cls.get_all_device_names(nwbf, config)
+
+        for device_name in ndx_devices:
+            new_device_dict = dict()
+
+            # read device properties into new_device_dict from PyNWB extension device object
+            nwb_device_obj = ndx_devices[device_name]
+
+            name = nwb_device_obj.name
+            adc_circuit = nwb_device_obj.adc_circuit
+
+            # transform system value. check if value is in DB. if not, prompt user to add an entry or cancel.
+            system = cls._add_system(nwb_device_obj.system)
+
+            # transform amplifier value. check if value is in DB. if not, prompt user to add an entry or cancel.
+            amplifier = cls._add_amplifier(nwb_device_obj.amplifier)
+
+            new_device_dict["data_acquisition_device_name"] = name
+            new_device_dict["data_acquisition_device_system"] = system
+            new_device_dict["data_acquisition_device_amplifier"] = amplifier
+            new_device_dict["adc_circuit"] = adc_circuit
+
+            cls._add_device(new_device_dict)
+
+        if ndx_devices:
+            print(f"Inserted or referenced data acquisition device(s): {ndx_devices.keys()}")
+        else:
+            print("No conforming data acquisition device metadata found.")
+
+    @classmethod
     def get_all_device_names(cls, nwbf, config):
         """Get a list of all device names in the NWB file, after appending and overwriting by the config file.
 
@@ -66,81 +109,56 @@ class DataAcquisitionDevice(dj.Manual):
                 device_dict["data_acquisition_device_name"] for device_dict in config["DataAcquisitionDevice"]
             ]
         else:
-            config_devices = dict()
+            config_devices = list()
 
         all_device_names = set(ndx_devices.keys()).union(set(config_devices))
 
         return all_device_names, ndx_devices, config_devices
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config):
-        """Insert data acquisition devices from an NWB file.
+    def _add_device(cls, new_device_dict):
+        """Check that the information in the NWB file and the database for the given device name match perfectly.
 
-        Note that this does not link the DataAcquisitionDevices with a Session. For that,
-        see DataAcquisitionDeviceList.
+        If no DataAcquisitionDevice with the given name exists in the database, check whether the user wants to add
+        a new entry instead of referencing an existing entry. If so, return. If not, raise an exception.
 
         Parameters
         ----------
-        nwbf : pynwb.NWBFile
-            The source NWB file object.
-        config : dict
-            Dictionary read from a user-defined YAML file containing values to replace in the NWB file.
+        new_device_dict : dict
+            Dict of new device properties
 
-        Returns
-        -------
-        device_name_list : list
-            List of data acquisition object names found in the NWB file.
+        Raises
+        ------
+        PopulateException
+            If user chooses not to add a device to the database when prompted or if the device properties from the
+            NWB file do not match the properties of the corresponding database entry.
         """
-        all_device_names, ndx_devices, _ = cls.get_all_device_names(nwbf, config)
+        name = new_device_dict["data_acquisition_device_name"]
+        all_values = DataAcquisitionDevice.fetch("data_acquisition_device_name").tolist()
+        if name not in all_values:
+            # no entry with the same name exists, prompt user about adding a new entry
+            print(
+                f"\nData acquisition device '{name}' was not found in the database. "
+                "The current values are: {all_values}. "
+                "Please ensure that the device you want to add does not already "
+                "exist in the database under a different name or spelling. "
+                "If you want to use an existing device in the database, "
+                "please change the corresponding Device object in the NWB file. "
+                "Entering 'N' will raise an exception."
+            )
+            val = input(f"Do you want to add data acquisition device '{name}' to the database? (y/N)")
+            if val.lower() in ["y", "yes"]:
+                cls.insert1(new_device_dict, skip_duplicates=True)
+            raise PopulateException(f"User chose not to add data acquisition device '{name}' to the database.")
 
-        for device_name in ndx_devices:
-            new_device_dict = dict()
-
-            # read device properties into new_device_dict from PyNWB device object
-            nwb_device_obj = ndx_devices[device_name]
-            cls._check_nwb_device_fields(nwb_device_obj)
-
-            name = nwb_device_obj.name
-            system = nwb_device_obj.system
-            amplifier = nwb_device_obj.amplifier
-            adc_circuit = nwb_device_obj.adc_circuit
-
-            # transform system value. check if value is in DB. if not, prompt user to add an entry or cancel.
-            system = cls._add_system(system)
-
-            # transform amplifier value. check if value is in DB. if not, prompt user to add an entry or cancel.
-            amplifier = cls._add_amplifier(amplifier)
-
-            new_device_dict["data_acquisition_device_name"] = name
-            new_device_dict["data_acquisition_device_system"] = system
-            new_device_dict["data_acquisition_device_amplifier"] = amplifier
-            new_device_dict["adc_circuit"] = adc_circuit
-
-            cls.insert1(new_device_dict, skip_duplicates=True)
-
-        if all_device_names:
-            print(f"Inserted data acquisition device(s): {all_device_names}")
-        else:
-            print("No conforming data acquisition device metadata found.")
-
-        return all_device_names
-
-    @classmethod
-    def _check_nwb_device_fields(cls, nwb_device_obj):
-        """Check that there are no conflicts between the information in the NWB file and the database.
-
-        If a DataAcquisitionDevice with the same name exists in the database, make sure the other fields match.
-        """
-
-        query = DataAcquisitionDevice & {"data_acquisition_device_name": nwb_device_obj.name}
-        if not query:  # no entry with the same name exists, so nothing to check
-            return
-
-        assert (
-            query["data_acquisition_device_system"] == nwb_device_obj.system
-        ), "System value does not match database system value"
-        assert query["data_acquisition_device_amplifier"] == nwb_device_obj.amplifier
-        assert query["adc_circuit"] == nwb_device_obj.adc_circuit
+        # effectively else (entry exists)
+        # check whether the values provided match the values stored in the database
+        db_dict = (DataAcquisitionDevice & {"data_acquisition_device_name": name}).fetch1()
+        if db_dict != new_device_dict:
+            raise PopulateException(
+                f"Data acquisition device properties of PyNWB Device object with name '{name}': "
+                f"{new_device_dict} do not match properties of the corresponding database entry: {db_dict}."
+            )
 
     @classmethod
     def _add_system(cls, system):
@@ -166,16 +184,16 @@ class DataAcquisitionDevice(dj.Manual):
         if system == "MCU":
             system = "SpikeGadgets"
 
-        if {"data_acquisition_device_system": system} not in DataAcquisitionDeviceSystem():
+        all_values = DataAcquisitionDeviceSystem.fetch("data_acquisition_device_system").tolist()
+        if system not in all_values:
             print(
-                f"\nData acquisition device system '{system}' was not found in the database. Current values are: "
-                f"{DataAcquisitionDeviceSystem.fetch('data_acquisition_device_system').tolist()}. "
+                f"\nData acquisition device system '{system}' was not found in the database. "
+                f"The current values are: {all_values}. "
                 "Please ensure that the system you want to add does not already "
                 "exist in the database under a different name or spelling. "
-                "If you want to use an existing name in the database, "
-                "please specify that name for the 'data_acquisition_device_system' key in the config YAML or "
-                "change the corresponding Device object in the NWB file. Entering 'N' "
-                "will raise an exception."
+                "If you want to use an existing system in the database, "
+                "please change the corresponding Device object in the NWB file. "
+                "Entering 'N' will raise an exception."
             )
             val = input(f"Do you want to add data acquisition device system '{system}' to the database? (y/N)")
             if val.lower() in ["y", "yes"]:
@@ -206,16 +224,16 @@ class DataAcquisitionDevice(dj.Manual):
         amplifier : str
             The amplifier value that was added to the database.
         """
-        if {"data_acquisition_device_amplifier": amplifier} not in DataAcquisitionDeviceAmplifier():
+        all_values = DataAcquisitionDeviceAmplifier.fetch("data_acquisition_device_amplifier").tolist()
+        if amplifier not in all_values:
             print(
-                f"\nData acquisition device amplifier '{amplifier}' was not found in the database. Current values are: "
-                f"{DataAcquisitionDeviceAmplifier.fetch('data_acquisition_device_amplifier').tolist()}. "
+                f"\nData acquisition device amplifier '{amplifier}' was not found in the database. "
+                f"The current values are: {all_values}. "
                 "Please ensure that the amplifier you want to add does not already "
                 "exist in the database under a different name or spelling. "
                 "If you want to use an existing name in the database, "
-                "please specify that name for the 'data_acquisition_device_amplifier' key in the config YAML or "
-                "change the corresponding Device object in the NWB file. Entering 'N' "
-                "will raise an exception."
+                "please change the corresponding Device object in the NWB file. "
+                "Entering 'N' will raise an exception."
             )
             val = input(f"Do you want to add data acquisition device amplifier '{amplifier}' to the database? (y/N)")
             if val.lower() in ["y", "yes"]:
@@ -281,7 +299,7 @@ class ProbeType(dj.Manual):
     # Type/category of probe, e.g., Neuropixels 1.0 or NeuroNexus X-Y-Z, regardless of configuration.
     # This is a controlled vocabulary of probe type names.
     # This is separated from Probe because probes like the Neuropixels 1.0 can have different dynamic configurations,
-    # e.g. channel maps
+    # e.g. channel maps.
     probe_type: varchar(80)
     ---
     probe_description: varchar(2000)               # description of this probe
@@ -289,50 +307,14 @@ class ProbeType(dj.Manual):
     num_shanks: int                                # number of shanks on this probe
     """
 
-    @classmethod
-    def _add_probe_type(cls, probe_dict):
-        """Check the probe_type. If it is not in the database, prompt the user to add the probe dict to the database.
-
-        Parameters
-        ----------
-        probe_dict : dict
-            The dict of probe type data.
-
-        Raises
-        ------
-        PopulateException
-            If user chooses not to add a probe_dict to the database when prompted.
-
-        Returns
-        -------
-        probe_dict : dict
-            The probe_dict that was added to the database.
-        """
-        probe_type = probe_dict["probe_type"]
-        if {"probe_type": probe_type} not in ProbeType():
-            print(
-                f"\nProbe type '{probe_type}' not found in database. Current values: "
-                f"{ProbeType.fetch('probe_type').tolist()}. "
-                "Please ensure that the probe type you want to add does not already "
-                "exist in the database under a different name or spelling. "
-                "If you want to use an existing name in the database, "
-                "please specify that name for the 'probe_type' key in the config YAML. Entering 'N' "
-                "will raise an exception."
-            )
-            val = input(f"Do you want to add probe type '{probe_type}' to the database? (y/N)")
-            if val.lower() in ["y", "yes"]:
-                ProbeType.insert1(probe_dict, skip_duplicates=True)
-            else:
-                raise PopulateException(f"User chose not to add probe type '{probe_type}' to the database.")
-        return probe_dict
-
 
 @schema
 class Probe(dj.Manual):
     definition = """
     # A configuration of a ProbeType. For most probe types, there is only one configuration, and that configuration
-    # should be reused. For Neuropixels probes, the specific channel map (which electrodes are used, where are they,
-    # and in what order) can differ between users and sessions.
+    # should always be used. For Neuropixels probes, the specific channel map (which electrodes are used,
+    # where are they, and in what order) can differ between users and sessions, and each configuration should have a
+    # different ProbeType.
     probe_id: varchar(80)     # a unique ID for this probe and dynamic configuration
     ---
     -> ProbeType              # the type of probe, selected from a controlled list of probe types
@@ -374,22 +356,7 @@ class Probe(dj.Manual):
         device_name_list : list
             List of probe device types found in the NWB file.
         """
-        # make a dict mapping probe type to PyNWB object for all devices in the NWB file that are
-        # of type ndx_franklab_novela.Probe and thus have the required metadata
-        ndx_probes = {
-            device_obj.probe_type: device_obj
-            for device_obj in nwbf.devices.values()
-            if isinstance(device_obj, ndx_franklab_novela.Probe)
-        }
-
-        # make a dict mapping probe type to dict of device metadata from the config YAML if exists
-        if "Probe" in config:
-            config_probes = {probe_dict["probe_type"]: probe_dict for probe_dict in config["Probe"]}
-        else:
-            config_probes = dict()
-
-        # get all the probe types from the NWB file plus the config YAML
-        all_probes_types = set(ndx_probes.keys()).union(set(config_probes.keys()))
+        all_probes_types, ndx_probes, _ = cls.get_all_probe_names(nwbf, config)
 
         for probe_type in all_probes_types:
             new_probe_type_dict = dict()
@@ -398,8 +365,8 @@ class Probe(dj.Manual):
             elect_dict = dict()
             num_shanks = 0
 
-            # if the probe is defined in the NWB file
             if probe_type in ndx_probes:
+                # read probe properties into new_probe_dict from PyNWB extension probe object
                 nwb_probe_obj = ndx_probes[probe_type]
                 cls.__read_ndx_probe_data(
                     nwb_probe_obj,
@@ -409,25 +376,14 @@ class Probe(dj.Manual):
                     elect_dict,
                 )
 
-            # if probe type is defined in the config YAML (regardless of whether it is also defined in
-            # the NWB file), override dicts with values from config
-            if probe_type in config_probes:
-                config_probe_dict = config_probes[probe_type]
-                cls.__read_probe_config_data(
-                    config_probe_dict,
-                    nwb_probe_obj,
-                    new_probe_type_dict,
-                    new_probe_dict,
-                    shank_dict,
-                    elect_dict,
-                )
-
+            # check that number of shanks is consistent
             num_shanks = new_probe_type_dict["num_shanks"]
             assert num_shanks == 0 or num_shanks == len(
                 shank_dict
             ), "`num_shanks` is not equal to the number of shanks."
 
             # if probe id already exists, do not overwrite anything or create new Shanks and Electrodes
+            # TODO test whether the Shanks and Electrodes in the NWB file match the ones in the database
             query = Probe & {"probe_id": new_probe_dict["probe_id"]}
             if len(query) > 0:
                 print(
@@ -451,6 +407,42 @@ class Probe(dj.Manual):
         return all_probes_types
 
     @classmethod
+    def get_all_probe_names(cls, nwbf, config):
+        """Get a list of all device names in the NWB file, after appending and overwriting by the config file.
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            The source NWB file object.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to replace in the NWB file.
+
+        Returns
+        -------
+        device_name_list : list
+            List of data acquisition object names found in the NWB file.
+        """
+
+        # make a dict mapping probe type to PyNWB object for all devices in the NWB file that are
+        # of type ndx_franklab_novela.Probe and thus have the required metadata
+        ndx_probes = {
+            device_obj.probe_type: device_obj
+            for device_obj in nwbf.devices.values()
+            if isinstance(device_obj, ndx_franklab_novela.Probe)
+        }
+
+        # make a dict mapping probe type to dict of device metadata from the config YAML if exists
+        if "Probe" in config:
+            config_probes = [probe_dict["probe_type"] for probe_dict in config["Probe"]]
+        else:
+            config_probes = list()
+
+        # get all the probe types from the NWB file plus the config YAML
+        all_probes_types = set(ndx_probes.keys()).union(set(config_probes))
+
+        return all_probes_types, ndx_probes, config_probes
+
+    @classmethod
     def __read_ndx_probe_data(
         cls,
         nwb_probe_obj: ndx_franklab_novela.Probe,
@@ -465,12 +457,11 @@ class Probe(dj.Manual):
         new_probe_type_dict["probe_description"] = nwb_probe_obj.probe_description
         new_probe_type_dict["num_shanks"] = len(nwb_probe_obj.shanks)
 
-        # check that the probe type value is allowed and create a ProbeType if requested
-        new_probe_dict["probe_type"] = cls._add_probe_type(new_probe_type_dict)
+        cls._add_probe_type(new_probe_type_dict)
 
+        new_probe_dict["probe_id"] = nwb_probe_obj.probe_type
+        new_probe_dict["probe_type"] = nwb_probe_obj.probe_type
         new_probe_dict["contact_side_numbering"] = "True" if nwb_probe_obj.contact_side_numbering else "False"
-
-        new_probe_dict["probe_id"] = new_probe_dict["probe_type"]
 
         # go through the shanks and add each one to the Shank table
         for shank in nwb_probe_obj.shanks.values():
@@ -491,53 +482,12 @@ class Probe(dj.Manual):
                 elect_dict[electrode.name]["rel_z"] = electrode.rel_z
 
     @classmethod
-    def __read_probe_config_data(cls, config_probe_dict):
-        config_probe_type = config_probe_dict["probe_type"]
-
-        # check whether the probe type exists in the database.
-        # users are currently not allowed to specify a probe type in the YAML that does not exist in the DB.
-        query = ProbeType & {"probe_type": config_probe_type}
-        if len(query) == 0:
-            raise PopulateException(
-                f"Probe type '{config_probe_type}' does not exist in the database. "
-                "Please first add the probe type and its information to the database before proceeding."
-            )
-
-        # if the config YAML contains this special key "device_name_to_read_from_nwb_file",
-        # then use the Device object with the given name from the NWB file as a Probe
-        # and use the config YAML dict as Probe properties
-
-        # the user specifies Shank and Electrode information manually in the config YAML file
-        # shanks = config_probe_dict.pop("Shank")
-        # num_shanks = len(shanks)
-        # new_probe_dict.update(config_probe_dict)
-        # for shank in shanks:
-        #     if shank["probe_shank"] not in shank_dict:
-        #         shank_dict[shank["probe_shank"]] = dict()
-        #     shank_dict[shank["probe_shank"]]["probe_id"] = new_probe_dict["probe_id"]
-        #     electrodes = shank.pop("Electrode")
-        #     shank_dict[shank["probe_shank"]].update(shank)
-        #     for electrode in electrodes:
-        #         if electrode["probe_electrode"] not in elect_dict:
-        #             elect_dict[electrode["probe_electrode"]] = dict()
-        #         elect_dict[electrode["probe_electrode"]]["probe_id"] = new_probe_dict[
-        #             "probe_id"
-        #         ]
-        #         elect_dict[electrode["probe_electrode"]]["probe_shank"] = shank[
-        #             "probe_shank"
-        #         ]
-        #         elect_dict[electrode["probe_electrode"]].update(electrode)
-
-    @classmethod
-    def _add_probe_type(cls, probe_type_dict):
+    def _add_probe_type(cls, new_probe_type_dict):
         """Check the probe type value against the values in the database.
-        If it is in the database and all the values match, return the probe type value.
-        If it is in the database and the values do not match, then warn the user and proceed if directed.
-        If it is not in the database, then warn the user and add a new probe type to the database if directed.
 
         Parameters
         ----------
-        probe_type_dict : dict
+        new_probe_type_dict : dict
             Dictionary of probe type properties. See ProbeType for keys.
 
         Raises
@@ -550,31 +500,32 @@ class Probe(dj.Manual):
         probe_type : str
             The probe type value that was added to the database.
         """
-        probe_type = probe_type_dict["probe_type"]
-        fetched_probe_type_dict = (ProbeType & {"probe_type": probe_type}).fetch1()
-        if fetched_probe_type_dict:
-            # check whether the values provided match the values stored in the database
-            if fetched_probe_type_dict != probe_type_dict:
-                print(
-                    f"\nThe probe type information for key '{probe_type}' in the database "
-                    "does not match the probe type information provided: "
-                    f"{fetched_probe_type_dict} != {probe_type_dict}. Do you want to use "
-                    "the probe type "
-                    f"information for '{probe_type}' already in the database? Entering 'y' "
-                    "will ignore the probe type information that you have provided. "
-                    "Entering 'N' will raise an exception."
-                )
-                val = input(
-                    f"Do you want to use the probe type information for '{probe_type}' "
-                    "already in the database? (y/N)"
-                )
-                if val.lower() not in ["y", "yes"]:
-                    raise PopulateException(
-                        f"User chose not to use the probe type information for '{probe_type}' "
-                        "already in the database."
-                    )
-        else:
-            ProbeType._add_probe_type(probe_type_dict)
+        probe_type = new_probe_type_dict["probe_type"]
+        all_values = ProbeType.fetch("probe_type").tolist()
+        if probe_type not in all_values:
+            print(
+                f"\nProbe type '{probe_type}' was not found in the database. "
+                f"The current values are: {all_values}. "
+                "Please ensure that the probe type you want to add does not already "
+                "exist in the database under a different name or spelling. "
+                "If you want to use an existing name in the database, "
+                "please change the corresponding Probe object in the NWB file. "
+                "Entering 'N' will raise an exception."
+            )
+            val = input(f"Do you want to add probe type '{probe_type}' to the database? (y/N)")
+            if val.lower() in ["y", "yes"]:
+                ProbeType.insert1(new_probe_type_dict, skip_duplicates=True)
+                return
+            raise PopulateException(f"User chose not to add probe type '{probe_type}' to the database.")
+
+        # effectively else (entry exists)
+        # check whether the values provided match the values stored in the database
+        db_dict = (ProbeType & {"probe_type": probe_type}).fetch1()
+        if db_dict != new_probe_type_dict:
+            raise PopulateException(
+                f"\nProbe type properties of PyNWB Probe object with name '{probe_type}': "
+                f"{new_probe_type_dict} do not match properties of the corresponding database entry: {db_dict}."
+            )
         return probe_type
 
     @classmethod
@@ -586,10 +537,11 @@ class Probe(dj.Manual):
         probe_type: str,
         contact_side_numbering: bool,
     ):
-        """Create a Probe entry using the data in the NWB file.
+        """Create a Probe entry and corresponding part table entries using the data in the NWB file.
 
-        The electrodes in the electrodes table, electrode groups (often shanks), and devices (often probes) in the
-        NWB file that are associated with the given NWB device name will be parsed.
+        This method will parse the electrodes in the electrodes table, electrode groups (as shanks), and devices
+        (as probes) in the NWB file, but only ones that are associated with the device that matches the given
+        `nwb_device_name`.
 
         Note that this code assumes the relatively standard convention where the NWB device corresponds to a Probe,
         the NWB electrode group corresponds to a Shank, and the NWB electrode corresponds to an Electrode.
@@ -624,8 +576,8 @@ class Probe(dj.Manual):
         nwb_file_path = Nwbfile.get_abs_path(nwb_file_name)
         nwbfile = get_nwb_file(nwb_file_path)
 
-        fetched_probe_type_dict = (ProbeType & {"probe_type": probe_type}).fetch1()
-        if not fetched_probe_type_dict:
+        query = ProbeType & {"probe_type": probe_type}
+        if len(query) == 0:
             print(f"No ProbeType found with probe_type '{probe_type}'. Aborting.")
             return
 

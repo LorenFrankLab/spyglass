@@ -66,6 +66,6 @@ from .nwb_helper_fn import (
 )
 from .populate_all_common import populate_all_common
 
-from .prepopulate import prepopulate_default, prepopulate_from_yaml
+from .prepopulate import prepopulate_default, populate_from_yaml
 
 prepopulate_default()

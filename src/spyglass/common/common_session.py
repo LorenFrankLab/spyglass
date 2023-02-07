@@ -121,13 +121,15 @@ class Session(dj.Imported):
         # print('Unit...')
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
-        self._add_session_data_acq_device_part(nwb_file_name, nwbf, config)
+        self._add_data_acquisition_device_part(nwb_file_name, nwbf, config)
         self._add_experimenter_part(nwb_file_name, nwbf)
 
-    def _add_session_data_acq_device_part(self, nwb_file_name, nwbf, config):
+    def _add_data_acquisition_device_part(self, nwb_file_name, nwbf, config):
+        # get device names from both the NWB file and the associated config file
         device_names, _, _ = DataAcquisitionDevice.get_all_device_names(nwbf, config)
 
         for device_name in device_names:
+            # ensure that the foreign key exists and do nothing if not
             query = DataAcquisitionDevice & {"data_acquisition_device_name": device_name}
             if len(query) == 0:
                 print(
@@ -145,6 +147,7 @@ class Session(dj.Imported):
             return
 
         for name in nwbf.experimenter:
+            # ensure that the foreign key exists and do nothing if not
             query = LabMember & {"lab_member_name": name}
             if len(query) == 0:
                 print(
