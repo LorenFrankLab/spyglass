@@ -14,7 +14,7 @@ from ..common.common_interval import (
     interval_from_inds,
     interval_list_intersect,
 )
-from ..common.nwb_helper_fn import get_valid_intervals
+from ..utils.nwb_helper_fn import get_valid_intervals
 from .spikesorting_recording import SpikeSortingRecording
 
 schema = dj.schema("spikesorting_artifact")
