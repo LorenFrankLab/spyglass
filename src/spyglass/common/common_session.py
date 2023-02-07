@@ -1,12 +1,7 @@
 import os
 import datajoint as dj
 
-from .common_device import (
-    CameraDevice,
-    DataAcquisitionDevice,
-    Probe,
-    SessionDataAcquisitionDevice,
-)
+from .common_device import CameraDevice, DataAcquisitionDevice, Probe
 from .common_lab import Institution, Lab, LabMember
 from .common_nwbfile import Nwbfile
 from .common_subject import Subject
