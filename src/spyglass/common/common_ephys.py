@@ -93,6 +93,20 @@ class Electrode(dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         electrodes = nwbf.electrodes.to_dataframe()
         for elect_id, elect_data in electrodes.iterrows():
+            key["electrode_id"] = elect_id
+            key["name"] = str(elect_id)
+            key["electrode_group_name"] = elect_data.group_name
+            key["region_id"] = BrainRegion.fetch_add(region_name=elect_data.group.location)
+            key["x"] = elect_data.x
+            key["y"] = elect_data.y
+            key["z"] = elect_data.z
+            key["x_warped"] = 0
+            key["y_warped"] = 0
+            key["z_warped"] = 0
+            key["contacts"] = ""
+            key["filtering"] = elect_data.filtering
+            key["impedance"] = elect_data.get("imp")
+
             # rough check of whether the electrodes table was created by rec_to_nwb and has
             # the appropriate custom columns used by rec_to_nwb
             # TODO this could be better resolved by making an extension for the electrodes table
@@ -103,32 +117,17 @@ class Electrode(dj.Imported):
                 and "bad_channel" in elect_data
                 and "ref_elect_id" in elect_data
             ):
-                key["electrode_id"] = elect_id
-                key["name"] = str(elect_id)
-                key["electrode_group_name"] = elect_data.group_name
-                key["region_id"] = BrainRegion.fetch_add(region_name=elect_data.group.location)
-                key["x"] = elect_data.x
-                key["y"] = elect_data.y
-                key["z"] = elect_data.z
-                key["x_warped"] = 0
-                key["y_warped"] = 0
-                key["z_warped"] = 0
-                key["contacts"] = ""
-                key["filtering"] = elect_data.filtering
-                key["impedance"] = elect_data.get("imp")
-
-                # these fields depend on fields created by rec_to_nwb
                 key["probe_id"] = elect_data.group.device.probe_type
                 key["probe_shank"] = elect_data.probe_shank
                 key["probe_electrode"] = elect_data.probe_electrode
                 key["bad_channel"] = "True" if elect_data.bad_channel else "False"
                 key["original_reference_electrode"] = elect_data.ref_elect_id
 
-                self.insert1(key, skip_duplicates=True)
+            self.insert1(key, skip_duplicates=True)
 
     @classmethod
     def create_from_config(cls, nwb_file_name: str):
-        """Create Electrode entries from what is specified in the config YAML file.
+        """Create or update Electrode entries from what is specified in the config YAML file.
 
         Parameters
         ----------
@@ -164,8 +163,13 @@ class Electrode(dj.Imported):
                 key["filtering"] = elect_data.filtering
                 key["impedance"] = elect_data.get("imp")
                 key.update(electrode_dicts[nwbfile_elect_id])
-                cls.insert1(key, skip_duplicates=True, allow_direct_insert=True)
-                print(f"Inserted Electrode with ID {nwbfile_elect_id}.")
+                query = Electrode & {"electrode_id": nwbfile_elect_id}
+                if len(query):
+                    cls.update1(key)
+                    print(f"Updated Electrode with ID {nwbfile_elect_id}.")
+                else:
+                    cls.insert1(key, skip_duplicates=True, allow_direct_insert=True)
+                    print(f"Inserted Electrode with ID {nwbfile_elect_id}.")
             else:
                 warnings.warn(
                     f"Electrode ID {nwbfile_elect_id} exists in the NWB file but has no corresponding "
