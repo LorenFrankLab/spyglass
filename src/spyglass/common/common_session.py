@@ -14,8 +14,8 @@ schema = dj.schema("common_session")
 class Session(dj.Imported):
     definition = """
     # Table for holding experimental sessions.
-    # Note that each session can have multiple experimenters and data acquisition devices. See ExperimenterList
-    # and DataAcqDeviceList below for more details.
+    # Note that each session can have multiple experimenters and data acquisition devices. See DataAcquisitionDevice
+    # and Experimenter part tables below.
     -> Nwbfile
     ---
     -> [nullable] Subject
@@ -29,14 +29,16 @@ class Session(dj.Imported):
     """
 
     class DataAcquisitionDevice(dj.Part):
-        # NOTE: we cannot use the full word Acquisition because there are limits to the
-        # field name length.
+        """Part table that allows a Session to be associated with multiple DataAcquisitionDevice entries."""
+
         definition = """
         -> Session
         -> DataAcquisitionDevice
         """
 
     class Experimenter(dj.Part):
+        """Part table that allows a Session to be associated with multiple LabMember entries."""
+
         definition = """
         -> Session
         -> LabMember
@@ -60,8 +62,8 @@ class Session(dj.Imported):
         # be dependent on (contain a primary key for) a session.
 
         # here, we create new entries in these dj.Manual tables based on the values read from the NWB file
-        # then, they are linked to the session via fields of Session (Subject, Institution, Lab) or join
-        # tables (e.g., SessionDataAcquisitionDevice).
+        # then, they are linked to the session via fields of Session (e.g., Subject, Institution, Lab) or part
+        # tables (e.g., Experimenter, DataAcquisitionDevice).
 
         print("Institution...")
         Institution().insert_from_nwbfile(nwbf)

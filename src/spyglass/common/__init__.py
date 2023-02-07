@@ -66,7 +66,6 @@ from .nwb_helper_fn import (
 )
 from .populate_all_common import populate_all_common
 
-from .prepopulate import prepopulate_default, prepopulate
+from .prepopulate import prepopulate_default, prepopulate_from_yaml
 
-# prepopulate("path_to_giocomo_entries.yaml")
-# prepopulate_default()
+prepopulate_default()
