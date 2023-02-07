@@ -52,7 +52,7 @@ from .common_position import (
 )
 from .common_region import BrainRegion
 from .common_sensors import SensorData
-from .common_session import ExperimenterList, Session, SessionGroup
+from .common_session import ExperimenterList, Session, SessionGroup, DataAcqDeviceList
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
 from .nwb_helper_fn import (

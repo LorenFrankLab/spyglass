@@ -60,7 +60,7 @@ class Session(dj.Imported):
         Subject().insert_from_nwbfile(nwbf)
 
         print("Populate DataAcquisitionDevice...")
-        device_names = DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
+        DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
         print()
 
         print("Populate CameraDevice...")
@@ -105,16 +105,19 @@ class Session(dj.Imported):
 
 
 @schema
-class DataAcquisitionDeviceList(dj.Imported):
+class DataAcqDeviceList(dj.Imported):
     # effectively a table for Session and DataAcquisitionDevice
     # each session can be associated with multiple data acquisition devices
     definition = """
     -> Session
     """
 
-    class SessionDataAcquisitionDevice(dj.Part):
+    class SessionDataAcqDevice(dj.Part):
+        # NOTE: we cannot use the full word Acquisition because there are limits to the
+        # field name length.
+        # e.g., _data_acquisition_device_list__session_data_acquisition_device_ibfk_1 is too long
         definition = """
-        -> DataAcquisitionDeviceList
+        -> DataAcqDeviceList
         -> DataAcquisitionDevice
         """
 
@@ -125,13 +128,13 @@ class DataAcquisitionDeviceList(dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath)
 
-        device_names = DataAcquisitionDevice.get_all_device_names(nwbf, config)
+        device_names, _, _ = DataAcquisitionDevice.get_all_device_names(nwbf, config)
         # it is assumed that the device names returned here now exist in DataAcquisitionDevice
         for device_name in device_names:
             key = dict()
             key["nwb_file_name"] = nwb_file_name
             key["data_acquisition_device_name"] = device_name
-            self.SessionDataAcquisitionDevice().insert1(key)
+            self.SessionDataAcqDevice().insert1(key)
 
 
 @schema

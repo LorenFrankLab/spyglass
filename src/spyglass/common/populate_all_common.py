@@ -2,7 +2,7 @@ from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFil
 from .common_dio import DIOEvents
 from .common_ephys import Electrode, ElectrodeGroup, Raw, SampleCount
 from .common_nwbfile import Nwbfile
-from .common_session import ExperimenterList, Session, DataAcquisitionDeviceList
+from .common_session import ExperimenterList, Session, DataAcqDeviceList
 from .common_task import TaskEpoch
 
 
@@ -19,8 +19,8 @@ def populate_all_common(nwb_file_name):
     print("Populate ExperimenterList...")
     ExperimenterList.populate(fp)
 
-    print("Populate DataAcquisitionDeviceList...")
-    DataAcquisitionDeviceList.populate(fp)
+    print("Populate DataAcqDeviceList...")
+    DataAcqDeviceList.populate(fp)
 
     print("Populate ElectrodeGroup...")
     ElectrodeGroup.populate(fp)
