@@ -14,6 +14,8 @@ schema = dj.schema("common_session")
 class Session(dj.Imported):
     definition = """
     # Table for holding experimental sessions.
+    # Note that each session can have multiple experimenters and data acquisition devices. See ExperimenterList
+    # and DataAcqDeviceList below for more details.
     -> Nwbfile
     ---
     -> [nullable] Subject
@@ -25,6 +27,20 @@ class Session(dj.Imported):
     timestamps_reference_time: datetime
     experiment_description = NULL: varchar(2000)
     """
+
+    class DataAcquisitionDevice(dj.Part):
+        # NOTE: we cannot use the full word Acquisition because there are limits to the
+        # field name length.
+        definition = """
+        -> Session
+        -> DataAcquisitionDevice
+        """
+
+    class Experimenter(dj.Part):
+        definition = """
+        -> Session
+        -> LabMember
+        """
 
     def make(self, key):
         # These imports must go here to avoid cyclic dependencies
@@ -103,69 +119,42 @@ class Session(dj.Imported):
         # print('Unit...')
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
+        self._add_session_data_acq_device_part(nwb_file_name, nwbf, config)
+        self._add_experimenter_part(nwb_file_name, nwbf)
 
-@schema
-class DataAcqDeviceList(dj.Imported):
-    # effectively a table for Session and DataAcquisitionDevice
-    # each session can be associated with multiple data acquisition devices
-    definition = """
-    -> Session
-    """
-
-    class SessionDataAcqDevice(dj.Part):
-        # NOTE: we cannot use the full word Acquisition because there are limits to the
-        # field name length.
-        # e.g., _data_acquisition_device_list__session_data_acquisition_device_ibfk_1 is too long
-        definition = """
-        -> DataAcqDeviceList
-        -> DataAcquisitionDevice
-        """
-
-    def make(self, key):
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        self.insert1({"nwb_file_name": nwb_file_name}, skip_duplicates=True)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath)
-
+    def _add_session_data_acq_device_part(self, nwb_file_name, nwbf, config):
         device_names, _, _ = DataAcquisitionDevice.get_all_device_names(nwbf, config)
-        # it is assumed that the device names returned here now exist in DataAcquisitionDevice
+
         for device_name in device_names:
+            query = DataAcquisitionDevice & {"data_acquisition_device_name": device_name}
+            if len(query) == 0:
+                print(
+                    f"DataAcquisitionDevice with name {device_name} does not exist. "
+                    "Cannot link Session with DataAcquisitionDevice in Session.DataAcquisitionDevice."
+                )
+                continue
             key = dict()
             key["nwb_file_name"] = nwb_file_name
             key["data_acquisition_device_name"] = device_name
-            self.SessionDataAcqDevice().insert1(key)
+            Session.DataAcquisitionDevice.insert1(key)
 
-
-@schema
-class ExperimenterList(dj.Imported):
-    # effectively a join table for Session and LabMember
-    # each session can be associated with multiple lab members
-    definition = """
-    -> Session
-    """
-
-    class Experimenter(dj.Part):
-        definition = """
-        -> ExperimenterList
-        -> LabMember
-        """
-
-    def make(self, key):
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        self.insert1({"nwb_file_name": nwb_file_name}, skip_duplicates=True)
-        nwbf = get_nwb_file(nwb_file_abspath)
-
+    def _add_experimenter_part(self, nwb_file_name, nwbf):
         if nwbf.experimenter is None:
             return
 
         for name in nwbf.experimenter:
-            LabMember().insert_from_name(name)  # NOTE: lab member should have already been created in Session.make
+            query = LabMember & {"lab_member_name": name}
+            if len(query) == 0:
+                print(
+                    f"LabMember with name {name} does not exist. "
+                    "Cannot link Session with LabMember in Session.Experimenter."
+                )
+                continue
+
             key = dict()
             key["nwb_file_name"] = nwb_file_name
             key["lab_member_name"] = name
-            self.Experimenter().insert1(key)
+            Session.Experimenter.insert1(key)
 
 
 @schema

@@ -60,16 +60,15 @@ class DataAcquisitionDevice(dj.Manual):
             if isinstance(device_obj, ndx_franklab_novela.DataAcqDevice)
         }
 
-        # make a dict mapping device name to a dict of device metadata from the config YAML if the config exists
+        # make a list of device names that are associated with this NWB file
         if "DataAcquisitionDevice" in config:
-            config_devices = {
-                device_dict["data_acquisition_device_name"]: device_dict
-                for device_dict in config["DataAcquisitionDevice"]
-            }
+            config_devices = [
+                device_dict["data_acquisition_device_name"] for device_dict in config["DataAcquisitionDevice"]
+            ]
         else:
             config_devices = dict()
 
-        all_device_names = set(ndx_devices.keys()).union(set(config_devices.keys()))
+        all_device_names = set(ndx_devices.keys()).union(set(config_devices))
 
         return all_device_names, ndx_devices, config_devices
 
@@ -92,33 +91,30 @@ class DataAcquisitionDevice(dj.Manual):
         device_name_list : list
             List of data acquisition object names found in the NWB file.
         """
-        all_device_names, ndx_devices, config_devices = cls.get_all_device_names(nwbf, config)
+        all_device_names, ndx_devices, _ = cls.get_all_device_names(nwbf, config)
 
-        for device_name in all_device_names:
+        for device_name in ndx_devices:
             new_device_dict = dict()
 
-            # read device properties into new_device_dict from PyNWB device object if it exists
-            if device_name in ndx_devices:
-                nwb_device_obj = ndx_devices[device_name]
-                new_device_dict["data_acquisition_device_name"] = nwb_device_obj.name
-                new_device_dict["data_acquisition_device_system"] = nwb_device_obj.system
-                new_device_dict["data_acquisition_device_amplifier"] = nwb_device_obj.amplifier
-                new_device_dict["adc_circuit"] = nwb_device_obj.adc_circuit
+            # read device properties into new_device_dict from PyNWB device object
+            nwb_device_obj = ndx_devices[device_name]
+            cls._check_nwb_device_fields(nwb_device_obj)
 
-            # override new_device_dict with values from config if specified
-            if device_name in config_devices:
-                device_config = config_devices[device_name]
-                new_device_dict.update(device_config)
+            name = nwb_device_obj.name
+            system = nwb_device_obj.system
+            amplifier = nwb_device_obj.amplifier
+            adc_circuit = nwb_device_obj.adc_circuit
 
-            # check that the system value is allowed and override
-            new_device_dict["data_acquisition_device_system"] = cls._add_system(
-                new_device_dict["data_acquisition_device_system"]
-            )
+            # transform system value. check if value is in DB. if not, prompt user to add an entry or cancel.
+            system = cls._add_system(system)
 
-            # check that the amplifier value is allowed and override if necessary
-            new_device_dict["data_acquisition_device_amplifier"] = cls._add_amplifier(
-                new_device_dict["data_acquisition_device_amplifier"]
-            )
+            # transform amplifier value. check if value is in DB. if not, prompt user to add an entry or cancel.
+            amplifier = cls._add_amplifier(amplifier)
+
+            new_device_dict["data_acquisition_device_name"] = name
+            new_device_dict["data_acquisition_device_system"] = system
+            new_device_dict["data_acquisition_device_amplifier"] = amplifier
+            new_device_dict["adc_circuit"] = adc_circuit
 
             cls.insert1(new_device_dict, skip_duplicates=True)
 
@@ -128,6 +124,23 @@ class DataAcquisitionDevice(dj.Manual):
             print("No conforming data acquisition device metadata found.")
 
         return all_device_names
+
+    @classmethod
+    def _check_nwb_device_fields(cls, nwb_device_obj):
+        """Check that there are no conflicts between the information in the NWB file and the database.
+
+        If a DataAcquisitionDevice with the same name exists in the database, make sure the other fields match.
+        """
+
+        query = DataAcquisitionDevice & {"data_acquisition_device_name": nwb_device_obj.name}
+        if not query:  # no entry with the same name exists, so nothing to check
+            return
+
+        assert (
+            query["data_acquisition_device_system"] == nwb_device_obj.system
+        ), "System value does not match database system value"
+        assert query["data_acquisition_device_amplifier"] == nwb_device_obj.amplifier
+        assert query["adc_circuit"] == nwb_device_obj.adc_circuit
 
     @classmethod
     def _add_system(cls, system):
@@ -155,7 +168,7 @@ class DataAcquisitionDevice(dj.Manual):
 
         if {"data_acquisition_device_system": system} not in DataAcquisitionDeviceSystem():
             print(
-                f"\nData acquisition device system '{system}' not found in database. Current values: "
+                f"\nData acquisition device system '{system}' was not found in the database. Current values are: "
                 f"{DataAcquisitionDeviceSystem.fetch('data_acquisition_device_system').tolist()}. "
                 "Please ensure that the system you want to add does not already "
                 "exist in the database under a different name or spelling. "
@@ -166,7 +179,8 @@ class DataAcquisitionDevice(dj.Manual):
             )
             val = input(f"Do you want to add data acquisition device system '{system}' to the database? (y/N)")
             if val.lower() in ["y", "yes"]:
-                DataAcquisitionDeviceSystem.insert1({"data_acquisition_device_system": system}, skip_duplicates=True)
+                key = {"data_acquisition_device_system": system}
+                DataAcquisitionDeviceSystem.insert1(key, skip_duplicates=True)
             else:
                 raise PopulateException(
                     f"User chose not to add data acquisition device system '{system}' to the database."
@@ -194,7 +208,7 @@ class DataAcquisitionDevice(dj.Manual):
         """
         if {"data_acquisition_device_amplifier": amplifier} not in DataAcquisitionDeviceAmplifier():
             print(
-                f"\nData acquisition device amplifier '{amplifier}' not found in database. Current values: "
+                f"\nData acquisition device amplifier '{amplifier}' was not found in the database. Current values are: "
                 f"{DataAcquisitionDeviceAmplifier.fetch('data_acquisition_device_amplifier').tolist()}. "
                 "Please ensure that the amplifier you want to add does not already "
                 "exist in the database under a different name or spelling. "
@@ -205,10 +219,8 @@ class DataAcquisitionDevice(dj.Manual):
             )
             val = input(f"Do you want to add data acquisition device amplifier '{amplifier}' to the database? (y/N)")
             if val.lower() in ["y", "yes"]:
-                DataAcquisitionDeviceAmplifier.insert1(
-                    {"data_acquisition_device_amplifier": amplifier},
-                    skip_duplicates=True,
-                )
+                key = {"data_acquisition_device_amplifier": amplifier}
+                DataAcquisitionDeviceAmplifier.insert1(key, skip_duplicates=True)
             else:
                 raise PopulateException(
                     f"User chose not to add data acquisition device amplifier '{amplifier}' to the database."
@@ -266,21 +278,16 @@ class CameraDevice(dj.Manual):
 @schema
 class ProbeType(dj.Manual):
     definition = """
-    # Type/category of probe, e.g., Neuropixels 1.0 or NeuroNexus X-Y-Z, regardless of dynamic configuration.
+    # Type/category of probe, e.g., Neuropixels 1.0 or NeuroNexus X-Y-Z, regardless of configuration.
     # This is a controlled vocabulary of probe type names.
-    # This is separated from Probe because probes like the Neuropixels 1.0 can have different dynamic configurations.
+    # This is separated from Probe because probes like the Neuropixels 1.0 can have different dynamic configurations,
+    # e.g. channel maps
     probe_type: varchar(80)
     ---
     probe_description: varchar(2000)               # description of this probe
     manufacturer = "": varchar(200)                # manufacturer of this probe
     num_shanks: int                                # number of shanks on this probe
     """
-
-    @classmethod
-    def insert_from_config(cls, config):
-        if "ProbeType" in config:
-            for probe_dict in config["ProbeType"]:
-                cls._add_probe_type(probe_dict)
 
     @classmethod
     def _add_probe_type(cls, probe_dict):
@@ -401,9 +408,6 @@ class Probe(dj.Manual):
                     shank_dict,
                     elect_dict,
                 )
-
-            # add any ProbeType objects defined in the config YAML
-            # ProbeType.insert_from_config(config)
 
             # if probe type is defined in the config YAML (regardless of whether it is also defined in
             # the NWB file), override dicts with values from config

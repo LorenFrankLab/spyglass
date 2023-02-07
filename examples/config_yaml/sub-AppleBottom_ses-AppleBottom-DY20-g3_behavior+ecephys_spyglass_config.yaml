@@ -2,15 +2,16 @@
 # existing entities.
 # - If the entity does not exist, then the user will be prompted to create a new entity.
 # - If the entity exists, then values that are not primary keys will be ignored.
+
 # Subject:
-# - subject_id: My Subject  # this value is used instead of the subject_id in the NWB file
+#   subject_id: My Subject  # this value is used instead of the subject_id in the NWB file
 #   age: 7 months  # if `subject_id: My Subject` does not already exist in Subject, then this is used to define the new entity
 
 # Institution:
-# - institution_name: DEF University  # this value is used instead of the subject_id in the NWB file
+#   institution_name: DEF University  # this value is used instead of the subject_id in the NWB file
 
 # Lab:
-# - lab_name: ABC Lab  # this value is used instead of the subject_id in the NWB file
+#   lab_name: ABC Lab  # this value is used instead of the subject_id in the NWB file
 
 # LabMember:
 # - lab_member_name: Grad Student One  # this value is used instead of the subject_id in the NWB file
@@ -46,5 +47,5 @@ ElectrodeGroup:
 - electrode_group_name: shank0
 
 # this links the NWB file with this Data Acquisition Device which must exist in the DB
-SessionDataAcquisitionDevice:
+DataAcquisitionDevice:
 - data_acquisition_device_name: Neuropixels Recording Device
