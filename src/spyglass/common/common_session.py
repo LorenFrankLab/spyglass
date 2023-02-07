@@ -29,17 +29,19 @@ class Session(dj.Imported):
     """
 
     class DataAcquisitionDevice(dj.Part):
-        """Part table that allows a Session to be associated with multiple DataAcquisitionDevice entries."""
-
         definition = """
+        # Part table that allows a Session to be associated with multiple DataAcquisitionDevice entries.
         -> Session
         -> DataAcquisitionDevice
         """
 
-    class Experimenter(dj.Part):
-        """Part table that allows a Session to be associated with multiple LabMember entries."""
+        # NOTE: as a Part table, it is generally advised not to delete entries directly
+        # (see https://docs.datajoint.org/python/computation/03-master-part.html),
+        # but you can use `delete(force=True)`.
 
+    class Experimenter(dj.Part):
         definition = """
+        # Part table that allows a Session to be associated with multiple LabMember entries.
         -> Session
         -> LabMember
         """
