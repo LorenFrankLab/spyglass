@@ -2,7 +2,7 @@ import datajoint as dj
 import ndx_franklab_novela
 
 from .errors import PopulateException
-from .nwb_helper_fn import get_nwb_file
+from ..utils.nwb_helper_fn import get_nwb_file
 
 
 schema = dj.schema("common_device")
