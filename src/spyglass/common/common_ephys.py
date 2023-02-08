@@ -91,6 +91,15 @@ class Electrode(dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
+        config = get_config(nwb_file_abspath)
+
+        if "Electrode" in config:
+            electrode_config_dicts = {
+                electrode_dict["electrode_id"]: electrode_dict for electrode_dict in config["Electrode"]
+            }
+        else:
+            electrode_config_dicts = dict()
+
         electrodes = nwbf.electrodes.to_dataframe()
         for elect_id, elect_data in electrodes.iterrows():
             key["electrode_id"] = elect_id
@@ -122,6 +131,18 @@ class Electrode(dj.Imported):
                 key["probe_electrode"] = elect_data.probe_electrode
                 key["bad_channel"] = "True" if elect_data.bad_channel else "False"
                 key["original_reference_electrode"] = elect_data.ref_elect_id
+
+            # override with information from the config YAML based on primary key (electrode id)
+            if elect_id in electrode_config_dicts:
+                # check whether the Probe.Electrode being referenced exists
+                query = Probe.Electrode & electrode_config_dicts[elect_id]
+                if len(query) == 0:
+                    warnings.warn(
+                        f"No Probe.Electrode exists that matches the data: {electrode_config_dicts[elect_id]}. "
+                        f"The config YAML for Electrode with electrode_id {elect_id} will be ignored."
+                    )
+                else:
+                    key.update(electrode_config_dicts[elect_id])
 
             self.insert1(key, skip_duplicates=True)
 
