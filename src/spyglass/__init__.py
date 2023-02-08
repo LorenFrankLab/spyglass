@@ -9,5 +9,6 @@
 import ndx_franklab_novela
 
 import importlib.metadata
+from .settings import config
 
 __version__ = importlib.metadata.version("spyglass-neuro")

@@ -1,4 +1,5 @@
 import os
+import spyglass as sg
 
 from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFile
@@ -68,4 +69,5 @@ from .populate_all_common import populate_all_common
 
 from .prepopulate import prepopulate_default, populate_from_yaml
 
-prepopulate_default()
+if sg.config["prepopulate"] == True:
+    prepopulate_default()
