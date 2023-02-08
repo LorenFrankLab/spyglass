@@ -3,6 +3,7 @@ from pathlib import Path
 import inspect
 import os
 import datajoint as dj
+from .dlc_utils import OutputLogger
 from .position_dlc_project import DLCProject
 
 schema = dj.schema("position_dlc_training")
@@ -33,11 +34,13 @@ class DLCModelTrainingParams(dj.Lookup):
 
         Parameters
         ----------
-        paramset_name (str): Description of parameter set to be inserted
-        params (dict): Dictionary including all settings to specify model training.
-                       Must include shuffle & trainingsetindex b/c not in config.yaml.
-                       project_path and video_sets will be overwritten by config.yaml.
-                       Note that trainingsetindex is 0-indexed
+        paramset_name : str
+            Description of parameter set to be inserted
+        params : dict
+            Dictionary including all settings to specify model training.
+            Must include shuffle & trainingsetindex b/c not in config.yaml.
+            project_path and video_sets will be overwritten by config.yaml.
+            Note that trainingsetindex is 0-indexed
         """
 
         for required_param in cls.required_parameters:
@@ -119,18 +122,11 @@ class DLCModelTraining(dj.Computed):
     # https://github.com/DeepLabCut/DeepLabCut/issues/70
 
     def make(self, key):
-        """Launch training for each train.TrainingTask training_id via `.populate()`."""
-        # Not sure what either of these accomplish
+        """Launch training for each entry in DLCModelTrainingSelection via `.populate()`."""
         model_prefix = (DLCModelTrainingSelection & key).fetch1("model_prefix")
-        from .dlc_utils import OutputLogger
         from deeplabcut import train_network, create_training_dataset
         from . import dlc_reader
-        from deeplabcut.utils.auxiliaryfunctions import (
-            read_config,
-            get_deeplabcut_path,
-            edit_config,
-        )
-        from deeplabcut.utils import auxfun_models
+        from deeplabcut.utils.auxiliaryfunctions import read_config
 
         try:
             from deeplabcut.utils.auxiliaryfunctions import get_model_folder
@@ -177,6 +173,7 @@ class DLCModelTraining(dj.Computed):
             training_dataset_kwargs = {
                 k: v for k, v in dlc_config.items() if k in training_dataset_input_args
             }
+            logger.logger.info("creating training dataset")
             create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
             # ---- Trigger DLC model training job ----
             train_network_input_args = list(inspect.signature(train_network).parameters)

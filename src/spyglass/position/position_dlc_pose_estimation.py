@@ -3,6 +3,8 @@ import os
 from datetime import datetime
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
+import cv2
 import datajoint as dj
 from IPython.display import display
 from ..common.dj_helper_fn import fetch_nwb
@@ -29,12 +31,22 @@ class DLCPoseEstimationSelection(dj.Manual):
 
     @classmethod
     def get_video_crop(cls, video_path):
-        import cv2
-        import matplotlib.pyplot as plt
-        import numpy as np
+        """
+        Queries the user to determine the cropping parameters for a given video
+
+        Parameters
+        ----------
+        video_path : str
+            path to the video file
+
+        Returns
+        -------
+        crop_ints : list
+            list of 4 integers [x min, x max, y min, y max]
+        """
 
         cap = cv2.VideoCapture(video_path)
-        ret, frame = cap.read()
+        _, frame = cap.read()
         fig, ax = plt.subplots(figsize=(20, 10))
         ax.imshow(frame)
         xlims = ax.get_xlim()
@@ -252,6 +264,23 @@ def convert_to_cm(df, meters_to_pixels):
 
 
 def add_timestamps(df: pd.DataFrame, raw_pos_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Takes timestamps from raw_pos_df and adds to df,
+    which is returned with timestamps and their matching video frame index
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        pose estimation dataframe to add timestamps
+    raw_pos_df : pd.DataFrame
+        dataframe fetched from RawPosition that
+        contains timestamps and video frame inds
+
+    Returns
+    -------
+    pd.DataFrame
+        original df with timestamps and video_frame_ind as new columns
+    """
 
     raw_pos_df = raw_pos_df.drop(
         columns=[
