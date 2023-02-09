@@ -292,151 +292,150 @@ def get_jump_points(dlc_df: pd.DataFrame, max_dist_between):
     return too_much_jump_inds
 
 
-def get_jump_spans(jump_inds):
-    print("Getting spans of consecutive indices that jump")
-    inds_that_jump = []
-    # Get spans of consecutive indices that jump
-    for k, g in groupby(enumerate(jump_inds), lambda x: x[1] - x[0]):
-        group = list(map(itemgetter(1), g))
-        inds_that_jump.append((group[0], group[-1]))
-    # see if spans are within 2 inds of each other and combine
-    if len(inds_that_jump) > 1:
-        modified_jump_spans = []
-        for (start1, stop1), (start2, stop2) in zip(
-            inds_that_jump[:-1], inds_that_jump[1:]
-        ):
-            check_existing = [
-                entry
-                for entry in modified_jump_spans
-                if start1 in range(entry[0] - 2, entry[1] + 2)
-            ]
-            if len(check_existing) > 0:
-                modify_ind = modified_jump_spans.index(check_existing[0])
-                if (start2 - stop1) <= 2:
-                    modified_jump_spans[modify_ind] = (check_existing[0][0], stop2)
-                else:
-                    modified_jump_spans[modify_ind] = (check_existing[0][0], stop1)
-                    modified_jump_spans.append((start2, stop2))
-                continue
-            if (start2 - stop1) <= 2:
-                modified_jump_spans.append((start1, stop2))
-            else:
-                modified_jump_spans.append((start1, stop1))
-                modified_jump_spans.append((start2, stop2))
-        all_inds_that_jump = [
-            item
-            for entry in inds_that_jump
-            for item in list(range(entry[0], entry[1] + 1))
-        ]
-        all_modified_jump_spans = [
-            item
-            for entry in modified_jump_spans
-            for item in list(range(entry[0], entry[1] + 1))
-        ]
-        assert all(
-            item in all_modified_jump_spans for item in all_inds_that_jump
-        ), "not all entries to NaN are represented by modified_jump_spans"
-        return modified_jump_spans
-    else:
-        return inds_that_jump
+def nan_inds(
+    dlc_df: pd.DataFrame, max_dist_between, likelihood_thresh: float, dist_to_span: int
+):
 
-
-def nan_inds(dlc_df: pd.DataFrame, max_dist_between, likelihood_thresh: float):
     idx = pd.IndexSlice
     # Could either NaN sub-likelihood threshold inds here and then not consider in jumping...
     # OR just keep in back pocket when checking jumps against last good point
-    jump_points = get_jump_points(dlc_df, max_dist_between)
-    jump_spans = get_jump_spans(jump_points)
     subthresh_inds = get_subthresh_inds(dlc_df, likelihood_thresh=likelihood_thresh)
     df_subthresh_indices = dlc_df.index[subthresh_inds]
     dlc_df.loc[idx[df_subthresh_indices], idx[("x", "y")]] = np.nan
     # To further determine which indices are the original point and which are jump points
     # There could be a more efficient method of doing this
     # screen inds for jumps to baseline
-    bad_inds_mask = np.zeros(len(dlc_df), dtype=bool)
-    bad_inds_mask[subthresh_inds] = True
-    for span in jump_spans:
-        previous_good_inds = np.where(
-            np.logical_and(
-                ~np.isnan(dlc_df.iloc[: span[0]].x), ~bad_inds_mask[: span[0]]
-            )
-        )[0]
-        if len(previous_good_inds) > 1:
-            last_good_ind = np.max(previous_good_inds)
-        else:
-            bad_inds_mask[np.arange(span[0], span[1] + 1)] = True
-            continue
-        good_x, good_y = dlc_df.loc[idx[dlc_df.index[last_good_ind]], ["x", "y"]]
-        bad_x = np.where(
-            (dlc_df.x.iloc[span[0] : span[1] + 1] < int(good_x - max_dist_between))
-            | (dlc_df.x.iloc[span[0] : span[1] + 1] > int(good_x + max_dist_between))
-        )[0]
-        bad_y = np.where(
-            (dlc_df.y.iloc[span[0] : span[1] + 1] < int(good_y - max_dist_between))
-            | (dlc_df.y.iloc[span[0] : span[1] + 1] > int(good_y + max_dist_between))
-        )[0]
-        bad_inds_mask[
-            np.arange(span[0], span[1] + 1)[list(set(bad_x).union(set(bad_y)))]
-        ] = True
-    print(
-        f"{np.sum(bad_inds_mask) - len(subthresh_inds)} pts with jump more than "
-        f"{max_dist_between} cm"
+    subthresh_inds_mask = np.zeros(len(dlc_df), dtype=bool)
+    subthresh_inds_mask[subthresh_inds] = True
+    jump_inds_mask = np.zeros(len(dlc_df), dtype=bool)
+    orig_spans, good_spans = get_good_spans(
+        subthresh_inds_mask, dist_to_span=dist_to_span
     )
-    print(f"{len(subthresh_inds)} pts with low likelihood")
-    dlc_df.loc[bad_inds_mask, idx[("x", "y")]] = np.nan
+
+    for span in good_spans[::-1]:
+        start_point = span[0] + int(span_length(span) // 2)
+        for ind in range(start_point, span[0], -1):
+            if subthresh_inds_mask[ind]:
+                continue
+            previous_good_inds = np.where(
+                np.logical_and(
+                    ~np.isnan(dlc_df.iloc[ind + 1 : start_point].x),
+                    ~jump_inds_mask[ind + 1 : start_point],
+                    ~subthresh_inds_mask[ind + 1 : start_point],
+                )
+            )[0]
+            if len(previous_good_inds) >= 1:
+                last_good_ind = ind + 1 + np.min(previous_good_inds)
+            else:
+                last_good_ind = start_point
+            good_x, good_y = dlc_df.loc[idx[dlc_df.index[last_good_ind]], ["x", "y"]]
+            if (
+                (dlc_df.y.iloc[ind] < int(good_y - max_dist_between))
+                | (dlc_df.y.iloc[ind] > int(good_y + max_dist_between))
+            ) | (
+                (dlc_df.x.iloc[ind] < int(good_x - max_dist_between))
+                | (dlc_df.x.iloc[ind] > int(good_x + max_dist_between))
+            ):
+                jump_inds_mask[ind] = True
+        for ind in range(start_point, span[-1], 1):
+            if subthresh_inds_mask[ind]:
+                continue
+            previous_good_inds = np.where(
+                np.logical_and(
+                    ~np.isnan(dlc_df.iloc[start_point:ind].x),
+                    ~jump_inds_mask[start_point:ind],
+                    ~subthresh_inds_mask[start_point:ind],
+                )
+            )[0]
+            if len(previous_good_inds) >= 1:
+                last_good_ind = start_point + np.max(previous_good_inds)
+            else:
+                last_good_ind = start_point
+            good_x, good_y = dlc_df.loc[idx[dlc_df.index[last_good_ind]], ["x", "y"]]
+            if (
+                (dlc_df.y.iloc[ind] < int(good_y - max_dist_between))
+                | (dlc_df.y.iloc[ind] > int(good_y + max_dist_between))
+            ) | (
+                (dlc_df.x.iloc[ind] < int(good_x - max_dist_between))
+                | (dlc_df.x.iloc[ind] > int(good_x + max_dist_between))
+            ):
+                jump_inds_mask[ind] = True
+        bad_inds_mask = np.logical_or(jump_inds_mask, subthresh_inds_mask)
+        dlc_df.loc[bad_inds_mask, idx[("x", "y")]] = np.nan
     return dlc_df, bad_inds_mask
 
 
-# def nan_inds(dlc_df: pd.DataFrame, max_dist_between, likelihood_thresh: float):
-#     temp_df = dlc_df.copy()
-#     idx = pd.IndexSlice
-#     # Could either NaN sub-likelihood threshold inds here and then not consider in jumping...
-#     # OR just keep in back pocket when checking jumps against last good point
-#     jump_points = get_jump_points(dlc_df, max_dist_between)
-#     jump_spans = get_jump_spans(jump_points)
-#     subthresh_inds = get_subthresh_inds(dlc_df, likelihood_thresh=likelihood_thresh)
-#     df_subthresh_indices = dlc_df.index[subthresh_inds]
-#     dlc_df.loc[idx[df_subthresh_indices], idx[("x", "y")]] = np.nan
-#     # To further determine which indices are the original point and which are jump points
-#     # There could be a more efficient method of doing this
-#     # screen inds for jumps to baseline
-#     bad_inds_mask = np.zeros(len(dlc_df), dtype=bool)
-#     bad_inds_mask[subthresh_inds] = True
-#     for span in jump_spans:
-#         previous_good_inds = np.logical_and(
-#             np.where(~dlc_df.iloc[: span[0]].loc[:, idx[("x", "y")]].isna())[0],
-#             ~bad_inds_mask,
-#         )
+def get_good_spans(bad_inds_mask, dist_to_span: int = 50):
+    """_summary_
 
-#         if len(previous_good_inds) < 1:
-#             bad_inds_mask[np.arange(span[0], span[1] + 1)] = True
-#             continue
-#         last_good_ind = np.max(previous_good_inds)
-#         good_x, good_y = dlc_df.loc[idx[dlc_df.index[last_good_ind]], ["x", "y"]]
-#         bad_x = np.where(
-#             (dlc_df.x.iloc[span[0] : span[1] + 1] < int(good_x - max_dist_between))
-#             | (dlc_df.x.iloc[span[0] : span[1] + 1] > int(good_x + max_dist_between))
-#         )[0]
-#         bad_y = np.where(
-#             (dlc_df.y.iloc[span[0] : span[1] + 1] < int(good_y - max_dist_between))
-#             | (dlc_df.y.iloc[span[0] : span[1] + 1] > int(good_y + max_dist_between))
-#         )[0]
-#         bad_inds_mask[
-#             np.arange(span[0], span[1] + 1)[list(set(bad_x).union(set(bad_y)))]
-#         ] = True
-#     print(
-#         f"{np.sum(bad_inds_mask)} pts with jump more than "
-#         f"{max_dist_between} cm or low likelihood"
-#     )
-#     dlc_df.loc[bad_inds_mask, idx[("x", "y")]] = np.nan
-#     return dlc_df, bad_inds_mask
+    Parameters
+    ----------
+    bad_inds_mask : _type_
+        _description_
+    dist_to_span : int, optional
+        _description_, by default 50
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    good_spans = get_consecutive_inds(np.arange(len(bad_inds_mask))[~bad_inds_mask])
+    if len(good_spans) > 1:
+        modified_spans = []
+        for (start1, stop1), (start2, stop2) in zip(good_spans[:-1], good_spans[1:]):
+            check_existing = [
+                entry
+                for entry in modified_spans
+                if start1 in range(entry[0] - dist_to_span, entry[1] + dist_to_span)
+            ]
+            if len(check_existing) > 0:
+                modify_ind = modified_spans.index(check_existing[0])
+                if (start2 - stop1) <= dist_to_span:
+                    modified_spans[modify_ind] = (check_existing[0][0], stop2)
+                else:
+                    modified_spans[modify_ind] = (check_existing[0][0], stop1)
+                    modified_spans.append((start2, stop2))
+                continue
+            if (start2 - stop1) <= dist_to_span:
+                modified_spans.append((start1, stop2))
+            else:
+                modified_spans.append((start1, stop1))
+                modified_spans.append((start2, stop2))
+
+    return good_spans, modified_spans
+
+
+def get_consecutive_inds(indices):
+    """_summary_
+
+    Parameters
+    ----------
+    indices : _type_
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    span_inds = []
+    # Get spans of consecutive indices that jump
+    for k, g in groupby(enumerate(indices), lambda x: x[1] - x[0]):
+        group = list(map(itemgetter(1), g))
+        span_inds.append((group[0], group[-1]))
+    return span_inds
+
+
+def span_length(x):
+    return x[-1] - x[0]
 
 
 def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
     df_filter = dlc_df["likelihood"] < likelihood_thresh
     sub_thresh_inds = np.where(~np.isnan(dlc_df["likelihood"].where(df_filter)))[0]
-    nan_inds = np.where(np.isnan(dlc_df["x"]))[0]
-    all_nan_inds = list(set(sub_thresh_inds).union(set(nan_inds)))
+    nand_inds = np.where(np.isnan(dlc_df["x"]))[0]
+    all_nan_inds = list(set(sub_thresh_inds).union(set(nand_inds)))
     all_nan_inds.sort()
     sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
     # TODO: add option to return sub_thresh_percent
