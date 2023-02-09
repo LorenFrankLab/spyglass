@@ -5,7 +5,6 @@ import spyglass as nd
 
 
 def main():
-
     data_dir = Path(
         "/stelmo/nwb"
     )  # CHANGE ME TO THE BASE DIRECTORY FOR DATA STORAGE ON YOUR SYSTEM

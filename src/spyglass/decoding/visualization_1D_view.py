@@ -12,7 +12,6 @@ def discretize_and_trim(series: xr.DataArray) -> xr.DataArray:
 def get_observations_per_time(
     trimmed_posterior: xr.DataArray, base_data: xr.Dataset
 ) -> np.ndarray:
-
     times, counts = np.unique(trimmed_posterior.time.values, return_counts=True)
     indexed_counts = xr.DataArray(counts, coords={"time": times})
     _, good_counts = xr.align(base_data.time, indexed_counts, join="left", fill_value=0)  # type: ignore
