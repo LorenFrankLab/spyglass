@@ -144,6 +144,9 @@ class OutputLogger:
         return logger
 
     def _get_file_handler(self, path):
+        output_dir = pathlib.Path(os.path.dirname(path))
+        if not os.path.exists(output_dir):
+            output_dir.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(path, mode="a")
         file_handler.setFormatter(self._get_formatter())
         return file_handler
