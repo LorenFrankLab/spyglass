@@ -10,7 +10,7 @@ authors = [
     { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
     { name = "Eric Denovellis", email = "eric.denovellis@ucsf.edu" },
     { name = "Ryan Ly", email = "rly@lbl.gov" },
-    { name="Daniel Gramling", email="daniel.gramling@ucsf.edu" }
+    { name = "Daniel Gramling", email = "daniel.gramling@ucsf.edu" },
 ]
 description = "Neuroscience data analysis framework for reproducible research"
 readme = "README.md"
@@ -35,7 +35,7 @@ keywords = [
     "sortingview",
 ]
 dependencies = [
-    "pydotplus>=2.0.*",
+    "pydotplus>=2.0",
     "dask>=2.30",
     "position_tools",
     "track_linearization>=2.3",
@@ -52,7 +52,7 @@ dependencies = [
     "pynwb>=2.2.0,<3",
     "hdmf>=3.4.6",
     "datajoint>=0.13.6",
-    "pymysql>=1.0.*",
+    "pymysql>=1.0",
     "sortingview>=0.11",
     "pyyaml",
     "click",
@@ -71,5 +71,5 @@ spyglass_cli = "spyglass.cli:cli"
 position = [
     "ffmpeg",
     "numba>=0.54",
-    "deeplabcut[gui, tf]",
+    "deeplabcut<2.3.0",
 ]
