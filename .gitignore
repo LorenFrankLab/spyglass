@@ -20,6 +20,7 @@ mysql_config
 !notebooks/09_Decoding_with_GPUs_on_the_GPU_cluster.ipynb
 !notebooks/10_1D_Clusterless_Decoding.ipynb
 !notebooks/11_2D_Clusterless_Decoding.ipynb
+!notebooks/12_Ripple_Detection.ipynb
 
 
 # Byte-compiled / optimized / DLL files

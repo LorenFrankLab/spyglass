@@ -11,7 +11,7 @@ dependencies:
   - dask>=2.30
   - pip>=20.2.*
   - position_tools
-  - track_linearization
+  - track_linearization>=2.3
   - replay_trajectory_classification
   - ripple_detection
   - trajectory_analysis_tools
@@ -22,7 +22,7 @@ dependencies:
   - ipympl
   - tqdm
   - nb_conda
-  - pyfftw  # used by ghostipy. install from conda-forge so that it works on Mac ARM processors
+  - pyfftw<=0.12.0  # used by ghostipy. install from conda-forge so that it works on Mac ARM processors
   - pip:
     - pubnub<6.4.0
     - git+https://github.com/SpikeInterface/spikeinterface.git
@@ -31,7 +31,7 @@ dependencies:
     - datajoint>=0.13.6
     - ghostipy
     - pymysql>=1.0.*
-    - sortingview>=0.8
+    - sortingview>=0.11
     - figurl-jupyter
     - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
     - pyyaml
