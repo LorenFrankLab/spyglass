@@ -247,7 +247,6 @@ class DLCPos(dj.Computed):
 
 @schema
 class DLCPosVideoParams(dj.Manual):
-
     definition = """
     dlc_pos_video_params_name : varchar(50)
     ---
@@ -278,7 +277,6 @@ class DLCPosVideoParams(dj.Manual):
 
 @schema
 class DLCPosVideoSelection(dj.Manual):
-
     definition = """
     -> DLCPos
     -> DLCPosVideoParams
