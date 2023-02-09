@@ -60,6 +60,9 @@ class DLCSmoothInterpParams(dj.Manual):
                 "likelihood_thresh": 0.95,
             },
             "max_cm_between_pts": 20,
+            # This is for use when finding "good spans" and is how many indices to bridge in between good spans
+            # see inds_to_span in get_good_spans
+            "num_inds_to_span": 20,
             "speed_smoothing_std_dev": 0.100,
         }
         cls.insert1(
@@ -170,6 +173,7 @@ class DLCSmoothInterp(dj.Computed):
                 dlc_df.copy(),
                 params["max_cm_between_pts"],
                 likelihood_thresh=params["interp_params"].pop("likelihood_thresh"),
+                inds_to_span=params["num_inds_to_span"],
             )
             nan_spans = get_span_start_stop(np.where(bad_inds)[0])
             logger.logger.info("interpolating across low likelihood times")
@@ -293,7 +297,7 @@ def get_jump_points(dlc_df: pd.DataFrame, max_dist_between):
 
 
 def nan_inds(
-    dlc_df: pd.DataFrame, max_dist_between, likelihood_thresh: float, dist_to_span: int
+    dlc_df: pd.DataFrame, max_dist_between, likelihood_thresh: float, inds_to_span: int
 ):
 
     idx = pd.IndexSlice
@@ -309,7 +313,7 @@ def nan_inds(
     subthresh_inds_mask[subthresh_inds] = True
     jump_inds_mask = np.zeros(len(dlc_df), dtype=bool)
     orig_spans, good_spans = get_good_spans(
-        subthresh_inds_mask, dist_to_span=dist_to_span
+        subthresh_inds_mask, inds_to_span=inds_to_span
     )
 
     for span in good_spans[::-1]:
@@ -365,20 +369,29 @@ def nan_inds(
     return dlc_df, bad_inds_mask
 
 
-def get_good_spans(bad_inds_mask, dist_to_span: int = 50):
-    """_summary_
+def get_good_spans(bad_inds_mask, inds_to_span: int = 50):
+    """
+    This function takes in a boolean mask of good and bad indices and
+    determines spans of consecutive good indices. It combines two neighboring spans
+    with a separation of less than inds_to_span and treats them as a single good span.
 
     Parameters
     ----------
-    bad_inds_mask : _type_
-        _description_
-    dist_to_span : int, optional
-        _description_, by default 50
+    bad_inds_mask : boolean mask
+        A boolean mask where True is a bad index and False is a good index.
+    inds_to_span : int, default 50
+        This indicates how many indices between two good spans should
+        be bridged to form a single good span.
+        For instance if span A is (1500, 2350) and span B is (2370, 3700),
+        then span A and span B would be combined into span A (1500, 3700)
+        since one would want to identify potential jumps in the space in between the original A and B.
 
     Returns
     -------
-    _type_
-        _description_
+    good_spans : list
+        List of spans of good indices, unmodified.
+    modified_spans : list
+        spans that are amended to bridge up to inds_to_span consecutive bad indices
     """
     good_spans = get_consecutive_inds(np.arange(len(bad_inds_mask))[~bad_inds_mask])
     if len(good_spans) > 1:
@@ -387,17 +400,17 @@ def get_good_spans(bad_inds_mask, dist_to_span: int = 50):
             check_existing = [
                 entry
                 for entry in modified_spans
-                if start1 in range(entry[0] - dist_to_span, entry[1] + dist_to_span)
+                if start1 in range(entry[0] - inds_to_span, entry[1] + inds_to_span)
             ]
             if len(check_existing) > 0:
                 modify_ind = modified_spans.index(check_existing[0])
-                if (start2 - stop1) <= dist_to_span:
+                if (start2 - stop1) <= inds_to_span:
                     modified_spans[modify_ind] = (check_existing[0][0], stop2)
                 else:
                     modified_spans[modify_ind] = (check_existing[0][0], stop1)
                     modified_spans.append((start2, stop2))
                 continue
-            if (start2 - stop1) <= dist_to_span:
+            if (start2 - stop1) <= inds_to_span:
                 modified_spans.append((start1, stop2))
             else:
                 modified_spans.append((start1, stop1))
