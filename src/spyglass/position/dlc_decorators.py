@@ -12,7 +12,7 @@ def accepts(*vals, **kwargs):
 
         def new_f(*args, **kwargs):
             pargs = args[1:] if is_method else args
-            for (a, t) in zip(pargs, vals):  # assume first arg is self or cls
+            for a, t in zip(pargs, vals):  # assume first arg is self or cls
                 if t is None:
                     continue
                 assert a in t, "arg %r is not in %s" % (a, t)

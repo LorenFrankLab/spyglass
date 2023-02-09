@@ -197,7 +197,6 @@ class IntervalPositionInfo(dj.Computed):
 
 @schema
 class PositionVideoSelection(dj.Manual):
-
     definition = """
     nwb_file_name       : varchar(255)                 # name of the NWB file
     interval_list_name  : varchar(200)                 # descriptive name of this interval list

@@ -98,7 +98,6 @@ class DLCOrientation(dj.Computed):
         orient_func = _key_to_func_dict[params["orient_method"]]
         orientation = orient_func(pos_df, **params)
         if not params["orient_method"] == "none":
-
             # Smooth orientation
             is_nan = np.isnan(orientation)
             # Unwrap orientation before smoothing

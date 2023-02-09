@@ -43,7 +43,6 @@ class DLCSmoothInterpParams(dj.Manual):
 
     @classmethod
     def insert_params(cls, params_name: str, params: dict, **kwargs):
-
         cls.insert1(
             {"dlc_si_params_name": params_name, "params": params},
             **kwargs,
@@ -226,7 +225,6 @@ class DLCSmoothInterp(dj.Computed):
 
 
 def interp_pos(dlc_df, spans_to_interp, **kwargs):
-
     idx = pd.IndexSlice
     for ind, (span_start, span_stop) in enumerate(spans_to_interp):
         if (span_stop + 1) >= len(dlc_df):
@@ -299,7 +297,6 @@ def get_jump_points(dlc_df: pd.DataFrame, max_dist_between):
 def nan_inds(
     dlc_df: pd.DataFrame, max_dist_between, likelihood_thresh: float, inds_to_span: int
 ):
-
     idx = pd.IndexSlice
     # Could either NaN sub-likelihood threshold inds here and then not consider in jumping...
     # OR just keep in back pocket when checking jumps against last good point
@@ -317,7 +314,12 @@ def nan_inds(
     )
 
     for span in good_spans[::-1]:
-        start_point = span[0] + int(span_length(span) // 2)
+        if np.sum(np.isnan(dlc_df.iloc[span[0] : span[-1]].x)) > 0:
+            nan_mask = np.isnan(dlc_df.iloc[span[0] : span[-1]].x)
+            good_start = np.arange(span[0], span[1])[~nan_mask]
+            start_point = good_start[int(len(good_start) // 2)]
+        else:
+            start_point = span[0] + int(span_length(span) // 2)
         for ind in range(start_point, span[0], -1):
             if subthresh_inds_mask[ind]:
                 continue
@@ -456,7 +458,6 @@ def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
 
 
 def get_span_start_stop(sub_thresh_inds):
-
     sub_thresh_spans = []
     for k, g in groupby(enumerate(sub_thresh_inds), lambda x: x[1] - x[0]):
         group = list(map(itemgetter(1), g))

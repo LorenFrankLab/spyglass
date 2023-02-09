@@ -217,7 +217,6 @@ class TrodesPos(dj.Computed):
         upsampling_sampling_rate,
         upsampling_interpolation_method,
     ):
-
         CM_TO_METERS = 100
 
         # Get spatial series properties

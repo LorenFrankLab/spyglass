@@ -80,7 +80,6 @@ class DLCModelSource(dj.Manual):
         key: dict = None,
         **kwargs,
     ):
-
         cls.insert1(
             {
                 "dlc_model_name": dlc_model_name,
@@ -170,7 +169,6 @@ class DLCModel(dj.Computed):
         """
 
     def make(self, key):
-
         from deeplabcut.utils.auxiliaryfunctions import GetScorerName
         from .dlc_utils import OutputLogger
 

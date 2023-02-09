@@ -256,7 +256,6 @@ class DLCPoseEstimation(dj.Computed):
 
 
 def convert_to_cm(df, meters_to_pixels):
-
     CM_TO_METERS = 100
     idx = pd.IndexSlice
     df.loc[:, idx[("x", "y")]] *= meters_to_pixels * CM_TO_METERS
