@@ -283,7 +283,6 @@ def make_multi_environment_movie(
     direction_name="head_orientation",
     vmax=0.07,
 ):
-
     # Set up formatting for the movie files
     Writer = animation.writers["ffmpeg"]
     fps = sampling_frequency // video_slowdown
@@ -539,7 +538,6 @@ def create_interactive_2D_decoding_figurl(
     sampling_frequency=500,
     view_height=800,
 ):
-
     decode_view = create_2D_decode_view(
         position_time=position_info.index,
         position=position_info[position_name],
