@@ -90,7 +90,6 @@ def generate_linearization_function(
     y_min: float,
     y_width: float,
 ):
-
     args = {
         "location_lookup": location_lookup,
         "x_count": x_count,
