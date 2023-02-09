@@ -24,14 +24,25 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-keywords = ["neuroscience", "research", "electrophysiology", "reproducible", "data analysis",
-            "spike sorting", "spikeinterface","datajoint", "nwb", "kachery", "sortingview"]
+keywords = [
+    "neuroscience",
+    "research",
+    "electrophysiology",
+    "reproducible",
+    "data analysis",
+    "spike sorting",
+    "spikeinterface",
+    "datajoint",
+    "nwb",
+    "kachery",
+    "sortingview",
+]
 dependencies = [
     "jupyterlab>=3.*",
     "pydotplus>=2.0.*",
     "dask>=2.30",
     "position_tools",
-    "track_linearization",
+    "track_linearization>=2.3",
     "replay_trajectory_classification",
     "ripple_detection",
     "trajectory_analysis_tools",
@@ -46,11 +57,11 @@ dependencies = [
     "hdmf>=3.4.6",
     "datajoint>=0.13.6",
     "pymysql>=1.0.*",
-    "sortingview>=0.8",
+    "sortingview>=0.11",
     "pyyaml",
     "click",
     "spikeinterface",
-    "ndx_franklab_novela>=0.1.0"
+    "ndx_franklab_novela>=0.1.0",
 ]
 
 [project.scripts]
@@ -62,10 +73,7 @@ spyglass_cli = "spyglass.cli:cli"
 
 [project.optional-dependencies]
 position = [
-    "pytorch<1.12.0",
     "ffmpeg",
-    "torchvision",
-    "torchaudio",
-    "cudatoolkit==11.3",
-    "deeplabcut",
+    "numba>=0.54",
+    "deeplabcut[gui, tf]",
 ]
