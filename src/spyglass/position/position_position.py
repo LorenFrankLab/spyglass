@@ -18,17 +18,21 @@ from .position_dlc_pose_estimation import (
 from .dlc_utils import get_video_path, check_videofile
 from .position_dlc_selection import DLCPos
 from .position_trodes_position import TrodesPos
+from ..common.common_position import IntervalPositionInfo as CommonIntervalPositionInfo
 
 schema = dj.schema("position_position")
 
 
 @schema
-class PosSource(dj.Manual):
+class PosMerge(dj.Manual):
     """
     Table to identify source of Position Information from upstream options
     (e.g. DLC, Trodes, etc...) To add another upstream option, a new Part table
     should be added in the same syntax as DLCPos and TrodesPos and
     PosSelect source header should be modified to include the name.
+
+    Note: all part tables need to be named using the source+"Pos" convention
+    i.e. if the source='DLC', then the table is DLCPos
     """
 
     definition = """
@@ -44,7 +48,7 @@ class PosSource(dj.Manual):
         """
 
         definition = """
-        -> PosSource
+        -> PosMerge
         -> DLCPos
         ---
         -> AnalysisNwbfile
@@ -59,7 +63,7 @@ class PosSource(dj.Manual):
         """
 
         definition = """
-        -> PosSource
+        -> PosMerge
         -> TrodesPos
         ---
         -> AnalysisNwbfile
@@ -68,7 +72,32 @@ class PosSource(dj.Manual):
         velocity_object_id : varchar(80)
         """
 
+    class CommonPos(dj.Part):
+        """
+        Table to pass-through upstream Trodes Position Tracking information
+        """
+
+        definition = """
+        -> PosMerge
+        -> CommonIntervalPositionInfo
+        ---
+        -> AnalysisNwbfile
+        position_object_id : varchar(80)
+        orientation_object_id : varchar(80)
+        velocity_object_id : varchar(80)
+        """
+
     def insert1(self, key, params: Dict = None, **kwargs):
+        """Overrides insert1 to also insert into specific part table.
+
+        Parameters
+        ----------
+        key : Dict
+            key specifying the entry to insert
+        params : Dict, optional
+            A dictionary containing all table entries
+            not specified by the parent table (PosMerge)
+        """
         position_id = key.get("position_id", None)
         if position_id is None:
             key["position_id"] = (
@@ -111,26 +140,26 @@ class PosSource(dj.Manual):
 
 
 @schema
-class IntervalPositionInfoSelection(dj.Manual):
+class PositionOutputSelection(dj.Manual):
     """
-    Table to specify which upstream PosSelect entry to populate IntervalPositionInfo
+    Table to specify which upstream PosMerge entry to populate IntervalPositionInfo
     """
 
     definition = """
-    -> PosSource
+    -> PosMerge
     ---
     """
 
 
 @schema
-class IntervalPositionInfo(dj.Computed):
+class PositionOutputSelection(dj.Computed):
     """
     Holds position information in a singluar location for an
     arbitrary number of upstream position processing options
     """
 
     definition = """
-    -> IntervalPositionInfoSelection
+    -> PositionOutputSelection
     ---
     -> AnalysisNwbfile
     position_object_id : varchar(80)
@@ -139,9 +168,9 @@ class IntervalPositionInfo(dj.Computed):
     """
 
     def make(self, key):
-        source = (PosSource & key).fetch1("source")
+        source = (PosMerge & key).fetch1("source")
         table_source = f"{source}Pos"
-        SourceTable = getattr(PosSource, table_source)
+        SourceTable = getattr(PosMerge, table_source)
         (
             key["analysis_file_name"],
             key["position_object_id"],
