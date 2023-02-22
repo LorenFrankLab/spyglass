@@ -180,7 +180,6 @@ class FinalPosition(dj.Manual):
         )
 
     def fetch1_dataframe(self):
-
         source = self.fetch1("source")
         part_table = getattr(self, f"{source}Pos") & self
         nwb_data = part_table.fetch_nwb()[0]
@@ -190,7 +189,6 @@ class FinalPosition(dj.Manual):
             name="time",
         )
         if "video_frame_ind" in nwb_data["velocity"].fields["time_series"].keys():
-
             COLUMNS = [
                 "video_frame_ind",
                 "position_x",
