@@ -123,18 +123,18 @@ class DLCPos(dj.Computed):
         )
 
         self.insert1(key)
-        from .position_position import PosSource
+        from .position_position import FinalPosition
 
         key["source"] = "DLC"
         dlc_key = key.copy()
         del dlc_key["pose_eval_result"]
         key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
-        valid_fields = PosSource().fetch().dtype.fields.keys()
+        valid_fields = FinalPosition().fetch().dtype.fields.keys()
         entries_to_delete = [entry for entry in key.keys() if entry not in valid_fields]
         for entry in entries_to_delete:
             del key[entry]
 
-        PosSource().insert1(key=key, params=dlc_key, skip_duplicates=True)
+        FinalPosition().insert1(key=key, params=dlc_key, skip_duplicates=True)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(

@@ -194,15 +194,15 @@ class TrodesPos(dj.Computed):
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
 
         self.insert1(key)
-        from .position_position import PosSource
+        from .position_position import FinalPosition
 
         key["source"] = "Trodes"
         trodes_key = key.copy()
-        valid_fields = PosSource().fetch().dtype.fields.keys()
+        valid_fields = FinalPosition().fetch().dtype.fields.keys()
         entries_to_delete = [entry for entry in key.keys() if entry not in valid_fields]
         for entry in entries_to_delete:
             del key[entry]
-        PosSource().insert1(key=key, params=trodes_key, skip_duplicates=True)
+        FinalPosition().insert1(key=key, params=trodes_key, skip_duplicates=True)
 
     @staticmethod
     def calculate_position_info_from_spatial_series(
