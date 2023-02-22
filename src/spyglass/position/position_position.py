@@ -22,14 +22,15 @@ from ..common.common_position import IntervalPositionInfo as CommonIntervalPosit
 
 schema = dj.schema("position_position")
 
+_valid_data_sources = ["DLC", "Trodes", "Common"]
+
 
 @schema
-class PosMerge(dj.Manual):
+class FinalPosition(dj.Manual):
     """
     Table to identify source of Position Information from upstream options
     (e.g. DLC, Trodes, etc...) To add another upstream option, a new Part table
     should be added in the same syntax as DLCPos and TrodesPos and
-    PosSelect source header should be modified to include the name.
 
     Note: all part tables need to be named using the source+"Pos" convention
     i.e. if the source='DLC', then the table is DLCPos
@@ -37,7 +38,7 @@ class PosMerge(dj.Manual):
 
     definition = """
     -> IntervalList
-    source: enum("DLC", "Trodes")
+    source: varchar(40)
     position_id: int
     ---
     """
@@ -48,7 +49,7 @@ class PosMerge(dj.Manual):
         """
 
         definition = """
-        -> PosMerge
+        -> FinalPosition
         -> DLCPos
         ---
         -> AnalysisNwbfile
@@ -57,13 +58,18 @@ class PosMerge(dj.Manual):
         velocity_object_id : varchar(80)
         """
 
+        def fetch_nwb(self, *attrs, **kwargs):
+            return fetch_nwb(
+                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+            )
+
     class TrodesPos(dj.Part):
         """
         Table to pass-through upstream Trodes Position Tracking information
         """
 
         definition = """
-        -> PosMerge
+        -> FinalPosition
         -> TrodesPos
         ---
         -> AnalysisNwbfile
@@ -72,13 +78,18 @@ class PosMerge(dj.Manual):
         velocity_object_id : varchar(80)
         """
 
+        def fetch_nwb(self, *attrs, **kwargs):
+            return fetch_nwb(
+                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+            )
+
     class CommonPos(dj.Part):
         """
         Table to pass-through upstream Trodes Position Tracking information
         """
 
         definition = """
-        -> PosMerge
+        -> FinalPosition
         -> CommonIntervalPositionInfo
         ---
         -> AnalysisNwbfile
@@ -86,6 +97,11 @@ class PosMerge(dj.Manual):
         orientation_object_id : varchar(80)
         velocity_object_id : varchar(80)
         """
+
+        def fetch_nwb(self, *attrs, **kwargs):
+            return fetch_nwb(
+                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+            )
 
     def insert1(self, key, params: Dict = None, **kwargs):
         """Overrides insert1 to also insert into specific part table.
@@ -98,6 +114,9 @@ class PosMerge(dj.Manual):
             A dictionary containing all table entries
             not specified by the parent table (PosMerge)
         """
+        assert (
+            key["source"] in _valid_data_sources
+        ), f"source needs to be one of {_valid_data_sources}"
         position_id = key.get("position_id", None)
         if position_id is None:
             key["position_id"] = (
@@ -113,20 +132,42 @@ class PosMerge(dj.Manual):
         super().insert1(key, **kwargs)
         source = key["source"]
         part_table = getattr(self, f"{source}Pos")
-        table_query = (
-            dj.FreeTable(dj.conn(), full_table_name=part_table.parents()[1]) & params
-        )
-        (
-            analysis_file_name,
-            position_object_id,
-            orientation_object_id,
-            velocity_object_id,
-        ) = table_query.fetch1(
-            "analysis_file_name",
-            "position_object_id",
-            "orientation_object_id",
-            "velocity_object_id",
-        )
+        # TODO: The parent table to refer to is hard-coded here, expecting it to be the second
+        # Table in the definition. This could be more flexible.
+        if params:
+            table_query = (
+                dj.FreeTable(dj.conn(), full_table_name=part_table.parents()[1])
+                & key
+                & params
+            )
+        else:
+            table_query = (
+                dj.FreeTable(dj.conn(), full_table_name=part_table.parents()[1]) & key
+            )
+        if any("head" in col for col in list(table_query.fetch().dtype.fields.keys())):
+            (
+                analysis_file_name,
+                position_object_id,
+                orientation_object_id,
+                velocity_object_id,
+            ) = table_query.fetch1(
+                "analysis_file_name",
+                "head_position_object_id",
+                "head_orientation_object_id",
+                "head_velocity_object_id",
+            )
+        else:
+            (
+                analysis_file_name,
+                position_object_id,
+                orientation_object_id,
+                velocity_object_id,
+            ) = table_query.fetch1(
+                "analysis_file_name",
+                "position_object_id",
+                "orientation_object_id",
+                "velocity_object_id",
+            )
         part_table.insert1(
             {
                 **key,
@@ -138,90 +179,70 @@ class PosMerge(dj.Manual):
             },
         )
 
-
-@schema
-class PositionOutputSelection(dj.Manual):
-    """
-    Table to specify which upstream PosMerge entry to populate IntervalPositionInfo
-    """
-
-    definition = """
-    -> PosMerge
-    ---
-    """
-
-
-@schema
-class PositionOutputSelection(dj.Computed):
-    """
-    Holds position information in a singluar location for an
-    arbitrary number of upstream position processing options
-    """
-
-    definition = """
-    -> PositionOutputSelection
-    ---
-    -> AnalysisNwbfile
-    position_object_id : varchar(80)
-    orientation_object_id : varchar(80)
-    velocity_object_id : varchar(80)
-    """
-
-    def make(self, key):
-        source = (PosMerge & key).fetch1("source")
-        table_source = f"{source}Pos"
-        SourceTable = getattr(PosMerge, table_source)
-        (
-            key["analysis_file_name"],
-            key["position_object_id"],
-            key["orientation_object_id"],
-            key["velocity_object_id"],
-        ) = (SourceTable & key).fetch1(
-            "analysis_file_name",
-            "position_object_id",
-            "orientation_object_id",
-            "velocity_object_id",
-        )
-        self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
     def fetch1_dataframe(self):
-        nwb_data = self.fetch_nwb()[0]
+
+        source = self.fetch1("source")
+        part_table = getattr(self, f"{source}Pos") & self
+        nwb_data = part_table.fetch_nwb()[0]
+
         index = pd.Index(
             np.asarray(nwb_data["position"].get_spatial_series().timestamps),
             name="time",
         )
-        COLUMNS = [
-            "video_frame_ind",
-            "position_x",
-            "position_y",
-            "orientation",
-            "velocity_x",
-            "velocity_y",
-            "speed",
-        ]
-        return pd.DataFrame(
-            np.concatenate(
-                (
-                    np.asarray(
-                        nwb_data["velocity"].time_series["video_frame_ind"].data,
-                        dtype=int,
-                    )[:, np.newaxis],
-                    np.asarray(nwb_data["position"].get_spatial_series().data),
-                    np.asarray(nwb_data["orientation"].get_spatial_series().data)[
-                        :, np.newaxis
-                    ],
-                    np.asarray(nwb_data["velocity"].time_series["velocity"].data),
+        if "video_frame_ind" in nwb_data["velocity"].fields["time_series"].keys():
+
+            COLUMNS = [
+                "video_frame_ind",
+                "position_x",
+                "position_y",
+                "orientation",
+                "velocity_x",
+                "velocity_y",
+                "speed",
+            ]
+            return pd.DataFrame(
+                np.concatenate(
+                    (
+                        np.asarray(
+                            nwb_data["velocity"].get_timeseries("video_frame_ind").data,
+                            dtype=int,
+                        )[:, np.newaxis],
+                        np.asarray(nwb_data["position"].get_spatial_series().data),
+                        np.asarray(nwb_data["orientation"].get_spatial_series().data)[
+                            :, np.newaxis
+                        ],
+                        np.asarray(
+                            nwb_data["velocity"].get_timeseries("velocity").data
+                        ),
+                    ),
+                    axis=1,
                 ),
-                axis=1,
-            ),
-            columns=COLUMNS,
-            index=index,
-        )
+                columns=COLUMNS,
+                index=index,
+            )
+        else:
+            COLUMNS = [
+                "position_x",
+                "position_y",
+                "orientation",
+                "velocity_x",
+                "velocity_y",
+                "speed",
+            ]
+            return pd.DataFrame(
+                np.concatenate(
+                    (
+                        np.asarray(nwb_data["position"].get_spatial_series().data),
+                        np.asarray(nwb_data["orientation"].get_spatial_series().data)[
+                            :, np.newaxis
+                        ],
+                        np.asarray(nwb_data["velocity"].get_timeseries().data),
+                    ),
+                    axis=1,
+                ),
+                columns=COLUMNS,
+                index=index,
+            )
 
 
 @schema
@@ -262,7 +283,7 @@ class PositionVideo(dj.Computed):
         ).fetch1_dataframe()
         if key["plot"] == "DLC":
             pos_df = (
-                IntervalPositionInfo()
+                FinalPosition()
                 & {
                     "nwb_file_name": key["nwb_file_name"],
                     "interval_list_name": key["interval_list_name"],
@@ -272,7 +293,7 @@ class PositionVideo(dj.Computed):
             ).fetch1_dataframe()
         elif key["plot"] == "Trodes":
             pos_df = (
-                IntervalPositionInfo()
+                FinalPosition()
                 & {
                     "nwb_file_name": key["nwb_file_name"],
                     "interval_list_name": key["interval_list_name"],
@@ -283,7 +304,7 @@ class PositionVideo(dj.Computed):
         elif key["plot"] == "All":
             dlc_df = (
                 (
-                    IntervalPositionInfo()
+                    FinalPosition()
                     & {
                         "nwb_file_name": key["nwb_file_name"],
                         "interval_list_name": key["interval_list_name"],
@@ -296,7 +317,7 @@ class PositionVideo(dj.Computed):
             )
             trodes_df = (
                 (
-                    IntervalPositionInfo()
+                    FinalPosition()
                     & {
                         "nwb_file_name": key["nwb_file_name"],
                         "interval_list_name": key["interval_list_name"],
@@ -332,7 +353,7 @@ class PositionVideo(dj.Computed):
         ]
         video_frame_inds = pos_df[video_frame_col_name[0]].astype(int).to_numpy()
         if key["plot"] in ["DLC", "All"]:
-            dlc_model_name = (PosSource.DLCPos & key).fetch1("dlc_model_name")
+            dlc_model_name = (FinalPosition.DLCPos & key).fetch1("dlc_model_name")
             video_path = (
                 DLCPoseEstimationSelection & {"dlc_model_name": dlc_model_name, **key}
             ).fetch1("video_path")

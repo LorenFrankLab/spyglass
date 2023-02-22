@@ -39,9 +39,7 @@ from .position_trodes_position import (
     TrodesPosVideo,
 )
 from .position_position import (
-    PosSource,
-    IntervalPositionInfo,
-    IntervalPositionInfoSelection,
+    FinalPosition,
     PositionVideoSelection,
     PositionVideo,
 )
