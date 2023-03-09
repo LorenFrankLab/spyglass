@@ -15,7 +15,7 @@ from .position_dlc_pose_estimation import (
     DLCPoseEstimation,
 )
 
-from .dlc_utils import get_video_path
+from .dlc_utils import get_video_path, make_video
 from .position_dlc_centroid import DLCCentroid
 from .position_dlc_orient import DLCOrientation
 from .position_dlc_position import DLCSmoothInterp, DLCSmoothInterpParams
@@ -319,6 +319,7 @@ class DLCPosVideo(dj.Computed):
         pose_estimation_params, video_filename, output_dir = (
             DLCPoseEstimationSelection() & pose_estimation_key
         ).fetch1("pose_estimation_params", "video_path", "pose_estimation_output_dir")
+        print(f"video filename: {video_filename}")
         meters_per_pixel = (DLCPoseEstimation() & pose_estimation_key).fetch1(
             "meters_per_pixel"
         )
@@ -376,32 +377,45 @@ class DLCPosVideo(dj.Computed):
             bodypart: pose_estimation_df.loc[:, idx[bodypart, ("x", "y")]].to_numpy()
             for bodypart in pose_estimation_df.columns.levels[0]
         }
-        likelihoods = {
-            bodypart: pose_estimation_df.loc[
-                :, idx[bodypart, ("likelihood")]
-            ].to_numpy()
-            for bodypart in pose_estimation_df.columns.levels[0]
+        if params.get("incl_likelihood", None):
+            likelihoods = {
+                bodypart: pose_estimation_df.loc[
+                    :, idx[bodypart, ("likelihood")]
+                ].to_numpy()
+                for bodypart in pose_estimation_df.columns.levels[0]
+            }
+        else:
+            likelihoods = None
+        position_mean = {
+            "DLC": np.asarray(position_info_df[["position_x", "position_y"]])
         }
-        position_mean = np.asarray(position_info_df[["position_x", "position_y"]])
-        orientation_mean = np.asarray(position_info_df[["orientation"]])
+        orientation_mean = {"DLC": np.asarray(position_info_df[["orientation"]])}
         position_time = np.asarray(position_info_df.index)
         cm_per_pixel = meters_per_pixel * M_TO_CM
+        percent_frames = params.get("percent_frames", None)
+        frames = params.get("frames", None)
+        if frames is not None:
+            frames_arr = np.arange(frames[0], frames[1])
+        else:
+            frames_arr = frames
 
         print("Making video...")
-        self.make_video(
-            video_filename,
-            centroids,
-            likelihoods,
-            position_mean,
-            orientation_mean,
-            position_time,
-            video_frame_inds,
-            frames=np.arange(params["frames"][0], params["frames"][1]),
-            percent_frames=params["percent_frames"],
+        make_video(
+            video_filename=video_filename,
+            video_frame_inds=video_frame_inds,
+            position_mean=position_mean,
+            orientation_mean=orientation_mean,
+            centroids=centroids,
+            likelihoods=likelihoods,
+            position_time=position_time,
+            video_time=None,
+            processor=params.get("processor", "matplotlib"),
+            frames=frames_arr,
+            percent_frames=percent_frames,
             output_video_filename=output_video_filename,
             cm_to_pixels=cm_per_pixel,
             disable_progressbar=False,
-            crop=None,
+            crop=crop,
         )
 
     @staticmethod
