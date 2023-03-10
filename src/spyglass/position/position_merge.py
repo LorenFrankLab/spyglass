@@ -11,16 +11,16 @@ from ..common.common_behav import VideoFile, RawPosition
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.common_interval import IntervalList
 
-from .position_dlc_pose_estimation import (
+from .position_v1.position_dlc_pose_estimation import (
     DLCPoseEstimation,
     DLCPoseEstimationSelection,
 )
-from .dlc_utils import get_video_path, check_videofile, make_video
-from .position_dlc_selection import DLCPosV1
-from .position_trodes_position import TrodesPosV1
+from .position_v1.dlc_utils import get_video_path, check_videofile, make_video
+from .position_v1.position_dlc_selection import DLCPosV1
+from .position_v1.position_trodes_position import TrodesPosV1
 from ..common.common_position import IntervalPositionInfo as CommonIntervalPositionInfo
 
-schema = dj.schema("position_position")
+schema = dj.schema("position_merge")
 
 _valid_data_sources = ["DLC", "Trodes", "Common"]
 

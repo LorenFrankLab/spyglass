@@ -6,10 +6,10 @@ import datajoint as dj
 from tqdm import tqdm as tqdm
 import pynwb
 import cv2
-from ..common.dj_helper_fn import fetch_nwb
-from ..common.common_nwbfile import AnalysisNwbfile
-from ..common.common_behav import RawPosition, VideoFile
-from ..common.common_interval import IntervalList
+from ...common.dj_helper_fn import fetch_nwb
+from ...common.common_nwbfile import AnalysisNwbfile
+from ...common.common_behav import RawPosition, VideoFile
+from ...common.common_interval import IntervalList
 from .position_dlc_pose_estimation import (
     DLCPoseEstimationSelection,
     DLCPoseEstimation,
@@ -123,7 +123,7 @@ class DLCPosV1(dj.Computed):
         )
 
         self.insert1(key)
-        from .position_position import FinalPosition
+        from ..position_merge import FinalPosition
 
         key["source"] = "DLC"
         key["version"] = 1

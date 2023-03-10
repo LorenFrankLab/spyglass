@@ -3,12 +3,12 @@ import numpy as np
 import pandas as pd
 import datajoint as dj
 import pynwb
-from ..common.dj_helper_fn import fetch_nwb
-from ..common.common_nwbfile import AnalysisNwbfile
+from ...common.dj_helper_fn import fetch_nwb
+from ...common.common_nwbfile import AnalysisNwbfile
 from position_tools import get_velocity, get_distance
 from .position_dlc_position import DLCSmoothInterpParams
 from .position_dlc_cohort import DLCSmoothInterpCohort
-from ..common.common_behav import RawPosition
+from ...common.common_behav import RawPosition
 from .dlc_utils import (
     smooth_moving_avg,
     _key_to_smooth_func_dict,

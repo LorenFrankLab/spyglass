@@ -3,11 +3,11 @@ import pandas as pd
 import datajoint as dj
 import pynwb
 from position_tools.core import gaussian_smooth
-from ..common.dj_helper_fn import fetch_nwb
-from ..common.common_nwbfile import AnalysisNwbfile
+from ...common.dj_helper_fn import fetch_nwb
+from ...common.common_nwbfile import AnalysisNwbfile
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_project import BodyPart
-from ..common.common_behav import RawPosition
+from ...common.common_behav import RawPosition
 
 schema = dj.schema("position_dlc_orient")
 
