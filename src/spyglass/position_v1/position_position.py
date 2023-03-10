@@ -16,8 +16,8 @@ from .position_dlc_pose_estimation import (
     DLCPoseEstimationSelection,
 )
 from .dlc_utils import get_video_path, check_videofile, make_video
-from .position_dlc_selection import DLCPos
-from .position_trodes_position import TrodesPos
+from .position_dlc_selection import DLCPosV1
+from .position_trodes_position import TrodesPosV1
 from ..common.common_position import IntervalPositionInfo as CommonIntervalPositionInfo
 
 schema = dj.schema("position_position")
@@ -39,18 +39,19 @@ class FinalPosition(dj.Manual):
     definition = """
     -> IntervalList
     source: varchar(40)
+    version: int
     position_id: int
     ---
     """
 
-    class DLCPos(dj.Part):
+    class DLCPosV1(dj.Part):
         """
         Table to pass-through upstream DLC Pose Estimation information
         """
 
         definition = """
         -> FinalPosition
-        -> DLCPos
+        -> DLCPosV1
         ---
         -> AnalysisNwbfile
         position_object_id : varchar(80)
@@ -63,14 +64,14 @@ class FinalPosition(dj.Manual):
                 self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
             )
 
-    class TrodesPos(dj.Part):
+    class TrodesPosV1(dj.Part):
         """
         Table to pass-through upstream Trodes Position Tracking information
         """
 
         definition = """
         -> FinalPosition
-        -> TrodesPos
+        -> TrodesPosV1
         ---
         -> AnalysisNwbfile
         position_object_id : varchar(80)
@@ -131,7 +132,12 @@ class FinalPosition(dj.Manual):
             key["position_id"] = position_id
         super().insert1(key, **kwargs)
         source = key["source"]
-        part_table = getattr(self, f"{source}Pos")
+        if source in ["Common"]:
+            table_name = f"{source}Pos"
+        else:
+            version = key["version"]
+            table_name = f"{source}PosV{version}"
+        part_table = getattr(self, table_name)
         # TODO: The parent table to refer to is hard-coded here, expecting it to be the second
         # Table in the definition. This could be more flexible.
         if params:

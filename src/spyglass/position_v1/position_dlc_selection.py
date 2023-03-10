@@ -38,7 +38,7 @@ class DLCPosSelection(dj.Manual):
 
 
 @schema
-class DLCPos(dj.Computed):
+class DLCPosV1(dj.Computed):
     """
     Combines upstream DLCCentroid and DLCOrientation
     entries into a single entry with a single Analysis NWB file
@@ -55,7 +55,7 @@ class DLCPos(dj.Computed):
     """
 
     def make(self, key):
-        key["pose_eval_result"] = DLCPos.evaluate_pose_estimation(key)
+        key["pose_eval_result"] = self.evaluate_pose_estimation(key)
         position_nwb_data = (DLCCentroid & key).fetch_nwb()[0]
         orientation_nwb_data = (DLCOrientation & key).fetch_nwb()[0]
         position_object = position_nwb_data["dlc_position"].spatial_series["position"]
@@ -126,6 +126,7 @@ class DLCPos(dj.Computed):
         from .position_position import FinalPosition
 
         key["source"] = "DLC"
+        key["version"] = 1
         dlc_key = key.copy()
         del dlc_key["pose_eval_result"]
         key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
@@ -282,7 +283,7 @@ class DLCPosVideoParams(dj.Manual):
 @schema
 class DLCPosVideoSelection(dj.Manual):
     definition = """
-    -> DLCPos
+    -> DLCPosV1
     -> DLCPosVideoParams
     ---
     """
@@ -332,7 +333,7 @@ class DLCPosVideo(dj.Computed):
             crop = pose_estimation_params["cropping"]
         print("Loading position data...")
         position_info_df = (
-            DLCPos()
+            DLCPosV1()
             & {
                 "nwb_file_name": key["nwb_file_name"],
                 "epoch": epoch,

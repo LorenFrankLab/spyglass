@@ -90,7 +90,7 @@ class TrodesPosSelection(dj.Manual):
 
 
 @schema
-class TrodesPos(dj.Computed):
+class TrodesPosV1(dj.Computed):
     """
     Table to calculate the position based on Trodes tracking
     """
@@ -197,6 +197,7 @@ class TrodesPos(dj.Computed):
         from .position_position import FinalPosition
 
         key["source"] = "Trodes"
+        key["version"] = 1
         trodes_key = key.copy()
         valid_fields = FinalPosition().fetch().dtype.fields.keys()
         entries_to_delete = [entry for entry in key.keys() if entry not in valid_fields]
@@ -412,7 +413,7 @@ class TrodesPosVideo(dj.Computed):
     Use for debugging the effect of position extraction parameters."""
 
     definition = """
-    -> TrodesPos
+    -> TrodesPosV1
     ---
     """
 
@@ -427,7 +428,7 @@ class TrodesPosVideo(dj.Computed):
                 "interval_list_name": key["interval_list_name"],
             }
         ).fetch1_dataframe()
-        position_info_df = (TrodesPos() & key).fetch1_dataframe()
+        position_info_df = (TrodesPosV1() & key).fetch1_dataframe()
 
         print("Loading video data...")
         epoch = (
