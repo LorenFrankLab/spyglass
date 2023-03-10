@@ -9,6 +9,12 @@ from position_tools import get_velocity, get_distance
 from .position_dlc_position import DLCSmoothInterpParams
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from ..common.common_behav import RawPosition
+from .dlc_utils import (
+    smooth_moving_avg,
+    _key_to_smooth_func_dict,
+    get_span_start_stop,
+    interp_pos,
+)
 
 schema = dj.schema("position_dlc_centroid")
 
@@ -45,6 +51,13 @@ class DLCCentroidParams(dj.Manual):
             "points": {
                 "point1": "greenLED",
                 "point2": "redLED_C",
+            },
+            "interpolate": True,
+            "interp_params": {"max_cm_to_interp": 15},
+            "smooth": True,
+            "smoothing_params": {
+                "smoothing_duration": 0.05,
+                "smooth_method": "moving_avg",
             },
             "max_LED_separation": 12,
             "speed_smoothing_std_dev": 0.100,
@@ -108,6 +121,26 @@ class DLCCentroidParams(dj.Manual):
                     f"{type(params['max_LED_separation'])}, "
                     f"it should be one of type (float, int)"
                 )
+        if "smooth" in params:
+            if params["smooth"]:
+                if "smoothing_params" in params:
+                    if "smooth_method" in params["smoothing_params"]:
+                        smooth_method = params["smoothing_params"]["smooth_method"]
+                        if smooth_method not in _key_to_smooth_func_dict:
+                            raise KeyError(
+                                f"smooth_method: {smooth_method} not an available method."
+                            )
+                    if not "smoothing_duration" in params["smoothing_params"]:
+                        raise KeyError(
+                            "smoothing_duration must be passed as a smoothing_params within key['params']"
+                        )
+                    else:
+                        assert isinstance(
+                            params["smoothing_params"]["smoothing_duration"],
+                            (float, int),
+                        ), "smoothing_duration must be a float or int"
+                else:
+                    raise ValueError("smoothing_params not in key['params']")
 
         super().insert1(key, **kwargs)
 
@@ -143,6 +176,7 @@ class DLCCentroid(dj.Computed):
     def make(self, key):
         from .dlc_utils import OutputLogger, infer_output_dir
 
+        idx = pd.IndexSlice
         output_dir = infer_output_dir(key=key, makedir=False)
         with OutputLogger(
             name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
@@ -250,9 +284,52 @@ class DLCCentroid(dj.Computed):
             sampling_rate = 1 / dt
             logger.logger.info("Calculating centroid with %s", str(centroid_method))
             centroid = centroid_func(pos_df, **params)
+            centroid_df = pd.DataFrame(
+                centroid,
+                columns=["x", "y"],
+                index=pos_df.index.to_numpy(),
+            )
+            if params["interpolate"]:
+                if np.sum(np.isnan(centroid)) > 0:
+                    logger.logger.info("interpolating over NaNs")
+                    nan_inds = (
+                        pd.isnull(centroid_df.loc[:, idx[("x", "y")]])
+                        .any(axis=1)
+                        .to_numpy()
+                        .nonzero()[0]
+                    )
+                    nan_spans = get_span_start_stop(nan_inds)
+                    interp_df = interp_pos(
+                        centroid_df.copy(), nan_spans, **params["interp_params"]
+                    )
+            else:
+                interp_df = centroid_df.copy()
+            if params["smooth"]:
+                if "smoothing_duration" in params["smoothing_params"]:
+                    smoothing_duration = params["smoothing_params"].pop(
+                        "smoothing_duration"
+                    )
+                    dt = np.median(np.diff(pos_df.index.to_numpy()))
+                    sampling_rate = 1 / dt
+                    logger.logger.info("smoothing position")
+                    smooth_func = _key_to_smooth_func_dict[
+                        params["smoothing_params"]["smooth_method"]
+                    ]
+                    logger.logger.info(
+                        "Smoothing using method: %s",
+                        str(params["smoothing_params"]["smooth_method"]),
+                    )
+                    final_df = smooth_func(
+                        interp_df,
+                        smoothing_duration=smoothing_duration,
+                        sampling_rate=sampling_rate,
+                        **params["smoothing_params"],
+                    )
+            else:
+                final_df = interp_df.copy()
             logger.logger.info("getting velocity")
             velocity = get_velocity(
-                centroid,
+                final_df.loc[:, idx[("x", "y")]].to_numpy(),
                 time=pos_df.index.to_numpy(),
                 sigma=speed_smoothing_std_dev,
                 sampling_frequency=sampling_rate,
@@ -264,20 +341,9 @@ class DLCCentroid(dj.Computed):
                 columns=["velocity_x", "velocity_y", "speed"],
                 index=pos_df.index.to_numpy(),
             )
-            final_df = pd.DataFrame(
-                centroid,
-                columns=["position_x", "position_y"],
-                index=pos_df.index.to_numpy(),
-            )
-            idx = pd.IndexSlice
-            total_nan = np.sum(
-                final_df.loc[:, idx[("position_x", "position_y")]].isna().any(axis=1)
-            )
+            total_nan = np.sum(final_df.loc[:, idx[("x", "y")]].isna().any(axis=1))
             pretrack_nan = np.sum(
-                final_df.iloc[:1000]
-                .loc[:, idx[("position_x", "position_y")]]
-                .isna()
-                .any(axis=1)
+                final_df.iloc[:1000].loc[:, idx[("x", "y")]].isna().any(axis=1)
             )
             logger.logger.info("total NaNs in centroid dataset: %d", total_nan)
             logger.logger.info(
@@ -291,7 +357,7 @@ class DLCCentroid(dj.Computed):
                 name="position",
                 timestamps=final_df.index.to_numpy(),
                 conversion=METERS_PER_CM,
-                data=final_df.loc[:, idx[("position_x", "position_y")]].to_numpy(),
+                data=final_df.loc[:, idx[("x", "y")]].to_numpy(),
                 reference_frame=spatial_series.reference_frame,
                 comments=spatial_series.comments,
                 description="x_position, y_position",

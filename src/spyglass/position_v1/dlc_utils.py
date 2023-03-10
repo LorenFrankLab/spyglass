@@ -1,6 +1,7 @@
 # Convenience functions
-# DLC-utils copied from datajoint element-interface utils.py
-
+# some DLC-utils copied from datajoint element-interface utils.py
+from itertools import groupby
+from operator import itemgetter
 import pathlib
 import os
 import pwd
@@ -525,6 +526,105 @@ def get_gpu_memory():
         ) from err
     memory_use_values = {i: int(x.split()[0]) for i, x in enumerate(memory_use_info)}
     return memory_use_values
+
+
+def get_span_start_stop(indices):
+    """_summary_
+
+    Parameters
+    ----------
+    indices : _type_
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    span_inds = []
+    # Get start and stop index of spans of consecutive indices
+    for k, g in groupby(enumerate(indices), lambda x: x[1] - x[0]):
+        group = list(map(itemgetter(1), g))
+        span_inds.append((group[0], group[-1]))
+    return span_inds
+
+
+def interp_pos(dlc_df, spans_to_interp, **kwargs):
+    idx = pd.IndexSlice
+    for ind, (span_start, span_stop) in enumerate(spans_to_interp):
+        if (span_stop + 1) >= len(dlc_df):
+            dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
+            dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
+            print(f"ind: {ind} has no endpoint with which to interpolate")
+            continue
+        if span_start < 1:
+            dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
+            dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
+            print(f"ind: {ind} has no startpoint with which to interpolate")
+            continue
+        x = [dlc_df["x"].iloc[span_start - 1], dlc_df["x"].iloc[span_stop + 1]]
+        y = [dlc_df["y"].iloc[span_start - 1], dlc_df["y"].iloc[span_stop + 1]]
+        span_len = int(span_stop - span_start + 1)
+        start_time = dlc_df.index[span_start]
+        stop_time = dlc_df.index[span_stop]
+        if "max_pts_to_interp" in kwargs:
+            if span_len > kwargs["max_pts_to_interp"]:
+                dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
+                dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
+                print(
+                    f"inds {span_start} to {span_stop} "
+                    f"length: {span_len} not interpolated"
+                )
+        if "max_cm_to_interp" in kwargs:
+            if (
+                np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
+                > kwargs["max_cm_to_interp"]
+            ):
+                dlc_df.loc[idx[start_time:stop_time], idx["x"]] = np.nan
+                dlc_df.loc[idx[start_time:stop_time], idx["y"]] = np.nan
+                change = np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
+                print(
+                    f"inds {span_start} to {span_stop + 1} "
+                    f"with change in position: {change:.2f} not interpolated"
+                )
+                continue
+
+        xnew = np.interp(
+            x=dlc_df.index[span_start : span_stop + 1],
+            xp=[start_time, stop_time],
+            fp=[x[0], x[-1]],
+        )
+        ynew = np.interp(
+            x=dlc_df.index[span_start : span_stop + 1],
+            xp=[start_time, stop_time],
+            fp=[y[0], y[-1]],
+        )
+        dlc_df.loc[idx[start_time:stop_time], idx["x"]] = xnew
+        dlc_df.loc[idx[start_time:stop_time], idx["y"]] = ynew
+
+    return dlc_df
+
+
+def smooth_moving_avg(
+    interp_df, smoothing_duration: float, sampling_rate: int, **kwargs
+):
+    import bottleneck as bn
+
+    idx = pd.IndexSlice
+    moving_avg_window = int(smoothing_duration * sampling_rate)
+    xy_arr = interp_df.loc[:, idx[("x", "y")]].values
+    smoothed_xy_arr = bn.move_mean(
+        xy_arr, window=moving_avg_window, axis=0, min_count=2
+    )
+    interp_df.loc[:, idx["x"]], interp_df.loc[:, idx["y"]] = [
+        *zip(*smoothed_xy_arr.tolist())
+    ]
+    return interp_df
+
+
+_key_to_smooth_func_dict = {
+    "moving_avg": smooth_moving_avg,
+}
 
 
 def fill_nan(variable, video_time, variable_time):
