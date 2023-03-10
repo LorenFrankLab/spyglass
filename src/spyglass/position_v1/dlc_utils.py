@@ -548,6 +548,7 @@ def get_span_start_stop(indices):
         span_inds.append((group[0], group[-1]))
     return span_inds
 
+
 def interp_pos(dlc_df, spans_to_interp, **kwargs):
     idx = pd.IndexSlice
     for ind, (span_start, span_stop) in enumerate(spans_to_interp):
@@ -603,10 +604,12 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
 
     return dlc_df
 
+
 def smooth_moving_avg(
     interp_df, smoothing_duration: float, sampling_rate: int, **kwargs
 ):
     import bottleneck as bn
+
     idx = pd.IndexSlice
     moving_avg_window = int(smoothing_duration * sampling_rate)
     xy_arr = interp_df.loc[:, idx[("x", "y")]].values
