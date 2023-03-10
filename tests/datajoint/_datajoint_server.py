@@ -3,7 +3,6 @@ import os
 import time
 import traceback
 
-import hither2 as hi
 import kachery_client as kc
 from pymysql.err import OperationalError
 
@@ -21,20 +20,19 @@ def run_service_datajoint_server():
 
     os.environ["RUNNING_PYTEST"] = "TRUE"
 
-    with hi.ConsoleCapture(label="[datajoint-server]"):
-        ss = kc.ShellScript(
-            f"""
-        #!/bin/bash
-        set -ex
+    ss = kc.ShellScript(
+        f"""
+    #!/bin/bash
+    set -ex
 
-        docker kill {DOCKER_IMAGE_NAME} > /dev/null 2>&1 || true
-        docker rm {DOCKER_IMAGE_NAME} > /dev/null 2>&1 || true
-        exec docker run --name {DOCKER_IMAGE_NAME} -e MYSQL_ROOT_PASSWORD=tutorial -p {DATAJOINT_SERVER_PORT}:3306 datajoint/mysql
-        """,
-            redirect_output_to_stdout=True,
-        )  # noqa: E501
-        ss.start()
-        ss.wait()
+    docker kill {DOCKER_IMAGE_NAME} > /dev/null 2>&1 || true
+    docker rm {DOCKER_IMAGE_NAME} > /dev/null 2>&1 || true
+    exec docker run --name {DOCKER_IMAGE_NAME} -e MYSQL_ROOT_PASSWORD=tutorial -p {DATAJOINT_SERVER_PORT}:3306 datajoint/mysql
+    """,
+        redirect_output_to_stdout=True,
+    )  # noqa: E501
+    ss.start()
+    ss.wait()
 
 
 def run_datajoint_server():
