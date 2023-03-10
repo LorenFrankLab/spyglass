@@ -27,7 +27,7 @@ from .position_dlc_orient import (
 )
 from .position_dlc_selection import (
     DLCPosSelection,
-    DLCPos,
+    DLCPosV1,
     DLCPosVideo,
     DLCPosVideoParams,
     DLCPosVideoSelection,
@@ -35,7 +35,7 @@ from .position_dlc_selection import (
 from .position_trodes_position import (
     TrodesPosParams,
     TrodesPosSelection,
-    TrodesPos,
+    TrodesPosV1,
     TrodesPosVideo,
 )
 from .position_position import (
