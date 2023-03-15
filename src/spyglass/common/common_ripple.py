@@ -49,7 +49,8 @@ class RippleLFPSelection(dj.Manual):
 
     def insert1(self, key, **kwargs):
         filter_name = (LFPBand & key).fetch1("filter_name")
-        assert "ripple" in filter_name.lower(), "Please use a ripple filter"
+        if "ripple" not in filter_name.lower():
+            raise UserWarning("Please use a ripple filter")
         super().insert1(key, **kwargs)
 
     @staticmethod
@@ -237,7 +238,7 @@ class RippleTimes(dj.Computed):
             }
         ).fetch1_dataframe()
 
-        valid_position_info = pd.concat(
+        position_info = pd.concat(
             [
                 position_info.loc[slice(valid_time[0], valid_time[1])]
                 for valid_time in position_valid_times
@@ -252,12 +253,12 @@ class RippleTimes(dj.Computed):
             axis=1,
         )
 
-        new_valid_position_info = interpolate_to_new_time(
+        position_info = interpolate_to_new_time(
             valid_position_info, interval_ripple_lfps.index
         )
 
         return (
-            new_valid_position_info[speed_name],
+            position_info[speed_name],
             interval_ripple_lfps,
             sampling_frequency,
         )
