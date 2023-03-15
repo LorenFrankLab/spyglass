@@ -10,6 +10,7 @@ from spyglass.common import (
     IntervalPositionInfo,
     IntervalPositionInfoSelection,
     LFPBand,
+    LFPBandSelection,
     Session,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -36,44 +37,67 @@ def interpolate_to_new_time(df, new_time, upsampling_interpolation_method="linea
 @schema
 class RippleLFPSelection(dj.Manual):
     definition = """
-     -> Session
+     -> LFPBand
      group_name = 'CA1' : varchar(80)
      """
 
     class RippleLFPElectrode(dj.Part):
         definition = """
         -> RippleLFPSelection
-        -> Electrode
+        -> LFPBandSelection.LFPBandElectrode
         """
 
+    def insert1(self, key, **kwargs):
+        filter_name = (LFPBand & key).fetch1("filter_name")
+        if "ripple" not in filter_name.lower():
+            raise UserWarning("Please use a ripple filter")
+        super().insert1(key, **kwargs)
+
     @staticmethod
-    def set_lfp_electrodes(nwb_file_name, electrode_list, group_name="CA1"):
+    def set_lfp_electrodes(
+        key,
+        electrode_list=None,
+        group_name="CA1",
+        **kwargs,
+    ):
         """Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
 
         Parameters
         ----------
-        nwb_file_name : str
-            The name of the nwb file for the desired session
+        key : dict
+            dictionary corresponding to the LFPBand entry to use for ripple detection
         electrode_list : list
-            list of electrodes to be used for LFP
+            list of electrodes from LFPBandSelection.LFPBandElectrode
+            to be used as the ripple LFP during detection
         group_name : str, optional
-
+            description of the electrode group, by default "CA1"
         """
-        RippleLFPSelection().insert1(
-            {"nwb_file_name": nwb_file_name, "group_name": group_name},
-            skip_duplicates=True,
-        )
 
+        RippleLFPSelection().insert1(
+            {**key, "group_name": group_name},
+            skip_duplicates=True,
+            **kwargs,
+        )
+        if not electrode_list:
+            electrode_list = (
+                (LFPBandSelection.LFPBandElectrode() & key)
+                .fetch("electrode_id")
+                .tolist()
+            )
+        electrode_list.sort()
         electrode_keys = (
-            pd.DataFrame(Electrode & {"nwb_file_name": nwb_file_name})
+            pd.DataFrame(LFPBandSelection.LFPBandElectrode() & key)
             .set_index("electrode_id")
             .loc[electrode_list]
             .reset_index()
-            .loc[:, Electrode.primary_key]
+            .loc[:, LFPBandSelection.LFPBandElectrode.primary_key]
         )
         electrode_keys["group_name"] = group_name
+        electrode_keys = electrode_keys.sort_values(by=["electrode_id"])
         RippleLFPSelection().RippleLFPElectrode.insert(
-            electrode_keys.to_dict(orient="records"), replace=True
+            electrode_keys.to_dict(orient="records"),
+            replace=True,
+            **kwargs,
         )
 
 
@@ -88,7 +112,6 @@ class RippleParameters(dj.Lookup):
     def insert_default(self):
         """Insert the default parameter set"""
         default_dict = {
-            "filter_name": "Ripple 150-250 Hz",
             "speed_name": "head_speed",
             "ripple_detection_algorithm": "Kay_ripple_detector",
             "ripple_detection_params": dict(
@@ -168,44 +191,38 @@ class RippleTimes(dj.Computed):
     @staticmethod
     def get_ripple_lfps_and_position_info(key):
         nwb_file_name = key["nwb_file_name"]
-        interval_list_name = key["interval_list_name"]
+        interval_list_name = key["target_interval_list_name"]
         position_info_param_name = key["position_info_param_name"]
-        group_name = key["group_name"]
         ripple_params = (
             RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
         ).fetch1("ripple_param_dict")
 
-        filter_name = ripple_params["filter_name"]
         speed_name = ripple_params["speed_name"]
 
-        electrode_keys = (
-            (
-                RippleLFPSelection()
-                & {"nwb_file_name": nwb_file_name, "group_name": group_name}
-            )
-            .RippleLFPElectrode()
-            .fetch("KEY")
+        electrode_keys = (RippleLFPSelection.RippleLFPElectrode() & key).fetch(
+            "electrode_id"
         )
 
         # warn/validate that there is only one wire per electrode
-
-        ripple_lfp_nwb = (
-            LFPBand & {"nwb_file_name": nwb_file_name, "filter_name": filter_name}
-        ).fetch_nwb()[0]
-
+        lfp_key = key.copy()
+        del lfp_key["interval_list_name"]
+        ripple_lfp_nwb = (LFPBand & lfp_key).fetch_nwb()[0]
+        ripple_lfp_electrodes = ripple_lfp_nwb["filtered_data"].electrodes.data[:]
+        elec_mask = np.full_like(ripple_lfp_electrodes, 0, dtype=bool)
+        elec_mask[
+            [
+                ind
+                for ind, elec in enumerate(ripple_lfp_electrodes)
+                if elec in electrode_keys
+            ]
+        ] = True
         ripple_lfp = pd.DataFrame(
             ripple_lfp_nwb["filtered_data"].data,
             index=pd.Index(ripple_lfp_nwb["filtered_data"].timestamps, name="time"),
         )
         sampling_frequency = ripple_lfp_nwb["lfp_band_sampling_rate"]
 
-        electrode_df = (Electrode() & {"nwb_file_name": nwb_file_name}).fetch(
-            format="frame"
-        )
-        electrode_keys = (
-            pd.DataFrame(electrode_keys).set_index(Electrode.primary_key).index
-        )
-        ripple_lfp = ripple_lfp.loc[:, electrode_df.index.isin(electrode_keys)]
+        ripple_lfp = ripple_lfp.loc[:, elec_mask]
 
         position_valid_times = (
             IntervalList
@@ -237,10 +254,14 @@ class RippleTimes(dj.Computed):
         )
 
         position_info = interpolate_to_new_time(
-            position_info, interval_ripple_lfps.index
+            valid_position_info, interval_ripple_lfps.index
         )
 
-        return (position_info[speed_name], interval_ripple_lfps, sampling_frequency)
+        return (
+            position_info[speed_name],
+            interval_ripple_lfps,
+            sampling_frequency,
+        )
 
     @staticmethod
     def get_Kay_ripple_consensus_trace(
