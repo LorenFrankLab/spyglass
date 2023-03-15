@@ -302,6 +302,8 @@ class DLCCentroid(dj.Computed):
                     interp_df = interp_pos(
                         centroid_df.copy(), nan_spans, **params["interp_params"]
                     )
+                else:
+                    interp_df = centroid_df.copy()
             else:
                 interp_df = centroid_df.copy()
             if params["smooth"]:
@@ -325,6 +327,8 @@ class DLCCentroid(dj.Computed):
                         sampling_rate=sampling_rate,
                         **params["smoothing_params"],
                     )
+                else:
+                    final_df = interp_df.copy()
             else:
                 final_df = interp_df.copy()
             logger.logger.info("getting velocity")
