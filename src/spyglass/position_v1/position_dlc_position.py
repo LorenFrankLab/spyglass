@@ -265,9 +265,7 @@ def nan_inds(
     subthresh_inds_mask = np.zeros(len(dlc_df), dtype=bool)
     subthresh_inds_mask[subthresh_inds] = True
     jump_inds_mask = np.zeros(len(dlc_df), dtype=bool)
-    orig_spans, good_spans = get_good_spans(
-        subthresh_inds_mask, inds_to_span=inds_to_span
-    )
+    _, good_spans = get_good_spans(subthresh_inds_mask, inds_to_span=inds_to_span)
 
     for span in good_spans[::-1]:
         if np.sum(np.isnan(dlc_df.iloc[span[0] : span[-1]].x)) > 0:
@@ -373,8 +371,9 @@ def get_good_spans(bad_inds_mask, inds_to_span: int = 50):
             else:
                 modified_spans.append((start1, stop1))
                 modified_spans.append((start2, stop2))
-
-    return good_spans, modified_spans
+        return good_spans, modified_spans
+    else:
+        return None, good_spans
 
 
 def span_length(x):
