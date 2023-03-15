@@ -187,7 +187,12 @@ class FinalPosition(dj.Manual):
 
     def fetch1_dataframe(self):
         source = self.fetch1("source")
-        part_table = getattr(self, f"{source}Pos") & self
+        if source in ["Common"]:
+            table_name = f"{source}Pos"
+        else:
+            version = self.fetch1("version")
+            table_name = f"{source}PosV{version}"
+        part_table = getattr(self, table_name) & self
         nwb_data = part_table.fetch_nwb()[0]
 
         index = pd.Index(
