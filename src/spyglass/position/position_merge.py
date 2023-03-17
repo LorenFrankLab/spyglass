@@ -4,20 +4,18 @@ import pandas as pd
 import numpy as np
 from typing import Dict
 from pathlib import Path
-import pynwb
 from tqdm import tqdm as tqdm
 from ..common.dj_helper_fn import fetch_nwb
 from ..common.common_behav import VideoFile, RawPosition
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.common_interval import IntervalList
-
-from .position_v1.position_dlc_pose_estimation import (
+from .v1.position_dlc_pose_estimation import (
     DLCPoseEstimation,
     DLCPoseEstimationSelection,
 )
-from .position_v1.dlc_utils import get_video_path, check_videofile, make_video
-from .position_v1.position_dlc_selection import DLCPosV1
-from .position_v1.position_trodes_position import TrodesPosV1
+from .v1.dlc_utils import get_video_path, check_videofile, make_video
+from .v1.position_dlc_selection import DLCPosV1
+from .v1.position_trodes_position import TrodesPosV1
 from ..common.common_position import IntervalPositionInfo as CommonIntervalPositionInfo
 
 schema = dj.schema("position_merge")
@@ -385,7 +383,7 @@ class PositionVideo(dj.Computed):
         ]
         video_frame_inds = pos_df[video_frame_col_name[0]].astype(int).to_numpy()
         if key["plot"] in ["DLC", "All"]:
-            temp_key = (FinalPosition.DLCPos & key).fetch1("KEY")
+            temp_key = (FinalPosition.DLCPosV1 & key).fetch1("KEY")
             video_path = (DLCPoseEstimationSelection & temp_key).fetch1("video_path")
         else:
             video_path = check_videofile(video_dir, key["output_dir"], video_filename)[
