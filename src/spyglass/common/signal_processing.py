@@ -33,9 +33,7 @@ def hilbert_decomp(lfp_band_object, sampling_rate=1):
     )
 
     eseries_name = "frequency"
-    instantaneous_frequency = (
-        np.diff(instantaneous_phase) / (2.0 * np.pi) * sampling_rate
-    )
+    instantaneous_frequency = np.diff(instantaneous_phase) / (2.0 * np.pi) * sampling_rate
     frequency = pynwb.ecephys.ElectricalSeries(
         name=eseries_name,
         data=instantaneous_frequency,

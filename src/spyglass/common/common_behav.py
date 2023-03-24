@@ -128,9 +128,7 @@ class StateScriptFile(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        associated_files = nwbf.processing.get(
-            "associated_files"
-        ) or nwbf.processing.get("associated files")
+        associated_files = nwbf.processing.get("associated_files") or nwbf.processing.get("associated files")
         if associated_files is None:
             print(
                 f'Unable to import StateScriptFile: no processing module named "associated_files" '
@@ -208,10 +206,7 @@ class VideoFile(dj.Imported):
         is_found = False
         for video_obj in video.time_series.values():
             # check to see if the times for this video_object are largely overlapping with the task epoch times
-            if len(
-                interval_list_contains(valid_times, video_obj.timestamps)
-                > 0.9 * len(video_obj.timestamps)
-            ):
+            if len(interval_list_contains(valid_times, video_obj.timestamps) > 0.9 * len(video_obj.timestamps)):
                 key["video_file_object_id"] = video_obj.object_id
                 self.insert1(key)
                 is_found = True
@@ -248,13 +243,8 @@ class VideoFile(dj.Imported):
         nwb_video = nwbf.objects[video_info["video_file_object_id"]]
         video_filename = nwb_video.name
         # see if the file exists and is stored in the base analysis dir
-        nwb_video_file_abspath = pathlib.Path(
-            f"{video_dir}/{pathlib.Path(video_filename)}"
-        )
+        nwb_video_file_abspath = pathlib.Path(f"{video_dir}/{pathlib.Path(video_filename)}")
         if nwb_video_file_abspath.exists():
             return nwb_video_file_abspath.as_posix()
         else:
-            raise FileNotFoundError(
-                f"video file with filename: {video_filename} "
-                f"does not exist in {video_dir}/"
-            )
+            raise FileNotFoundError(f"video file with filename: {video_filename} " f"does not exist in {video_dir}/")

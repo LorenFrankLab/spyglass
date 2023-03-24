@@ -127,9 +127,7 @@ class TaskEpoch(dj.Imported):
                 if camera_id in camera_names:
                     key["camera_name"] = camera_names[camera_id]
                 else:
-                    print(
-                        f"No camera device found with ID {camera_id} in NWB file {nwbf}\n"
-                    )
+                    print(f"No camera device found with ID {camera_id} in NWB file {nwbf}\n")
 
                 # Add task environment
                 if hasattr(task, "task_environment"):
@@ -137,17 +135,13 @@ class TaskEpoch(dj.Imported):
 
                 # get the interval list for this task, which corresponds to the matching epoch for the raw data.
                 # Users should define more restrictive intervals as required for analyses
-                session_intervals = (
-                    IntervalList() & {"nwb_file_name": nwb_file_name}
-                ).fetch("interval_list_name")
+                session_intervals = (IntervalList() & {"nwb_file_name": nwb_file_name}).fetch("interval_list_name")
                 for epoch in task.task_epochs[0]:
                     # TODO in beans file, task_epochs[0] is 1x2 dset of ints, so epoch would be an int
                     key["epoch"] = epoch
                     target_interval = str(epoch).zfill(2)
                     for interval in session_intervals:
-                        if (
-                            target_interval in interval
-                        ):  # TODO this is not true for the beans file
+                        if target_interval in interval:  # TODO this is not true for the beans file
                             break
                     # TODO case when interval is not found is not handled
                     key["interval_list_name"] = interval
