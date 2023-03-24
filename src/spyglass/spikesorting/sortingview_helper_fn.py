@@ -82,7 +82,6 @@ def _create_spikesortingview_workspace(
     raster_plot_subsample_max_firing_rate=50,
     spike_amplitudes_subsample_max_firing_rate=50,
 ):
-
     workspace = sv.create_workspace(label=workspace_label)
 
     recording = si.load_extractor(recording_path)

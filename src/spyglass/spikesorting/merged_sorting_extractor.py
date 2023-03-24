@@ -13,7 +13,6 @@ class MergedSortingExtractor(si.BaseSorting):
     def __init__(
         self, *, parent_sorting: si.BaseSorting, merge_groups: List[List[int]]
     ):
-
         # Loop through the sorting segments in the original sorting
         # and add merged versions to the new sorting
         sorting_segment_list = []

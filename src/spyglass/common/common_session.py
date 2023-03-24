@@ -142,7 +142,7 @@ class SessionGroup(dj.Manual):
         session_group_name: str,
         session_group_description: str,
         *,
-        skip_duplicates: bool = False
+        skip_duplicates: bool = False,
     ):
         SessionGroup.insert1(
             {

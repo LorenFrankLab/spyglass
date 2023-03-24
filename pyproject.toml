@@ -1,34 +1,41 @@
 [build-system]
-requires = [
-    "setuptools>=61.0",
-    "wheel"
-]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "spyglass-neuro"
 version = "0.2.0"
 authors = [
-  { name="Loren Frank", email="loren.frank@ucsf.edu" },
-  { name="Kyu Hyun Lee", email="kyuhyun.lee@ucsf.edu" },
-  { name="Eric Denovellis", email="eric.denovellis@ucsf.edu" },
-  { name="Ryan Ly", email="rly@lbl.gov" }
+    { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
+    { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
+    { name = "Eric Denovellis", email = "eric.denovellis@ucsf.edu" },
+    { name = "Ryan Ly", email = "rly@lbl.gov" },
 ]
 description = "Neuroscience data analysis framework for reproducible research"
 readme = "README.md"
-license = { file="LICENSE" }
-requires-python = ">=3.8"
+license = { file = "LICENSE" }
+requires-python = ">=3.8,<3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-keywords = ["neuroscience", "research", "electrophysiology", "reproducible", "data analysis",
-            "spike sorting", "spikeinterface","datajoint", "nwb", "kachery", "sortingview"]
+keywords = [
+    "neuroscience",
+    "research",
+    "electrophysiology",
+    "reproducible",
+    "data analysis",
+    "spike sorting",
+    "spikeinterface",
+    "datajoint",
+    "nwb",
+    "kachery",
+    "sortingview",
+]
 dependencies = [
-    "jupyterlab>=3.*",
-    "pydotplus>=2.0.*",
-    "dask>=2.30",
+    "pydotplus",
+    "dask",
     "position_tools",
     "track_linearization>=2.3",
     "replay_trajectory_classification",
@@ -44,12 +51,12 @@ dependencies = [
     "pynwb>=2.2.0,<3",
     "hdmf>=3.4.6",
     "datajoint>=0.13.6",
-    "pymysql>=1.0.*",
-    "sortingview>=0.8",
+    "pymysql",
+    "sortingview>=0.11",
     "pyyaml",
     "click",
     "spikeinterface",
-    "ndx_franklab_novela>=0.1.0"
+    "ndx_franklab_novela>=0.1.0",
 ]
 
 [project.scripts]

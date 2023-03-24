@@ -151,7 +151,6 @@ class SortedSpikesIndicator(dj.Computed):
 
 
 def make_default_decoding_parameters_cpu():
-
     classifier_parameters = dict(
         environments=[_DEFAULT_ENVIRONMENT],
         observation_models=None,

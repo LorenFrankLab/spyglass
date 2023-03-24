@@ -448,7 +448,6 @@ class UnitMarksIndicator(dj.Computed):
 
 
 def make_default_decoding_parameters_cpu():
-
     classifier_parameters = dict(
         environments=[_DEFAULT_ENVIRONMENT],
         observation_models=None,
@@ -558,7 +557,6 @@ class MultiunitFiringRate(dj.Computed):
     """
 
     def make(self, key):
-
         marks = (UnitMarksIndicator & key).fetch_xarray()
         multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(float)
         multiunit_firing_rate = pd.DataFrame(
@@ -637,7 +635,6 @@ class MultiunitHighSynchronyEvents(dj.Computed):
     """
 
     def make(self, key):
-
         marks = (UnitMarksIndicator & key).fetch_xarray()
         multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(float)
         position_info = (IntervalPositionInfo() & key).fetch1_dataframe()
@@ -717,7 +714,6 @@ def get_data_for_multiple_epochs(
     position_info_param_name="default_decoding",
     additional_mark_keys={},
 ):
-
     data = []
     environment_labels = []
 
@@ -773,7 +769,6 @@ def populate_mark_indicators(
     mark_param_name="default",
     position_info_param_name="default_decoding",
 ):
-
     spikesorting_selection_keys = deepcopy(spikesorting_selection_keys)
     # Populate spike sorting
     SpikeSortingSelection().insert(
