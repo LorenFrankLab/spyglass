@@ -360,7 +360,7 @@ def list_spike_sorter_parameters():
 
 sample_spike_sorting_key = dict(
     sample_spike_sorting_recording_selection_key,
-    **{"artifact_params_name": "default", "sorter_params_name": "default"}
+    **{"artifact_params_name": "default", "sorter_params_name": "default"},
 )
 
 
@@ -388,7 +388,7 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
 
     artifact_key = dict(
         spike_sorting_recording_key,
-        **{"artifact_params_name": x["artifact_params_name"]}
+        **{"artifact_params_name": x["artifact_params_name"]},
     )
     nds.ArtifactDetectionSelection.insert1(artifact_key, skip_duplicates=True)
     nds.ArtifactDetection.populate(
@@ -409,7 +409,7 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
             "sorter": sorter,
             "sorter_params_name": sorter_params_name,
             "artifact_removed_interval_list_name": artifact_removed_interval_list_name,
-        }
+        },
     )
 
     nds.SpikeSortingSelection.insert1(sorting_key, skip_duplicates=True)

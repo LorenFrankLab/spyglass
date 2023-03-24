@@ -330,7 +330,6 @@ def get_all_spatial_series(nwbf, verbose=False):
     pos_data_dict = dict()
 
     for index, orig_epoch in enumerate(sorted_order):
-
         spatial_series = list(position.spatial_series.values())[orig_epoch]
         pos_data_dict[index] = dict()
         # get the valid intervals for the position data

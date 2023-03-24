@@ -5,7 +5,6 @@ from spyglass.common.common_interval import IntervalList, interval_list_intersec
 
 
 def get_valid_ephys_position_times_from_interval(interval_list_name, nwb_file_name):
-
     interval_valid_times = (
         IntervalList
         & {"nwb_file_name": nwb_file_name, "interval_list_name": interval_list_name}

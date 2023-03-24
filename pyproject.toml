@@ -14,7 +14,7 @@ authors = [
 description = "Neuroscience data analysis framework for reproducible research"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.8"
+requires-python = ">=3.8,<3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -34,9 +34,8 @@ keywords = [
     "sortingview",
 ]
 dependencies = [
-    "jupyterlab>=3.*",
-    "pydotplus>=2.0.*",
-    "dask>=2.30",
+    "pydotplus",
+    "dask",
     "position_tools",
     "track_linearization>=2.3",
     "replay_trajectory_classification",
@@ -52,8 +51,8 @@ dependencies = [
     "pynwb>=2.2.0,<3",
     "hdmf>=3.4.6",
     "datajoint>=0.13.6",
-    "pymysql>=1.0.*",
-    "sortingview>=0.8",
+    "pymysql",
+    "sortingview>=0.11",
     "pyyaml",
     "click",
     "spikeinterface",
