@@ -5,6 +5,9 @@ import pynwb
 
 # NOTE: importing this calls spyglass.__init__ whichand spyglass.common.__init__ which both require the
 # DataJoint MySQL server to be already set up and running
+import spyglass as sg
+
+sg.config["prepopulate"] = False
 from spyglass.common import get_electrode_indices
 
 

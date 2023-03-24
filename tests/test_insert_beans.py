@@ -15,6 +15,10 @@ def test_insert_sessions():
     raw_dir = pathlib.Path(os.environ["SPYGLASS_BASE_DIR"]) / "raw"
     nwbfile_path = raw_dir / "test.nwb"
 
+    import spyglass as sg
+
+    sg.config["prepopulate"] = False
+
     from spyglass.common import Session, DataAcquisitionDevice, CameraDevice, Probe
     from spyglass.data_import import insert_sessions
 
