@@ -9,7 +9,9 @@ def cli():
     pass
 
 
-@click.command(help="Insert a session from a .nwb file that lives in the $SPYGLASS_BASE_DIR directory")
+@click.command(
+    help="Insert a session from a .nwb file that lives in the $SPYGLASS_BASE_DIR directory"
+)
 @click.argument("nwb_file_name")
 def insert_session(nwb_file_name: str):
     import spyglass as nd
@@ -124,7 +126,9 @@ def list_lab_team_members(team_name: str):
     print(results)
 
 
-@click.command(help="List sort groups for a session. Note that nwb_file_name should include the trailing underscore.")
+@click.command(
+    help="List sort groups for a session. Note that nwb_file_name should include the trailing underscore."
+)
 @click.argument("nwb_file_name")
 def list_sort_groups(nwb_file_name: str):
     import spyglass.spikesorting as nds
@@ -180,7 +184,11 @@ def insert_spike_sorting_preprocessing_parameters(yaml_file_name: Union[str, Non
     if yaml_file_name is None:
         print("You must specify a yaml file. Sample content:")
         print("==========================================")
-        print(yaml.safe_dump(sample_spike_sorting_preprocessing_parameters, sort_keys=False))
+        print(
+            yaml.safe_dump(
+                sample_spike_sorting_preprocessing_parameters, sort_keys=False
+            )
+        )
         return
 
     import spyglass.spikesorting as nds
@@ -253,7 +261,11 @@ def create_spike_sorting_recording(yaml_file_name: Union[str, None]):
     if yaml_file_name is None:
         print("You must specify a yaml file. Sample content:")
         print("==========================================")
-        print(yaml.safe_dump(sample_spike_sorting_recording_selection_key, sort_keys=False))
+        print(
+            yaml.safe_dump(
+                sample_spike_sorting_recording_selection_key, sort_keys=False
+            )
+        )
         return
 
     import spyglass.spikesorting as nds
@@ -263,7 +275,9 @@ def create_spike_sorting_recording(yaml_file_name: Union[str, None]):
     # restrict to relevant keys
     x = {k: x[k] for k in sample_spike_sorting_recording_selection_key.keys()}
     nds.SpikeSortingRecordingSelection.insert1(x, skip_duplicates=True)
-    nds.SpikeSortingRecording.populate([(nds.SpikeSortingRecordingSelection & x).proj()])
+    nds.SpikeSortingRecording.populate(
+        [(nds.SpikeSortingRecordingSelection & x).proj()]
+    )
 
 
 @click.command(help="List spike sorting recordings for a session.")
@@ -278,11 +292,17 @@ def list_spike_sorting_recordings(nwb_file_name: str):
 @click.command(help="Create a spike sorting recording view")
 @click.argument("yaml_file_name", required=False)
 @click.option("--replace", is_flag=True)
-def create_spike_sorting_recording_view(yaml_file_name: Union[str, None], replace: bool):
+def create_spike_sorting_recording_view(
+    yaml_file_name: Union[str, None], replace: bool
+):
     if yaml_file_name is None:
         print("You must specify a yaml file. Sample content:")
         print("==========================================")
-        print(yaml.safe_dump(sample_spike_sorting_recording_selection_key, sort_keys=False))
+        print(
+            yaml.safe_dump(
+                sample_spike_sorting_recording_selection_key, sort_keys=False
+            )
+        )
         return
 
     import spyglass.figurl_views as ndf
@@ -359,21 +379,29 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
         x = yaml.safe_load(f)
     # restrict to relevant keys
     x = {k: x[k] for k in sample_spike_sorting_key.keys()}
-    spike_sorting_recording_query = {k: x[k] for k in sample_spike_sorting_recording_selection_key.keys()}
-    spike_sorting_recording_key = (nds.SpikeSortingRecording & spike_sorting_recording_query).proj().fetch1()
+    spike_sorting_recording_query = {
+        k: x[k] for k in sample_spike_sorting_recording_selection_key.keys()
+    }
+    spike_sorting_recording_key = (
+        (nds.SpikeSortingRecording & spike_sorting_recording_query).proj().fetch1()
+    )
 
     artifact_key = dict(
         spike_sorting_recording_key,
         **{"artifact_params_name": x["artifact_params_name"]},
     )
     nds.ArtifactDetectionSelection.insert1(artifact_key, skip_duplicates=True)
-    nds.ArtifactDetection.populate([(nds.ArtifactDetectionSelection & artifact_key).proj()])
+    nds.ArtifactDetection.populate(
+        [(nds.ArtifactDetectionSelection & artifact_key).proj()]
+    )
     artifact_removed_interval_list_name = (nds.ArtifactDetection & artifact_key).fetch1(
         "artifact_removed_interval_list_name"
     )
 
     sorter_params_name = x["sorter_params_name"]
-    sorter = (nds.SpikeSorterParameters & {"sorter_params_name": sorter_params_name}).fetch1("sorter")
+    sorter = (
+        nds.SpikeSorterParameters & {"sorter_params_name": sorter_params_name}
+    ).fetch1("sorter")
 
     sorting_key = dict(
         spike_sorting_recording_key,

@@ -77,7 +77,9 @@ class LabTeam(dj.Manual):
         """
 
     @classmethod
-    def create_new_team(cls, team_name: str, team_members: list, team_description: str = ""):
+    def create_new_team(
+        cls, team_name: str, team_members: list, team_description: str = ""
+    ):
         """Create a new team with a list of team members.
 
         If the lab member does not exist in the database, they will be added.
@@ -98,7 +100,9 @@ class LabTeam(dj.Manual):
 
         for team_member in team_members:
             LabMember.insert_from_name(team_member)
-            query = (LabMember.LabMemberInfo() & {"lab_member_name": team_member}).fetch("google_user_name")
+            query = (
+                LabMember.LabMemberInfo() & {"lab_member_name": team_member}
+            ).fetch("google_user_name")
             if not len(query):
                 print(
                     f"Please add the Google user ID for {team_member} in the LabMember.LabMemberInfo table "

@@ -132,7 +132,9 @@ class Session(dj.Imported):
 
         for device_name in device_names:
             # ensure that the foreign key exists and do nothing if not
-            query = DataAcquisitionDevice & {"data_acquisition_device_name": device_name}
+            query = DataAcquisitionDevice & {
+                "data_acquisition_device_name": device_name
+            }
             if len(query) == 0:
                 print(
                     f"DataAcquisitionDevice with name {device_name} does not exist. "
@@ -188,7 +190,9 @@ class SessionGroup(dj.Manual):
         )
 
     @staticmethod
-    def update_session_group_description(session_group_name: str, session_group_description):
+    def update_session_group_description(
+        session_group_name: str, session_group_description
+    ):
         SessionGroup.update1(
             {
                 "session_group_name": session_group_name,
@@ -197,7 +201,9 @@ class SessionGroup(dj.Manual):
         )
 
     @staticmethod
-    def add_session_to_group(nwb_file_name: str, session_group_name: str, *, skip_duplicates: bool = False):
+    def add_session_to_group(
+        nwb_file_name: str, session_group_name: str, *, skip_duplicates: bool = False
+    ):
         SessionGroupSession.insert1(
             {"session_group_name": session_group_name, "nwb_file_name": nwb_file_name},
             skip_duplicates=skip_duplicates,
@@ -218,7 +224,9 @@ class SessionGroup(dj.Manual):
 
     @staticmethod
     def get_group_sessions(session_group_name: str):
-        results = (SessionGroupSession & {"session_group_name": session_group_name}).fetch(as_dict=True)
+        results = (
+            SessionGroupSession & {"session_group_name": session_group_name}
+        ).fetch(as_dict=True)
         return [{"nwb_file_name": result["nwb_file_name"]} for result in results]
 
     @staticmethod

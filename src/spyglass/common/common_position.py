@@ -95,7 +95,8 @@ class IntervalPositionInfo(dj.Computed):
             }
         ).fetch_nwb()[0]
         position_info_parameters = (
-            PositionInfoParameters() & {"position_info_param_name": key["position_info_param_name"]}
+            PositionInfoParameters()
+            & {"position_info_param_name": key["position_info_param_name"]}
         ).fetch1()
 
         head_position = pynwb.behavior.Position()
@@ -159,11 +160,15 @@ class IntervalPositionInfo(dj.Computed):
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
 
-        key["head_position_object_id"] = nwb_analysis_file.add_nwb_object(key["analysis_file_name"], head_position)
+        key["head_position_object_id"] = nwb_analysis_file.add_nwb_object(
+            key["analysis_file_name"], head_position
+        )
         key["head_orientation_object_id"] = nwb_analysis_file.add_nwb_object(
             key["analysis_file_name"], head_orientation
         )
-        key["head_velocity_object_id"] = nwb_analysis_file.add_nwb_object(key["analysis_file_name"], head_velocity)
+        key["head_velocity_object_id"] = nwb_analysis_file.add_nwb_object(
+            key["analysis_file_name"], head_velocity
+        )
 
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
 
@@ -187,9 +192,9 @@ class IntervalPositionInfo(dj.Computed):
         # Get spatial series properties
         time = np.asarray(spatial_series.timestamps)  # seconds
         position = np.asarray(
-            pd.DataFrame(spatial_series.data, columns=spatial_series.description.split(", ")).loc[
-                :, ["xloc", "yloc", "xloc2", "yloc2"]
-            ]
+            pd.DataFrame(
+                spatial_series.data, columns=spatial_series.description.split(", ")
+            ).loc[:, ["xloc", "yloc", "xloc2", "yloc2"]]
         )  # meters
 
         # remove NaN times
@@ -235,7 +240,9 @@ class IntervalPositionInfo(dj.Computed):
         )
 
         # Set to points to NaN where the speed is too fast
-        is_too_fast = (front_LED_speed > max_plausible_speed) | (back_LED_speed > max_plausible_speed)
+        is_too_fast = (front_LED_speed > max_plausible_speed) | (
+            back_LED_speed > max_plausible_speed
+        )
         back_LED[is_too_fast] = np.nan
         front_LED[is_too_fast] = np.nan
 
@@ -245,8 +252,12 @@ class IntervalPositionInfo(dj.Computed):
 
         # Smooth
         moving_average_window = int(position_smoothing_duration * sampling_rate)
-        back_LED = bottleneck.move_mean(back_LED, window=moving_average_window, axis=0, min_count=1)
-        front_LED = bottleneck.move_mean(front_LED, window=moving_average_window, axis=0, min_count=1)
+        back_LED = bottleneck.move_mean(
+            back_LED, window=moving_average_window, axis=0, min_count=1
+        )
+        front_LED = bottleneck.move_mean(
+            front_LED, window=moving_average_window, axis=0, min_count=1
+        )
 
         if is_upsampled:
             position_df = pd.DataFrame(
@@ -262,9 +273,21 @@ class IntervalPositionInfo(dj.Computed):
             upsampling_start_time = time[0]
             upsampling_end_time = time[-1]
 
-            n_samples = int(np.ceil((upsampling_end_time - upsampling_start_time) * upsampling_sampling_rate)) + 1
-            new_time = np.linspace(upsampling_start_time, upsampling_end_time, n_samples)
-            new_index = pd.Index(np.unique(np.concatenate((position_df.index, new_time))), name="time")
+            n_samples = (
+                int(
+                    np.ceil(
+                        (upsampling_end_time - upsampling_start_time)
+                        * upsampling_sampling_rate
+                    )
+                )
+                + 1
+            )
+            new_time = np.linspace(
+                upsampling_start_time, upsampling_end_time, n_samples
+            )
+            new_index = pd.Index(
+                np.unique(np.concatenate((position_df.index, new_time))), name="time"
+            )
             position_df = (
                 position_df.reindex(index=new_index)
                 .interpolate(method=upsampling_interpolation_method)
@@ -312,7 +335,9 @@ class IntervalPositionInfo(dj.Computed):
         }
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs)
+        return fetch_nwb(
+            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+        )
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
@@ -332,8 +357,12 @@ class IntervalPositionInfo(dj.Computed):
             np.concatenate(
                 (
                     np.asarray(nwb_data["head_position"].get_spatial_series().data),
-                    np.asarray(nwb_data["head_orientation"].get_spatial_series().data)[:, np.newaxis],
-                    np.asarray(nwb_data["head_velocity"].time_series["head_velocity"].data),
+                    np.asarray(nwb_data["head_orientation"].get_spatial_series().data)[
+                        :, np.newaxis
+                    ],
+                    np.asarray(
+                        nwb_data["head_velocity"].time_series["head_velocity"].data
+                    ),
                 ),
                 axis=1,
             ),
@@ -399,7 +428,9 @@ class TrackGraph(dj.Manual):
     ):
         """Plot the track graph in 1D to see how the linearization is set up."""
         track_graph_parameters = self.fetch1()
-        track_graph = self.get_networkx_track_graph(track_graph_parameters=track_graph_parameters)
+        track_graph = self.get_networkx_track_graph(
+            track_graph_parameters=track_graph_parameters
+        )
         plot_graph_as_1D(
             track_graph,
             edge_order=track_graph_parameters["linear_edge_order"],
@@ -452,9 +483,12 @@ class IntervalLinearizedPosition(dj.Computed):
         time = np.asarray(position_nwb["head_position"].get_spatial_series().timestamps)
 
         linearization_parameters = (
-            LinearizationParameters() & {"linearization_param_name": key["linearization_param_name"]}
+            LinearizationParameters()
+            & {"linearization_param_name": key["linearization_param_name"]}
         ).fetch1()
-        track_graph_info = (TrackGraph() & {"track_graph_name": key["track_graph_name"]}).fetch1()
+        track_graph_info = (
+            TrackGraph() & {"track_graph_name": key["track_graph_name"]}
+        ).fetch1()
 
         track_graph = make_track_graph(
             node_positions=track_graph_info["node_positions"],
@@ -467,7 +501,9 @@ class IntervalLinearizedPosition(dj.Computed):
             edge_spacing=track_graph_info["linear_edge_spacing"],
             edge_order=track_graph_info["linear_edge_order"],
             use_HMM=linearization_parameters["use_hmm"],
-            route_euclidean_distance_scaling=linearization_parameters["route_euclidean_distance_scaling"],
+            route_euclidean_distance_scaling=linearization_parameters[
+                "route_euclidean_distance_scaling"
+            ],
             sensor_std_dev=linearization_parameters["sensor_std_dev"],
             diagonal_bias=linearization_parameters["diagonal_bias"],
         )
@@ -490,7 +526,9 @@ class IntervalLinearizedPosition(dj.Computed):
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs)
+        return fetch_nwb(
+            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+        )
 
     def fetch1_dataframe(self):
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")
@@ -499,7 +537,9 @@ class IntervalLinearizedPosition(dj.Computed):
 class NodePicker:
     """Interactive creation of track graph by looking at video frames."""
 
-    def __init__(self, ax=None, video_filename=None, node_color="#1f78b4", node_size=100):
+    def __init__(
+        self, ax=None, video_filename=None, node_color="#1f78b4", node_size=100
+    ):
         if ax is None:
             ax = plt.gca()
         self.ax = ax
@@ -637,21 +677,34 @@ class PositionVideo(dj.Computed):
         ).fetch1_dataframe()
 
         print("Loading video data...")
-        epoch = int(key["interval_list_name"].replace("pos ", "").replace(" valid times", "")) + 1
-        video_info = (VideoFile() & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}).fetch1()
+        epoch = (
+            int(
+                key["interval_list_name"]
+                .replace("pos ", "")
+                .replace(" valid times", "")
+            )
+            + 1
+        )
+        video_info = (
+            VideoFile() & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
+        ).fetch1()
         io = pynwb.NWBHDF5IO("/stelmo/nwb/raw/" + video_info["nwb_file_name"], "r")
         nwb_file = io.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
         video_filename = nwb_video.external_file.value[0]
 
         nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
-        output_video_filename = f"{nwb_base_filename}_{epoch:02d}_" f'{key["position_info_param_name"]}.mp4'
+        output_video_filename = (
+            f"{nwb_base_filename}_{epoch:02d}_" f'{key["position_info_param_name"]}.mp4'
+        )
 
         centroids = {
             "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
             "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
         }
-        head_position_mean = np.asarray(position_info_df[["head_position_x", "head_position_y"]])
+        head_position_mean = np.asarray(
+            position_info_df[["head_position_x", "head_position_y"]]
+        )
         head_orientation_mean = np.asarray(position_info_df[["head_orientation"]])
         video_time = np.asarray(nwb_video.timestamps)
         position_time = np.asarray(position_info_df.index)
@@ -722,13 +775,24 @@ class PositionVideo(dj.Computed):
         frame_rate = video.get(5)
         n_frames = int(head_orientation_mean.shape[0])
 
-        out = cv2.VideoWriter(output_video_filename, fourcc, frame_rate, frame_size, True)
+        out = cv2.VideoWriter(
+            output_video_filename, fourcc, frame_rate, frame_size, True
+        )
 
-        centroids = {color: self.fill_nan(data, video_time, position_time) for color, data in centroids.items()}
-        head_position_mean = self.fill_nan(head_position_mean, video_time, position_time)
-        head_orientation_mean = self.fill_nan(head_orientation_mean, video_time, position_time)
+        centroids = {
+            color: self.fill_nan(data, video_time, position_time)
+            for color, data in centroids.items()
+        }
+        head_position_mean = self.fill_nan(
+            head_position_mean, video_time, position_time
+        )
+        head_orientation_mean = self.fill_nan(
+            head_orientation_mean, video_time, position_time
+        )
 
-        for time_ind in tqdm(range(n_frames - 1), desc="frames", disable=disable_progressbar):
+        for time_ind in tqdm(
+            range(n_frames - 1), desc="frames", disable=disable_progressbar
+        ):
             is_grabbed, frame = video.read()
             if is_grabbed:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -737,7 +801,9 @@ class PositionVideo(dj.Computed):
                 green_centroid = centroids["green"][time_ind]
 
                 head_position = head_position_mean[time_ind]
-                head_position = self.convert_to_pixels(head_position, frame_size, cm_to_pixels)
+                head_position = self.convert_to_pixels(
+                    head_position, frame_size, cm_to_pixels
+                )
                 head_orientation = head_orientation_mean[time_ind]
 
                 if np.all(~np.isnan(red_centroid)):
@@ -760,7 +826,9 @@ class PositionVideo(dj.Computed):
                         shift=cv2.CV_8U,
                     )
 
-                if np.all(~np.isnan(head_position)) & np.all(~np.isnan(head_orientation)):
+                if np.all(~np.isnan(head_position)) & np.all(
+                    ~np.isnan(head_orientation)
+                ):
                     arrow_tip = (
                         int(head_position[0] + arrow_radius * np.cos(head_orientation)),
                         int(head_position[1] + arrow_radius * np.sin(head_orientation)),
@@ -825,8 +893,12 @@ class SelectFromCollection:
         self.poly = PolygonSelector(
             ax=ax,
             onselect=self.onselect,
-            lineprops=dict(color="white", linestyle="-", linewidth=2, alpha=0.5, zorder=10),
-            markerprops=dict(marker="o", markersize=7, mec="white", mfc="white", alpha=0.5, zorder=10),
+            lineprops=dict(
+                color="white", linestyle="-", linewidth=2, alpha=0.5, zorder=10
+            ),
+            markerprops=dict(
+                marker="o", markersize=7, mec="white", mfc="white", alpha=0.5, zorder=10
+            ),
         )
         self.ind = []
         self.video_filename = video_filename
@@ -834,7 +906,9 @@ class SelectFromCollection:
         self.frame = self.get_video_frame()
         ax.imshow(self.frame, picker=True, zorder=-1)
 
-        x, y = np.meshgrid(np.arange(self.frame.shape[1]), np.arange(self.frame.shape[0]))
+        x, y = np.meshgrid(
+            np.arange(self.frame.shape[1]), np.arange(self.frame.shape[0])
+        )
 
         self.collection = ax.scatter(x, y, s=1, alpha=0.0, zorder=1)
         self.alpha_other = alpha_other

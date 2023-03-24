@@ -27,7 +27,11 @@ RIPPLE_DETECTION_ALGORITHMS = {
 def interpolate_to_new_time(df, new_time, upsampling_interpolation_method="linear"):
     old_time = df.index
     new_index = pd.Index(np.unique(np.concatenate((old_time, new_time))), name="time")
-    return df.reindex(index=new_index).interpolate(method=upsampling_interpolation_method).reindex(index=new_time)
+    return (
+        df.reindex(index=new_index)
+        .interpolate(method=upsampling_interpolation_method)
+        .reindex(index=new_time)
+    )
 
 
 @schema
@@ -75,7 +79,11 @@ class RippleLFPSelection(dj.Manual):
             **kwargs,
         )
         if not electrode_list:
-            electrode_list = (LFPBandSelection.LFPBandElectrode() & key).fetch("electrode_id").tolist()
+            electrode_list = (
+                (LFPBandSelection.LFPBandElectrode() & key)
+                .fetch("electrode_id")
+                .tolist()
+            )
         electrode_list.sort()
         electrode_keys = (
             pd.DataFrame(LFPBandSelection.LFPBandElectrode() & key)
@@ -133,7 +141,9 @@ class RippleTimes(dj.Computed):
 
     def make(self, key):
         print(f"Computing ripple times for: {key}")
-        ripple_params = (RippleParameters & {"ripple_param_name": key["ripple_param_name"]}).fetch1("ripple_param_dict")
+        ripple_params = (
+            RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
+        ).fetch1("ripple_param_dict")
 
         ripple_detection_algorithm = ripple_params["ripple_detection_algorithm"]
         ripple_detection_params = ripple_params["ripple_detection_params"]
@@ -167,7 +177,9 @@ class RippleTimes(dj.Computed):
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs)
+        return fetch_nwb(
+            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+        )
 
     def fetch1_dataframe(self):
         """Convenience function for returning the marks in a readable format"""
@@ -181,11 +193,15 @@ class RippleTimes(dj.Computed):
         nwb_file_name = key["nwb_file_name"]
         interval_list_name = key["target_interval_list_name"]
         position_info_param_name = key["position_info_param_name"]
-        ripple_params = (RippleParameters & {"ripple_param_name": key["ripple_param_name"]}).fetch1("ripple_param_dict")
+        ripple_params = (
+            RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
+        ).fetch1("ripple_param_dict")
 
         speed_name = ripple_params["speed_name"]
 
-        electrode_keys = (RippleLFPSelection.RippleLFPElectrode() & key).fetch("electrode_id")
+        electrode_keys = (RippleLFPSelection.RippleLFPElectrode() & key).fetch(
+            "electrode_id"
+        )
 
         # warn/validate that there is only one wire per electrode
         lfp_key = key.copy()
@@ -193,7 +209,13 @@ class RippleTimes(dj.Computed):
         ripple_lfp_nwb = (LFPBand & lfp_key).fetch_nwb()[0]
         ripple_lfp_electrodes = ripple_lfp_nwb["filtered_data"].electrodes.data[:]
         elec_mask = np.full_like(ripple_lfp_electrodes, 0, dtype=bool)
-        elec_mask[[ind for ind, elec in enumerate(ripple_lfp_electrodes) if elec in electrode_keys]] = True
+        elec_mask[
+            [
+                ind
+                for ind, elec in enumerate(ripple_lfp_electrodes)
+                if elec in electrode_keys
+            ]
+        ] = True
         ripple_lfp = pd.DataFrame(
             ripple_lfp_nwb["filtered_data"].data,
             index=pd.Index(ripple_lfp_nwb["filtered_data"].timestamps, name="time"),
@@ -203,7 +225,8 @@ class RippleTimes(dj.Computed):
         ripple_lfp = ripple_lfp.loc[:, elec_mask]
 
         position_valid_times = (
-            IntervalList & {"nwb_file_name": nwb_file_name, "interval_list_name": interval_list_name}
+            IntervalList
+            & {"nwb_file_name": nwb_file_name, "interval_list_name": interval_list_name}
         ).fetch1("valid_times")
 
         position_info = (
@@ -216,15 +239,23 @@ class RippleTimes(dj.Computed):
         ).fetch1_dataframe()
 
         position_info = pd.concat(
-            [position_info.loc[slice(valid_time[0], valid_time[1])] for valid_time in position_valid_times],
+            [
+                position_info.loc[slice(valid_time[0], valid_time[1])]
+                for valid_time in position_valid_times
+            ],
             axis=1,
         )
         interval_ripple_lfps = pd.concat(
-            [ripple_lfp.loc[slice(valid_time[0], valid_time[1])] for valid_time in position_valid_times],
+            [
+                ripple_lfp.loc[slice(valid_time[0], valid_time[1])]
+                for valid_time in position_valid_times
+            ],
             axis=1,
         )
 
-        position_info = interpolate_to_new_time(valid_position_info, interval_ripple_lfps.index)
+        position_info = interpolate_to_new_time(
+            valid_position_info, interval_ripple_lfps.index
+        )
 
         return (
             position_info[speed_name],
@@ -233,16 +264,22 @@ class RippleTimes(dj.Computed):
         )
 
     @staticmethod
-    def get_Kay_ripple_consensus_trace(ripple_filtered_lfps, sampling_frequency, smoothing_sigma=0.004):
+    def get_Kay_ripple_consensus_trace(
+        ripple_filtered_lfps, sampling_frequency, smoothing_sigma=0.004
+    ):
         ripple_consensus_trace = np.full_like(ripple_filtered_lfps, np.nan)
         not_null = np.all(pd.notnull(ripple_filtered_lfps), axis=1)
 
-        ripple_consensus_trace[not_null] = get_envelope(np.asarray(ripple_filtered_lfps)[not_null])
+        ripple_consensus_trace[not_null] = get_envelope(
+            np.asarray(ripple_filtered_lfps)[not_null]
+        )
         ripple_consensus_trace = np.sum(ripple_consensus_trace**2, axis=1)
         ripple_consensus_trace[not_null] = gaussian_smooth(
             ripple_consensus_trace[not_null], smoothing_sigma, sampling_frequency
         )
-        return pd.DataFrame(np.sqrt(ripple_consensus_trace), index=ripple_filtered_lfps.index)
+        return pd.DataFrame(
+            np.sqrt(ripple_consensus_trace), index=ripple_filtered_lfps.index
+        )
 
     @staticmethod
     def plot_ripple_consensus_trace(
@@ -275,7 +312,9 @@ class RippleTimes(dj.Computed):
         ax.set_xlim((time_slice.start - start_offset, time_slice.stop - start_offset))
 
     @staticmethod
-    def plot_ripple(lfps, ripple_times, ripple_label=1, offset=0.100, relative=True, ax=None):
+    def plot_ripple(
+        lfps, ripple_times, ripple_label=1, offset=0.100, relative=True, ax=None
+    ):
         lfp_labels = lfps.columns
         n_lfps = len(lfp_labels)
         ripple_start = ripple_times.loc[ripple_label].start_time

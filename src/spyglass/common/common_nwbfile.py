@@ -58,7 +58,9 @@ class Nwbfile(dj.Manual):
             The relative path to the NWB file.
         """
         nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
-        assert os.path.exists(nwb_file_abs_path), f"File does not exist: {nwb_file_abs_path}"
+        assert os.path.exists(
+            nwb_file_abs_path
+        ), f"File does not exist: {nwb_file_abs_path}"
 
         key = dict()
         key["nwb_file_name"] = nwb_file_name
@@ -82,7 +84,9 @@ class Nwbfile(dj.Manual):
             The absolute path for the given file name.
         """
         base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
-        assert base_dir is not None, "You must set SPYGLASS_BASE_DIR or provide the base_dir argument"
+        assert (
+            base_dir is not None
+        ), "You must set SPYGLASS_BASE_DIR or provide the base_dir argument"
 
         nwb_file_abspath = base_dir / "raw" / nwb_file_name
         return str(nwb_file_abspath)
@@ -100,7 +104,9 @@ class Nwbfile(dj.Manual):
         """
         key = {"nwb_file_name": nwb_file_name}
         # check to make sure the file exists
-        assert len((Nwbfile() & key).fetch()) > 0, f"Error adding {nwb_file_name} to lock file, not in Nwbfile() schema"
+        assert (
+            len((Nwbfile() & key).fetch()) > 0
+        ), f"Error adding {nwb_file_name} to lock file, not in Nwbfile() schema"
 
         lock_file = open(os.getenv("NWB_LOCK_FILE"), "a+")
         lock_file.write(f"{nwb_file_name}\n")
@@ -150,7 +156,9 @@ class AnalysisNwbfile(dj.Manual):
             The name of the new NWB file.
         """
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode="r", load_namespaces=True) as io:
+        with pynwb.NWBHDF5IO(
+            path=nwb_file_abspath, mode="r", load_namespaces=True
+        ) as io:
             nwbf = io.read()
             # pop off the unnecessary elements to save space
             nwb_fields = nwbf.fields
@@ -166,7 +174,9 @@ class AnalysisNwbfile(dj.Manual):
             print(f"Writing new NWB file {analysis_file_name}")
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
             # export the new NWB file
-            with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="w", manager=io.manager) as export_io:
+            with pynwb.NWBHDF5IO(
+                path=analysis_file_abs_path, mode="w", manager=io.manager
+            ) as export_io:
                 export_io.export(io, nwbf)
 
         # change the permissions to only allow owner to write
@@ -212,7 +222,9 @@ class AnalysisNwbfile(dj.Manual):
             The name of the new NWB file.
         """
         nwb_file_abspath = AnalysisNwbfile.get_abs_path(nwb_file_name)
-        with pynwb.NWBHDF5IO(path=nwb_file_abspath, mode="r", load_namespaces=True) as io:
+        with pynwb.NWBHDF5IO(
+            path=nwb_file_abspath, mode="r", load_namespaces=True
+        ) as io:
             nwbf = io.read()
             # get the current number of analysis files related to this nwb file
             query = AnalysisNwbfile & {"analysis_file_name": nwb_file_name}
@@ -222,7 +234,9 @@ class AnalysisNwbfile(dj.Manual):
             print(f"Writing new NWB file {analysis_file_name}...")
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
             # export the new NWB file
-            with pynwb.NWBHDF5IO(path=analysis_file_abs_path, mode="w", manager=io.manager) as export_io:
+            with pynwb.NWBHDF5IO(
+                path=analysis_file_abs_path, mode="w", manager=io.manager
+            ) as export_io:
                 export_io.export(io, nwbf)
 
         return analysis_file_name
@@ -261,7 +275,9 @@ class AnalysisNwbfile(dj.Manual):
             The absolute path for the given file name.
         """
         base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
-        assert base_dir is not None, "You must set SPYGLASS_BASE_DIR environment variable."
+        assert (
+            base_dir is not None
+        ), "You must set SPYGLASS_BASE_DIR environment variable."
 
         # see if the file exists and is stored in the base analysis dir
         test_path = str(base_dir / "analysis" / analysis_nwb_file_name)
@@ -271,7 +287,9 @@ class AnalysisNwbfile(dj.Manual):
         else:
             # use the new path
             analysis_file_base_path = (
-                base_dir / "analysis" / AnalysisNwbfile.__get_analysis_file_dir(analysis_nwb_file_name)
+                base_dir
+                / "analysis"
+                / AnalysisNwbfile.__get_analysis_file_dir(analysis_nwb_file_name)
             )
             if not analysis_file_base_path.exists():
                 os.mkdir(str(analysis_file_base_path))
@@ -296,7 +314,9 @@ class AnalysisNwbfile(dj.Manual):
         nwb_object_id : str
             The NWB object ID of the added object.
         """
-        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
+        with pynwb.NWBHDF5IO(
+            path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True
+        ) as io:
             nwbf = io.read()
             if isinstance(nwb_object, pd.DataFrame):
                 dt_object = DynamicTable.from_dataframe(name=table_name, df=nwb_object)
@@ -342,7 +362,9 @@ class AnalysisNwbfile(dj.Manual):
         units_object_id, waveforms_object_id : str, str
             The NWB object id of the Units object and the object id of the waveforms object ('' if None)
         """
-        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
+        with pynwb.NWBHDF5IO(
+            path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True
+        ) as io:
             nwbf = io.read()
             sort_intervals = list()
             if len(units.keys()):
@@ -390,7 +412,9 @@ class AnalysisNwbfile(dj.Manual):
                 # If the waveforms were specified, add them as a dataframe to scratch
                 waveforms_object_id = ""
                 if units_waveforms is not None:
-                    waveforms_df = pd.DataFrame.from_dict(units_waveforms, orient="index")
+                    waveforms_df = pd.DataFrame.from_dict(
+                        units_waveforms, orient="index"
+                    )
                     waveforms_df.columns = ["waveforms"]
                     nwbf.add_scratch(
                         waveforms_df,
@@ -429,7 +453,9 @@ class AnalysisNwbfile(dj.Manual):
             The NWB object id of the Units object
         """
 
-        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
+        with pynwb.NWBHDF5IO(
+            path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True
+        ) as io:
             nwbf = io.read()
             for id in waveform_extractor.sorting.get_unit_ids():
                 # (spikes, samples, channels)
@@ -437,7 +463,9 @@ class AnalysisNwbfile(dj.Manual):
                 # (channels, spikes, samples)
                 waveforms = np.moveaxis(waveforms, source=2, destination=0)
                 nwbf.add_unit(
-                    spike_times=waveform_extractor.sorting.get_unit_spike_train(unit_id=id),
+                    spike_times=waveform_extractor.sorting.get_unit_spike_train(
+                        unit_id=id
+                    ),
                     id=id,
                     electrodes=waveform_extractor.recording.get_channel_ids(),
                     waveforms=waveforms,
@@ -474,9 +502,13 @@ class AnalysisNwbfile(dj.Manual):
                 for metric_name, metric_dict in metrics.items():
                     print(f"Adding metric {metric_name} : {metric_dict}")
                     metric_data = metric_dict.values().to_list()
-                    nwbf.add_unit_column(name=metric_name, description=metric_name, data=metric_data)
+                    nwbf.add_unit_column(
+                        name=metric_name, description=metric_name, data=metric_data
+                    )
             if labels is not None:
-                nwbf.add_unit_column(name="label", description="label given during curation", data=labels)
+                nwbf.add_unit_column(
+                    name="label", description="label given during curation", data=labels
+                )
 
             io.write(nwbf)
             return nwbf.units.object_id
@@ -501,7 +533,9 @@ class AnalysisNwbfile(dj.Manual):
         """
         metric_names = list(metrics.keys())
         unit_ids = list(metrics[metric_names[0]].keys())
-        with pynwb.NWBHDF5IO(path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True) as io:
+        with pynwb.NWBHDF5IO(
+            path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True
+        ) as io:
             nwbf = io.read()
             for id in unit_ids:
                 nwbf.add_unit(id=id)
@@ -509,7 +543,9 @@ class AnalysisNwbfile(dj.Manual):
             for metric_name, metric_dict in metrics.items():
                 print(f"Adding metric {metric_name} : {metric_dict}")
                 metric_data = list(metric_dict.values())
-                nwbf.add_unit_column(name=metric_name, description=metric_name, data=metric_data)
+                nwbf.add_unit_column(
+                    name=metric_name, description=metric_name, data=metric_data
+                )
 
             io.write(nwbf)
             return nwbf.units.object_id
@@ -583,5 +619,7 @@ class AnalysisNwbfileKachery(dj.Computed):
 
     def make(self, key):
         print(f'Linking {key["analysis_file_name"]} and storing in kachery...')
-        key["analysis_file_uri"] = kc.link_file(AnalysisNwbfile().get_abs_path(key["analysis_file_name"]))
+        key["analysis_file_uri"] = kc.link_file(
+            AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
+        )
         self.insert1(key)
