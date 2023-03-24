@@ -5,9 +5,7 @@ import spyglass as nd
 
 
 def main():
-    data_dir = Path(
-        "/stelmo/nwb"
-    )  # CHANGE ME TO THE BASE DIRECTORY FOR DATA STORAGE ON YOUR SYSTEM
+    data_dir = Path("/stelmo/nwb")  # CHANGE ME TO THE BASE DIRECTORY FOR DATA STORAGE ON YOUR SYSTEM
 
     os.environ["SPYGLASS_BASE_DIR"] = str(data_dir)
     os.environ["KACHERY_STORAGE_DIR"] = str(data_dir / "kachery-storage")
