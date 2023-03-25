@@ -1,3 +1,4 @@
+from dataclasses import replace
 import warnings
 
 import datajoint as dj
@@ -229,7 +230,7 @@ class LFPSelection(dj.Manual):
         (LFPSelection() & {'nwb_file_name': nwb_file_name}).delete()
         # check to see if the user allowed the deletion
         if len((LFPSelection() & {'nwb_file_name': nwb_file_name}).fetch()) == 0:
-            LFPSelection().insert1({'nwb_file_name': nwb_file_name})
+            LFPSelection().insert1({'nwb_file_name': nwb_file_name},replace=True)
 
             # TODO: do this in a better way
             all_electrodes = (Electrode() & {'nwb_file_name': nwb_file_name}).fetch(as_dict=True)

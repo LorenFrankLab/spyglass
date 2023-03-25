@@ -5,7 +5,7 @@ from .common_dio import DIOEvents
 # from .common_nwbfile import NwbfileKachery
 from .common_ephys import Electrode, ElectrodeGroup, Raw, SampleCount
 from .common_nwbfile import Nwbfile
-# from .common_sensors import SensorData
+from .common_sensors import SensorData
 from .common_session import ExperimenterList, Session
 from .common_task import TaskEpoch
 
@@ -34,8 +34,8 @@ def populate_all_common(nwb_file_name):
     # sensor data (from analog ProcessingModule) is temporarily removed from NWBFile
     # to reduce file size while it is not being used. add it back in by commenting out
     # the removal code in spyglass/data_import/insert_sessions.py when ready
-    # print('Populate SensorData')
-    # SensorData.populate(fp)
+    print('Populate SensorData')
+    SensorData.populate(fp)
     print('Populate TaskEpochs')
     TaskEpoch.populate(fp)
     print('Populate StateScriptFile')
