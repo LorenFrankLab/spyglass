@@ -14,7 +14,8 @@ def prepopulate_default():
     ), "You must set SPYGLASS_BASE_DIR or provide the base_dir argument"
 
     yaml_path = pathlib.Path(base_dir) / "entries.yaml"
-    populate_from_yaml(yaml_path)
+    if os.path.exists(yaml_path):
+        populate_from_yaml(yaml_path)
 
 
 def populate_from_yaml(yaml_path: str):
