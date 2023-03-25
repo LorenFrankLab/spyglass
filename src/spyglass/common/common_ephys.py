@@ -17,13 +17,14 @@ from .common_interval import (
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_region import BrainRegion  # noqa: F401
 from .common_session import Session  # noqa: F401
-from .dj_helper_fn import fetch_nwb  # dj_replace
-from .nwb_helper_fn import (
+from ..utils.dj_helper_fn import fetch_nwb  # dj_replace
+from ..utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_data_interface,
     get_electrode_indices,
     get_nwb_file,
     get_valid_intervals,
+    get_config,
 )
 
 schema = dj.schema("common_ephys")
@@ -92,26 +93,21 @@ class Electrode(dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
+        config = get_config(nwb_file_abspath)
+
+        if "Electrode" in config:
+            electrode_config_dicts = {
+                electrode_dict["electrode_id"]: electrode_dict
+                for electrode_dict in config["Electrode"]
+            }
+        else:
+            electrode_config_dicts = dict()
+
         electrodes = nwbf.electrodes.to_dataframe()
         for elect_id, elect_data in electrodes.iterrows():
             key["electrode_id"] = elect_id
             key["name"] = str(elect_id)
             key["electrode_group_name"] = elect_data.group_name
-            # rough check of whether the electrodes table was created by rec_to_nwb and has
-            # the appropriate custom columns used by rec_to_nwb
-            # TODO this could be better resolved by making an extension for the electrodes table
-            if (
-                isinstance(elect_data.group.device, ndx_franklab_novela.Probe)
-                and "probe_shank" in elect_data
-                and "probe_electrode" in elect_data
-                and "bad_channel" in elect_data
-                and "ref_elect_id" in elect_data
-            ):
-                key["probe_type"] = elect_data.group.device.probe_type
-                key["probe_shank"] = elect_data.probe_shank
-                key["probe_electrode"] = elect_data.probe_electrode
-                key["bad_channel"] = "True" if elect_data.bad_channel else "False"
-                key["original_reference_electrode"] = elect_data.ref_elect_id
             key["region_id"] = BrainRegion.fetch_add(
                 region_name=elect_data.group.location
             )
@@ -123,8 +119,93 @@ class Electrode(dj.Imported):
             key["z_warped"] = 0
             key["contacts"] = ""
             key["filtering"] = elect_data.filtering
-            key["impedance"] = elect_data.imp
+            key["impedance"] = elect_data.get("imp")
+
+            # rough check of whether the electrodes table was created by rec_to_nwb and has
+            # the appropriate custom columns used by rec_to_nwb
+            # TODO this could be better resolved by making an extension for the electrodes table
+            if (
+                isinstance(elect_data.group.device, ndx_franklab_novela.Probe)
+                and "probe_shank" in elect_data
+                and "probe_electrode" in elect_data
+                and "bad_channel" in elect_data
+                and "ref_elect_id" in elect_data
+            ):
+                key["probe_id"] = elect_data.group.device.probe_type
+                key["probe_shank"] = elect_data.probe_shank
+                key["probe_electrode"] = elect_data.probe_electrode
+                key["bad_channel"] = "True" if elect_data.bad_channel else "False"
+                key["original_reference_electrode"] = elect_data.ref_elect_id
+
+            # override with information from the config YAML based on primary key (electrode id)
+            if elect_id in electrode_config_dicts:
+                # check whether the Probe.Electrode being referenced exists
+                query = Probe.Electrode & electrode_config_dicts[elect_id]
+                if len(query) == 0:
+                    warnings.warn(
+                        f"No Probe.Electrode exists that matches the data: {electrode_config_dicts[elect_id]}. "
+                        f"The config YAML for Electrode with electrode_id {elect_id} will be ignored."
+                    )
+                else:
+                    key.update(electrode_config_dicts[elect_id])
+
             self.insert1(key, skip_duplicates=True)
+
+    @classmethod
+    def create_from_config(cls, nwb_file_name: str):
+        """Create or update Electrode entries from what is specified in the config YAML file.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file.
+        """
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        nwbf = get_nwb_file(nwb_file_abspath)
+        config = get_config(nwb_file_abspath)
+        if "Electrode" not in config:
+            return
+
+        # map electrode id to dictionary of electrode information from config YAML
+        electrode_dicts = {
+            electrode_dict["electrode_id"]: electrode_dict
+            for electrode_dict in config["Electrode"]
+        }
+
+        electrodes = nwbf.electrodes.to_dataframe()
+        for nwbfile_elect_id, elect_data in electrodes.iterrows():
+            if nwbfile_elect_id in electrode_dicts:
+                # use the information in the electrodes table to start and then add (or overwrite) values from the
+                # config YAML
+                key = dict()
+                key["nwb_file_name"] = nwb_file_name
+                key["name"] = str(nwbfile_elect_id)
+                key["electrode_group_name"] = elect_data.group_name
+                key["region_id"] = BrainRegion.fetch_add(
+                    region_name=elect_data.group.location
+                )
+                key["x"] = elect_data.x
+                key["y"] = elect_data.y
+                key["z"] = elect_data.z
+                key["x_warped"] = 0
+                key["y_warped"] = 0
+                key["z_warped"] = 0
+                key["contacts"] = ""
+                key["filtering"] = elect_data.filtering
+                key["impedance"] = elect_data.get("imp")
+                key.update(electrode_dicts[nwbfile_elect_id])
+                query = Electrode & {"electrode_id": nwbfile_elect_id}
+                if len(query):
+                    cls.update1(key)
+                    print(f"Updated Electrode with ID {nwbfile_elect_id}.")
+                else:
+                    cls.insert1(key, skip_duplicates=True, allow_direct_insert=True)
+                    print(f"Inserted Electrode with ID {nwbfile_elect_id}.")
+            else:
+                warnings.warn(
+                    f"Electrode ID {nwbfile_elect_id} exists in the NWB file but has no corresponding "
+                    "config YAML entry."
+                )
 
 
 @schema

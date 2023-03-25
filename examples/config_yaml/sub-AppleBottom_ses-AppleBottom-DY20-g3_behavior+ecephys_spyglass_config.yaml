@@ -1,0 +1,1934 @@
+# This file is used to associate data in the corresponding NWB file with new (to-be-created) entities or
+# existing entities.
+# - If the entity does not exist, then the user will be prompted to create a new entity.
+# - If the entity exists, then a link will be made between the Session and the entity.
+# Values that are not primary keys will be ignored.
+
+# Link the Session with these Data Acquisition Devices
+DataAcquisitionDevice:
+- data_acquisition_device_name: Neuropixels Recording Device
+- data_acquisition_device_name: New Device
+
+# Map each Session Electrode to a Probe Electrode
+# This is tedious by hand but can be generated automatically
+Electrode:
+- electrode_id: 0
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 0
+  bad_channel: 'False'
+- electrode_id: 1
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 1
+  bad_channel: 'False'
+- electrode_id: 2
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 2
+  bad_channel: 'False'
+- electrode_id: 3
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 3
+  bad_channel: 'False'
+- electrode_id: 4
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 4
+  bad_channel: 'False'
+- electrode_id: 5
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 5
+  bad_channel: 'False'
+- electrode_id: 6
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 6
+  bad_channel: 'False'
+- electrode_id: 7
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 7
+  bad_channel: 'False'
+- electrode_id: 8
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 8
+  bad_channel: 'False'
+- electrode_id: 9
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 9
+  bad_channel: 'False'
+- electrode_id: 10
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 10
+  bad_channel: 'False'
+- electrode_id: 11
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 11
+  bad_channel: 'False'
+- electrode_id: 12
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 12
+  bad_channel: 'False'
+- electrode_id: 13
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 13
+  bad_channel: 'False'
+- electrode_id: 14
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 14
+  bad_channel: 'False'
+- electrode_id: 15
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 15
+  bad_channel: 'False'
+- electrode_id: 16
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 16
+  bad_channel: 'False'
+- electrode_id: 17
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 17
+  bad_channel: 'False'
+- electrode_id: 18
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 18
+  bad_channel: 'False'
+- electrode_id: 19
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 19
+  bad_channel: 'False'
+- electrode_id: 20
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 20
+  bad_channel: 'False'
+- electrode_id: 21
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 21
+  bad_channel: 'False'
+- electrode_id: 22
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 22
+  bad_channel: 'False'
+- electrode_id: 23
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 23
+  bad_channel: 'False'
+- electrode_id: 24
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 24
+  bad_channel: 'False'
+- electrode_id: 25
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 25
+  bad_channel: 'False'
+- electrode_id: 26
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 26
+  bad_channel: 'False'
+- electrode_id: 27
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 27
+  bad_channel: 'False'
+- electrode_id: 28
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 28
+  bad_channel: 'False'
+- electrode_id: 29
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 29
+  bad_channel: 'False'
+- electrode_id: 30
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 30
+  bad_channel: 'False'
+- electrode_id: 31
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 31
+  bad_channel: 'False'
+- electrode_id: 32
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 32
+  bad_channel: 'False'
+- electrode_id: 33
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 33
+  bad_channel: 'False'
+- electrode_id: 34
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 34
+  bad_channel: 'False'
+- electrode_id: 35
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 35
+  bad_channel: 'False'
+- electrode_id: 36
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 36
+  bad_channel: 'False'
+- electrode_id: 37
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 37
+  bad_channel: 'False'
+- electrode_id: 38
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 38
+  bad_channel: 'False'
+- electrode_id: 39
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 39
+  bad_channel: 'False'
+- electrode_id: 40
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 40
+  bad_channel: 'False'
+- electrode_id: 41
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 41
+  bad_channel: 'False'
+- electrode_id: 42
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 42
+  bad_channel: 'False'
+- electrode_id: 43
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 43
+  bad_channel: 'False'
+- electrode_id: 44
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 44
+  bad_channel: 'False'
+- electrode_id: 45
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 45
+  bad_channel: 'False'
+- electrode_id: 46
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 46
+  bad_channel: 'False'
+- electrode_id: 47
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 47
+  bad_channel: 'False'
+- electrode_id: 48
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 48
+  bad_channel: 'False'
+- electrode_id: 49
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 49
+  bad_channel: 'False'
+- electrode_id: 50
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 50
+  bad_channel: 'False'
+- electrode_id: 51
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 51
+  bad_channel: 'False'
+- electrode_id: 52
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 52
+  bad_channel: 'False'
+- electrode_id: 53
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 53
+  bad_channel: 'False'
+- electrode_id: 54
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 54
+  bad_channel: 'False'
+- electrode_id: 55
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 55
+  bad_channel: 'False'
+- electrode_id: 56
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 56
+  bad_channel: 'False'
+- electrode_id: 57
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 57
+  bad_channel: 'False'
+- electrode_id: 58
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 58
+  bad_channel: 'False'
+- electrode_id: 59
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 59
+  bad_channel: 'False'
+- electrode_id: 60
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 60
+  bad_channel: 'False'
+- electrode_id: 61
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 61
+  bad_channel: 'False'
+- electrode_id: 62
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 62
+  bad_channel: 'False'
+- electrode_id: 63
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 63
+  bad_channel: 'False'
+- electrode_id: 64
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 64
+  bad_channel: 'False'
+- electrode_id: 65
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 65
+  bad_channel: 'False'
+- electrode_id: 66
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 66
+  bad_channel: 'False'
+- electrode_id: 67
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 67
+  bad_channel: 'False'
+- electrode_id: 68
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 68
+  bad_channel: 'False'
+- electrode_id: 69
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 69
+  bad_channel: 'False'
+- electrode_id: 70
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 70
+  bad_channel: 'False'
+- electrode_id: 71
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 71
+  bad_channel: 'False'
+- electrode_id: 72
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 72
+  bad_channel: 'False'
+- electrode_id: 73
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 73
+  bad_channel: 'False'
+- electrode_id: 74
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 74
+  bad_channel: 'False'
+- electrode_id: 75
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 75
+  bad_channel: 'False'
+- electrode_id: 76
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 76
+  bad_channel: 'False'
+- electrode_id: 77
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 77
+  bad_channel: 'False'
+- electrode_id: 78
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 78
+  bad_channel: 'False'
+- electrode_id: 79
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 79
+  bad_channel: 'False'
+- electrode_id: 80
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 80
+  bad_channel: 'False'
+- electrode_id: 81
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 81
+  bad_channel: 'False'
+- electrode_id: 82
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 82
+  bad_channel: 'False'
+- electrode_id: 83
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 83
+  bad_channel: 'False'
+- electrode_id: 84
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 84
+  bad_channel: 'False'
+- electrode_id: 85
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 85
+  bad_channel: 'False'
+- electrode_id: 86
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 86
+  bad_channel: 'False'
+- electrode_id: 87
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 87
+  bad_channel: 'False'
+- electrode_id: 88
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 88
+  bad_channel: 'False'
+- electrode_id: 89
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 89
+  bad_channel: 'False'
+- electrode_id: 90
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 90
+  bad_channel: 'False'
+- electrode_id: 91
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 91
+  bad_channel: 'False'
+- electrode_id: 92
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 92
+  bad_channel: 'False'
+- electrode_id: 93
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 93
+  bad_channel: 'False'
+- electrode_id: 94
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 94
+  bad_channel: 'False'
+- electrode_id: 95
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 95
+  bad_channel: 'False'
+- electrode_id: 96
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 96
+  bad_channel: 'False'
+- electrode_id: 97
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 97
+  bad_channel: 'False'
+- electrode_id: 98
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 98
+  bad_channel: 'False'
+- electrode_id: 99
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 99
+  bad_channel: 'False'
+- electrode_id: 100
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 100
+  bad_channel: 'False'
+- electrode_id: 101
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 101
+  bad_channel: 'False'
+- electrode_id: 102
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 102
+  bad_channel: 'False'
+- electrode_id: 103
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 103
+  bad_channel: 'False'
+- electrode_id: 104
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 104
+  bad_channel: 'False'
+- electrode_id: 105
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 105
+  bad_channel: 'False'
+- electrode_id: 106
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 106
+  bad_channel: 'False'
+- electrode_id: 107
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 107
+  bad_channel: 'False'
+- electrode_id: 108
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 108
+  bad_channel: 'False'
+- electrode_id: 109
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 109
+  bad_channel: 'False'
+- electrode_id: 110
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 110
+  bad_channel: 'False'
+- electrode_id: 111
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 111
+  bad_channel: 'False'
+- electrode_id: 112
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 112
+  bad_channel: 'False'
+- electrode_id: 113
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 113
+  bad_channel: 'False'
+- electrode_id: 114
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 114
+  bad_channel: 'False'
+- electrode_id: 115
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 115
+  bad_channel: 'False'
+- electrode_id: 116
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 116
+  bad_channel: 'False'
+- electrode_id: 117
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 117
+  bad_channel: 'False'
+- electrode_id: 118
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 118
+  bad_channel: 'False'
+- electrode_id: 119
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 119
+  bad_channel: 'False'
+- electrode_id: 120
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 120
+  bad_channel: 'False'
+- electrode_id: 121
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 121
+  bad_channel: 'False'
+- electrode_id: 122
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 122
+  bad_channel: 'False'
+- electrode_id: 123
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 123
+  bad_channel: 'False'
+- electrode_id: 124
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 124
+  bad_channel: 'False'
+- electrode_id: 125
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 125
+  bad_channel: 'False'
+- electrode_id: 126
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 126
+  bad_channel: 'False'
+- electrode_id: 127
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 127
+  bad_channel: 'False'
+- electrode_id: 128
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 128
+  bad_channel: 'False'
+- electrode_id: 129
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 129
+  bad_channel: 'False'
+- electrode_id: 130
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 130
+  bad_channel: 'False'
+- electrode_id: 131
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 131
+  bad_channel: 'False'
+- electrode_id: 132
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 132
+  bad_channel: 'False'
+- electrode_id: 133
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 133
+  bad_channel: 'False'
+- electrode_id: 134
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 134
+  bad_channel: 'False'
+- electrode_id: 135
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 135
+  bad_channel: 'False'
+- electrode_id: 136
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 136
+  bad_channel: 'False'
+- electrode_id: 137
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 137
+  bad_channel: 'False'
+- electrode_id: 138
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 138
+  bad_channel: 'False'
+- electrode_id: 139
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 139
+  bad_channel: 'False'
+- electrode_id: 140
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 140
+  bad_channel: 'False'
+- electrode_id: 141
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 141
+  bad_channel: 'False'
+- electrode_id: 142
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 142
+  bad_channel: 'False'
+- electrode_id: 143
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 143
+  bad_channel: 'False'
+- electrode_id: 144
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 144
+  bad_channel: 'False'
+- electrode_id: 145
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 145
+  bad_channel: 'False'
+- electrode_id: 146
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 146
+  bad_channel: 'False'
+- electrode_id: 147
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 147
+  bad_channel: 'False'
+- electrode_id: 148
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 148
+  bad_channel: 'False'
+- electrode_id: 149
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 149
+  bad_channel: 'False'
+- electrode_id: 150
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 150
+  bad_channel: 'False'
+- electrode_id: 151
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 151
+  bad_channel: 'False'
+- electrode_id: 152
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 152
+  bad_channel: 'False'
+- electrode_id: 153
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 153
+  bad_channel: 'False'
+- electrode_id: 154
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 154
+  bad_channel: 'False'
+- electrode_id: 155
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 155
+  bad_channel: 'False'
+- electrode_id: 156
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 156
+  bad_channel: 'False'
+- electrode_id: 157
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 157
+  bad_channel: 'False'
+- electrode_id: 158
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 158
+  bad_channel: 'False'
+- electrode_id: 159
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 159
+  bad_channel: 'False'
+- electrode_id: 160
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 160
+  bad_channel: 'False'
+- electrode_id: 161
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 161
+  bad_channel: 'False'
+- electrode_id: 162
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 162
+  bad_channel: 'False'
+- electrode_id: 163
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 163
+  bad_channel: 'False'
+- electrode_id: 164
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 164
+  bad_channel: 'False'
+- electrode_id: 165
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 165
+  bad_channel: 'False'
+- electrode_id: 166
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 166
+  bad_channel: 'False'
+- electrode_id: 167
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 167
+  bad_channel: 'False'
+- electrode_id: 168
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 168
+  bad_channel: 'False'
+- electrode_id: 169
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 169
+  bad_channel: 'False'
+- electrode_id: 170
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 170
+  bad_channel: 'False'
+- electrode_id: 171
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 171
+  bad_channel: 'False'
+- electrode_id: 172
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 172
+  bad_channel: 'False'
+- electrode_id: 173
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 173
+  bad_channel: 'False'
+- electrode_id: 174
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 174
+  bad_channel: 'False'
+- electrode_id: 175
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 175
+  bad_channel: 'False'
+- electrode_id: 176
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 176
+  bad_channel: 'False'
+- electrode_id: 177
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 177
+  bad_channel: 'False'
+- electrode_id: 178
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 178
+  bad_channel: 'False'
+- electrode_id: 179
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 179
+  bad_channel: 'False'
+- electrode_id: 180
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 180
+  bad_channel: 'False'
+- electrode_id: 181
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 181
+  bad_channel: 'False'
+- electrode_id: 182
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 182
+  bad_channel: 'False'
+- electrode_id: 183
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 183
+  bad_channel: 'False'
+- electrode_id: 184
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 184
+  bad_channel: 'False'
+- electrode_id: 185
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 185
+  bad_channel: 'False'
+- electrode_id: 186
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 186
+  bad_channel: 'False'
+- electrode_id: 187
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 187
+  bad_channel: 'False'
+- electrode_id: 188
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 188
+  bad_channel: 'False'
+- electrode_id: 189
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 189
+  bad_channel: 'False'
+- electrode_id: 190
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 190
+  bad_channel: 'False'
+- electrode_id: 191
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 191
+  bad_channel: 'False'
+- electrode_id: 192
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 192
+  bad_channel: 'False'
+- electrode_id: 193
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 193
+  bad_channel: 'False'
+- electrode_id: 194
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 194
+  bad_channel: 'False'
+- electrode_id: 195
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 195
+  bad_channel: 'False'
+- electrode_id: 196
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 196
+  bad_channel: 'False'
+- electrode_id: 197
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 197
+  bad_channel: 'False'
+- electrode_id: 198
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 198
+  bad_channel: 'False'
+- electrode_id: 199
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 199
+  bad_channel: 'False'
+- electrode_id: 200
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 200
+  bad_channel: 'False'
+- electrode_id: 201
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 201
+  bad_channel: 'False'
+- electrode_id: 202
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 202
+  bad_channel: 'False'
+- electrode_id: 203
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 203
+  bad_channel: 'False'
+- electrode_id: 204
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 204
+  bad_channel: 'False'
+- electrode_id: 205
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 205
+  bad_channel: 'False'
+- electrode_id: 206
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 206
+  bad_channel: 'False'
+- electrode_id: 207
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 207
+  bad_channel: 'False'
+- electrode_id: 208
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 208
+  bad_channel: 'False'
+- electrode_id: 209
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 209
+  bad_channel: 'False'
+- electrode_id: 210
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 210
+  bad_channel: 'False'
+- electrode_id: 211
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 211
+  bad_channel: 'False'
+- electrode_id: 212
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 212
+  bad_channel: 'False'
+- electrode_id: 213
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 213
+  bad_channel: 'False'
+- electrode_id: 214
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 214
+  bad_channel: 'False'
+- electrode_id: 215
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 215
+  bad_channel: 'False'
+- electrode_id: 216
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 216
+  bad_channel: 'False'
+- electrode_id: 217
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 217
+  bad_channel: 'False'
+- electrode_id: 218
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 218
+  bad_channel: 'False'
+- electrode_id: 219
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 219
+  bad_channel: 'False'
+- electrode_id: 220
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 220
+  bad_channel: 'False'
+- electrode_id: 221
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 221
+  bad_channel: 'False'
+- electrode_id: 222
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 222
+  bad_channel: 'False'
+- electrode_id: 223
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 223
+  bad_channel: 'False'
+- electrode_id: 224
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 224
+  bad_channel: 'False'
+- electrode_id: 225
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 225
+  bad_channel: 'False'
+- electrode_id: 226
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 226
+  bad_channel: 'False'
+- electrode_id: 227
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 227
+  bad_channel: 'False'
+- electrode_id: 228
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 228
+  bad_channel: 'False'
+- electrode_id: 229
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 229
+  bad_channel: 'False'
+- electrode_id: 230
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 230
+  bad_channel: 'False'
+- electrode_id: 231
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 231
+  bad_channel: 'False'
+- electrode_id: 232
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 232
+  bad_channel: 'False'
+- electrode_id: 233
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 233
+  bad_channel: 'False'
+- electrode_id: 234
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 234
+  bad_channel: 'False'
+- electrode_id: 235
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 235
+  bad_channel: 'False'
+- electrode_id: 236
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 236
+  bad_channel: 'False'
+- electrode_id: 237
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 237
+  bad_channel: 'False'
+- electrode_id: 238
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 238
+  bad_channel: 'False'
+- electrode_id: 239
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 239
+  bad_channel: 'False'
+- electrode_id: 240
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 240
+  bad_channel: 'False'
+- electrode_id: 241
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 241
+  bad_channel: 'False'
+- electrode_id: 242
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 242
+  bad_channel: 'False'
+- electrode_id: 243
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 243
+  bad_channel: 'False'
+- electrode_id: 244
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 244
+  bad_channel: 'False'
+- electrode_id: 245
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 245
+  bad_channel: 'False'
+- electrode_id: 246
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 246
+  bad_channel: 'False'
+- electrode_id: 247
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 247
+  bad_channel: 'False'
+- electrode_id: 248
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 248
+  bad_channel: 'False'
+- electrode_id: 249
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 249
+  bad_channel: 'False'
+- electrode_id: 250
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 250
+  bad_channel: 'False'
+- electrode_id: 251
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 251
+  bad_channel: 'False'
+- electrode_id: 252
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 252
+  bad_channel: 'False'
+- electrode_id: 253
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 253
+  bad_channel: 'False'
+- electrode_id: 254
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 254
+  bad_channel: 'False'
+- electrode_id: 255
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 255
+  bad_channel: 'False'
+- electrode_id: 256
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 256
+  bad_channel: 'False'
+- electrode_id: 257
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 257
+  bad_channel: 'False'
+- electrode_id: 258
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 258
+  bad_channel: 'False'
+- electrode_id: 259
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 259
+  bad_channel: 'False'
+- electrode_id: 260
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 260
+  bad_channel: 'False'
+- electrode_id: 261
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 261
+  bad_channel: 'False'
+- electrode_id: 262
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 262
+  bad_channel: 'False'
+- electrode_id: 263
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 263
+  bad_channel: 'False'
+- electrode_id: 264
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 264
+  bad_channel: 'False'
+- electrode_id: 265
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 265
+  bad_channel: 'False'
+- electrode_id: 266
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 266
+  bad_channel: 'False'
+- electrode_id: 267
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 267
+  bad_channel: 'False'
+- electrode_id: 268
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 268
+  bad_channel: 'False'
+- electrode_id: 269
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 269
+  bad_channel: 'False'
+- electrode_id: 270
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 270
+  bad_channel: 'False'
+- electrode_id: 271
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 271
+  bad_channel: 'False'
+- electrode_id: 272
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 272
+  bad_channel: 'False'
+- electrode_id: 273
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 273
+  bad_channel: 'False'
+- electrode_id: 274
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 274
+  bad_channel: 'False'
+- electrode_id: 275
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 275
+  bad_channel: 'False'
+- electrode_id: 276
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 276
+  bad_channel: 'False'
+- electrode_id: 277
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 277
+  bad_channel: 'False'
+- electrode_id: 278
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 278
+  bad_channel: 'False'
+- electrode_id: 279
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 279
+  bad_channel: 'False'
+- electrode_id: 280
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 280
+  bad_channel: 'False'
+- electrode_id: 281
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 281
+  bad_channel: 'False'
+- electrode_id: 282
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 282
+  bad_channel: 'False'
+- electrode_id: 283
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 283
+  bad_channel: 'False'
+- electrode_id: 284
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 284
+  bad_channel: 'False'
+- electrode_id: 285
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 285
+  bad_channel: 'False'
+- electrode_id: 286
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 286
+  bad_channel: 'False'
+- electrode_id: 287
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 287
+  bad_channel: 'False'
+- electrode_id: 288
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 288
+  bad_channel: 'False'
+- electrode_id: 289
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 289
+  bad_channel: 'False'
+- electrode_id: 290
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 290
+  bad_channel: 'False'
+- electrode_id: 291
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 291
+  bad_channel: 'False'
+- electrode_id: 292
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 292
+  bad_channel: 'False'
+- electrode_id: 293
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 293
+  bad_channel: 'False'
+- electrode_id: 294
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 294
+  bad_channel: 'False'
+- electrode_id: 295
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 295
+  bad_channel: 'False'
+- electrode_id: 296
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 296
+  bad_channel: 'False'
+- electrode_id: 297
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 297
+  bad_channel: 'False'
+- electrode_id: 298
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 298
+  bad_channel: 'False'
+- electrode_id: 299
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 299
+  bad_channel: 'False'
+- electrode_id: 300
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 300
+  bad_channel: 'False'
+- electrode_id: 301
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 301
+  bad_channel: 'False'
+- electrode_id: 302
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 302
+  bad_channel: 'False'
+- electrode_id: 303
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 303
+  bad_channel: 'False'
+- electrode_id: 304
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 304
+  bad_channel: 'False'
+- electrode_id: 305
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 305
+  bad_channel: 'False'
+- electrode_id: 306
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 306
+  bad_channel: 'False'
+- electrode_id: 307
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 307
+  bad_channel: 'False'
+- electrode_id: 308
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 308
+  bad_channel: 'False'
+- electrode_id: 309
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 309
+  bad_channel: 'False'
+- electrode_id: 310
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 310
+  bad_channel: 'False'
+- electrode_id: 311
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 311
+  bad_channel: 'False'
+- electrode_id: 312
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 312
+  bad_channel: 'False'
+- electrode_id: 313
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 313
+  bad_channel: 'False'
+- electrode_id: 314
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 314
+  bad_channel: 'False'
+- electrode_id: 315
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 315
+  bad_channel: 'False'
+- electrode_id: 316
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 316
+  bad_channel: 'False'
+- electrode_id: 317
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 317
+  bad_channel: 'False'
+- electrode_id: 318
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 318
+  bad_channel: 'False'
+- electrode_id: 319
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 319
+  bad_channel: 'False'
+- electrode_id: 320
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 320
+  bad_channel: 'False'
+- electrode_id: 321
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 321
+  bad_channel: 'False'
+- electrode_id: 322
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 322
+  bad_channel: 'False'
+- electrode_id: 323
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 323
+  bad_channel: 'False'
+- electrode_id: 324
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 324
+  bad_channel: 'False'
+- electrode_id: 325
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 325
+  bad_channel: 'False'
+- electrode_id: 326
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 326
+  bad_channel: 'False'
+- electrode_id: 327
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 327
+  bad_channel: 'False'
+- electrode_id: 328
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 328
+  bad_channel: 'False'
+- electrode_id: 329
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 329
+  bad_channel: 'False'
+- electrode_id: 330
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 330
+  bad_channel: 'False'
+- electrode_id: 331
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 331
+  bad_channel: 'False'
+- electrode_id: 332
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 332
+  bad_channel: 'False'
+- electrode_id: 333
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 333
+  bad_channel: 'False'
+- electrode_id: 334
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 334
+  bad_channel: 'False'
+- electrode_id: 335
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 335
+  bad_channel: 'False'
+- electrode_id: 336
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 336
+  bad_channel: 'False'
+- electrode_id: 337
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 337
+  bad_channel: 'False'
+- electrode_id: 338
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 338
+  bad_channel: 'False'
+- electrode_id: 339
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 339
+  bad_channel: 'False'
+- electrode_id: 340
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 340
+  bad_channel: 'False'
+- electrode_id: 341
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 341
+  bad_channel: 'False'
+- electrode_id: 342
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 342
+  bad_channel: 'False'
+- electrode_id: 343
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 343
+  bad_channel: 'False'
+- electrode_id: 344
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 344
+  bad_channel: 'False'
+- electrode_id: 345
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 345
+  bad_channel: 'False'
+- electrode_id: 346
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 346
+  bad_channel: 'False'
+- electrode_id: 347
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 347
+  bad_channel: 'False'
+- electrode_id: 348
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 348
+  bad_channel: 'False'
+- electrode_id: 349
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 349
+  bad_channel: 'False'
+- electrode_id: 350
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 350
+  bad_channel: 'False'
+- electrode_id: 351
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 351
+  bad_channel: 'False'
+- electrode_id: 352
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 352
+  bad_channel: 'False'
+- electrode_id: 353
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 353
+  bad_channel: 'False'
+- electrode_id: 354
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 354
+  bad_channel: 'False'
+- electrode_id: 355
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 355
+  bad_channel: 'False'
+- electrode_id: 356
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 356
+  bad_channel: 'False'
+- electrode_id: 357
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 357
+  bad_channel: 'False'
+- electrode_id: 358
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 358
+  bad_channel: 'False'
+- electrode_id: 359
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 359
+  bad_channel: 'False'
+- electrode_id: 360
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 360
+  bad_channel: 'False'
+- electrode_id: 361
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 361
+  bad_channel: 'False'
+- electrode_id: 362
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 362
+  bad_channel: 'False'
+- electrode_id: 363
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 363
+  bad_channel: 'False'
+- electrode_id: 364
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 364
+  bad_channel: 'False'
+- electrode_id: 365
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 365
+  bad_channel: 'False'
+- electrode_id: 366
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 366
+  bad_channel: 'False'
+- electrode_id: 367
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 367
+  bad_channel: 'False'
+- electrode_id: 368
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 368
+  bad_channel: 'False'
+- electrode_id: 369
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 369
+  bad_channel: 'False'
+- electrode_id: 370
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 370
+  bad_channel: 'False'
+- electrode_id: 371
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 371
+  bad_channel: 'False'
+- electrode_id: 372
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 372
+  bad_channel: 'False'
+- electrode_id: 373
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 373
+  bad_channel: 'False'
+- electrode_id: 374
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 374
+  bad_channel: 'False'
+- electrode_id: 375
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 375
+  bad_channel: 'False'
+- electrode_id: 376
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 376
+  bad_channel: 'False'
+- electrode_id: 377
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 377
+  bad_channel: 'False'
+- electrode_id: 378
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 378
+  bad_channel: 'False'
+- electrode_id: 379
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 379
+  bad_channel: 'False'
+- electrode_id: 380
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 380
+  bad_channel: 'False'
+- electrode_id: 381
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 381
+  bad_channel: 'False'
+- electrode_id: 382
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 382
+  bad_channel: 'False'
+- electrode_id: 383
+  probe_id: Neuropixels 1.0 Giocomo Lab Configuration
+  probe_shank: 0
+  probe_electrode: 383
+  bad_channel: 'False'

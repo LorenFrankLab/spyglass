@@ -6,7 +6,7 @@ from .common_device import CameraDevice
 from .common_interval import IntervalList
 from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
-from .nwb_helper_fn import get_data_interface, get_nwb_file
+from ..utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_task")
 

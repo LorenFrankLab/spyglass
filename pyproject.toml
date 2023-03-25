@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spyglass-neuro"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
     { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
     { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
@@ -65,3 +65,6 @@ spyglass_cli = "spyglass.cli:cli"
 [project.urls]
 "Homepage" = "https://github.com/LorenFrankLab/spyglass"
 "Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
+
+[tool.black]
+# line-length = 120

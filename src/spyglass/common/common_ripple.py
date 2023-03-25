@@ -14,7 +14,7 @@ from spyglass.common import (
     Session,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_helper_fn import fetch_nwb
 
 schema = dj.schema("common_ripple")
 
