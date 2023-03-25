@@ -65,3 +65,6 @@ spyglass_cli = "spyglass.cli:cli"
 [project.urls]
 "Homepage" = "https://github.com/LorenFrankLab/spyglass"
 "Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
+
+[tool.black]
+# line-length = 120
