@@ -3,7 +3,7 @@ import pandas as pd
 import datajoint as dj
 import pynwb
 from position_tools.core import gaussian_smooth
-from ..common.dj_helper_fn import fetch_nwb
+from ..utils.dj_helper_fn import fetch_nwb
 from ..common.common_nwbfile import AnalysisNwbfile
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_project import BodyPart

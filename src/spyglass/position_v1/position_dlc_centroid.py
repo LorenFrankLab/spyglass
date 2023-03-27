@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import datajoint as dj
 import pynwb
-from ..common.dj_helper_fn import fetch_nwb
+from ..common.utils import fetch_nwb
 from ..common.common_nwbfile import AnalysisNwbfile
 from position_tools import get_velocity, get_distance
 from .position_dlc_position import DLCSmoothInterpParams

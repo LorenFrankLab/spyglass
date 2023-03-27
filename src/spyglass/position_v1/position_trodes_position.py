@@ -18,7 +18,7 @@ from position_tools import (
     interpolate_nan,
 )
 from position_tools.core import gaussian_smooth
-from ..common.dj_helper_fn import fetch_nwb
+from ..utils.dj_helper_fn import fetch_nwb
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.common_behav import RawPosition, VideoFile
 from .dlc_utils import get_video_path, check_videofile

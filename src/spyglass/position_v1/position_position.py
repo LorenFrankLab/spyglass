@@ -6,7 +6,7 @@ from typing import Dict
 from pathlib import Path
 import pynwb
 from tqdm import tqdm as tqdm
-from ..common.dj_helper_fn import fetch_nwb
+from ..utils.dj_helper_fn import fetch_nwb
 from ..common.common_behav import VideoFile, RawPosition
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.common_interval import IntervalList
