@@ -12,62 +12,6 @@ from sortingview.SpikeSortingView import SpikeSortingView
 from .merged_sorting_extractor import MergedSortingExtractor
 
 
-def _add_metrics_to_sorting_in_workspace(
-    workspace: sv.Workspace,
-    metrics: Dict[str, Dict[str, float]],
-    sortingview_sorting_id: str = None,
-):
-    """Adds a metrics to the specified sorting.
-
-    Parameters
-    ----------
-    workspace : sv.Workspace
-    metrics : dict
-        Quality metrics.
-        Key: name of quality metric
-        Value: another dict in which key: unit ID (str),
-                                     value: metric value (float)
-    sortingview_sorting_id : str, optional
-        if not specified, just uses the first sorting ID of the workspace
-
-    Returns
-    -------
-    workspace : sv.Workspace
-        Workspace after adding the metrics to the sorting
-    """
-
-    # make sure the unit IDs are str
-    for metric_name in metrics:
-        metrics[metric_name] = {
-            str(unit_id): metric_value
-            for unit_id, metric_value in metrics[metric_name].items()
-        }
-
-    # the metrics must be in this form (List[Dict]) to be added to sortingview
-    external_metrics = [
-        {
-            "name": metric_name,
-            "label": metric_name,
-            "tooltip": metric_name,
-            "data": metric,
-        }
-        for metric_name, metric in metrics.items()
-    ]
-
-    if sortingview_sorting_id is None:
-        print(
-            "sortingview sorting ID not specified, adding metrics to the first"
-            "sorting in the workspace..."
-        )
-        sortingview_sorting_id = workspace.sorting_ids[0]
-
-    workspace.set_unit_metrics_for_sorting(
-        sorting_id=sortingview_sorting_id, metrics=external_metrics
-    )
-
-    return workspace
-
-
 def _create_spikesortingview_workspace(
     recording_path: str,
     sorting_path: str,
@@ -97,11 +41,6 @@ def _create_spikesortingview_workspace(
     sorting_id = workspace.add_sorting(
         recording_id=recording_id, label=sorting_label, sorting=sorting
     )
-
-    if metrics is not None:
-        workspace = _add_metrics_to_sorting_in_workspace(
-            workspace=workspace, metrics=metrics, sortingview_sorting_id=sorting_id
-        )
 
     if google_user_ids is not None:
         workspace.create_curation_feed_for_sorting(sorting_id=sorting_id)

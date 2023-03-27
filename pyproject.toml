@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spyglass-neuro"
-version = "0.2.0"
+version = "0.3.2"
 authors = [
     { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
     { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
@@ -73,3 +73,5 @@ position = [
     "numba>=0.54",
     "deeplabcut<2.3.0",
 ]
+[tool.black]
+# line-length = 120
