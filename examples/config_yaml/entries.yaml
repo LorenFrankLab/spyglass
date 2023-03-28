@@ -1,0 +1,138 @@
+# This file should live in the SPYGLASS BASE directory.
+
+# This YAML is used to populate spyglass tables when the spyglass.common module is loaded.
+# This is an easy way to pre-populate the tables, especially with controlled vocabularies (preferred terms
+# for a set of concepts).
+# Using controlled vocabularies helps ensure that a preferred term or definition is used,
+# e.g. "SpikeGadgets" and not "spikegadgets". Using inconsistent terms for the same concept creates confusion and
+# makes search queries on the concept difficult.
+#
+# Format:
+# Top-level keys are table names.
+# Each item under the table name is read as an entry (entity) to be added to that table.
+# Duplicates (entries where the primary key already exists in the table) are skipped, so this YAML file can be used
+# to reload the same entries repeatedly.
+# Only Manual, Lookup, and Part tables can be populated this way.
+# All required fields, such as primary keys, for a table must be provided. Optional fields are optional.
+# If a table has a `fetch_add` method defined (e.g., BrainRegion), then the primary key is not required, and
+# `fetch_add` will be called on the key-value pairs provided.
+# Editing this YAML by hand should be done very carefully because the foreign keys have to be set up before they
+# are referenced. Often, it is easier and less error-prone to add these entries programmatically in DataJoint.
+
+DataAcquisitionDeviceSystem:
+- data_acquisition_device_system: SpikeGadgets
+- data_acquisition_device_system: TDT_Rig1
+- data_acquisition_device_system: TDT_Rig2
+- data_acquisition_device_system: PCS
+- data_acquisition_device_system: RCS
+- data_acquisition_device_system: RNS
+- data_acquisition_device_system: NeuroOmega
+- data_acquisition_device_system: Neuralynx
+- data_acquisition_device_system: ABC
+- data_acquisition_device_system: Unknown
+- data_acquisition_device_system: Neuropixels Acquisition System
+
+DataAcquisitionDeviceAmplifier:
+- data_acquisition_device_amplifier: Intan
+- data_acquisition_device_amplifier: PZ5_Amp1
+- data_acquisition_device_amplifier: PZ5_Amp2
+- data_acquisition_device_amplifier: Unknown
+- data_acquisition_device_amplifier: Neuropixels Headstage
+
+# `data_acquisition_device_system` and `data_acquisition_device_amplifier` are foreign keys to
+# `DataAcquisitionDeviceAmplifier` and `DataAcquisitionDeviceSystem`.
+# They must be added in the tables above before they can be referenced in an entry below.
+DataAcquisitionDevice:
+- data_acquisition_device_name: SpikeGadgets_Intan
+  data_acquisition_device_system: SpikeGadgets
+  data_acquisition_device_amplifier: Intan
+  adc_circuit: Intan
+- data_acquisition_device_name: Neuropixels Recording Device
+  data_acquisition_device_system: Neuropixels Acquisition System
+  data_acquisition_device_amplifier: Neuropixels Headstage
+  # adc_circuit is optional
+
+ProbeType:
+- probe_type: Neuropixels 1.0
+  probe_description: A Neuropixels 1.0 probe
+  manufacturer: imec
+  num_shanks: 1
+- probe_type: 128c-4s6mm6cm-15um-26um-sl
+  probe_description: A Livermore flexible probe with 128 channels, 4 shanks, 6 mm shank length, 6 cm ribbon length. 15 um contact diameter, 26 um center-to-center distance (pitch), single-line configuration.
+  manufacturer: Lawrence Livermore National Lab
+  num_shanks: 4
+- probe_type: A1x32-6mm-50-177-H32_21mm
+  probe_description: A NeuroNexus probe with 32 channels, 6 mm shank length, 50 um site spacing, 177 um^2 site area, the H32 package, and a 21 mm cable
+  manufacturer: NeuroNexus
+  num_shanks: 1
+- probe_type: My Custom Probe
+  probe_description: My custom probe from Loren Frank's lab
+  manufacturer: Frank Lab
+  num_shanks: 2
+
+# `probe_type` is a foreign key to `ProbeType`
+Probe:
+- probe_id: My Custom Probe Configuration 1
+  probe_type: My Custom Probe
+  contact_side_numbering: True
+
+# `Probe.Shank` is a part table of `Probe` and has a foreign key to `Probe`.
+Probe.Shank:
+- probe_id: My Custom Probe Configuration 1
+  probe_shank: 0
+- probe_id: My Custom Probe Configuration 1
+  probe_shank: 1
+
+# `Probe.Shank` is a part table of `Probe` and has a foreign key to `Probe`.
+# `Probe.Electrode` is a part table of `Probe` and has foreign keys to `Probe` and `Probe.Shank`.
+# Defining electrodes this way is tedious. Programmatically defining the electrodes or loading
+# the electrode configuration from probeinterface may be more efficient.
+Probe.Electrode:
+- probe_id: My Custom Probe Configuration 1
+  probe_shank: 0
+  probe_electrode: 0
+  rel_x: 0
+  rel_y: 0
+- probe_id: My Custom Probe Configuration 1
+  probe_shank: 0
+  probe_electrode: 1
+  rel_x: 10
+  rel_y: 10
+- probe_id: My Custom Probe Configuration 1
+  probe_shank: 1
+  probe_electrode: 2
+  rel_x: 20
+  rel_y: 20
+- probe_id: My Custom Probe Configuration 1
+  probe_shank: 1
+  probe_electrode: 3
+  rel_x: 30
+  rel_y: 30
+
+Institution:
+- institution_name: University of California, San Francisco
+
+Lab:
+- lab_name: Loren Frank
+
+LabMember:
+- lab_member_name: Kyu Hyun Lee
+  first_name: Kyu Hyun
+  last_name: Lee
+- lab_member_name: Eric Denovellis
+  first_name: Eric
+  last_name: Denovellis
+- lab_member_name: Ryan Ly
+  first_name: Ryan
+  last_name: Ly
+- lab_member_name: Loren Frank
+  first_name: Loren
+  last_name: Frank
+
+LabMember.LabMemberInfo:
+- lab_member_name: Ryan Ly
+  google_user_name: rly@lbl.gov
+  datajoint_user_name: rly
+
+BrainRegion:
+- region_name: medial entorhinal cortex

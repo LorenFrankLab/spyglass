@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spyglass-neuro"
-version = "0.2.0"
+version = "0.3.2"
 authors = [
     { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
     { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
@@ -15,7 +15,7 @@ authors = [
 description = "Neuroscience data analysis framework for reproducible research"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.8"
+requires-python = ">=3.8,<3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -73,3 +73,5 @@ position = [
     "numba>=0.54",
     "deeplabcut<2.3.0",
 ]
+[tool.black]
+# line-length = 120

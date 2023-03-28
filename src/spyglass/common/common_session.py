@@ -5,17 +5,17 @@ from .common_device import CameraDevice, DataAcquisitionDevice, Probe
 from .common_lab import Institution, Lab, LabMember
 from .common_nwbfile import Nwbfile
 from .common_subject import Subject
-from .nwb_helper_fn import get_nwb_file
+from ..utils.nwb_helper_fn import get_nwb_file, get_config
 
 schema = dj.schema("common_session")
-
-# TODO: figure out what to do about ExperimenterList
 
 
 @schema
 class Session(dj.Imported):
     definition = """
     # Table for holding experimental sessions.
+    # Note that each session can have multiple experimenters and data acquisition devices. See DataAcquisitionDevice
+    # and Experimenter part tables below.
     -> Nwbfile
     ---
     -> [nullable] Subject
@@ -28,6 +28,24 @@ class Session(dj.Imported):
     experiment_description = NULL: varchar(2000)
     """
 
+    class DataAcquisitionDevice(dj.Part):
+        definition = """
+        # Part table that allows a Session to be associated with multiple DataAcquisitionDevice entries.
+        -> Session
+        -> DataAcquisitionDevice
+        """
+
+        # NOTE: as a Part table, it is generally advised not to delete entries directly
+        # (see https://docs.datajoint.org/python/computation/03-master-part.html),
+        # but you can use `delete(force=True)`.
+
+    class Experimenter(dj.Part):
+        definition = """
+        # Part table that allows a Session to be associated with multiple LabMember entries.
+        -> Session
+        -> LabMember
+        """
+
     def make(self, key):
         # These imports must go here to avoid cyclic dependencies
         # from .common_task import Task, TaskEpoch
@@ -38,11 +56,16 @@ class Session(dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
+        config = get_config(nwb_file_abspath)
 
         # certain data are not associated with a single NWB file / session because they may apply to
-        # multiple sessions. these data go into dj.Manual tables
+        # multiple sessions. these data go into dj.Manual tables.
         # e.g., a lab member may be associated with multiple experiments, so the lab member table should not
-        # be dependent on (contain a primary key for) a session
+        # be dependent on (contain a primary key for) a session.
+
+        # here, we create new entries in these dj.Manual tables based on the values read from the NWB file
+        # then, they are linked to the session via fields of Session (e.g., Subject, Institution, Lab) or part
+        # tables (e.g., Experimenter, DataAcquisitionDevice).
 
         print("Institution...")
         Institution().insert_from_nwbfile(nwbf)
@@ -56,14 +79,17 @@ class Session(dj.Imported):
         print("Subject...")
         Subject().insert_from_nwbfile(nwbf)
 
-        print("DataAcquisitionDevice...")
-        DataAcquisitionDevice().insert_from_nwbfile(nwbf)
+        print("Populate DataAcquisitionDevice...")
+        DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
+        print()
 
-        print("CameraDevice...")
-        CameraDevice().insert_from_nwbfile(nwbf)
+        print("Populate CameraDevice...")
+        CameraDevice.insert_from_nwbfile(nwbf)
+        print()
 
-        print("Probe...")
-        Probe().insert_from_nwbfile(nwbf)
+        print("Populate Probe...")
+        Probe.insert_from_nwbfile(nwbf, config)
+        print()
 
         if nwbf.subject is not None:
             subject_id = nwbf.subject.subject_id
@@ -97,36 +123,47 @@ class Session(dj.Imported):
         # print('Unit...')
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
+        self._add_data_acquisition_device_part(nwb_file_name, nwbf, config)
+        self._add_experimenter_part(nwb_file_name, nwbf)
 
-@schema
-class ExperimenterList(dj.Imported):
-    definition = """
-    -> Session
-    """
+    def _add_data_acquisition_device_part(self, nwb_file_name, nwbf, config):
+        # get device names from both the NWB file and the associated config file
+        device_names, _, _ = DataAcquisitionDevice.get_all_device_names(nwbf, config)
 
-    class Experimenter(dj.Part):
-        definition = """
-        -> ExperimenterList
-        -> LabMember
-        """
+        for device_name in device_names:
+            # ensure that the foreign key exists and do nothing if not
+            query = DataAcquisitionDevice & {
+                "data_acquisition_device_name": device_name
+            }
+            if len(query) == 0:
+                print(
+                    f"DataAcquisitionDevice with name {device_name} does not exist. "
+                    "Cannot link Session with DataAcquisitionDevice in Session.DataAcquisitionDevice."
+                )
+                continue
+            key = dict()
+            key["nwb_file_name"] = nwb_file_name
+            key["data_acquisition_device_name"] = device_name
+            Session.DataAcquisitionDevice.insert1(key)
 
-    def make(self, key):
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        self.insert1(
-            {"nwb_file_name": nwb_file_name}, skip_duplicates=True
-        )  # TODO is this necessary??
-        nwbf = get_nwb_file(nwb_file_abspath)
-
+    def _add_experimenter_part(self, nwb_file_name, nwbf):
         if nwbf.experimenter is None:
             return
 
         for name in nwbf.experimenter:
-            LabMember().insert_from_name(name)
+            # ensure that the foreign key exists and do nothing if not
+            query = LabMember & {"lab_member_name": name}
+            if len(query) == 0:
+                print(
+                    f"LabMember with name {name} does not exist. "
+                    "Cannot link Session with LabMember in Session.Experimenter."
+                )
+                continue
+
             key = dict()
             key["nwb_file_name"] = nwb_file_name
             key["lab_member_name"] = name
-            self.Experimenter().insert1(key)
+            Session.Experimenter.insert1(key)
 
 
 @schema

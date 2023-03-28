@@ -1,0 +1,2 @@
+class PopulateException(Exception):
+    pass

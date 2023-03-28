@@ -8,7 +8,7 @@ import psutil
 import pynwb
 import scipy.signal as signal
 
-from .nwb_helper_fn import get_electrode_indices
+from ..utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_filter")
 
