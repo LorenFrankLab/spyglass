@@ -69,8 +69,8 @@ class DataAcquisitionDevice(dj.Manual):
 
             new_device_dict["data_acquisition_device_name"] = name
             new_device_dict["data_acquisition_device_system"] = system
-            new_device_dict["data_acquisition_device_amplifier"] = amplifier
-            new_device_dict["adc_circuit"] = adc_circuit
+            new_device_dict["data_acquisition_device_amplifier"] = amplifier.title()
+            new_device_dict["adc_circuit"] = adc_circuit.title()
 
             cls._add_device(new_device_dict)
 
