@@ -9,7 +9,7 @@ import probeinterface as pi
 import spikeinterface as si
 import spikeinterface.extractors as se
 
-from ..common.common_device import Probe
+from ..common.common_device import Probe, ProbeType
 from ..common.common_ephys import Electrode, ElectrodeGroup
 from ..common.common_interval import (
     IntervalList,
@@ -246,13 +246,13 @@ class SortGroup(dj.Manual):
         key["sort_group_id"] = sort_group_id
         sort_group_electrodes = (SortGroup.SortGroupElectrode() & key).fetch()
         electrode_group_name = sort_group_electrodes["electrode_group_name"][0]
-        probe_type = (
+        probe_id = (
             ElectrodeGroup
             & {
                 "nwb_file_name": nwb_file_name,
                 "electrode_group_name": electrode_group_name,
             }
-        ).fetch1("probe_type")
+        ).fetch1("probe_id")
         channel_group[sort_group_id] = dict()
         channel_group[sort_group_id]["channels"] = sort_group_electrodes[
             "electrode_id"
@@ -271,7 +271,7 @@ class SortGroup(dj.Manual):
             )
             rel_x, rel_y, rel_z = (
                 Probe().Electrode()
-                & {"probe_type": probe_type, "probe_electrode": probe_electrode}
+                & {"probe_id": probe_id, "probe_electrode": probe_electrode}
             ).fetch("rel_x", "rel_y", "rel_z")
             # TODO: Fix this HACK when we can use probeinterface:
             rel_x = float(rel_x)
@@ -553,6 +553,7 @@ class SpikeSortingRecording(dj.Computed):
                         "nwb_file_name": key["nwb_file_name"],
                         "electrode_id": channel_id,
                     }
+                    * ProbeType
                 ).fetch1("probe_type")
             )
             electrode_group.append(

@@ -54,7 +54,7 @@ class ElectrodeGroup(dj.Imported):
                 region_name=electrode_group.location
             )
             if isinstance(electrode_group.device, ndx_franklab_novela.Probe):
-                key["probe_type"] = electrode_group.device.probe_type
+                key["probe_id"] = electrode_group.device.probe_type
             key["description"] = electrode_group.description
             if isinstance(electrode_group, ndx_franklab_novela.NwbElectrodeGroup):
                 # Define target_hemisphere based on targeted x coordinate
