@@ -548,12 +548,11 @@ class SpikeSortingRecording(dj.Computed):
         for channel_id in channel_ids:
             probe_type.append(
                 (
-                    Electrode
+                    Electrode * Probe
                     & {
                         "nwb_file_name": key["nwb_file_name"],
                         "electrode_id": channel_id,
                     }
-                    * ProbeType
                 ).fetch1("probe_type")
             )
             electrode_group.append(
