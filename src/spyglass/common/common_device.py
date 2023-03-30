@@ -144,7 +144,7 @@ class DataAcquisitionDevice(dj.Manual):
             # no entry with the same name exists, prompt user about adding a new entry
             print(
                 f"\nData acquisition device '{name}' was not found in the database. "
-                "The current values are: {all_values}. "
+                f"The current values are: {all_values}. "
                 "Please ensure that the device you want to add does not already "
                 "exist in the database under a different name or spelling. "
                 "If you want to use an existing device in the database, "
@@ -156,6 +156,7 @@ class DataAcquisitionDevice(dj.Manual):
             )
             if val.lower() in ["y", "yes"]:
                 cls.insert1(new_device_dict, skip_duplicates=True)
+                return
             raise PopulateException(
                 f"User chose not to add data acquisition device '{name}' to the database."
             )
@@ -471,7 +472,9 @@ class Probe(dj.Manual):
         elect_dict: dict,
     ):
         # construct dictionary of values to add to ProbeType
-        new_probe_type_dict["manufacturer"] = getattr(nwb_probe_obj, "manufacturer", "")
+        new_probe_type_dict["manufacturer"] = (
+            getattr(nwb_probe_obj, "manufacturer") or ""
+        )
         new_probe_type_dict["probe_type"] = nwb_probe_obj.probe_type
         new_probe_type_dict["probe_description"] = nwb_probe_obj.probe_description
         new_probe_type_dict["num_shanks"] = len(nwb_probe_obj.shanks)
@@ -487,14 +490,14 @@ class Probe(dj.Manual):
         # go through the shanks and add each one to the Shank table
         for shank in nwb_probe_obj.shanks.values():
             shank_dict[shank.name] = dict()
-            shank_dict[shank.name]["probe_type"] = new_probe_dict["probe_type"]
+            shank_dict[shank.name]["probe_id"] = new_probe_dict["probe_type"]
             shank_dict[shank.name]["probe_shank"] = int(shank.name)
 
             # go through the electrodes and add each one to the Electrode table
             for electrode in shank.shanks_electrodes.values():
                 # the next line will need to be fixed if we have different sized contacts on a shank
                 elect_dict[electrode.name] = dict()
-                elect_dict[electrode.name]["probe_type"] = new_probe_dict["probe_type"]
+                elect_dict[electrode.name]["probe_id"] = new_probe_dict["probe_type"]
                 elect_dict[electrode.name]["probe_shank"] = shank_dict[shank.name][
                     "probe_shank"
                 ]
