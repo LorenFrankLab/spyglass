@@ -471,7 +471,7 @@ class Probe(dj.Manual):
         elect_dict: dict,
     ):
         # construct dictionary of values to add to ProbeType
-        new_probe_type_dict["manufacturer"] = getattr(nwb_probe_obj, "manufacturer")
+        new_probe_type_dict["manufacturer"] = getattr(nwb_probe_obj, "manufacturer", "")
         new_probe_type_dict["probe_type"] = nwb_probe_obj.probe_type
         new_probe_type_dict["probe_description"] = nwb_probe_obj.probe_description
         new_probe_type_dict["num_shanks"] = len(nwb_probe_obj.shanks)
