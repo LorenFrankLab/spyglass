@@ -2,7 +2,7 @@ from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFil
 from .common_dio import DIOEvents
 from .common_ephys import Electrode, ElectrodeGroup, Raw, SampleCount
 from .common_nwbfile import Nwbfile
-from .common_session import ExperimenterList, Session
+from .common_session import Session
 from .common_task import TaskEpoch
 
 
@@ -15,9 +15,6 @@ def populate_all_common(nwb_file_name):
     # If we use Kachery for data sharing we can uncomment the following two lines. TBD
     # print('Populate NwbfileKachery...')
     # NwbfileKachery.populate()
-
-    print("Populate ExperimenterList...")
-    ExperimenterList.populate(fp)
 
     print("Populate ElectrodeGroup...")
     ElectrodeGroup.populate(fp)

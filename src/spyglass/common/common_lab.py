@@ -1,4 +1,4 @@
-"""Schema for institution name, lab name, and lab members (experimenters)."""
+"""Schema for institution name, lab team, lab name, and lab members (independent of a session)."""
 import datajoint as dj
 
 schema = dj.schema("common_lab")
@@ -103,7 +103,7 @@ class LabTeam(dj.Manual):
             query = (
                 LabMember.LabMemberInfo() & {"lab_member_name": team_member}
             ).fetch("google_user_name")
-            if not query:
+            if not len(query):
                 print(
                     f"Please add the Google user ID for {team_member} in the LabMember.LabMemberInfo table "
                     "if you want to give them permission to manually curate sortings by this team."

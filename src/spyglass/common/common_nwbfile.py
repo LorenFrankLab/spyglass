@@ -11,8 +11,8 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
-from .dj_helper_fn import get_child_tables
-from .nwb_helper_fn import get_electrode_indices, get_nwb_file
+from ..utils.dj_helper_fn import get_child_tables
+from ..utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
 schema = dj.schema("common_nwbfile")
 

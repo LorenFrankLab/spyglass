@@ -21,7 +21,6 @@ from position_tools import (
 from position_tools.core import gaussian_smooth
 from skan import skeleton_to_csgraph
 from skan.draw import _clean_positions_dict
-from spyglass.common.dj_helper_fn import fetch_nwb
 from tqdm import tqdm_notebook as tqdm
 from track_linearization import (
     get_linearized_position,
@@ -33,6 +32,7 @@ from track_linearization import (
 from .common_behav import RawPosition, VideoFile
 from .common_interval import IntervalList
 from .common_nwbfile import AnalysisNwbfile
+from ..utils.dj_helper_fn import fetch_nwb
 
 schema = dj.schema("common_position")
 
