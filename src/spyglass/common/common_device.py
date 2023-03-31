@@ -67,10 +67,14 @@ class DataAcquisitionDevice(dj.Manual):
             # transform amplifier value. check if value is in DB. if not, prompt user to add an entry or cancel.
             amplifier = cls._add_amplifier(nwb_device_obj.amplifier)
 
+            # standardize how Intan is represented in the database
+            if adc_circuit.title() == "Intan":
+                adc_circuit = "Intan"
+
             new_device_dict["data_acquisition_device_name"] = name
             new_device_dict["data_acquisition_device_system"] = system
-            new_device_dict["data_acquisition_device_amplifier"] = amplifier.title()
-            new_device_dict["adc_circuit"] = adc_circuit.title()
+            new_device_dict["data_acquisition_device_amplifier"] = amplifier
+            new_device_dict["adc_circuit"] = adc_circuit
 
             cls._add_device(new_device_dict)
 
@@ -240,6 +244,10 @@ class DataAcquisitionDevice(dj.Manual):
         amplifier : str
             The amplifier value that was added to the database.
         """
+        # standardize how Intan is represented in the database
+        if amplifier.title() == "Intan":
+            amplifier = "Intan"
+
         all_values = DataAcquisitionDeviceAmplifier.fetch(
             "data_acquisition_device_amplifier"
         ).tolist()
