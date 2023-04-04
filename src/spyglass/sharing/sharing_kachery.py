@@ -25,9 +25,10 @@ except:
 
 schema = dj.schema("sharing_kachery")
 
+
 def kachery_download_file(uri: str, dest: str, kachery_zone: str):
     # set the kachery zone and attempt to down load the uri into the destination path
-    KacheryZone.set_zone({'kachery_zone':kachery_zone})
+    KacheryZone.set_zone({"kachery_zone": kachery_zone})
     return kcl.load_file(uri, dest=dest)
 
 
@@ -41,6 +42,7 @@ class KacheryZone(dj.Manual):
     kachery_proxy: varchar(200) # kachery sharing proxy
     -> Lab
     """
+
     @staticmethod
     def set_zone(key: dict):
         """Set the kachery zone based on the key to KacheryZone
@@ -66,15 +68,14 @@ class KacheryZone(dj.Manual):
 
     @staticmethod
     def reset_zone():
-        """Resets the kachery zone environment variable to the default values.
-        """
+        """Resets the kachery zone environment variable to the default values."""
         if default_kachery_zone is not None:
             os.environ[kachery_zone_envar] = default_kachery_zone
         if default_kachery_cloud_dir is not None:
             os.environ[kachery_cloud_dir_envar] = default_kachery_cloud_dir
 
     @staticmethod
-    def set_resource_url(key:dict):
+    def set_resource_url(key: dict):
         """sets the KACHERY_RESOURCE_URL based on the key corresponding to a single Kachery Zone
 
         Parameters
@@ -93,13 +94,16 @@ class KacheryZone(dj.Manual):
             return None
         # set the new zone and cloud directory
         os.environ[kachery_zone_envar] = kachery_zone_name
-        os.environ[kachery_resource_url_envar] = kachery_proxy + "/r/" + kachery_zone_name
+        os.environ[kachery_resource_url_envar] = (
+            kachery_proxy + "/r/" + kachery_zone_name
+        )
 
     @staticmethod
     def reset_resource_url():
         KacheryZone.reset_zone()
         if default_kachery_resource_url is not None:
             os.environ[kachery_resource_url_envar] = default_kachery_resource_url
+
 
 @schema
 class NwbfileKacherySelection(dj.Manual):
@@ -159,9 +163,9 @@ class NwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        (nwb_uri,) = (NwbfileKachery & {"nwb_file_name": nwb_file_name}).fetch(
-            "nwb_file_uri", "kachery_zone"
-        )
+        (nwb_uri, kachery_zone) = (
+            NwbfileKachery & {"nwb_file_name": nwb_file_name}
+        ).fetch("nwb_file_uri", "kachery_zone")
         if len(nwb_uri) == 0:
             return False
         # check to see if the sha1 is encrypted
@@ -259,14 +263,16 @@ class AnalysisNwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        uri, kachery_zone = (AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}).fetch('analysis_file_uri', 'kachery_zone')
+        uri, kachery_zone = (
+            AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}
+        ).fetch("analysis_file_uri", "kachery_zone")
         if len(uri) == 0:
             return False
 
         if not kachery_download_file(
             uri=uri,
             dest=AnalysisNwbfile.get_abs_path(analysis_file_name),
-            kachery_zone=kachery_zone
+            kachery_zone=kachery_zone,
         ):
             raise Exception(
                 f"{AnalysisNwbfile.get_abs_path(analysis_file_name)} cannot be downloaded"
