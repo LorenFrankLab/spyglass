@@ -33,6 +33,7 @@ class KacheryZone(dj.Manual):
     ---
     description: varchar(200) # description of this zone
     kachery_cloud_dir: varchar(200) # kachery cloud directory on local machine where files are linked
+    kachery_proxy: varchar(200) # kachery sharing proxy 
     -> Lab
     """
 
