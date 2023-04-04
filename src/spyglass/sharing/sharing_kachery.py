@@ -10,14 +10,18 @@ from ..common.common_lab import Lab
 # define the environment variable name for the kachery zone and the cloud directory
 kachery_zone_envar = "KACHERY_ZONE"
 kachery_cloud_dir_envar = "KACHERY_CLOUD_DIR"
+kachery_resource_url_envar = "KACHERY_RESOURCE_URL"
+
 
 # set the global default kachery zones
 try:
     default_kachery_zone = os.environ[kachery_zone_envar]
     default_kachery_cloud_dir = os.environ[kachery_cloud_dir_envar]
+    default_kachery_resource_url = os.environ[kachery_resource_url_envar]
 except:
-    default_kachery_zone = ""
-    default_kachery_cloud_dir = ""
+    default_kachery_zone = None
+    default_kachery_cloud_dir = None
+    default_kachery_resource_url = None
 
 schema = dj.schema("sharing_kachery")
 
@@ -29,14 +33,14 @@ def kachery_download_file(uri: str=None, dest: str=None, kachery_zone: str=None)
 @schema
 class KacheryZone(dj.Manual):
     definition = """
-    kachery_zone_name: varchar(200) # the name of the kachery zone
+    kachery_zone_name: varchar(200) # the name of the kachery zone. Note that this is the same as the name of the kachery resource.
     ---
     description: varchar(200) # description of this zone
     kachery_cloud_dir: varchar(200) # kachery cloud directory on local machine where files are linked
-    kachery_proxy: varchar(200) # kachery sharing proxy 
+    kachery_proxy: varchar(200) # kachery sharing proxy
     -> Lab
     """
-
+    @staticmethod
     def set_zone(key: dict):
         """Set the kachery zone based on the key to KacheryZone
 
@@ -59,6 +63,7 @@ class KacheryZone(dj.Manual):
         os.environ[kachery_zone_envar] = kachery_zone_name
         os.environ[kachery_cloud_dir_envar] = kachery_cloud_dir
 
+    @staticmethod
     def reset_zone():
         """Resets the kachery zone environment variable to the default values.
         """
@@ -67,6 +72,33 @@ class KacheryZone(dj.Manual):
         if default_kachery_cloud_dir is not None:
             os.environ[kachery_cloud_dir_envar] = default_kachery_cloud_dir
 
+    @staticmethod
+    def set_resource_url(key:dict):
+        """sets the KACHERY_RESOURCE_URL based on the key corresponding to a single Kachery Zone
+
+        Parameters
+        ----------
+        key : dict
+            key to retrieve a single kachery zone
+        """
+        try:
+            kachery_zone_name, kachery_proxy = (KacheryZone & key).fetch1(
+                "kachery_zone_name", "kachery_proxy"
+            )
+        except:
+            raise Exception(
+                f"{key} does not correspond to a single entry in KacheryZone."
+            )
+            return None
+        # set the new zone and cloud directory
+        os.environ[kachery_zone_envar] = kachery_zone_name
+        os.environ[kachery_resource_url_envar] = kachery_proxy + "/r/" + kachery_zone_name
+
+    @staticmethod
+    def reset_resource_url():
+        KacheryZone.reset_zone()
+        if default_kachery_resource_url is not None:
+            os.environ[kachery_resource_url_envar] = default_kachery_resource_url
 
 @schema
 class NwbfileKacherySelection(dj.Manual):
