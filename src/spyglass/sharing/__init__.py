@@ -1,7 +1,7 @@
 from .sharing_kachery import (
     AnalysisNwbfileKachery,
     AnalysisNwbfileKacherySelection,
-    KacherySharingGroup,
+    KacheryZone,
     NwbfileKachery,
     NwbfileKacherySelection,
 )

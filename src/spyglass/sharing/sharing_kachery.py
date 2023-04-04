@@ -27,8 +27,8 @@ schema = dj.schema("sharing_kachery")
 
 
 def kachery_download_file(uri: str, dest: str, kachery_zone: str):
-    # set the kachery zone and attempt to down load the uri into the destination path
-    KacheryZone.set_zone({"kachery_zone": kachery_zone})
+    # set the kachery resource url and attempt to down load the uri into the destination path
+    KacheryZone.set_resource_url({"kachery_zone": kachery_zone})
     return kcl.load_file(uri, dest=dest)
 
 
