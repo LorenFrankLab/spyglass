@@ -25,10 +25,11 @@ except:
 
 schema = dj.schema("sharing_kachery")
 
-def kachery_download_file(uri: str=None, dest: str=None, kachery_zone: str=None):
+def kachery_download_file(uri: str, dest: str, kachery_zone: str):
     # set the kachery zone and attempt to down load the uri into the destination path
     KacheryZone.set_zone({'kachery_zone':kachery_zone})
-    kcl.load_file(uri, dest=dest)
+    return kcl.load_file(uri, dest=dest)
+
 
 @schema
 class KacheryZone(dj.Manual):
@@ -217,7 +218,7 @@ class AnalysisNwbfileKachery(dj.Computed):
     definition = """
     -> AnalysisNwbfileKacherySelection
     ---
-    analysis_file_uri='': varchar(200)  # the uri of the file; may be encyrpted (limited sharing) or not encrypted (public sharing)
+    analysis_file_uri='': varchar(200)  # the uri of the file
     """
 
     class LinkedFile(dj.Part):
@@ -258,16 +259,14 @@ class AnalysisNwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        uri, kachery_zone = (
-            AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}).fetch('analysis_file_uri', 'kachery_zone'))
+        uri, kachery_zone = (AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}).fetch('analysis_file_uri', 'kachery_zone')
         if len(uri) == 0:
             return False
-
 
         if not kachery_download_file(
             uri=uri,
             dest=AnalysisNwbfile.get_abs_path(analysis_file_name),
-            kachery_zone=kachery_zone,
+            kachery_zone=kachery_zone
         ):
             raise Exception(
                 f"{AnalysisNwbfile.get_abs_path(analysis_file_name)} cannot be downloaded"
@@ -279,17 +278,12 @@ class AnalysisNwbfileKachery(dj.Computed):
             & {"analysis_file_name": analysis_file_name}
         ).fetch(as_dict=True)
         for file in linked_files:
-            if file["linked_file_uri"].startswith("sha1-enc://"):
-                uri = kcl.decrypt_uri(file["linked_file_uri"])
-            else:
-                uri = file["linked_file_uri"]
+            uri = file["linked_file_uri"]
             print(f"attempting to download linked file uri {uri}")
             linked_file_path = (
                 os.environ["SPYGLASS_BASE_DIR"] + file["linked_file_rel_path"]
             )
-            if not kachery_download_file(
-                uri=uri, dest=linked_file_path, project_id=project_id
-            ):
+            if not kachery_download_file(uri=uri, dest=linked_file_path):
                 raise Exception(f"Linked file {linked_file_path} cannot be downloaded")
                 return False
 
