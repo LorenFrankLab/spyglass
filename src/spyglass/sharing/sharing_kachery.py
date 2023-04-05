@@ -239,7 +239,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         print(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
         # set the kachery zone
         KacheryZone.set_zone(key)
-        key["uri"] = kcl.link_file(
+        key["analysis_file_uri"] = kcl.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )
         self.insert1(key)
