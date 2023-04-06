@@ -265,16 +265,16 @@ class AnalysisNwbfileKachery(dj.Computed):
         bool
             True if the file was successfully downloaded, false otherwise
         """
-        uri, kachery_zone = (
+        uri, kachery_zone_name = (
             AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}
-        ).fetch("analysis_file_uri", "kachery_zone")
+        ).fetch1("analysis_file_uri", "kachery_zone_name")
         if len(uri) == 0:
             return False
 
         if not kachery_download_file(
             uri=uri,
             dest=AnalysisNwbfile.get_abs_path(analysis_file_name),
-            kachery_zone=kachery_zone,
+            kachery_zone=kachery_zone_name,
         ):
             raise Exception(
                 f"{AnalysisNwbfile.get_abs_path(analysis_file_name)} cannot be downloaded"
