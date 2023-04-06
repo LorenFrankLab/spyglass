@@ -380,10 +380,10 @@ class MetricParameters(dj.Manual):
         "snr": {
             "peak_sign": "neg",
             "random_chunk_kwargs_dict": {
-            "num_chunks_per_segment": 20,
-            "chunk_size": 10000,
-            "seed": 0,
-            }
+                "num_chunks_per_segment": 20,
+                "chunk_size": 10000,
+                "seed": 0,
+            },
         },
         "isi_violation": {"isi_threshold_ms": 1.5, "min_isi_ms": 0.0},
         "nn_isolation": {
