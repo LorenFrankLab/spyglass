@@ -1,6 +1,6 @@
 import datajoint as dj
-from ..utils.dj_helper_fn import fetch_nwb
-from ..common.common_nwbfile import AnalysisNwbfile
+from ...utils.dj_helper_fn import fetch_nwb
+from ...common.common_nwbfile import AnalysisNwbfile
 from .position_dlc_pose_estimation import DLCPoseEstimation
 from .position_dlc_position import DLCSmoothInterp
 

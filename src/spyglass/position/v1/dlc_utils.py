@@ -315,7 +315,7 @@ def get_video_path(key):
     video_filename : str
         filename of the video
     """
-    from ..common.common_behav import VideoFile
+    from ...common.common_behav import VideoFile
     import pynwb
 
     video_info = (

@@ -7,9 +7,9 @@ import numpy as np
 import cv2
 import datajoint as dj
 from IPython.display import display
-from ..utils.dj_helper_fn import fetch_nwb
-from ..common.common_behav import VideoFile, RawPosition
-from ..common.common_nwbfile import AnalysisNwbfile
+from ...utils.dj_helper_fn import fetch_nwb
+from ...common.common_behav import VideoFile, RawPosition
+from ...common.common_nwbfile import AnalysisNwbfile
 from .position_dlc_project import BodyPart
 from .position_dlc_model import DLCModel
 from .dlc_utils import OutputLogger, infer_output_dir

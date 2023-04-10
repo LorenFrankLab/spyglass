@@ -3,12 +3,12 @@ import numpy as np
 import pandas as pd
 import datajoint as dj
 import pynwb
-from ..utils.dj_helper_fn import fetch_nwb
-from ..common.common_nwbfile import AnalysisNwbfile
+from ...utils.dj_helper_fn import fetch_nwb
+from ...common.common_nwbfile import AnalysisNwbfile
 from position_tools import get_velocity, get_distance
 from .position_dlc_position import DLCSmoothInterpParams
 from .position_dlc_cohort import DLCSmoothInterpCohort
-from ..common.common_behav import RawPosition
+from ...common.common_behav import RawPosition
 from .dlc_utils import (
     smooth_moving_avg,
     _key_to_smooth_func_dict,
@@ -302,8 +302,6 @@ class DLCCentroid(dj.Computed):
                     interp_df = interp_pos(
                         centroid_df.copy(), nan_spans, **params["interp_params"]
                     )
-                else:
-                    interp_df = centroid_df.copy()
             else:
                 interp_df = centroid_df.copy()
             if params["smooth"]:
@@ -327,8 +325,6 @@ class DLCCentroid(dj.Computed):
                         sampling_rate=sampling_rate,
                         **params["smoothing_params"],
                     )
-                else:
-                    final_df = interp_df.copy()
             else:
                 final_df = interp_df.copy()
             logger.logger.info("getting velocity")

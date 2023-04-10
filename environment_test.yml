@@ -1,0 +1,39 @@
+name: spyglass_test
+channels:
+  - conda-forge
+  - defaults
+  - franklab
+  - edeno
+dependencies:
+  - python>=3.8,<3.10
+  - jupyterlab>=3.*
+  - pydotplus>=2.0.*
+  - dask>=2.30
+  - pip>=20.2.*
+  - position_tools
+  - track_linearization
+  - replay_trajectory_classification
+  - ripple_detection
+  - trajectory_analysis_tools
+  - matplotlib
+  - seaborn
+  - skan
+  - bottleneck
+  - ipympl
+  - tqdm
+  - nb_conda
+  - pyfftw  # used by ghostipy. install from conda-forge so that it works on Mac ARM processors
+  - pip:
+    - pubnub<6.4.0
+    - git+https://github.com/SpikeInterface/spikeinterface.git
+    - pynwb>=2.2.0,<3
+    - hdmf>=3.4.6
+    - datajoint>=0.13.6
+    - ghostipy
+    - pymysql>=1.0.*
+    - sortingview>=0.8
+    - figurl-jupyter
+    - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
+    - pyyaml
+    - click
+    - 'black[jupyter]'

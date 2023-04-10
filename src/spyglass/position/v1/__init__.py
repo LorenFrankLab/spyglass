@@ -38,11 +38,6 @@ from .position_trodes_position import (
     TrodesPosV1,
     TrodesPosVideo,
 )
-from .position_position import (
-    FinalPosition,
-    PositionVideoSelection,
-    PositionVideo,
-)
 from .dlc_utils import (
     get_dlc_root_data_dir,
     get_dlc_processed_data_dir,
@@ -74,5 +69,4 @@ _schemas = [
     "position_dlc_orient",
     "position_dlc_selection",
     "position_trodes_position",
-    "position_position",
 ]

@@ -3,7 +3,7 @@ import os
 import glob
 import datajoint as dj
 import ruamel.yaml as yaml
-from ..common.common_lab import LabTeam
+from ...common.common_lab import LabTeam
 from .position_dlc_project import BodyPart, DLCProject
 from .position_dlc_training import DLCModelTraining, DLCModelTrainingParams
 from .dlc_decorators import accepts

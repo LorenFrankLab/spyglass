@@ -10,7 +10,7 @@ import ruamel.yaml
 import numpy as np
 import pandas as pd
 import datajoint as dj
-from ..common.common_lab import LabTeam
+from ...common.common_lab import LabTeam
 from .dlc_utils import check_videofile, _set_permissions, get_video_path
 
 
