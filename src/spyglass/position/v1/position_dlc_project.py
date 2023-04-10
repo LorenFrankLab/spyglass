@@ -316,6 +316,7 @@ class DLCProject(dj.Manual):
         )
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
+        del key["config_path"]
         cfg = read_config(config_path)
         video_names = list(cfg["video_sets"].keys())
         training_files = []

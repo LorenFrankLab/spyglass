@@ -5,7 +5,7 @@ import numpy as np
 from typing import Dict
 from pathlib import Path
 from tqdm import tqdm as tqdm
-from ..common.dj_helper_fn import fetch_nwb
+from ..utils.dj_helper_fn import fetch_nwb
 from ..common.common_behav import VideoFile, RawPosition
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.common_interval import IntervalList
@@ -185,7 +185,12 @@ class FinalPosition(dj.Manual):
 
     def fetch1_dataframe(self):
         source = self.fetch1("source")
-        part_table = getattr(self, f"{source}Pos") & self
+        if source in ["Common"]:
+            table_name = f"{source}Pos"
+        else:
+            version = self.fetch1("version")
+            table_name = f"{source}PosV{version}"
+        part_table = getattr(self, table_name) & self
         nwb_data = part_table.fetch_nwb()[0]
 
         index = pd.Index(

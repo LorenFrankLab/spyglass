@@ -255,7 +255,7 @@ class DLCModel(dj.Computed):
             )
         print(
             f"Finished inserting {model_name}, training iteration"
-            f" {dlc_config['interation']} into DLCModel"
+            f" {dlc_config['iteration']} into DLCModel"
         )
 
 
