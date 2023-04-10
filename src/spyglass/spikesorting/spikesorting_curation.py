@@ -314,7 +314,7 @@ class Waveforms(dj.Computed):
         waveform_params = (WaveformParameters & key).fetch1("waveform_params")
         if "whiten" in waveform_params:
             if waveform_params.pop("whiten"):
-                recording = sp.whiten(recording)
+                recording = sp.whiten(recording, int_scale=256)
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key["waveform_extractor_path"] = str(
@@ -379,22 +379,24 @@ class MetricParameters(dj.Manual):
     metric_default_params = {
         "snr": {
             "peak_sign": "neg",
-            "num_chunks_per_segment": 20,
-            "chunk_size": 10000,
-            "seed": 0,
+            "random_chunk_kwargs_dict": {
+                "num_chunks_per_segment": 20,
+                "chunk_size": 10000,
+                "seed": 0,
+            },
         },
         "isi_violation": {"isi_threshold_ms": 1.5, "min_isi_ms": 0.0},
         "nn_isolation": {
-            "max_spikes_for_nn": 1000,
-            "min_spikes_for_nn": 10,
+            "max_spikes": 1000,
+            "min_spikes": 10,
             "n_neighbors": 5,
             "n_components": 7,
             "radius_um": 100,
             "seed": 0,
         },
         "nn_noise_overlap": {
-            "max_spikes_for_nn": 1000,
-            "min_spikes_for_nn": 10,
+            "max_spikes": 1000,
+            "min_spikes": 10,
             "n_neighbors": 5,
             "n_components": 7,
             "radius_um": 100,
@@ -420,7 +422,7 @@ class MetricParameters(dj.Manual):
 
     def insert_default(self):
         self.insert1(
-            ["franklab_default", self.metric_default_params], skip_duplicates=True
+            ["franklab_default3", self.metric_default_params], skip_duplicates=True
         )
 
     def get_available_metrics(self):
