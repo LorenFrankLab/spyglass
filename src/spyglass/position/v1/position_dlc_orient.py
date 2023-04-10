@@ -8,6 +8,7 @@ from ...common.common_nwbfile import AnalysisNwbfile
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_project import BodyPart
 from ...common.common_behav import RawPosition
+from .dlc_utils import get_span_start_stop
 
 schema = dj.schema("position_dlc_orient")
 
@@ -100,17 +101,26 @@ class DLCOrientation(dj.Computed):
         if not params["orient_method"] == "none":
             # Smooth orientation
             is_nan = np.isnan(orientation)
-            # Unwrap orientation before smoothing
-            orientation[~is_nan] = np.unwrap(orientation[~is_nan])
-            orientation[~is_nan] = gaussian_smooth(
-                orientation[~is_nan],
+            unwrap_orientation = orientation.copy()
+            # Only unwrap non nan values, while keeping nans in dataset for interpolation
+            unwrap_orientation[~is_nan] = np.unwrap(orientation[~is_nan])
+            unwrap_df = pd.DataFrame(
+                unwrap_orientation, columns=["orientation"], index=pos_df.index
+            )
+            nan_spans = get_span_start_stop(np.where(is_nan)[0])
+            orient_df = interp_orientation(
+                unwrap_df,
+                nan_spans,
+            )
+            orientation = gaussian_smooth(
+                orient_df["orientation"].to_numpy(),
                 orientation_smoothing_std_dev,
                 sampling_rate,
                 axis=0,
                 truncate=8,
             )
             # convert back to between -pi and pi
-            orientation[~is_nan] = np.angle(np.exp(1j * orientation[~is_nan]))
+            orientation = np.angle(np.exp(1j * orientation))
         final_df = pd.DataFrame(
             orientation, columns=["orientation"], index=pos_df.index
         )
@@ -214,3 +224,29 @@ _key_to_func_dict = {
     "red_green_orientation": two_pt_head_orientation,
     "red_led_bisector": red_led_bisector_orientation,
 }
+
+
+def interp_orientation(orientation, spans_to_interp, **kwargs):
+    idx = pd.IndexSlice
+    for ind, (span_start, span_stop) in enumerate(spans_to_interp):
+        if (span_stop + 1) >= len(orientation):
+            orientation.loc[idx[span_start:span_stop], idx["orientation"]] = np.nan
+            print(f"ind: {ind} has no endpoint with which to interpolate")
+            continue
+        if span_start < 1:
+            orientation.loc[idx[span_start:span_stop], idx["orientation"]] = np.nan
+            print(f"ind: {ind} has no startpoint with which to interpolate")
+            continue
+        orient = [
+            orientation["orientation"].iloc[span_start - 1],
+            orientation["orientation"].iloc[span_stop + 1],
+        ]
+        start_time = orientation.index[span_start]
+        stop_time = orientation.index[span_stop]
+        orientnew = np.interp(
+            x=orientation.index[span_start : span_stop + 1],
+            xp=[start_time, stop_time],
+            fp=[orient[0], orient[-1]],
+        )
+        orientation.loc[idx[start_time:stop_time], idx["orientation"]] = orientnew
+    return orientation
