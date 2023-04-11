@@ -1,25 +1,23 @@
 from pathlib import Path
+
+import cv2
+import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import datajoint as dj
-from tqdm import tqdm as tqdm
 import pynwb
-import cv2
-from ...utils.dj_helper_fn import fetch_nwb
-from ...common.common_nwbfile import AnalysisNwbfile
+from tqdm import tqdm as tqdm
+
 from ...common.common_behav import RawPosition, VideoFile
 from ...common.common_interval import IntervalList
-from .position_dlc_pose_estimation import (
-    DLCPoseEstimationSelection,
-    DLCPoseEstimation,
-)
-
+from ...common.common_nwbfile import AnalysisNwbfile
+from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import get_video_path, make_video
 from .position_dlc_centroid import DLCCentroid
-from .position_dlc_orient import DLCOrientation
-from .position_dlc_position import DLCSmoothInterp, DLCSmoothInterpParams
 from .position_dlc_cohort import DLCSmoothInterpCohort
+from .position_dlc_orient import DLCOrientation
+from .position_dlc_pose_estimation import DLCPoseEstimation, DLCPoseEstimationSelection
+from .position_dlc_position import DLCSmoothInterp, DLCSmoothInterpParams
 
 schema = dj.schema("position_dlc_selection")
 

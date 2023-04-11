@@ -1,21 +1,22 @@
 # Convenience functions
 # some DLC-utils copied from datajoint element-interface utils.py
-from itertools import groupby
-from operator import itemgetter
-import pathlib
-import os
-import pwd
 import grp
+import logging
+import os
+import pathlib
+import pwd
 import subprocess
 from collections import abc
-from typing import Union
 from contextlib import redirect_stdout
-import logging
+from itertools import groupby
+from operator import itemgetter
+from typing import Union
+
+import cv2
+import datajoint as dj
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import datajoint as dj
-import cv2
 from tqdm import tqdm as tqdm
 
 
@@ -315,8 +316,9 @@ def get_video_path(key):
     video_filename : str
         filename of the video
     """
-    from ...common.common_behav import VideoFile
     import pynwb
+
+    from ...common.common_behav import VideoFile
 
     video_info = (
         VideoFile() & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}

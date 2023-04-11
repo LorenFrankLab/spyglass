@@ -1,18 +1,19 @@
-import stat
-import glob
-import shutil
-import os
-from itertools import combinations
-from typing import List, Dict, Union
-from pathlib import Path, PosixPath
 import getpass
-import ruamel.yaml
+import glob
+import os
+import shutil
+import stat
+from itertools import combinations
+from pathlib import Path, PosixPath
+from typing import Dict, List, Union
+
+import datajoint as dj
 import numpy as np
 import pandas as pd
-import datajoint as dj
-from ...common.common_lab import LabTeam
-from .dlc_utils import check_videofile, _set_permissions, get_video_path
+import ruamel.yaml
 
+from ...common.common_lab import LabTeam
+from .dlc_utils import _set_permissions, check_videofile, get_video_path
 
 schema = dj.schema("position_dlc_project")
 

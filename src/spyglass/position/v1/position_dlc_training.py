@@ -1,8 +1,10 @@
 import getpass
-from pathlib import Path
 import inspect
 import os
+from pathlib import Path
+
 import datajoint as dj
+
 from .dlc_utils import OutputLogger
 from .position_dlc_project import DLCProject
 
@@ -75,7 +77,7 @@ class DLCModelTrainingParams(dj.Lookup):
 
     @classmethod
     def get_accepted_params(cls):
-        from deeplabcut import train_network, create_training_dataset
+        from deeplabcut import create_training_dataset, train_network
 
         return list(
             set(
@@ -124,9 +126,10 @@ class DLCModelTraining(dj.Computed):
     def make(self, key):
         """Launch training for each entry in DLCModelTrainingSelection via `.populate()`."""
         model_prefix = (DLCModelTrainingSelection & key).fetch1("model_prefix")
-        from deeplabcut import train_network, create_training_dataset
-        from . import dlc_reader
+        from deeplabcut import create_training_dataset, train_network
         from deeplabcut.utils.auxiliaryfunctions import read_config
+
+        from . import dlc_reader
 
         try:
             from deeplabcut.utils.auxiliaryfunctions import get_model_folder

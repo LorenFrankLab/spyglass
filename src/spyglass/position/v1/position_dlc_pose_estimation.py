@@ -1,18 +1,20 @@
-from pathlib import Path
 import os
 from datetime import datetime
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
+from pathlib import Path
+
 import cv2
 import datajoint as dj
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from IPython.display import display
-from ...utils.dj_helper_fn import fetch_nwb
-from ...common.common_behav import VideoFile, RawPosition
+
+from ...common.common_behav import RawPosition, VideoFile
 from ...common.common_nwbfile import AnalysisNwbfile
-from .position_dlc_project import BodyPart
-from .position_dlc_model import DLCModel
+from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import OutputLogger, infer_output_dir
+from .position_dlc_model import DLCModel
+from .position_dlc_project import BodyPart
 
 schema = dj.schema("position_dlc_pose_estimation")
 
@@ -86,7 +88,7 @@ class DLCPoseEstimationSelection(dj.Manual):
             videotype, gputouse, save_as_csv, batchsize, cropping, TFGPUinference,
             dynamic, robust_nframes, allow_growth, use_shelve
         """
-        from .dlc_utils import get_video_path, check_videofile
+        from .dlc_utils import check_videofile, get_video_path
 
         video_path, video_filename, _, _ = get_video_path(key)
         output_dir = infer_output_dir(key)
