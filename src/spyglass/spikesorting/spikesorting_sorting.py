@@ -190,8 +190,10 @@ class SpikeSorting(dj.Computed):
         sorter_params["tempdir"] = sorter_temp_dir.name
         # whiten recording; make sure dtype is float16
         recording = sip.whiten(recording, dtype="float16")
-        if sorter_params['whiten'] == True:
-            print("Warning: the recording is whitened prior to sorting but the sorter param includes whitening")
+        if sorter_params["whiten"] == True:
+            print(
+                "Warning: the recording is whitened prior to sorting but the sorter param includes whitening"
+            )
         if sorter == "clusterless_thresholder":
             # Detect peaks for clusterless decoding
             # need to remove tempdir
