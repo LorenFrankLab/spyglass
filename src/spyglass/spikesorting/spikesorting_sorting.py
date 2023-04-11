@@ -9,6 +9,7 @@ import datajoint as dj
 import numpy as np
 import spikeinterface as si
 import spikeinterface.sorters as sis
+import spikeinterface.preprocessing as sip
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
 from ..common.common_lab import LabMember, LabTeam
@@ -169,7 +170,7 @@ class SpikeSorting(dj.Computed):
                     )
                 )
             list_triggers = [list(np.concatenate(list_triggers))]
-            recording = si.preprocessing.remove_artifacts(
+            recording = sip.remove_artifacts(
                 recording=recording,
                 list_triggers=list_triggers,
                 ms_before=None,
@@ -187,7 +188,12 @@ class SpikeSorting(dj.Computed):
         )
         # add tempdir option for mountainsort
         sorter_params["tempdir"] = sorter_temp_dir.name
-
+        # whiten recording; make sure dtype is float16
+        recording = sip.whiten(recording, dtype="float16")
+        if sorter_params["whiten"] == True:
+            print(
+                "Warning: the recording is whitened prior to sorting but the sorter param includes whitening"
+            )
         if sorter == "clusterless_thresholder":
             # Detect peaks for clusterless decoding
             # need to remove tempdir
