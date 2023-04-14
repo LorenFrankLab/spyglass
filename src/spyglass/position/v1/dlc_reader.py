@@ -1,10 +1,11 @@
 # From datajoint elements-deeplabut readers/dlc_reader.py
 
+import pickle
 import re
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
-import pickle
 import ruamel.yaml as yaml
 
 

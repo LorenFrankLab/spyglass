@@ -1,13 +1,15 @@
-from pathlib import Path, PosixPath, PurePath
-import os
 import glob
+import os
+from pathlib import Path, PosixPath, PurePath
+
 import datajoint as dj
 import ruamel.yaml as yaml
+
 from ...common.common_lab import LabTeam
-from .position_dlc_project import BodyPart, DLCProject
-from .position_dlc_training import DLCModelTraining, DLCModelTrainingParams
-from .dlc_decorators import accepts
 from . import dlc_reader
+from .dlc_decorators import accepts
+from .position_dlc_project import BodyPart, DLCProject # noqa: F401
+from .position_dlc_training import DLCModelTraining, DLCModelTrainingParams
 
 schema = dj.schema("position_dlc_model")
 
@@ -170,6 +172,7 @@ class DLCModel(dj.Computed):
 
     def make(self, key):
         from deeplabcut.utils.auxiliaryfunctions import GetScorerName
+
         from .dlc_utils import OutputLogger
 
         _, model_name, table_source = (DLCModelSource & key).fetch1().values()
@@ -275,6 +278,7 @@ class DLCModelEvaluation(dj.Computed):
     def make(self, key):
         """.populate() method will launch evaulation for each unique entry in Model."""
         import csv
+
         from deeplabcut import evaluate_network
         from deeplabcut.utils.auxiliaryfunctions import get_evaluation_folder
 

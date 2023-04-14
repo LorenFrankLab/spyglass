@@ -1,13 +1,13 @@
-import os
 import glob
+import os
+from pathlib import Path
+
 import bottleneck
+import cv2
+import datajoint as dj
 import numpy as np
 import pandas as pd
-import datajoint as dj
 import pynwb
-import cv2
-from tqdm import tqdm as tqdm
-from pathlib import Path
 import pynwb.behavior
 from position_tools import (
     get_angle,
@@ -18,10 +18,12 @@ from position_tools import (
     interpolate_nan,
 )
 from position_tools.core import gaussian_smooth
-from ...utils.dj_helper_fn import fetch_nwb
-from ...common.common_nwbfile import AnalysisNwbfile
+from tqdm import tqdm as tqdm
+
 from ...common.common_behav import RawPosition, VideoFile
-from .dlc_utils import get_video_path, check_videofile
+from ...common.common_nwbfile import AnalysisNwbfile
+from ...utils.dj_helper_fn import fetch_nwb
+from .dlc_utils import check_videofile, get_video_path
 
 schema = dj.schema("position_trodes_position")
 
