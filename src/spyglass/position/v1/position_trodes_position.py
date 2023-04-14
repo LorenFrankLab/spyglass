@@ -1,4 +1,3 @@
-import glob
 import os
 from pathlib import Path
 
@@ -20,7 +19,7 @@ from position_tools import (
 from position_tools.core import gaussian_smooth
 from tqdm import tqdm as tqdm
 
-from ...common.common_behav import RawPosition, VideoFile
+from ...common.common_behav import RawPosition
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import check_videofile, get_video_path

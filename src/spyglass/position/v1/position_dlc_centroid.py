@@ -13,7 +13,6 @@ from .dlc_utils import (
     _key_to_smooth_func_dict,
     get_span_start_stop,
     interp_pos,
-    smooth_moving_avg,
 )
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_position import DLCSmoothInterpParams
@@ -292,7 +291,7 @@ class DLCCentroid(dj.Computed):
                 index=pos_df.index.to_numpy(),
             )
             if params["interpolate"]:
-                if np.sum(np.isnan(centroid)) > 0:
+                if np.any(np.isnan(centroid)):
                     logger.logger.info("interpolating over NaNs")
                     nan_inds = (
                         pd.isnull(centroid_df.loc[:, idx[("x", "y")]])
@@ -780,11 +779,9 @@ def two_pt_centroid(pos_df: pd.DataFrame, **params):
         ]
     # If neither point is not NaN
     all_bad_mask = np.logical_and(pt1_nans, pt2_nans)
-    if np.sum(all_bad_mask) > 0:
-        centroid[all_bad_mask, :] = np.nan
+    centroid[all_bad_mask, :] = np.nan
     # If LEDs are too far apart
-    if np.sum(is_too_separated) > 0:
-        centroid[is_too_separated, :] = np.nan
+    centroid[is_too_separated, :] = np.nan
 
     return centroid
 

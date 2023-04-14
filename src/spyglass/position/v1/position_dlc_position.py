@@ -2,17 +2,14 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 
-from ...common.common_behav import RawPosition
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import (
     _key_to_smooth_func_dict,
     get_span_start_stop,
     interp_pos,
-    smooth_moving_avg,
 )
 from .position_dlc_pose_estimation import DLCPoseEstimation
-from .position_dlc_project import BodyPart
 
 schema = dj.schema("position_dlc_position")
 

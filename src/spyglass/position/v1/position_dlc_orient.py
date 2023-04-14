@@ -8,7 +8,6 @@ from ...common.common_behav import RawPosition
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
 from .position_dlc_cohort import DLCSmoothInterpCohort
-from .position_dlc_project import BodyPart
 from ...common.common_behav import RawPosition
 from .dlc_utils import get_span_start_stop
 

@@ -7,16 +7,12 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
-from ..common.common_behav import RawPosition, VideoFile
 from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.common_position import IntervalPositionInfo as CommonIntervalPositionInfo
 from ..utils.dj_helper_fn import fetch_nwb
 from .v1.dlc_utils import check_videofile, get_video_path, make_video
-from .v1.position_dlc_pose_estimation import (
-    DLCPoseEstimation,
-    DLCPoseEstimationSelection,
-)
+from .v1.position_dlc_pose_estimation import DLCPoseEstimationSelection
 from .v1.position_dlc_selection import DLCPosV1
 from .v1.position_trodes_position import TrodesPosV1
 

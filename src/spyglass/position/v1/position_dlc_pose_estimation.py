@@ -14,7 +14,6 @@ from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import OutputLogger, infer_output_dir
 from .position_dlc_model import DLCModel
-from .position_dlc_project import BodyPart
 
 schema = dj.schema("position_dlc_pose_estimation")
 
