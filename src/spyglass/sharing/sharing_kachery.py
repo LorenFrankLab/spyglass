@@ -242,6 +242,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         key["analysis_file_uri"] = kcl.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )
+        print(kcl.load_file_info(key["analysis_file_uri"]))
         self.insert1(key)
 
         # we also need to insert any linked files
@@ -270,15 +271,13 @@ class AnalysisNwbfileKachery(dj.Computed):
         ).fetch1("analysis_file_uri", "kachery_zone_name")
         if len(uri) == 0:
             return False
-
+        print("uri:", uri)
         if not kachery_download_file(
             uri=uri,
             dest=AnalysisNwbfile.get_abs_path(analysis_file_name),
             kachery_zone=kachery_zone_name,
         ):
-            raise Exception(
-                f"{AnalysisNwbfile.get_abs_path(analysis_file_name)} cannot be downloaded"
-            )
+            raise Exception(f"{analysis_file_name} cannot be downloaded")
             return False
         # now download the linked file(s)
         linked_files = (
