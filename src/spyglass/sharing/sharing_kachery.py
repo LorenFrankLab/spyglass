@@ -242,6 +242,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         key["analysis_file_uri"] = kcl.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )
+        print(AnalysisNwbfile().get_abs_path(key["analysis_file_name"]))
         print(kcl.load_file_info(key["analysis_file_uri"]))
         self.insert1(key)
 
