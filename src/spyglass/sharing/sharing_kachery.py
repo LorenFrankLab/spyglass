@@ -246,9 +246,6 @@ class AnalysisNwbfileKachery(dj.Computed):
         print(AnalysisNwbfile().get_abs_path(key["analysis_file_name"]))
         print(kcl.load_file_info(key["analysis_file_uri"]))
         self.insert1(key)
-        import time
-
-        time.sleep(10)
 
         # we also need to insert any linked files
         # TODO: change this to automatically detect all linked files
