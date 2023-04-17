@@ -12,7 +12,6 @@ from itertools import groupby
 from operator import itemgetter
 from typing import Union
 
-import cv2
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np

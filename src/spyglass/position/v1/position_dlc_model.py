@@ -5,11 +5,10 @@ from pathlib import Path, PosixPath, PurePath
 import datajoint as dj
 import ruamel.yaml as yaml
 
-from ...common.common_lab import LabTeam
 from . import dlc_reader
 from .dlc_decorators import accepts
 from .position_dlc_project import BodyPart, DLCProject  # noqa: F401
-from .position_dlc_training import DLCModelTraining
+from .position_dlc_training import DLCModelTraining  # noqa: F401
 
 schema = dj.schema("position_dlc_model")
 
