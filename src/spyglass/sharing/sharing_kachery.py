@@ -244,7 +244,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         )
         print(os.environ[kachery_zone_envar], os.environ[kachery_cloud_dir_envar])
         print(AnalysisNwbfile().get_abs_path(key["analysis_file_name"]))
-        print(kcl.load_file_info(key["analysis_file_uri"]))
+        print(kcl.load_file(key["analysis_file_uri"]))
         self.insert1(key)
 
         # we also need to insert any linked files
