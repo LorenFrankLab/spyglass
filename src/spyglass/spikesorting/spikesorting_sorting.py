@@ -8,8 +8,8 @@ from pathlib import Path
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
-import spikeinterface.sorters as sis
 import spikeinterface.preprocessing as sip
+import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
 from ..common.common_lab import LabMember, LabTeam
@@ -195,9 +195,11 @@ class SpikeSorting(dj.Computed):
                 "Warning: the recording is whitened prior to sorting but the sorter param includes whitening"
             )
         if sorter == "clusterless_thresholder":
-            # Detect peaks for clusterless decoding
-            # need to remove tempdir
+            # need to remove tempdir and whiten from sorter_params
             sorter_params.pop("tempdir", None)
+            sorter_params.pop("whiten", None)
+
+            # Detect peaks for clusterless decoding
             detected_spikes = detect_peaks(recording, **sorter_params)
             sorting = si.NumpySorting.from_times_labels(
                 times_list=detected_spikes["sample_ind"],
