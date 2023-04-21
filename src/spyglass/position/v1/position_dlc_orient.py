@@ -11,7 +11,7 @@ from .position_dlc_cohort import DLCSmoothInterpCohort
 from ...common.common_behav import RawPosition
 from .dlc_utils import get_span_start_stop
 
-schema = dj.schema("position_dlc_orient")
+schema = dj.schema("position_v1_dlc_orient")
 
 
 @schema
@@ -229,6 +229,7 @@ _key_to_func_dict = {
 
 def interp_orientation(orientation, spans_to_interp, **kwargs):
     idx = pd.IndexSlice
+    # TODO: add parameters to refine interpolation
     for ind, (span_start, span_stop) in enumerate(spans_to_interp):
         if (span_stop + 1) >= len(orientation):
             orientation.loc[idx[span_start:span_stop], idx["orientation"]] = np.nan

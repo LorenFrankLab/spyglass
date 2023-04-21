@@ -1,21 +1,20 @@
-import getpass
-import glob
-import os
-import shutil
 import stat
+import glob
+import shutil
+import os
 from itertools import combinations
+from typing import List, Dict, Union
 from pathlib import Path, PosixPath
-from typing import Dict, List, Union
-
-import datajoint as dj
+import getpass
+import ruamel.yaml
 import numpy as np
 import pandas as pd
-import ruamel.yaml
-
+import datajoint as dj
 from ...common.common_lab import LabTeam
-from .dlc_utils import _set_permissions, check_videofile, get_video_path
+from .dlc_utils import check_videofile, _set_permissions, get_video_path
 
-schema = dj.schema("position_dlc_project")
+
+schema = dj.schema("position_v1_dlc_project")
 
 
 @schema
@@ -90,10 +89,6 @@ class DLCProject(dj.Manual):
 
     def insert1(self, key, **kwargs):
         assert isinstance(key["project_name"], str), "project_name must be a string"
-        project_names_in_use = np.unique(self.fetch("project_name"))
-        assert (
-            key["project_name"] not in project_names_in_use
-        ), f"project name: {key['project_name']} is already in use."
         assert isinstance(
             key["frames_per_video"], int
         ), "frames_per_video must be of type `int`"
@@ -124,7 +119,16 @@ class DLCProject(dj.Manual):
             optional list of bodyparts to label that
             are not already in existing config
         """
+
         # Read config
+        project_names_in_use = np.unique(cls.fetch("project_name"))
+        if project_name in project_names_in_use:
+            print(f"project name: {project_name} is already in use.")
+            return_key = {}
+            return_key["project_name"], return_key["config_path"] = (
+                cls & {"project_name": project_name}
+            ).fetch1("project_name", "config_path")
+            return return_key
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
         cfg = read_config(config_path)
@@ -172,15 +176,18 @@ class DLCProject(dj.Manual):
             "config_path": config_path.as_posix(),
             "frames_per_video": frames_per_video,
         }
-        cls.insert1(key, skip_duplicates=True)
-        cls.BodyPart.insert((project_name, bp) for bp in all_bodyparts)
+        cls.insert1(key, **kwargs)
+        cls.BodyPart.insert(
+            [{"project_name": project_name, "bodypart": bp} for bp in all_bodyparts],
+            **kwargs,
+        )
         if add_to_files:
             del key["bodyparts"]
             del key["team_name"]
             del key["config_path"]
             del key["frames_per_video"]
             # Check for training files to add
-            cls.add_training_files(key)
+            cls.add_training_files(key, **kwargs)
         return {"project_name": project_name, "config_path": config_path.as_posix()}
 
     @classmethod
@@ -222,6 +229,15 @@ class DLCProject(dj.Manual):
             if True, will set permissions for user and group to be read+write
             (Default is False)
         """
+        project_names_in_use = np.unique(cls.fetch("project_name"))
+        if project_name in project_names_in_use:
+            print(f"project name: {project_name} is already in use.")
+            return_key = {}
+            return_key["project_name"], return_key["config_path"] = (
+                cls & {"project_name": project_name}
+            ).fetch1("project_name", "config_path")
+            return return_key
+
         add_to_files = kwargs.pop("add_to_files", True)
         if not bool(LabTeam() & {"team_name": lab_team}):
             raise ValueError(f"team_name: {lab_team} does not exist in LabTeam")
@@ -296,28 +312,32 @@ class DLCProject(dj.Manual):
                 username=username,
                 groupname=groupname,
             )
-        cls.insert1(key)
-        cls.BodyPart.insert((project_name, bp) for bp in bodyparts)
+        cls.insert1(key, **kwargs)
+        cls.BodyPart.insert(
+            [{"project_name": project_name, "bodypart": bp} for bp in bodyparts],
+            **kwargs,
+        )
         if add_to_files:
             del key["bodyparts"]
             del key["team_name"]
             del key["config_path"]
             del key["frames_per_video"]
             # Add videos to training files
-            cls.add_training_files(key)
+            cls.add_training_files(key, **kwargs)
         if isinstance(config_path, PosixPath):
             config_path = config_path.as_posix()
         return {"project_name": project_name, "config_path": config_path}
 
     @classmethod
-    def add_training_files(cls, key):
+    def add_training_files(cls, key, **kwargs):
         """Add training videos and labeled frames .h5 and .csv to DLCProject.File"""
         config_path = (cls & {"project_name": key["project_name"]}).fetch1(
             "config_path"
         )
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
-        del key["config_path"]
+        if "config_path" in key:
+            del key["config_path"]
         cfg = read_config(config_path)
         video_names = list(cfg["video_sets"].keys())
         training_files = []
@@ -334,7 +354,7 @@ class DLCProject(dj.Manual):
             key["file_name"] = f'{os.path.splitext(video.split("/")[-1])[0]}'
             key["file_ext"] = os.path.splitext(video.split("/")[-1])[-1].split(".")[-1]
             key["file_path"] = video
-            cls.File.insert1(key, skip_duplicates=True)
+            cls.File.insert1(key, **kwargs)
         if len(training_files) > 0:
             for file in training_files:
                 video_name = os.path.dirname(file).split("/")[-1]
@@ -344,7 +364,7 @@ class DLCProject(dj.Manual):
                 key["file_name"] = f"{video_name}_labeled_data"
                 key["file_ext"] = file_type
                 key["file_path"] = file
-                cls.File.insert1(key, skip_duplicates=True)
+                cls.File.insert1(key, **kwargs)
         else:
             Warning("No training files to add")
 
@@ -386,6 +406,7 @@ class DLCProject(dj.Manual):
         key: Dict,
         import_project_path: Union[str, PosixPath],
         video_filenames: Union[str, List],
+        **kwargs,
     ):
         """Function to import pre-labeled frames from an existing project into a new project
 
@@ -434,7 +455,7 @@ class DLCProject(dj.Manual):
                 ).as_posix(),
                 "df_with_missing",
             )
-        cls.add_training_files(key)
+        cls.add_training_files(key, **kwargs)
 
 
 def add_to_config(config, bodyparts: List = None, skeleton_node: str = None, **kwargs):

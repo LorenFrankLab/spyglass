@@ -15,7 +15,7 @@ from .position_dlc_orient import DLCOrientation
 from .position_dlc_pose_estimation import DLCPoseEstimation, DLCPoseEstimationSelection
 from .position_dlc_position import DLCSmoothInterpParams
 
-schema = dj.schema("position_dlc_selection")
+schema = dj.schema("position_v1_dlc_selection")
 
 
 @schema

@@ -24,7 +24,7 @@ from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import check_videofile, get_video_path
 
-schema = dj.schema("position_trodes_position")
+schema = dj.schema("position_v1_trodes_position")
 
 
 @schema

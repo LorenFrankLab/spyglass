@@ -8,7 +8,7 @@ import datajoint as dj
 from .dlc_utils import OutputLogger
 from .position_dlc_project import DLCProject
 
-schema = dj.schema("position_dlc_training")
+schema = dj.schema("position_v1_dlc_training")
 
 
 @schema

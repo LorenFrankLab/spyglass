@@ -11,7 +11,7 @@ from .dlc_utils import (
 )
 from .position_dlc_pose_estimation import DLCPoseEstimation
 
-schema = dj.schema("position_dlc_position")
+schema = dj.schema("position_v1_dlc_position")
 
 
 @schema
@@ -89,6 +89,16 @@ class DLCSmoothInterpParams(dj.Manual):
         else:
             default = query.fetch1()
         return default
+
+    @classmethod
+    def get_nan_params(cls):
+        query = cls & {"dlc_si_params_name": "just_nan"}
+        if not len(query) > 0:
+            cls().insert_nan_params(skip_duplicates=True)
+            nan_params = (cls & {"dlc_si_params_name": "just_nan"}).fetch1()
+        else:
+            nan_params = query.fetch1()
+        return nan_params
 
     @staticmethod
     def get_available_methods():

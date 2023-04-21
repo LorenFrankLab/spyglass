@@ -11,7 +11,7 @@ from .dlc_decorators import accepts
 from .position_dlc_project import BodyPart, DLCProject  # noqa: F401
 from .position_dlc_training import DLCModelTraining
 
-schema = dj.schema("position_dlc_model")
+schema = dj.schema("position_v1_dlc_model")
 
 
 @schema

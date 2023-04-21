@@ -17,7 +17,7 @@ from .dlc_utils import (
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_position import DLCSmoothInterpParams
 
-schema = dj.schema("position_dlc_centroid")
+schema = dj.schema("position_v1_dlc_centroid")
 
 
 @schema
