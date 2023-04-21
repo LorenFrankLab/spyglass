@@ -188,12 +188,7 @@ class SpikeSorting(dj.Computed):
         )
         # add tempdir option for mountainsort
         sorter_params["tempdir"] = sorter_temp_dir.name
-        # whiten recording; make sure dtype is float16
-        recording = sip.whiten(recording, dtype="float16")
-        if sorter_params["whiten"] == True:
-            print(
-                "Warning: the recording is whitened prior to sorting but the sorter param includes whitening"
-            )
+
         if sorter == "clusterless_thresholder":
             # need to remove tempdir and whiten from sorter_params
             sorter_params.pop("tempdir", None)
@@ -207,6 +202,12 @@ class SpikeSorting(dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
         else:
+            # whiten recording; make sure dtype is float16
+            recording = sip.whiten(recording, dtype="float16")
+            if sorter_params["whiten"] == True:
+                print(
+                    "Warning: the recording is whitened prior to sorting but the sorter param includes whitening"
+                )
             sorting = sis.run_sorter(
                 sorter,
                 recording,
