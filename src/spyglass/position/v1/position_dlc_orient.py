@@ -7,9 +7,8 @@ from position_tools.core import gaussian_smooth
 from ...common.common_behav import RawPosition
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
-from .position_dlc_cohort import DLCSmoothInterpCohort
-from ...common.common_behav import RawPosition
 from .dlc_utils import get_span_start_stop
+from .position_dlc_cohort import DLCSmoothInterpCohort
 
 schema = dj.schema("position_v1_dlc_orient")
 

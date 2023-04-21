@@ -1,4 +1,3 @@
-import getpass
 import inspect
 import os
 from pathlib import Path

@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-from pathlib import Path
 
 import cv2
 import datajoint as dj
@@ -9,7 +8,7 @@ import numpy as np
 import pandas as pd
 from IPython.display import display
 
-from ...common.common_behav import RawPosition, VideoFile
+from ...common.common_behav import RawPosition, VideoFile  # noqa: F401
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import OutputLogger, infer_output_dir
