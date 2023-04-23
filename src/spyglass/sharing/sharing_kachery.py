@@ -26,9 +26,9 @@ except KeyError:
 schema = dj.schema("sharing_kachery")
 
 
-def kachery_download_file(uri: str, dest: str, kachery_zone: str) -> str:
+def kachery_download_file(uri: str, dest: str, kachery_zone_name: str) -> str:
     """set the kachery resource url and attempt to down load the uri into the destination path"""
-    KacheryZone.set_resource_url({"kachery_zone": kachery_zone})
+    KacheryZone.set_resource_url({"kachery_zone_name": kachery_zone_name})
     return kcl.load_file(uri, dest=dest)
 
 
@@ -173,7 +173,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         if not kachery_download_file(
             uri=uri,
             dest=AnalysisNwbfile.get_abs_path(analysis_file_name),
-            kachery_zone=kachery_zone_name,
+            kachery_zone_name=kachery_zone_name,
         ):
             raise Exception(f"{analysis_file_name} cannot be downloaded")
         # now download the linked file(s)
@@ -187,7 +187,9 @@ class AnalysisNwbfileKachery(dj.Computed):
             linked_file_path = (
                 os.environ["SPYGLASS_BASE_DIR"] + file["linked_file_rel_path"]
             )
-            if not kachery_download_file(uri=uri, dest=linked_file_path):
+            if not kachery_download_file(
+                uri=uri, dest=linked_file_path, kachery_zone_name=kachery_zone_name
+            ):
                 raise Exception(f"Linked file {linked_file_path} cannot be downloaded")
 
         return True
