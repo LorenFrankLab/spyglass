@@ -18,7 +18,7 @@ try:
     default_kachery_zone = os.environ[kachery_zone_envar]
     default_kachery_cloud_dir = os.environ[kachery_cloud_dir_envar]
     default_kachery_resource_url = os.environ[kachery_resource_url_envar]
-except:
+except KeyError:
     default_kachery_zone = None
     default_kachery_cloud_dir = None
     default_kachery_resource_url = None
@@ -161,8 +161,8 @@ class AnalysisNwbfileKachery(dj.Computed):
 
         Returns
         ----------
-        bool
-            True if the file was successfully downloaded, false otherwise
+        is_success : bool
+            True if the file was successfully downloaded, False otherwise
         """
         uri, kachery_zone_name = (
             AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}
