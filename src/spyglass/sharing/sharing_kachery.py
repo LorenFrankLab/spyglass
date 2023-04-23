@@ -4,7 +4,7 @@ import os
 import datajoint as dj
 import kachery_cloud as kcl
 
-from ..common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from ..common.common_nwbfile import AnalysisNwbfile
 from ..common.common_lab import Lab
 
 # define the environment variable name for the kachery zone and the cloud directory
