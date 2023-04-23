@@ -26,8 +26,8 @@ except:
 schema = dj.schema("sharing_kachery")
 
 
-def kachery_download_file(uri: str, dest: str, kachery_zone: str):
-    # set the kachery resource url and attempt to down load the uri into the destination path
+def kachery_download_file(uri: str, dest: str, kachery_zone: str) -> str:
+    """set the kachery resource url and attempt to down load the uri into the destination path"""
     KacheryZone.set_resource_url({"kachery_zone": kachery_zone})
     return kcl.load_file(uri, dest=dest)
 
@@ -76,7 +76,7 @@ class KacheryZone(dj.Manual):
 
     @staticmethod
     def set_resource_url(key: dict):
-        """sets the KACHERY_RESOURCE_URL based on the key corresponding to a single Kachery Zone
+        """Sets the KACHERY_RESOURCE_URL based on the key corresponding to a single Kachery Zone
 
         Parameters
         ----------
@@ -91,7 +91,6 @@ class KacheryZone(dj.Manual):
             raise Exception(
                 f"{key} does not correspond to a single entry in KacheryZone."
             )
-            return None
         # set the new zone and cloud directory
         os.environ[kachery_zone_envar] = kachery_zone_name
         os.environ[kachery_resource_url_envar] = (
@@ -131,7 +130,8 @@ class AnalysisNwbfileKachery(dj.Computed):
 
     def make(self, key):
         # note that we're assuming that the user has initialized a kachery-cloud client with kachery-cloud-init
-        linked_key = copy.deepcopy(key)
+        # uncomment the line below once we are sharing linked files as well.
+        # linked_key = copy.deepcopy(key)
         print(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
         # set the kachery zone
         KacheryZone.set_zone(key)
@@ -151,7 +151,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         KacheryZone.reset_zone()
 
     @staticmethod
-    def download_file(analysis_file_name: str):
+    def download_file(analysis_file_name: str) -> bool:
         """Download the specified analysis file and associated linked files from kachery-cloud if possible
 
         Parameters
@@ -176,7 +176,6 @@ class AnalysisNwbfileKachery(dj.Computed):
             kachery_zone=kachery_zone_name,
         ):
             raise Exception(f"{analysis_file_name} cannot be downloaded")
-            return False
         # now download the linked file(s)
         linked_files = (
             AnalysisNwbfileKachery.LinkedFile
@@ -190,6 +189,5 @@ class AnalysisNwbfileKachery(dj.Computed):
             )
             if not kachery_download_file(uri=uri, dest=linked_file_path):
                 raise Exception(f"Linked file {linked_file_path} cannot be downloaded")
-                return False
 
         return True
