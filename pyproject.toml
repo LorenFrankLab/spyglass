@@ -45,6 +45,7 @@ dependencies = [
     "seaborn",
     "skan",
     "bottleneck",
+    "numpy<1.24",
     "ipympl",
     "tqdm",
     "pubnub<6.4.0",
