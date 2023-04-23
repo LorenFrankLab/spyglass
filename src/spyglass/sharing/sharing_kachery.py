@@ -161,8 +161,8 @@ class AnalysisNwbfileKachery(dj.Computed):
 
         Returns
         ----------
-        bool
-            True if the file was successfully downloaded, false otherwise
+        is_success : bool
+            True if the file was successfully downloaded, False otherwise
         """
         uri, kachery_zone_name = (
             AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}
