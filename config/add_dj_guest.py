@@ -21,7 +21,7 @@ def add_user(user_name):
     )
     file.flush()
 
-    # run those commands in sql
+    # run that commands in sql
     os.system(f"mysql -p -h lmf-db.cin.ucsf.edu < {file.name}")
 
 
