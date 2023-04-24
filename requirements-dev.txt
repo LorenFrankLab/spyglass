@@ -1,2 +1,5 @@
 pytest
 pytest-cov
+kachery
+kachery-client
+kachery-cloud

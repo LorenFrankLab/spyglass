@@ -1,15 +1,23 @@
-kyu/
-environment2.yml
-devel/data
-*-Copy*.ipynb
-Untitled.ipynb
 rec_to_nwb
 spyglass.code-workspace
 mountainsort4_output/
 .idea/
-.vscode/
-README_old.md
 mysql_config
+
+# Notebooks
+*.ipynb
+
+!notebooks/0_intro.ipynb
+!notebooks/1_spikesorting.ipynb
+!notebooks/2_curation_ipynb
+!notebooks/3_lfp.ipynb
+!notebooks/4_position_info.ipynb
+!notebooks/5_linearization.ipynb
+!notebooks/6_Extract_Mark_indicators.ipynb
+!notebooks/7_Decoding_with_GPUs_on_the_GPU_cluster.ipynb
+!notebooks/8_1D_Clusterless_Decoding.ipynb
+!notebooks/9_2D_Clusterless_Decoding.ipynb
+!notebooks/12_Ripple_Detection.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -149,10 +157,17 @@ dmypy.json
 *.nwb
 *.DS_Store
 
-temp_nwb/*
-
-notebooks/mountainsort4_output/
-notebooks/mark_extraction_test.ipynb
+temp_nwb/*s
 
 *.mp4
 dj_local_conf.json
+*.png
+*.npy
+*.nc
+*.csv
+*.pkl
+*.json
+*.gz
+
+!/.vscode/extensions.json
+!/.vscode/settings.json
