@@ -16,7 +16,9 @@ def add_user(user_name):
     # create a tempoary file for the command
     file = tempfile.NamedTemporaryFile(mode="w")
 
-    file.write(f"GRANT SELECT ON `%`.* TO `{user_name}`@'%';\n")
+    file.write(
+        f"GRANT SELECT ON `%`.* TO `{user_name}`@'%' IDENTIFIED BY 'Data_$haring';\n"
+    )
     file.flush()
 
     # run those commands in sql
