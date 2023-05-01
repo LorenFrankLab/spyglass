@@ -203,9 +203,9 @@ class SpikeSorting(dj.Computed):
             )
         else:
             # whiten recording here if indicated, so can make sure dtype is float16
-            whiten = sorter_params.pop("whiten")  # remove whiten from params so not used by sorter
-            if whiten:
+            if sorter_params["whiten"]:
                 recording = sip.whiten(recording, dtype="float16")
+                sorter_params["whiten"] = False  # set whiten to False
             sorting = sis.run_sorter(
                 sorter,
                 recording,
