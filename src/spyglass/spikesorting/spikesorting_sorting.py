@@ -202,12 +202,10 @@ class SpikeSorting(dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
         else:
-            # whiten recording; make sure dtype is float16
-            recording = sip.whiten(recording, dtype="float16")
-            if sorter_params["whiten"] == True:
-                print(
-                    "Warning: the recording is whitened prior to sorting but the sorter param includes whitening"
-                )
+            # whiten recording here if indicated, so can make sure dtype is float16
+            whiten = sorter_params.pop("whiten")  # remove whiten from params so not used by sorter
+            if whiten:
+                recording = sip.whiten(recording, dtype="float16")
             sorting = sis.run_sorter(
                 sorter,
                 recording,
