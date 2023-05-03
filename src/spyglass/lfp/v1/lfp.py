@@ -20,59 +20,139 @@ from spyglass.utils.nwb_helper_fn import get_electrode_indices
 schema = dj.schema("lfp_v1")
 
 @schema
-class LFPInterval(dj.Manual):
+class LFPSelection(dj.Manual):
     definition = """
-    -> Session
-    lfp_interval_name: varchar(200)
-    ---
-    lfp_interval: longblob # numpy array of [start time, end_time]
-    """
+     -> IntervalList
+     -> ElectrodeGroup
+     -> FirFilter
+     """
 
 @schema
-class LFPGroup(dj.Manual):
+class LFP(dj.Imported):
     definition = """
-    # Set of electrodes to filter for LFP
-    -> Session
-    lfp_group_name: varchar(200)
+    -> LFPSelection
     ---
-    sort_reference_electrode_id = -1: int  # the electrode to use for reference. -1: no reference, -2: common median
+    -> AnalysisNwbfile          # the name of the nwb file with the lfp data
+    lfp_object_id: varchar(40)  # the NWB object ID for loading this object from the file
+    lfp_sampling_rate: float    # the sampling rate, in HZ
     """
 
-    class LFPElectrode(dj.Part):
-        definition = """
-        -> LFPGroup
-        -> Electrode
-        """
-        
-    @classmethod
-    def set_lfp_electrodes(nwb_file_name, electrode_list):
-        """Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
+    def make(self, key):
+        # get the NWB object with the data; FIX: change to fetch with additional infrastructure
+        rawdata = Raw.nwb_object(key)
+        sampling_rate, interval_list_name = (Raw & key).fetch1(
+            "sampling_rate", "interval_list_name"
+        )
+        sampling_rate = int(np.round(sampling_rate))
 
-        Parameters
-        ----------
-        nwb_file_name : str
-            The name of the nwb file for the desired session
-        electrode_list : list
-            list of electrodes to be used for LFP
+        valid_times = (
+            IntervalList()
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": interval_list_name,
+            }
+        ).fetch1("valid_times")
+        # keep only the intervals > 1 second long
+        min_interval_length = 1.0
+        valid = []
+        for count, interval in enumerate(valid_times):
+            if interval[1] - interval[0] > min_interval_length:
+                valid.append(count)
+        valid_times = valid_times[valid]
+        print(
+            f"LFP: found {len(valid)} of {count+1} intervals > {min_interval_length} sec long."
+        )
 
-        """
-        # remove the session and then recreate the session and Electrode list
-        # (LFPSelection() & {"nwb_file_name": nwb_file_name}).delete()
-        # check to see if the user allowed the deletion
-        if len((LFPGroup & {"nwb_file_name": nwb_file_name}).fetch()) == 0:
-            LFPGroup.insert1({"nwb_file_name": nwb_file_name})
+        # target 1 KHz sampling rate
+        decimation = sampling_rate // 1000
 
-            # TODO: do this in a better way
-            all_electrodes = (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
-                as_dict=True
+        # get the LFP filter that matches the raw data
+        filter = (
+            FirFilter()
+            & {"filter_name": "LFP 0-400 Hz"}
+            & {"filter_sampling_rate": sampling_rate}
+        ).fetch(as_dict=True)
+
+        # there should only be one filter that matches, so we take the first of the dictionaries
+        key["filter_name"] = filter[0]["filter_name"]
+        key["filter_sampling_rate"] = filter[0]["filter_sampling_rate"]
+
+        filter_coeff = filter[0]["filter_coeff"]
+        if len(filter_coeff) == 0:
+            print(
+                f"Error in LFP: no filter found with data sampling rate of {sampling_rate}"
             )
-            primary_key = Electrode.primary_key
-            for e in all_electrodes:
-                # create a dictionary so we can insert new elects
-                if e["electrode_id"] in electrode_list:
-                    lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
-                    LFPGroup.LFPElectrode.insert1(lfpelectdict, replace=True)
+            return None
+        # get the list of selected LFP Channels from LFPElectrode
+        electrode_keys = (LFPSelection.LFPElectrode & key).fetch("KEY")
+        electrode_id_list = list(k["electrode_id"] for k in electrode_keys)
+        electrode_id_list.sort()
 
+        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+
+        lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
+        lfp_object_id, timestamp_interval = FirFilter().filter_data_nwb(
+            lfp_file_abspath,
+            rawdata,
+            filter_coeff,
+            valid_times,
+            electrode_id_list,
+            decimation,
+        )
+
+        # now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table
+        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
+
+        key["analysis_file_name"] = lfp_file_name
+        key["lfp_object_id"] = lfp_object_id
+        key["lfp_sampling_rate"] = sampling_rate // decimation
+
+        # finally, we need to censor the valid times to account for the downsampling
+        lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
+        # add an interval list for the LFP valid times, skipping duplicates
+        key["interval_list_name"] = "lfp valid times"
+        IntervalList.insert1(
+            {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["interval_list_name"],
+                "valid_times": lfp_valid_times,
+            },
+            replace=True,
+        )
+        self.insert1(key)
+
+    def nwb_object(self, key):
+        # return the NWB object in the raw NWB file
+        lfp_file_name = (LFP() & {"nwb_file_name": key["nwb_file_name"]}).fetch1(
+            "analysis_file_name"
+        )
+        lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
+        lfp_nwbf = get_nwb_file(lfp_file_abspath)
+        # get the object id
+        nwb_object_id = (self & {"analysis_file_name": lfp_file_name}).fetch1(
+            "lfp_object_id"
+        )
+        return lfp_nwbf.objects[nwb_object_id]
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        return fetch_nwb(
+            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+        )
+
+    def fetch1_dataframe(self, *attrs, **kwargs):
+        nwb_lfp = self.fetch_nwb()[0]
+        return pd.DataFrame(
+            nwb_lfp["lfp"].data, index=pd.Index(nwb_lfp["lfp"].timestamps, name="time")
+        )
+
+@schema
+class ImportedLFP(dj.Imported):
+    definition = """
+    -> Session
+    lfp_object_id: varchar(40)      # the NWB object ID for loading this object from the file
+    ---
+    sampling_rate: float
+    """
 @schema
 class LFPOutput(dj.Manual):
     definition = """
@@ -92,19 +172,7 @@ class LFPBandSelection(dj.Manual):
     definition = """
     -> LFPOutput
     -> FirFilter                   # the filter to use for the data
-    -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
-    lfp_band_sampling_rate: int    # the sampling rate for this band
-    ---
-    min_interval_len = 1: float  # the minimum length of a valid interval to filter
     """
-    
-    # class LFPBandElectrode(dj.Part):
-    #     definition = """
-    #     -> LFPBandSelection
-    #     -> LFPSelection.LFPElectrode  # the LFP electrode to be filtered
-    #     reference_elect_id = -1: int  # the reference electrode to use; -1 for no reference
-    #     ---
-    #     """
     
     @classmethod
     def set_lfp_band_electrodes(
