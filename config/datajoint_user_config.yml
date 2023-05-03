@@ -1,0 +1,14 @@
+database.host: lmf-db.cin.ucsf.edu
+database.port: 3306
+database.use_tls: true
+enable_python_native_blobs: true
+filepath_checksum_size_limit: 1 * 1024**3 # disable checksum for files > 1 GB
+stores:
+  analysis:
+    location: /stelmo/nwb/analysis
+    protocol: file
+    stage: /stelmo/nwb/analysis
+  raw:
+    location: /stelmo/nwb/raw
+    protocol: file
+    stage: /stelmo/nwb/raw

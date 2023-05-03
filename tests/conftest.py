@@ -1,14 +1,14 @@
 # directory-specific hook implementations
-import datajoint as dj
-import pathlib
 import os
+import pathlib
 import shutil
 import sys
 import tempfile
 
-from .datajoint._config import DATAJOINT_SERVER_PORT
-from .datajoint._datajoint_server import run_datajoint_server, kill_datajoint_server
+import datajoint as dj
 
+from .datajoint._config import DATAJOINT_SERVER_PORT
+from .datajoint._datajoint_server import kill_datajoint_server, run_datajoint_server
 
 thisdir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(thisdir)
@@ -19,8 +19,13 @@ __PROCESS = None
 
 
 def pytest_addoption(parser):
-    parser.addoption('--current', action='store_true', dest="current",
-                     default=False, help="run only tests marked as current")
+    parser.addoption(
+        "--current",
+        action="store_true",
+        dest="current",
+        default=False,
+        help="run only tests marked as current",
+    )
 
 
 def pytest_configure(config):
@@ -31,11 +36,11 @@ def pytest_configure(config):
     markexpr_list = []
 
     if config.option.current:
-        markexpr_list.append('current')
+        markexpr_list.append("current")
 
     if len(markexpr_list) > 0:
-        markexpr = ' and '.join(markexpr_list)
-        setattr(config.option, 'markexpr', markexpr)
+        markexpr = " and ".join(markexpr_list)
+        setattr(config.option, "markexpr", markexpr)
 
     _set_env()
 
@@ -50,54 +55,50 @@ def pytest_configure(config):
 
 def pytest_unconfigure(config):
     if __PROCESS:
-        print('Terminating datajoint compute resource process')
+        print("Terminating datajoint compute resource process")
         __PROCESS.terminate()
         # TODO handle ResourceWarning: subprocess X is still running
         # __PROCESS.join()
 
     kill_datajoint_server()
-    shutil.rmtree(os.environ['SPYGLASS_BASE_DIR'])
+    shutil.rmtree(os.environ["SPYGLASS_BASE_DIR"])
 
 
 def _set_env():
     """Set environment variables."""
-    print('Setting datajoint and kachery environment variables.')
+    print("Setting datajoint and kachery environment variables.")
 
     spyglass_base_dir = pathlib.Path(tempfile.mkdtemp())
 
-    spike_sorting_storage_dir = spyglass_base_dir / 'spikesorting'
-    tmp_dir = spyglass_base_dir / 'tmp'
+    spike_sorting_storage_dir = spyglass_base_dir / "spikesorting"
+    tmp_dir = spyglass_base_dir / "tmp"
 
-    os.environ['SPYGLASS_BASE_DIR'] = str(spyglass_base_dir)
-    print('SPYGLASS_BASE_DIR set to', spyglass_base_dir)
-    os.environ['DJ_SUPPORT_FILEPATH_MANAGEMENT'] = 'TRUE'
-    os.environ['SPIKE_SORTING_STORAGE_DIR'] = str(spike_sorting_storage_dir)
-    os.environ['SPYGLASS_TEMP_DIR'] = str(tmp_dir)
-    os.environ['KACHERY_CLOUD_EPHEMERAL'] = 'TRUE'
+    os.environ["SPYGLASS_BASE_DIR"] = str(spyglass_base_dir)
+    print("SPYGLASS_BASE_DIR set to", spyglass_base_dir)
+    os.environ["DJ_SUPPORT_FILEPATH_MANAGEMENT"] = "TRUE"
+    os.environ["SPIKE_SORTING_STORAGE_DIR"] = str(spike_sorting_storage_dir)
+    os.environ["SPYGLASS_TEMP_DIR"] = str(tmp_dir)
+    os.environ["KACHERY_CLOUD_EPHEMERAL"] = "TRUE"
 
     os.mkdir(spike_sorting_storage_dir)
     os.mkdir(tmp_dir)
 
-    raw_dir = spyglass_base_dir / 'raw'
-    analysis_dir = spyglass_base_dir / 'analysis'
+    raw_dir = spyglass_base_dir / "raw"
+    analysis_dir = spyglass_base_dir / "analysis"
 
     os.mkdir(raw_dir)
     os.mkdir(analysis_dir)
 
-    dj.config['database.host'] = 'localhost'
-    dj.config['database.port'] = DATAJOINT_SERVER_PORT
-    dj.config['database.user'] = 'root'
-    dj.config['database.password'] = 'tutorial'
+    dj.config["database.host"] = "localhost"
+    dj.config["database.port"] = DATAJOINT_SERVER_PORT
+    dj.config["database.user"] = "root"
+    dj.config["database.password"] = "tutorial"
 
-    dj.config['stores'] = {
-        'raw': {
-            'protocol': 'file',
-            'location': str(raw_dir),
-            'stage': str(raw_dir)
+    dj.config["stores"] = {
+        "raw": {"protocol": "file", "location": str(raw_dir), "stage": str(raw_dir)},
+        "analysis": {
+            "protocol": "file",
+            "location": str(analysis_dir),
+            "stage": str(analysis_dir),
         },
-        'analysis': {
-            'protocol': 'file',
-            'location': str(analysis_dir),
-            'stage': str(analysis_dir)
-        }
     }

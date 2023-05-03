@@ -1,6 +1,8 @@
-import numpy as np
 import datajoint as dj
-schema = dj.schema('common_backup')
+import numpy as np
+
+schema = dj.schema("common_backup")
+
 
 @schema
 class SpikeSortingBackUp(dj.Manual):
@@ -13,10 +15,11 @@ class SpikeSortingBackUp(dj.Manual):
     spikesorter_parameter_set_name: varchar(500)
     ---
     sorting_id: varchar(500)
-    analysis_file_name: varchar(1000)   
+    analysis_file_name: varchar(1000)
     time_of_sort: int   # in Unix time, to the nearest second
     units_object_id: varchar(100)
     """
+
     def insert_from_backup(self, backup_file):
         """backup file lives in /common/backup_keys/
 
@@ -28,6 +31,7 @@ class SpikeSortingBackUp(dj.Manual):
         backup_keys = np.load(backup_file, allow_pickle=True)
         self.insert(backup_keys, skip_duplicates=True)
 
+
 @schema
 class CuratedSpikeSortingBackUp(dj.Manual):
     definition = """
@@ -37,9 +41,10 @@ class CuratedSpikeSortingBackUp(dj.Manual):
     filter_parameter_set_name: varchar(500)
     sorting_id: varchar(500)
     ---
-    analysis_file_name: varchar(1000)   
+    analysis_file_name: varchar(1000)
     units_object_id: varchar(100)
     """
+
     def insert_from_backup(self, backup_file):
         backup_keys = np.load(backup_file, allow_pickle=True)
         self.insert(backup_keys, skip_duplicates=True)
