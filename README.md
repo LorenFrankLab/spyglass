@@ -6,46 +6,9 @@
 
 Documentation can be found at - [https://lorenfranklab.github.io/spyglass/](https://lorenfranklab.github.io/spyglass/)
 
-### Installing from pip
+## Installation
 
-Install spyglass
-
-```bash
-pip install spyglass-neuro
-```
-
-Some functions may take advantage of the latest changes to spike interface, which currently has a slow release cycle. To get the latest changes:
-
-```bash
-pip install git+https://github.com/SpikeInterface/spikeinterface.git
-```
-
-The Frank Lab typically uses mountainsort, although spyglass uses spikeinterface, which allows for any spike sorter. To install mountainsort:
-
-```bash
-pip install mountainsort4
-```
-
-Spyglass uses the package `ghostipy` for filtering of signals:
-
-```bash
-pip install ghostipy
-```
-
-WARNING: If you are on an M1 Mac, you need to install pyfftw via conda BEFORE installing ghostipy
-
-```bash
-conda install -c conda-forge pyfftw
-```
-
-Finally, if you want to decode on the GPU, you must install cupy:
-```bash
-conda install -c conda-forge cupy
-```
-
-## Setup
-
-See the documentation for setup instructions - [https://lorenfranklab.github.io/spyglass/type/html/installation.html](https://lorenfranklab.github.io/spyglass/type/html/installation.html)
+For installation instructions see - [https://lorenfranklab.github.io/spyglass/type/html/installation.html](https://lorenfranklab.github.io/spyglass/type/html/installation.html)
 
 ## Tutorials
 
