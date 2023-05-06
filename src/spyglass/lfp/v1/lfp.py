@@ -3,8 +3,6 @@ import numpy as np
 import pandas as pd
 import pynwb
 
-from .lfp_filter import FirFilter
-
 from spyglass.common.common_ephys import Electrode, Raw
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_interval import (
@@ -13,6 +11,7 @@ from spyglass.common.common_interval import (
     interval_list_contains_ind,
     interval_list_intersect,
 )
+from spyglass.common.common_filter import FirFilter
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
@@ -35,7 +34,8 @@ class LFPElectrodeGroup(dj.Manual):
         -> Electrode
         """
 
-    def create_lfp_electrode_group(self, nwb_file_name, group_name, electrode_list):
+    @staticmethod
+    def create_lfp_electrode_group(nwb_file_name, group_name, electrode_list):
         """Adds an LFPElectrodeGroup and the individual electrodes
 
         Parameters
@@ -61,7 +61,7 @@ class LFPElectrodeGroup(dj.Manual):
             # create a dictionary so we can insert the electrodes
             if e["electrode_id"] in electrode_list:
                 lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
-                lfpelectdict["lfp_electrode_group_name":group_name]
+                lfpelectdict["lfp_electrode_group_name"] = group_name
                 LFPElectrodeGroup().LFPElectrode.insert1(lfpelectdict)
 
 
@@ -75,7 +75,7 @@ class LFPSelection(dj.Manual):
 
 
 @schema
-class LFP(dj.Imported):
+class LFP(dj.Computed):
     definition = """
     -> LFPSelection
     ---
@@ -88,7 +88,8 @@ class LFP(dj.Imported):
         min_interval_len = 1.0  # 1 second intervals minimum
 
         # get the NWB object with the data
-        rawdata = Raw.fetch_nwb(key)[0]
+        nwb_file_name = key["nwb_file_name"]
+        rawdata = (Raw & {"nwb_file_name": nwb_file_name}).fetch_nwb()[0]
         sampling_rate, interval_list_name = (Raw & key).fetch1(
             "sampling_rate", "interval_list_name"
         )
@@ -251,7 +252,7 @@ class LFPBandSelection(dj.Manual):
     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
     lfp_band_sampling_rate: int    # the sampling rate for this band
     ---
-    min_interval_len = 1: float  # the minimum length of a valid interval to filter
+    min_interval_len = 1.0: float  # the minimum length of a valid interval to filter
     """
 
     class LFPBandElectrode(dj.Part):
@@ -290,14 +291,14 @@ class LFPBandSelection(dj.Manual):
         # Error checks on parameters
         # electrode_list
         lfp_object = LFPOutput.get_lfp_object(key)
-        query = LFPSelection().LFPElectrode() & {"nwb_file_name": nwb_file_name}
+        query = lfp_object().LFPElectrode() & {"nwb_file_name": nwb_file_name}
         available_electrodes = query.fetch("electrode_id")
         if not np.all(np.isin(electrode_list, available_electrodes)):
             raise ValueError(
-                "All elements in electrode_list must be valid electrode_ids in the LFPSelection table"
+                "All elements in electrode_list must be valid electrode_ids in the LFPElectodeGroup table"
             )
         # sampling rate
-        lfp_sampling_rate = (LFP() & {"nwb_file_name": nwb_file_name}).fetch1(
+        lfp_sampling_rate = (lfp_object() & {"nwb_file_name": nwb_file_name}).fetch1(
             "lfp_sampling_rate"
         )
         decimation = lfp_sampling_rate // lfp_band_sampling_rate
