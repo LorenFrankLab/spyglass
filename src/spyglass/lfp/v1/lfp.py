@@ -257,7 +257,7 @@ class LFPBandSelection(dj.Manual):
     class LFPBandElectrode(dj.Part):
         definition = """
         -> LFPBandSelection
-        -> LFPSelection.LFPElectrode  # the LFP electrode to be filtered
+        -> LFPElectrodeGroup.LFPElectrode  # the LFP electrode to be filtered
         reference_elect_id = -1: int  # the reference electrode to use; -1 for no reference
         ---
         """
@@ -265,6 +265,7 @@ class LFPBandSelection(dj.Manual):
     def set_lfp_band_electrodes(
         self,
         nwb_file_name,
+        lfp_electrode_group_name,
         electrode_list,
         filter_name,
         interval_list_name,
@@ -276,7 +277,8 @@ class LFPBandSelection(dj.Manual):
         Adds an entry for each electrode in the electrode_list with the specified filter, interval_list, and
         reference electrode.
         :param nwb_file_name: string - the name of the nwb file for the desired session
-        :param electrode_list: list of LFP electrodes to be filtered
+        :param lfp_electrode_group_name: string - the name of the LFP electrode group to use
+        :param electrode_list: list of LFP electrodes (electrode ids) to be filtered
         :param filter_name: the name of the filter (from the FirFilter schema)
         :param interval_name: the name of the interval list (from the IntervalList schema)
         :param reference_electrode_list: A single electrode id corresponding to the reference to use for all
@@ -287,6 +289,7 @@ class LFPBandSelection(dj.Manual):
         """
         # Error checks on parameters
         # electrode_list
+        lfp_object = LFPOutput.get_lfp_object(key)
         query = LFPSelection().LFPElectrode() & {"nwb_file_name": nwb_file_name}
         available_electrodes = query.fetch("electrode_id")
         if not np.all(np.isin(electrode_list, available_electrodes)):
