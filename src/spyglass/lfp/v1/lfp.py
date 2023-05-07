@@ -2,6 +2,7 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
+import uuid
 
 from spyglass.common.common_ephys import Electrode, Raw
 from spyglass.common.common_session import Session  # noqa: F401
@@ -69,7 +70,7 @@ class LFPElectrodeGroup(dj.Manual):
 class LFPSelection(dj.Manual):
     definition = """
      -> LFPElectrodeGroup
-     -> IntervalList
+     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
      -> FirFilter
      """
 
@@ -80,6 +81,7 @@ class LFP(dj.Computed):
     -> LFPSelection
     ---
     -> AnalysisNwbfile          # the name of the nwb file with the lfp data
+    -> IntervalList             # the final interval list of valid times for the data
     lfp_object_id: varchar(40)  # the NWB object ID for loading this object from the file
     lfp_sampling_rate: float    # the sampling rate, in HZ
     """
@@ -89,27 +91,26 @@ class LFP(dj.Computed):
 
         # get the NWB object with the data
         nwb_file_name = key["nwb_file_name"]
-        rawdata = (Raw & {"nwb_file_name": nwb_file_name}).fetch_nwb()[0]
-        sampling_rate, interval_list_name = (Raw & key).fetch1(
+        nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
+        rawdata = (Raw & nwbf_key).fetch_nwb()[0]["raw"]
+        sampling_rate, raw_interval_list_name = (Raw & nwbf_key).fetch1(
             "sampling_rate", "interval_list_name"
         )
         sampling_rate = int(np.round(sampling_rate))
 
         # to get the list of valid times, we need to combine those from the user with those from the
         # raw data
-        user_valid_times = (
-            IntervalList()
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": interval_list_name,
-            }
-        ).fetch1("valid_times")
+        orig_key = key.copy()
+        orig_key["interval_list_name"] = key["target_interval_list_name"]
+        user_valid_times = (IntervalList() & orig_key).fetch1("valid_times")
+        # we remove the extra entry so we can insert this into the LFPOutput table.
+        del orig_key["interval_list_name"]
 
         raw_valid_times = (
             IntervalList()
             & {
                 "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": (Raw & key).fetch1("interval_list_name"),
+                "interval_list_name": raw_interval_list_name,
             }
         ).fetch1("valid_times")
         valid_times = interval_list_intersect(
@@ -140,7 +141,7 @@ class LFP(dj.Computed):
             )
             return None
         # get the list of selected LFP Channels from LFPElectrode
-        electrode_keys = (LFPSelection & key).fetch("KEY")
+        electrode_keys = (LFPElectrodeGroup.LFPElectrode & key).fetch("KEY")
         electrode_id_list = list(k["electrode_id"] for k in electrode_keys)
         electrode_id_list.sort()
 
@@ -166,7 +167,13 @@ class LFP(dj.Computed):
         # finally, we need to censor the valid times to account for the downsampling
         lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
         # add an interval list for the LFP valid times, skipping duplicates
-        key["interval_list_name"] = "lfp valid times"
+        key["interval_list_name"] = (
+            key["lfp_electrode_group_name"]
+            + "_"
+            + key["target_interval_list_name"]
+            + "_"
+            + "valid times"
+        )
         IntervalList.insert1(
             {
                 "nwb_file_name": key["nwb_file_name"],
@@ -176,6 +183,13 @@ class LFP(dj.Computed):
             replace=True,
         )
         self.insert1(key)
+        # finally, we insert this into the LFP output table.
+        lfp_id = uuid.uuid1()
+        lfp_o_key = {"lfp_id": lfp_id}
+        LFPOutput.insert1(lfp_o_key)
+
+        orig_key.update(lfp_o_key)
+        LFPOutput.LFP.insert1(orig_key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
@@ -226,9 +240,11 @@ class LFPOutput(dj.Manual):
         Parameters
         ----------
         key : dict
-            A dictionary containing nwb_file_name,
+            A dictionary containing some combination of
+                                    uuid,
+                                    nwb_file_name,
                                     lfp_electrode_group_name,
-                                    interval_list_name, and, optionally,
+                                    interval_list_name,
                                     fir_filter_name
 
         Returns
@@ -239,9 +255,9 @@ class LFPOutput(dj.Manual):
         # first check if this returns anything from the LFP table
         lfp_object = LFPOutput.LFP & key
         if lfp_object is not None:
-            return lfp_object
+            return LFP & lfp_object.fetch("KEY")
         else:
-            return LFPOutput.ImportedLFP & key
+            return ImportedLFP & (LFPOutput.ImportedLFP & key).fetch("KEY")
 
 
 @schema
@@ -266,7 +282,7 @@ class LFPBandSelection(dj.Manual):
     def set_lfp_band_electrodes(
         self,
         nwb_file_name,
-        lfp_electrode_group_name,
+        lfp_id,
         electrode_list,
         filter_name,
         interval_list_name,
@@ -278,7 +294,7 @@ class LFPBandSelection(dj.Manual):
         Adds an entry for each electrode in the electrode_list with the specified filter, interval_list, and
         reference electrode.
         :param nwb_file_name: string - the name of the nwb file for the desired session
-        :param lfp_electrode_group_name: string - the name of the LFP electrode group to use
+        :param lfp_id: uuid - the uuid for the LFPOutput to use
         :param electrode_list: list of LFP electrodes (electrode ids) to be filtered
         :param filter_name: the name of the filter (from the FirFilter schema)
         :param interval_name: the name of the interval list (from the IntervalList schema)
@@ -290,17 +306,18 @@ class LFPBandSelection(dj.Manual):
         """
         # Error checks on parameters
         # electrode_list
-        lfp_object = LFPOutput.get_lfp_object(key)
-        query = lfp_object().LFPElectrode() & {"nwb_file_name": nwb_file_name}
+        lfp_object = LFPOutput.get_lfp_object({"lfp_id": lfp_id})
+        print(lfp_object)
+        lfp_key = lfp_object.fetch1("KEY")
+        query = LFPElectrodeGroup().LFPElectrode() & lfp_key
         available_electrodes = query.fetch("electrode_id")
         if not np.all(np.isin(electrode_list, available_electrodes)):
             raise ValueError(
                 "All elements in electrode_list must be valid electrode_ids in the LFPElectodeGroup table"
             )
         # sampling rate
-        lfp_sampling_rate = (lfp_object() & {"nwb_file_name": nwb_file_name}).fetch1(
-            "lfp_sampling_rate"
-        )
+        print(lfp_object)
+        lfp_sampling_rate = (lfp_object & lfp_key).fetch1("lfp_sampling_rate")
         decimation = lfp_sampling_rate // lfp_band_sampling_rate
         if lfp_sampling_rate // decimation != lfp_band_sampling_rate:
             raise ValueError(
@@ -347,6 +364,7 @@ class LFPBandSelection(dj.Manual):
 
         key = dict()
         key["nwb_file_name"] = nwb_file_name
+        key["lfp_id"] = lfp_id
         key["filter_name"] = filter_name
         key["filter_sampling_rate"] = lfp_sampling_rate
         key["target_interval_list_name"] = interval_list_name
@@ -354,21 +372,20 @@ class LFPBandSelection(dj.Manual):
         # insert an entry into the main LFPBandSelectionTable
         self.insert1(key, skip_duplicates=True)
 
-        # get all of the current entries and delete any that are not in the list
-        elect_id, ref_id = (self.LFPBandElectrode() & key).fetch(
-            "electrode_id", "reference_elect_id"
-        )
-        for e, r in zip(elect_id, ref_id):
-            if not len(np.where((electrode_list == e) & (ref_list == r))[0]):
-                key["electrode_id"] = e
-                key["reference_elect_id"] = r
-                (self.LFPBandElectrode() & key).delete()
-
+        key["lfp_electrode_group_name"] = lfp_object.fetch1("lfp_electrode_group_name")
         # iterate through all of the new elements and add them
         for e, r in zip(electrode_list, ref_list):
-            key["electrode_id"] = e
+            elect_key = (
+                LFPElectrodeGroup.LFPElectrode
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "lfp_electrode_group_name": key["lfp_electrode_group_name"],
+                    "electrode_id": e,
+                }
+            ).fetch1("KEY")
+            for item in elect_key:
+                key[item] = elect_key[item]
             query = Electrode & {"nwb_file_name": nwb_file_name, "electrode_id": e}
-            key["electrode_group_name"] = query.fetch1("electrode_group_name")
             key["reference_elect_id"] = r
             self.LFPBandElectrode().insert1(key, skip_duplicates=True)
 
