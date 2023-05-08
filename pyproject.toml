@@ -69,3 +69,8 @@ spyglass_cli = "spyglass.cli:cli"
 
 [tool.black]
 # line-length = 120
+
+[tool.codespell]
+skip = '.git,*.pdf,*.svg'
+#
+# ignore-words-list = ''
