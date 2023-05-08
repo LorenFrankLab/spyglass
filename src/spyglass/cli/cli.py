@@ -14,9 +14,9 @@ def cli():
 )
 @click.argument("nwb_file_name")
 def insert_session(nwb_file_name: str):
-    import spyglass as nd
+    import spyglass as sg
 
-    nd.insert_sessions(nwb_file_name)
+    sg.insert_sessions(nwb_file_name)
 
 
 @click.command(help="List all sessions")
