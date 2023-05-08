@@ -7,4 +7,8 @@ from .lfp import (
     LFPOutput,
     LFPBandSelection,
     LFPBand,
+    LFPArtifactRemovedIntervalList,
+    LFPArtifactDetection,
+    LFPArtifactDetectionSelection,
+    LFPArtifactDetectionParameters,
 )
