@@ -72,5 +72,5 @@ spyglass_cli = "spyglass.cli:cli"
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb'
-#
-# ignore-words-list = ''
+# Nevers - name in Citation
+ignore-words-list = 'nevers'
