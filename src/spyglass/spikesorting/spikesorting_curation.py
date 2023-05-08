@@ -39,7 +39,7 @@ def apply_merge_groups_to_sorting(
 class Curation(dj.Manual):
     definition = """
     # Stores each spike sorting; similar to IntervalList
-    curation_id: int # a number correponding to the index of this curation
+    curation_id: int # a number corresponding to the index of this curation
     -> SpikeSorting
     ---
     parent_curation_id=-1: int
@@ -994,7 +994,7 @@ class UnitInclusionParameters(dj.Manual):
         Parameters
         ----------
         curated_sorting_key : dict
-            key to select a set of curated sortings
+            key to select a set of curated sorting
         unit_inclusion_param_name : str
             name of a unit inclusion parameter entry
 

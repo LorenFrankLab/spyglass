@@ -106,7 +106,7 @@ class LabTeam(dj.Manual):
             if not len(query):
                 print(
                     f"Please add the Google user ID for {team_member} in the LabMember.LabMemberInfo table "
-                    "if you want to give them permission to manually curate sortings by this team."
+                    "if you want to give them permission to manually curate sorting by this team."
                 )
             labteammember_dict = dict()
             labteammember_dict["team_name"] = team_name

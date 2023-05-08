@@ -12,7 +12,7 @@ schema = dj.schema("figurl_view_spike_sorting_recording")
 @schema
 class SpikeSortingView(dj.Computed):
     definition = """
-    # Schema for storing figurl views of spike sortings
+    # Schema for storing figurl views of spike sorting
     -> SpikeSorting
     ---
     figurl: varchar(10000)
