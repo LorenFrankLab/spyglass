@@ -12,7 +12,7 @@ from ..common.common_interval import (
     IntervalList,
     _union_concat,
     interval_from_inds,
-    interval_list_intersect,
+    interval_set_difference_inds,
 )
 from ..utils.nwb_helper_fn import get_valid_intervals
 from .spikesorting_recording import SpikeSortingRecording
@@ -245,22 +245,37 @@ def _get_artifact_times(
         print("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
+    # convert indices to intervals
     artifact_intervals = interval_from_inds(artifact_frames)
 
+    # convert to seconds and pad with window
     artifact_intervals_s = np.zeros((len(artifact_intervals), 2), dtype=np.float64)
     for interval_idx, interval in enumerate(artifact_intervals):
         artifact_intervals_s[interval_idx] = [
             valid_timestamps[interval[0]] - half_removal_window_s,
             valid_timestamps[interval[1]] + half_removal_window_s,
         ]
+    # make the artifact intervals disjoint
     artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
 
-    valid_intervals = get_valid_intervals(
-        valid_timestamps, recording.get_sampling_frequency(), 1.5, 0.000001
+    # convert seconds back to indices
+    artifact_intervals_new = []
+    for artifact_interval_s in artifact_intervals_s:
+        artifact_intervals_new.append(
+            np.searchsorted(valid_timestamps, artifact_interval_s)
+        )
+
+    # compute set difference between intervals (of indices)
+    artifact_removed_valid_times_ind = interval_set_difference_inds(
+        [(0, len(valid_timestamps) - 1)], artifact_intervals_new
     )
-    artifact_removed_valid_times = interval_list_intersect(
-        valid_intervals, artifact_intervals_s
-    )
+
+    # convert back to seconds
+    artifact_removed_valid_times = []
+    for i in artifact_removed_valid_times_ind:
+        artifact_removed_valid_times.append(
+            (valid_timestamps[i[0]], valid_timestamps[i[1]])
+        )
 
     return artifact_removed_valid_times, artifact_intervals_s
 

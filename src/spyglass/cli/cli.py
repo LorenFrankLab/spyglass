@@ -14,9 +14,9 @@ def cli():
 )
 @click.argument("nwb_file_name")
 def insert_session(nwb_file_name: str):
-    import spyglass as nd
+    import spyglass as sg
 
-    nd.insert_sessions(nwb_file_name)
+    sg.insert_sessions(nwb_file_name)
 
 
 @click.command(help="List all sessions")
@@ -416,7 +416,7 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
     nds.SpikeSorting.populate([(nds.SpikeSortingSelection & sorting_key).proj()])
 
 
-@click.command(help="List spike sortings for a session.")
+@click.command(help="List spike sorting for a session.")
 @click.argument("nwb_file_name")
 def list_spike_sortings(nwb_file_name: str):
     import spyglass.spikesorting as nds
