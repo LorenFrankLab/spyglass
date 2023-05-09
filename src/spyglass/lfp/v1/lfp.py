@@ -250,7 +250,7 @@ class LFPOutput(dj.Manual):
         Returns
         -------
         lfp_object
-            The entry or entries in the LFPOutput part table that corresonds to the key
+            The entry or entries in the LFPOutput part table that corresponds to the key
         """
         # first check if this returns anything from the LFP table
         lfp_object = LFPOutput.LFP & key
