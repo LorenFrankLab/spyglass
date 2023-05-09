@@ -31,7 +31,7 @@ def test_interval_set_difference_inds_overlap():
     intervals1 = [(0, 5), (8, 10)]
     intervals2 = [(1, 2), (3, 4), (6, 9)]
     result = interval_set_difference_inds(intervals1, intervals2)
-    assert result == [(0, 1), (4, 5), (9, 10)]
+    assert result == [(0, 1), (2, 3), (4, 5), (9, 10)]
 
 
 def test_interval_set_difference_inds_empty_intervals1():
