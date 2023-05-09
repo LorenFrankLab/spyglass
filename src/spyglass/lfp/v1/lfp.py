@@ -1,24 +1,26 @@
+import uuid
+import warnings
+from functools import reduce
+from typing import Union
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
-import uuid
-from functools import reduce
-from typing import Union
 import scipy.stats as stats
 
 from spyglass.common.common_ephys import Electrode, Raw
-from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.common.common_filter import FirFilter
+from spyglass.common.common_interval import interval_list_censor  # noqa: F401
 from spyglass.common.common_interval import (
     IntervalList,
-    interval_list_censor,  # noqa: F401
-    interval_list_contains_ind,
-    interval_list_intersect,
     _union_concat,
     interval_from_inds,
+    interval_list_contains_ind,
+    interval_list_intersect,
 )
-from spyglass.common.common_filter import FirFilter
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_valid_intervals
 
@@ -92,10 +94,7 @@ class LFP(dj.Computed):
     """
 
     def make(self, key):
-        min_interval_len = 1.0  # 1 second intervals minimum
-
         # get the NWB object with the data
-        nwb_file_name = key["nwb_file_name"]
         nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
         rawdata = (Raw & nwbf_key).fetch_nwb()[0]["raw"]
         sampling_rate, raw_interval_list_name = (Raw & nwbf_key).fetch1(
@@ -322,12 +321,6 @@ class LFPArtifactDetection(dj.Computed):
                 "artifact_params"
             )
 
-            # recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
-            # recording_name = SpikeSortingRecording._get_recording_name(key)
-            # recording = si.load_extractor(recording_path)
-
-            # job_kwargs = {"chunk_duration": "10s", "n_jobs": 4, "progress_bar": "True"}
-
             # get LFP data
             lfp_eseries = (LFP() & key).fetch_nwb()[0]["lfp"]
 
@@ -384,8 +377,6 @@ def _get_artifact_times(
     amplitude_thresh: Union[float, None] = None,
     proportion_above_thresh: float = 1.0,
     removal_window_ms: float = 1.0,
-    verbose: bool = False,
-    # **job_kwargs,
 ):
     """Detects times during which artifacts do and do not occur.
     Artifacts are defined as periods where the absolute value of the change in LFP (ad units) exceeds one
@@ -414,16 +405,6 @@ def _get_artifact_times(
         Intervals in which artifacts are detected (including removal windows), unit: seconds
     """
 
-    # if recording.get_num_segments() > 1:
-    #    valid_timestamps = np.array([])
-    #    for segment in range(recording.get_num_segments()):
-    #        valid_timestamps = np.concatenate(
-    #            (valid_timestamps, recording.get_times(segment_index=segment))
-    #        )
-    #    recording = si.concatenate_recordings([recording])
-    # elif recording.get_num_segments() == 1:
-    #    valid_timestamps = recording.get_times(0)
-
     valid_timestamps = recording.timestamps
 
     # if both thresholds are None, we skip artifact detection
@@ -448,10 +429,6 @@ def _get_artifact_times(
     # compute the number of electrodes that have to be above threshold
     nelect_above = np.ceil(proportion_above_thresh * recording.data.shape[1])
 
-    # traces = recording.get_traces(
-    #    segment_index=segment_index, start_frame=start_frame, end_frame=end_frame
-    # )
-
     # find the artifact occurrences using one or both thresholds, across channels
     # replace with LFP artifact code
     # is this supposed to be indices??
@@ -461,31 +438,16 @@ def _get_artifact_times(
         )
         above_thresh = np.where(artifact_boolean > nelect_above)[0]
 
-        # above_a = np.abs(traces) > amplitude_thresh
-        # above_thresh = (
-        #    np.ravel(np.argwhere(np.sum(above_a, axis=1) >= nelect_above)) + start_frame
-        # )
     elif (amplitude_thresh is None) and (zscore_thresh is not None):
         dataz = np.abs(stats.zscore(recording.data, axis=1))
         above_z = dataz > zscore_thresh
-        # above_thresh = (
-        #    np.ravel(np.argwhere(np.sum(above_z, axis=1) >= nelect_above)) + start_frame
-        # )
         above_thresh = []
     else:
         above_a = np.abs(recording) > amplitude_thresh
         dataz = np.abs(stats.zscore(recording.data, axis=1))
         above_z = dataz > zscore_thresh
-        # above_thresh = (
-        #    np.ravel(
-        #        np.argwhere(
-        #            np.sum(np.logical_or(above_z, above_a), axis=1) >= nelect_above
-        #        )
-        #    )
-        #    + start_frame
-        # )
         above_thresh = []
-    # artifact_frames = executor.run()
+
     artifact_frames = above_thresh.copy()
 
     # turn ms to remove total into s to remove from either side of each detected artifact
