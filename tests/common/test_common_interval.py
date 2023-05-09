@@ -60,16 +60,3 @@ def test_interval_set_difference_inds_multiple_overlaps():
     intervals2 = [(1, 3), (4, 6), (7, 9)]
     result = interval_set_difference_inds(intervals1, intervals2)
     assert result == [(0, 1), (3, 4), (6, 7), (9, 10)]
-
-
-# @pytest.mark.parametrize(
-#     "intervals1, intervals2, expected",
-#     [
-#         ([(0, 10)], [(0, 10)], []),
-#         ([(0, 5)], [(3, 7)], [(0, 3)]),
-#         ([(2, 8)], [(0, 4), (6, 10)], [(4, 6)]),
-#     ],
-# )
-# def test_interval_set_difference_inds_parametrized(intervals1, intervals2, expected):
-#     result = interval_set_difference_inds(intervals1, intervals2)
-#     assert result == expected
