@@ -441,6 +441,7 @@ def interval_from_inds(list_frames):
         interval_list.append([group[0][1], group[-1][1]])
     return np.asarray(interval_list)
 
+
 def interval_set_difference_inds(intervals1, intervals2):
     """
     e.g.

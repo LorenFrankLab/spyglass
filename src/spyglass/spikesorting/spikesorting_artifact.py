@@ -262,12 +262,12 @@ def _get_artifact_times(
     artifact_intervals_new = []
     for artifact_interval_s in artifact_intervals_s:
         artifact_intervals_new.append(
-                np.searchsorted(valid_timestamps, artifact_interval_s)
+            np.searchsorted(valid_timestamps, artifact_interval_s)
         )
 
     # compute set difference between intervals (of indices)
     artifact_removed_valid_times_ind = interval_set_difference_inds(
-        [(0, len(valid_timestamps)-1)], artifact_intervals_new
+        [(0, len(valid_timestamps) - 1)], artifact_intervals_new
     )
 
     # convert back to seconds
