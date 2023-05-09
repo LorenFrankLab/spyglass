@@ -279,7 +279,7 @@ class LFPArtifactDetectionParameters(dj.Manual):
         """Insert the default artifact parameters with an appropriate parameter dict."""
         artifact_params = {}
         artifact_params["zscore_thresh"] = None  # must be None or >= 0
-        artifact_params["amplitude_thresh"] = 500  # must be None or >= 0
+        artifact_params["amplitude_thresh"] = 500  # must be None or >= 0, ad units
         # all electrodes of sort group
         artifact_params["proportion_above_thresh"] = 0.1
         artifact_params["removal_window_ms"] = 3.0  # in milliseconds
@@ -388,7 +388,7 @@ def _get_artifact_times(
     # **job_kwargs,
 ):
     """Detects times during which artifacts do and do not occur.
-    Artifacts are defined as periods where the absolute value of the change in LFP exceeds one
+    Artifacts are defined as periods where the absolute value of the change in LFP (ad units) exceeds one
     or both specified amplitude or zscore thresholds on the proportion of channels specified,
     with the period extended by the removal_window_ms/2 on each side. Z-score and amplitude
     threshold values of None are ignored.
@@ -399,7 +399,7 @@ def _get_artifact_times(
     zscore_thresh : float, optional
         Stdev threshold for exclusion, should be >=0, defaults to None
     amplitude_thresh : float, optional
-        Amplitude threshold for exclusion, should be >=0, defaults to None
+        Amplitude (ad units) threshold for exclusion, should be >=0, defaults to None
     proportion_above_thresh : float, optional, should be>0 and <=1
         Proportion of electrodes that need to have threshold crossings, defaults to 1
     removal_window_ms : float, optional
@@ -513,8 +513,28 @@ def _get_artifact_times(
     valid_intervals = get_valid_intervals(
         valid_timestamps, sampling_frequency, 1.5, 0.000001
     )
-    artifact_removed_valid_times = interval_list_intersect(
+
+    # these are artifact times - need to subtract these from valid timestamps
+    artifact_valid_times = interval_list_intersect(
         valid_intervals, artifact_intervals_s
+    )
+
+    # note: this is a slow step
+    list_triggers = []
+    for interval in artifact_valid_times:
+        list_triggers.append(
+            np.arange(
+                np.searchsorted(valid_timestamps, interval[0]),
+                np.searchsorted(valid_timestamps, interval[1]),
+            )
+        )
+
+    new_array = np.array(np.concatenate(list_triggers))
+
+    new_timestamps = np.delete(valid_timestamps, new_array)
+
+    artifact_removed_valid_times = get_valid_intervals(
+        new_timestamps, sampling_frequency, 1.5, 0.000001
     )
 
     return artifact_removed_valid_times, artifact_intervals_s
