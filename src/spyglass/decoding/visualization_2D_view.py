@@ -291,6 +291,13 @@ def create_2D_decode_view(
     view : vvf.TrackPositionAnimationV1
 
     """
+    assert (
+        position_time.shape[0] == position.shape[0]
+    ), "position_time and position must have the same length"
+    assert (
+        posterior.shape[0] == position.shape[0]
+    ), "posterior and position must have the same length"
+
     position_time = np.squeeze(np.asarray(position_time)).copy()
     position = np.asarray(position)
     if head_dir is not None:
