@@ -257,15 +257,22 @@ def _get_artifact_times(
 
     artifact_intervals_new = []
     for artifact_interval_s in artifact_intervals_s:
-        artifact_intervals_new.append((np.searchsorted(valid_timestamps, artifact_interval_s[0]),np.searchsorted(valid_timestamps, artifact_interval_s[1])))
+        artifact_intervals_new.append(
+            (
+                np.searchsorted(valid_timestamps, artifact_interval_s[0]),
+                np.searchsorted(valid_timestamps, artifact_interval_s[1]),
+            )
+        )
 
     artifact_removed_valid_times_ind = interval_set_difference_inds(
-        np.array((0, len(valid_timestamps))), artifact_intervals_new
+        [(0, len(valid_timestamps))], artifact_intervals_new
     )
 
     artifact_removed_valid_times = []
     for i in artifact_removed_valid_times_ind:
-        artifact_removed_valid_times.append((valid_timestamps[i[0]], valid_timestamps[i[1]]))
+        artifact_removed_valid_times.append(
+            (valid_timestamps[i[0]], valid_timestamps[i[1]])
+        )
 
     return artifact_removed_valid_times, artifact_intervals_s
 
