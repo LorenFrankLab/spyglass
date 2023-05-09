@@ -80,7 +80,7 @@ def _generate_url(
         channel_neighborhood_size=7,
     )
 
-    # create a fake unit similiarity matrix
+    # create a fake unit similarity matrix
     # similarity_scores = []
     # for u1 in X.unit_ids:
     #     for u2 in X.unit_ids:

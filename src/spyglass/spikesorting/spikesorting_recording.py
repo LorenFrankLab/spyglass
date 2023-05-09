@@ -140,7 +140,7 @@ class SortGroup(dj.Manual):
                 ]
                 if (
                     omit_unitrode and len(shank_elect) == 1
-                ):  # ommit unitrodes if indicated
+                ):  # omit unitrodes if indicated
                     print(
                         f"Omitting electrode group {e_group}, shank {shank} from sort groups because unitrode."
                     )
@@ -288,7 +288,7 @@ class SortGroup(dj.Manual):
                     n_found += 1
                 else:
                     Warning(
-                        "Relative electrode locations have three coordinates; only two are currenlty supported"
+                        "Relative electrode locations have three coordinates; only two are currently supported"
                     )
         return np.ndarray.tolist(geometry)
 

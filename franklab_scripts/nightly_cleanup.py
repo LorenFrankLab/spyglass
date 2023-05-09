@@ -7,7 +7,6 @@ import warnings
 
 import numpy as np
 
-import spyglass as nd
 from spyglass.decoding.clusterless import MarkParameters, UnitMarkParameters, UnitMarks
 
 warnings.simplefilter("ignore", category=DeprecationWarning)
