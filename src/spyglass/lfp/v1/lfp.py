@@ -278,16 +278,22 @@ class LFPArtifactDetectionParameters(dj.Manual):
     def insert_default(self):
         """Insert the default artifact parameters with an appropriate parameter dict."""
         artifact_params = {}
-        artifact_params["zscore_thresh"] = None  # must be None or >= 0
-        artifact_params["amplitude_thresh"] = 500  # must be None or >= 0, ad units
         # all electrodes of sort group
-        artifact_params["proportion_above_thresh"] = 0.1
-        artifact_params["removal_window_ms"] = 3.0  # in milliseconds
+        artifact_params["amplitude_thresh_1st"] = 500  # must be None or >= 0
+        artifact_params["proportion_above_thresh_1st"] = 0.1
+        artifact_params["amplitude_thresh_2nd"] = 1000  # must be None or >= 0
+        artifact_params["proportion_above_thresh_1st"] = 0.05
+        artifact_params["removal_window_ms"] = 10.0  # in milliseconds
+        artifact_params["local_window_ms"] = 40.0  # in milliseconds
         self.insert1(["default", artifact_params], skip_duplicates=True)
 
         artifact_params_none = {}
-        artifact_params_none["zscore_thresh"] = None
-        artifact_params_none["amplitude_thresh"] = None
+        artifact_params["amplitude_thresh_1st"] = None
+        artifact_params["proportion_above_thresh_1st"] = None
+        artifact_params["amplitude_thresh_2nd"] = None
+        artifact_params["proportion_above_thresh_1st"] = None
+        artifact_params["removal_window_ms"] = None
+        artifact_params["local_window_ms"] = None
         self.insert1(["none", artifact_params_none], skip_duplicates=True)
 
 
@@ -380,17 +386,19 @@ class LFPArtifactRemovedIntervalList(dj.Manual):
 def _get_artifact_times(
     recording: None,
     key: None,
-    zscore_thresh: Union[float, None] = None,
-    amplitude_thresh: Union[float, None] = None,
-    proportion_above_thresh: float = 1.0,
+    amplitude_thresh_1st: Union[float, None] = None,
+    amplitude_thresh_2nd: Union[float, None] = None,
+    proportion_above_thresh_1st: float = 1.0,
+    proportion_above_thresh_2nd: float = 1.0,
     removal_window_ms: float = 1.0,
-    verbose: bool = False,
+    local_window_ms: float = 1.0,
+    # verbose: bool = False,
     # **job_kwargs,
 ):
     """Detects times during which artifacts do and do not occur.
-    Artifacts are defined as periods where the absolute value of the change in LFP (ad units) exceeds one
-    or both specified amplitude or zscore thresholds on the proportion of channels specified,
-    with the period extended by the removal_window_ms/2 on each side. Z-score and amplitude
+    Artifacts are defined as periods where the absolute value of the change in LFP exceeds
+    amplitude change thresholds on the proportion of channels specified,
+    with the period extended by the removal_window_ms/2 on each side. amplitude change
     threshold values of None are ignored.
 
     Parameters
@@ -426,67 +434,76 @@ def _get_artifact_times(
 
     valid_timestamps = recording.timestamps
 
+    local_window = np.int(local_window_ms / 2)
+
     # if both thresholds are None, we skip artifact detection
-    if (amplitude_thresh is None) and (zscore_thresh is None):
+    if amplitude_thresh_1st is None:
         recording_interval = np.asarray([valid_timestamps[0], valid_timestamps[-1]])
         artifact_times_empty = np.asarray([])
-        print(
-            "Amplitude and zscore thresholds are both None, skipping artifact detection"
-        )
+        print("Amplitude threshold is None, skipping artifact detection")
         return recording_interval, artifact_times_empty
 
     # verify threshold parameters
     (
-        amplitude_thresh,
-        zscore_thresh,
-        proportion_above_thresh,
+        amplitude_thresh_1st,
+        amplitude_thresh_2nd,
+        proportion_above_thresh_1st,
+        proportion_above_thresh_2nd,
     ) = _check_artifact_thresholds(
-        amplitude_thresh, zscore_thresh, proportion_above_thresh
+        amplitude_thresh_1st,
+        amplitude_thresh_2nd,
+        proportion_above_thresh_1st,
+        proportion_above_thresh_2nd,
     )
 
     # want to detect frames without parallel processing
     # compute the number of electrodes that have to be above threshold
-    nelect_above = np.ceil(proportion_above_thresh * recording.data.shape[1])
-
-    # traces = recording.get_traces(
-    #    segment_index=segment_index, start_frame=start_frame, end_frame=end_frame
-    # )
+    nelect_above_1st = np.ceil(proportion_above_thresh_1st * recording.data.shape[1])
+    nelect_above_2nd = np.ceil(proportion_above_thresh_2nd * recording.data.shape[1])
 
     # find the artifact occurrences using one or both thresholds, across channels
     # replace with LFP artifact code
     # is this supposed to be indices??
-    if (amplitude_thresh is not None) and (zscore_thresh is None):
+    if amplitude_thresh_1st is not None:
+        # first find times with large amp change
         artifact_boolean = np.sum(
-            (np.abs(np.diff(recording.data, axis=0)) > amplitude_thresh), axis=1
+            (np.abs(np.diff(recording.data, axis=0)) > amplitude_thresh_1st), axis=1
         )
-        above_thresh = np.where(artifact_boolean > nelect_above)[0]
+        above_thresh_1st = np.where(artifact_boolean >= nelect_above_1st)[0]
 
-        # above_a = np.abs(traces) > amplitude_thresh
-        # above_thresh = (
-        #    np.ravel(np.argwhere(np.sum(above_a, axis=1) >= nelect_above)) + start_frame
-        # )
-    elif (amplitude_thresh is None) and (zscore_thresh is not None):
-        dataz = np.abs(stats.zscore(recording.data, axis=1))
-        above_z = dataz > zscore_thresh
-        # above_thresh = (
-        #    np.ravel(np.argwhere(np.sum(above_z, axis=1) >= nelect_above)) + start_frame
-        # )
-        above_thresh = []
-    else:
-        above_a = np.abs(recording) > amplitude_thresh
-        dataz = np.abs(stats.zscore(recording.data, axis=1))
-        above_z = dataz > zscore_thresh
-        # above_thresh = (
-        #    np.ravel(
-        #        np.argwhere(
-        #            np.sum(np.logical_or(above_z, above_a), axis=1) >= nelect_above
-        #        )
-        #    )
-        #    + start_frame
-        # )
-        above_thresh = []
+        # second, find artifacts with large baseline change
+        big_artifacts = np.zeros((recording.data.shape[1], above_thresh_1st.shape[0]))
+        for art_count in np.arange(above_thresh_1st.shape[0]):
+            local_max = np.max(
+                recording.data[
+                    above_thresh_1st[art_count]
+                    - local_window : above_thresh_1st[art_count]
+                    + local_window,
+                    :,
+                ],
+                axis=0,
+            )
+            local_min = np.min(
+                recording.data[
+                    above_thresh_1st[art_count]
+                    - local_window : above_thresh_1st[art_count]
+                    + local_window,
+                    :,
+                ],
+                axis=0,
+            )
+            big_artifacts[:, art_count] = (
+                np.abs(local_max - local_min) > amplitude_thresh_2nd
+            )
+
+        # sum columns in big artficat, then compare to nelect_above_2nd
+        above_thresh = above_thresh_1st[
+            np.sum(big_artifacts, axis=0) >= nelect_above_2nd
+        ]
+
     # artifact_frames = executor.run()
     artifact_frames = above_thresh.copy()
+    print("detected ", artifact_frames.shape[0], " artifacts")
 
     # turn ms to remove total into s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms / 1000 * 0.5
@@ -541,46 +558,72 @@ def _get_artifact_times(
 
 
 def _check_artifact_thresholds(
-    amplitude_thresh, zscore_thresh, proportion_above_thresh
+    amplitude_thresh_1st,
+    amplitude_thresh_2nd,
+    proportion_above_thresh_1st,
+    proportion_above_thresh_2nd,
 ):
     """Alerts user to likely unintended parameters. Not an exhaustive verification.
 
     Parameters
     ----------
-    zscore_thresh: float
-    amplitude_thresh: float
-    proportion_above_thresh: float
+        amplitude_thresh_1st: float
+        amplitude_thresh_2nd: float
+        proportion_above_thresh_1st: float
+        proportion_above_thresh_2nd: float
 
     Return
     ------
-    zscore_thresh: float
-    amplitude_thresh: float
-    proportion_above_thresh: float
+        amplitude_thresh_1st: float
+        amplitude_thresh_2nd: float
+        proportion_above_thresh_1st: float
+        proportion_above_thresh_2nd: float
 
     Raise
     ------
     ValueError: if signal thresholds are negative
     """
     # amplitude or zscore thresholds should be not negative, as they are applied to an absolute signal
-    signal_thresholds = [t for t in [amplitude_thresh, zscore_thresh] if t is not None]
+    signal_thresholds = [
+        t for t in [amplitude_thresh_1st, amplitude_thresh_1st] if t is not None
+    ]
     for t in signal_thresholds:
         if t < 0:
-            raise ValueError("Amplitude and Z-Score thresholds must be >= 0, or None")
+            raise ValueError("Amplitude  thresholds must be >= 0, or None")
 
     # proportion_above_threshold should be in [0:1] inclusive
-    if proportion_above_thresh < 0:
+    if proportion_above_thresh_1st < 0:
         warnings.warn(
             "Warning: proportion_above_thresh must be a proportion >0 and <=1."
-            f" Using proportion_above_thresh = 0.01 instead of {str(proportion_above_thresh)}"
+            f" Using proportion_above_thresh = 0.01 instead of {str(proportion_above_thresh_1st)}"
         )
-        proportion_above_thresh = 0.01
-    elif proportion_above_thresh > 1:
+        proportion_above_thresh_1st = 0.01
+    elif proportion_above_thresh_1st > 1:
         warnings.warn(
             "Warning: proportion_above_thresh must be a proportion >0 and <=1. "
-            f"Using proportion_above_thresh = 1 instead of {str(proportion_above_thresh)}"
+            f"Using proportion_above_thresh = 1 instead of {str(proportion_above_thresh_1st)}"
         )
-        proportion_above_thresh = 1
-    return amplitude_thresh, zscore_thresh, proportion_above_thresh
+        proportion_above_thresh_1st = 1
+    # proportion_above_threshold should be in [0:1] inclusive
+    if proportion_above_thresh_2nd < 0:
+        warnings.warn(
+            "Warning: proportion_above_thresh must be a proportion >0 and <=1."
+            f" Using proportion_above_thresh = 0.01 instead of {str(proportion_above_thresh_2nd)}"
+        )
+        proportion_above_thresh_2nd = 0.01
+    elif proportion_above_thresh_2nd > 1:
+        warnings.warn(
+            "Warning: proportion_above_thresh must be a proportion >0 and <=1. "
+            f"Using proportion_above_thresh = 1 instead of {str(proportion_above_thresh_2nd)}"
+        )
+        proportion_above_thresh_2nd = 1
+
+    return (
+        amplitude_thresh_1st,
+        amplitude_thresh_2nd,
+        proportion_above_thresh_1st,
+        proportion_above_thresh_2nd,
+    )
 
 
 @schema
