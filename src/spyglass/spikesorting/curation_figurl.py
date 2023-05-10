@@ -121,7 +121,7 @@ def _generate_the_figurl(
         max_num_snippets_per_segment=100,
         channel_neighborhood_size=7,
     )
-    # create a fake unit similiarity matrix (for future reference)
+    # create a fake unit similarity matrix (for future reference)
     # similarity_scores = []
     # for u1 in X.unit_ids:
     #     for u2 in X.unit_ids:

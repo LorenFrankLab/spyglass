@@ -46,6 +46,7 @@ dependencies = [
     "seaborn",
     "skan",
     "bottleneck",
+    "numpy<1.24",
     "ipympl",
     "tqdm",
     "pubnub<6.4.0",
@@ -75,3 +76,8 @@ position = [
 ]
 [tool.black]
 # line-length = 120
+
+[tool.codespell]
+skip = '.git,*.pdf,*.svg,*.ipynb'
+# Nevers - name in Citation
+ignore-words-list = 'nevers'
