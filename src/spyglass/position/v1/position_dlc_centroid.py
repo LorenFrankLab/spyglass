@@ -185,7 +185,7 @@ class DLCCentroid(dj.Computed):
             print_console=False,
         ) as logger:
             logger.logger.info("-----------------------")
-            logger.logger.info("Centroid Caluclation")
+            logger.logger.info("Centroid Calculation")
             # Get labels to smooth from Parameters table
             cohort_entries = DLCSmoothInterpCohort.BodyPart & key
             params = (DLCCentroidParams() & key).fetch1("params")

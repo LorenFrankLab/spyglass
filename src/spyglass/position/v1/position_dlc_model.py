@@ -275,7 +275,7 @@ class DLCModelEvaluation(dj.Computed):
     """
 
     def make(self, key):
-        """.populate() method will launch evaulation for each unique entry in Model."""
+        """.populate() method will launch evaluation for each unique entry in Model."""
         import csv
 
         from deeplabcut import evaluate_network
