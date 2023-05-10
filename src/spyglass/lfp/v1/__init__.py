@@ -1,14 +1,14 @@
 # flake8: noqa
 from .lfp import (
-    LFPElectrodeGroup,
-    LFPSelection,
     LFP,
     ImportedLFP,
-    LFPOutput,
-    LFPBandSelection,
-    LFPBand,
-    LFPArtifactRemovedIntervalList,
     LFPArtifactDetection,
-    LFPArtifactDetectionSelection,
     LFPArtifactDetectionParameters,
+    LFPArtifactDetectionSelection,
+    LFPArtifactRemovedIntervalList,
+    LFPBand,
+    LFPBandSelection,
+    LFPElectrodeGroup,
+    LFPOutput,
+    LFPSelection,
 )
