@@ -257,7 +257,7 @@ class FirFilter(dj.Manual):
             lfp = pynwb.ecephys.LFP(electrical_series=es)
             ecephys_module = nwbf.create_processing_module(
                 name="ecephys",
-                description="filtered extracellular electrophysiology data"
+                description="filtered extracellular electrophysiology data",
             )
             ecephys_module.add(lfp)
             io.write(nwbf)
