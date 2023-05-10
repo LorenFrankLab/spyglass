@@ -286,7 +286,7 @@ class DLCPosVideoSelection(dj.Manual):
 @schema
 class DLCPosVideo(dj.Computed):
     """Creates a video of the computed head position and orientation as well as
-    the original LED positions overlayed on the video of the animal.
+    the original LED positions overlaid on the video of the animal.
 
     Use for debugging the effect of position extraction parameters."""
 
