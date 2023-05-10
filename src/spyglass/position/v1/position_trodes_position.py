@@ -185,7 +185,7 @@ class TrodesPosV1(dj.Computed):
                     name="video_frame_ind",
                     unit="index",
                     timestamps=position_info["time"],
-                    data=np.ones_like(position_info["time"]),
+                    data=np.arange(len(position_info["time"])),
                     description="video_frame_ind",
                     comments=spatial_series.comments,
                 )
