@@ -172,6 +172,7 @@ dj_local_conf.json
 *.pkl
 *.json
 *.gz
+*.pdf
 
 !/.vscode/extensions.json
 !/.vscode/settings.json

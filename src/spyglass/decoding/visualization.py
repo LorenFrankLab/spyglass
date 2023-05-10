@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import sortingview.views as vv
+import xarray as xr
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from ripple_detection import get_multiunit_population_firing_rate
 from tqdm.auto import tqdm
@@ -441,15 +442,15 @@ def make_multi_environment_movie(
 
 
 def create_interactive_1D_decoding_figurl(
-    position_info,
-    linear_position_info,
-    marks,
-    results,
-    position_name="linear_position",
-    speed_name="head_speed",
-    posterior_type="acausal_posterior",
-    sampling_frequency=500,
-    view_height=800,
+    position_info: pd.DataFrame,
+    linear_position_info: pd.DataFrame,
+    marks: xr.DataArray,
+    results: xr.Dataset,
+    position_name: str = "linear_position",
+    speed_name: str = "head_speed",
+    posterior_type: str = "acausal_posterior",
+    sampling_frequency: float = 500.0,
+    view_height: int = 800,
 ):
     decode_view = create_1D_decode_view(
         posterior=results[posterior_type].sum("state"),
@@ -527,17 +528,17 @@ def create_interactive_1D_decoding_figurl(
 
 
 def create_interactive_2D_decoding_figurl(
-    position_info,
-    marks,
-    results,
-    bin_size,
-    position_name=["head_position_x", "head_position_y"],
-    head_direction_name="head_orientation",
-    speed_name="head_speed",
-    posterior_type="acausal_posterior",
-    sampling_frequency=500,
-    view_height=800,
-):
+    position_info: pd.DataFrame,
+    marks: xr.DataArray,
+    results: xr.Dataset,
+    bin_size: float,
+    position_name: list[str] = ["head_position_x", "head_position_y"],
+    head_direction_name: str = "head_orientation",
+    speed_name: str = "head_speed",
+    posterior_type: str = "acausal_posterior",
+    sampling_frequency: float = 500.0,
+    view_height: int = 800,
+) -> vv.Box:
     decode_view = create_2D_decode_view(
         position_time=position_info.index,
         position=position_info[position_name],
