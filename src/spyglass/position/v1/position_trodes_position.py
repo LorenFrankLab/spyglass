@@ -168,14 +168,27 @@ class TrodesPosV1(dj.Computed):
                 comments=spatial_series.comments,
                 description="x_velocity, y_velocity, speed",
             )
-            velocity.create_timeseries(
-                name="video_frame_ind",
-                unit="index",
-                timestamps=position_info["time"],
-                data=raw_pos_df.video_frame_ind.to_numpy(),
-                description="video_frame_ind",
-                comments=spatial_series.comments,
-            )
+            try:
+                velocity.create_timeseries(
+                    name="video_frame_ind",
+                    unit="index",
+                    timestamps=position_info["time"],
+                    data=raw_pos_df.video_frame_ind.to_numpy(),
+                    description="video_frame_ind",
+                    comments=spatial_series.comments,
+                )
+            except AttributeError:
+                print(
+                    "No video frame index found. Assuming all camera frames are present."
+                )
+                velocity.create_timeseries(
+                    name="video_frame_ind",
+                    unit="index",
+                    timestamps=position_info["time"],
+                    data=np.ones_like(position_info["time"]),
+                    description="video_frame_ind",
+                    comments=spatial_series.comments,
+                )
         except ValueError:
             pass
 
