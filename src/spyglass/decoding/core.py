@@ -157,7 +157,7 @@ def create_model_for_multiple_epochs(
     environments : list[Environment]
         Environment for each epoch.
     continuous_transition_types : list[list[object]]]
-        Coninuous transition types for each epoch.
+        Continuous transition types for each epoch.
 
     """
     observation_models = []
