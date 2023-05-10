@@ -254,8 +254,11 @@ class FirFilter(dj.Manual):
                 electrodes=electrode_table_region,
                 timestamps=np.empty(output_shape_list[time_axis]),
             )
-            # Add the electrical series to the scratch area
-            nwbf.add_scratch(es)
+            lfp = pynwb.ecephys.LFP(electrical_series=es)
+            ecephys_module = nwbf.create_processing_module(
+                name="ecephys", description="filtered extracellular electrophysiology data"
+            )
+            ecephys_module.add(lfp)
             io.write(nwbf)
 
             # reload the NWB file to get the h5py objects for the data and the timestamps
