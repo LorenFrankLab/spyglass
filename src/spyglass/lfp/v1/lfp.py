@@ -533,8 +533,11 @@ class LFPBand(dj.Computed):
                 electrodes=electrode_table_region,
                 timestamps=new_timestamps,
             )
-            # Add the electrical series to the scratch area
-            nwbf.add_scratch(es)
+            lfp = pynwb.ecephys.LFP(electrical_series=es)
+            ecephys_module = nwbf.create_processing_module(
+                name="ecephys", description=f"LFP data processed with {filter_name}"
+            )
+            ecephys_module.add(lfp)
             io.write(nwbf)
             filtered_data_object_id = es.object_id
         #
