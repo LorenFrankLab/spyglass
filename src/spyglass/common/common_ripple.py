@@ -5,14 +5,10 @@ import pandas as pd
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
 from spyglass.common import (
-    Electrode,
     IntervalList,  # noqa
     IntervalPositionInfo,
-    IntervalPositionInfoSelection,
-    LFPBand,
-    LFPBandSelection,
-    Session,
 )
+from spyglass.lfp.v1 import LFPBand, LFPBandSelection
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.utils.dj_helper_fn import fetch_nwb
 
