@@ -4,7 +4,7 @@
     "files.trimFinalNewlines": true,
     "editor.multiCursorModifier": "ctrlCmd",
     "autoDocstring.docstringFormat": "numpy",
-    "python.formatting.provider": "none",
+    "python.formatting.provider": "black",
     "remote.SSH.remoteServerListenOnSocket": true,
     "git.confirmSync": false,
     "[python]": {
