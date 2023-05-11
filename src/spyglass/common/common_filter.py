@@ -258,6 +258,7 @@ class FirFilter(dj.Manual):
                 timestamps=np.empty(output_shape_list[time_axis]),
                 description=description
             )
+<<<<<<< HEAD
             if type=="LFP":
                 lfp = pynwb.ecephys.LFP(electrical_series=es)
                 ecephys_module = nwbf.create_processing_module(
@@ -265,6 +266,14 @@ class FirFilter(dj.Manual):
                 ecephys_module.add(lfp)
             else:
                 nwbf.add_scratch(es)
+=======
+            lfp = pynwb.ecephys.LFP(electrical_series=es)
+            ecephys_module = nwbf.create_processing_module(
+                name="ecephys",
+                description="filtered extracellular electrophysiology data",
+            )
+            ecephys_module.add(lfp)
+>>>>>>> 5243b21096c6ed91f84477547b8051ce9b4ca3ce
             io.write(nwbf)
 
             # reload the NWB file to get the h5py objects for the data and the timestamps
