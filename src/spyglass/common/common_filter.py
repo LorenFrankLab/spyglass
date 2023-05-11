@@ -163,8 +163,8 @@ class FirFilter(dj.Manual):
         valid_times,
         electrode_ids,
         decimation,
-        description: str="filtered data",
-        type: Union[None, str]=None,
+        description: str = "filtered data",
+        type: Union[None, str] = None,
     ):
         """
         :param analysis_nwb_file_name: str   full path to previously created analysis nwb file where filtered data
@@ -256,24 +256,16 @@ class FirFilter(dj.Manual):
                 data=np.empty(tuple(output_shape_list), dtype=data_dtype),
                 electrodes=electrode_table_region,
                 timestamps=np.empty(output_shape_list[time_axis]),
-                description=description
+                description=description,
             )
-<<<<<<< HEAD
-            if type=="LFP":
+            if type == "LFP":
                 lfp = pynwb.ecephys.LFP(electrical_series=es)
                 ecephys_module = nwbf.create_processing_module(
-                    name="ecephys", description=description)
+                    name="ecephys", description=description
+                )
                 ecephys_module.add(lfp)
             else:
                 nwbf.add_scratch(es)
-=======
-            lfp = pynwb.ecephys.LFP(electrical_series=es)
-            ecephys_module = nwbf.create_processing_module(
-                name="ecephys",
-                description="filtered extracellular electrophysiology data"
-            )
-            ecephys_module.add(lfp)
->>>>>>> 5243b21096c6ed91f84477547b8051ce9b4ca3ce
             io.write(nwbf)
 
             # reload the NWB file to get the h5py objects for the data and the timestamps
