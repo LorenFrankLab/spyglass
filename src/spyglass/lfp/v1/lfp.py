@@ -71,8 +71,7 @@ class LFPElectrodeGroup(dj.Manual):
                 lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
                 lfpelectdict["lfp_electrode_group_name"] = group_name
                 LFPElectrodeGroup().LFPElectrode.insert1(
-                    lfpelectdict,
-                    skip_duplicates=True
+                    lfpelectdict, skip_duplicates=True
                 )
 
 
