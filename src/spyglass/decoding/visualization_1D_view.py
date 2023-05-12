@@ -49,7 +49,8 @@ def create_1D_decode_view(
     ----------
     posterior : xr.DataArray, shape (n_time, n_position_bins)
     linear_position : np.ndarray, shape (n_time, ), optional
-    ref_time_sec : np.float64, optional reference time for the purpose of offsetting the start time
+    ref_time_sec : np.float64, optional
+        Reference time for the purpose of offsetting the start time
 
     Returns
     -------
