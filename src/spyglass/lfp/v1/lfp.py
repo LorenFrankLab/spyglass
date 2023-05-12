@@ -58,7 +58,7 @@ class LFPElectrodeGroup(dj.Manual):
         # remove the session and then recreate the session and Electrode list
         # check to see if the user allowed the deletion
         key = {"nwb_file_name": nwb_file_name, "lfp_electrode_group_name": group_name}
-        LFPElectrodeGroup().insert1(key)
+        LFPElectrodeGroup().insert1(key, skip_duplicates=True)
 
         # TODO: do this in a better way
         all_electrodes = (Electrode() & {"nwb_file_name": nwb_file_name}).fetch(
@@ -70,7 +70,7 @@ class LFPElectrodeGroup(dj.Manual):
             if e["electrode_id"] in electrode_list:
                 lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
                 lfpelectdict["lfp_electrode_group_name"] = group_name
-                LFPElectrodeGroup().LFPElectrode.insert1(lfpelectdict)
+                LFPElectrodeGroup().LFPElectrode.insert1(lfpelectdict, skip_duplicates=True)
 
 
 @schema
