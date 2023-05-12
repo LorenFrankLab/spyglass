@@ -117,19 +117,19 @@ class DLCPosV1(dj.Computed):
         )
 
         self.insert1(key)
-        from ..position_merge import FinalPosition
+        from ..position_merge import PositionOutput
 
         key["source"] = "DLC"
         key["version"] = 1
         dlc_key = key.copy()
         del dlc_key["pose_eval_result"]
         key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
-        valid_fields = FinalPosition().fetch().dtype.fields.keys()
+        valid_fields = PositionOutput().fetch().dtype.fields.keys()
         entries_to_delete = [entry for entry in key.keys() if entry not in valid_fields]
         for entry in entries_to_delete:
             del key[entry]
 
-        FinalPosition().insert1(key=key, params=dlc_key, skip_duplicates=True)
+        PositionOutput().insert1(key=key, params=dlc_key, skip_duplicates=True)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
@@ -173,19 +173,26 @@ class DLCPosV1(dj.Computed):
     @classmethod
     def evaluate_pose_estimation(cls, key):
         likelihood_thresh = []
+        valid_fields = DLCSmoothInterpCohort.BodyPart().fetch().dtype.fields.keys()
+        centroid_key = {k: val for k, val in key.items() if k in valid_fields}
+        centroid_key["dlc_si_cohort_selection_name"] = key["dlc_si_cohort_centroid"]
+        orientation_key = centroid_key.copy()
+        orientation_key["dlc_si_cohort_selection_name"] = key[
+            "dlc_si_cohort_orientation"
+        ]
         centroid_bodyparts, centroid_si_params = (
-            DLCSmoothInterpCohort.BodyPart
-            & {"dlc_si_cohort_selection_name": key["dlc_si_cohort_centroid"]}
+            DLCSmoothInterpCohort.BodyPart & centroid_key
         ).fetch("bodypart", "dlc_si_params_name")
         orientation_bodyparts, orientation_si_params = (
-            DLCSmoothInterpCohort.BodyPart
-            & {"dlc_si_cohort_selection_name": key["dlc_si_cohort_orientation"]}
+            DLCSmoothInterpCohort.BodyPart & orientation_key
         ).fetch("bodypart", "dlc_si_params_name")
-        for param in centroid_si_params + orientation_si_params:
+        for param in np.unique(
+            np.concatenate((centroid_si_params, orientation_si_params))
+        ):
             likelihood_thresh.append(
-                (
-                    DLCSmoothInterpParams() & {"dlc_si_params_name": "JG_SI_params"}
-                ).fetch1("params")["interp_params"]["likelihood_thresh"]
+                (DLCSmoothInterpParams() & {"dlc_si_params_name": param}).fetch1(
+                    "params"
+                )["likelihood_thresh"]
             )
 
         if len(np.unique(likelihood_thresh)) > 1:
