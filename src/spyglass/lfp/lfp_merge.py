@@ -12,13 +12,13 @@ class LFPOutput(dj.Manual):
 
     class LFP(dj.Part):
         definition = """
-        -> master
+        -> LFPOutput
         -> LFP
         """
 
     class ImportedLFP(dj.Part):
         definition = """
-        -> master
+        -> LFPOutput
         -> ImportedLFP
         """
 
