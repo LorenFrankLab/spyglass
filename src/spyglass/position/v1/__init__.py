@@ -48,7 +48,6 @@ from .position_trodes_position import (
     TrodesPosV1,
     TrodesPosVideo,
 )
-from ..position_merge import PositionOutput
 
 
 def schemas():
