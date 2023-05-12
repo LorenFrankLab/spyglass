@@ -1,1 +1,1 @@
-from .position_merge import FinalPosition
+from .position_merge import PositionOutput

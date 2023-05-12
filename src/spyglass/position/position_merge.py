@@ -22,7 +22,7 @@ _valid_data_sources = ["DLC", "Trodes", "Common"]
 
 
 @schema
-class FinalPosition(dj.Manual):
+class PositionOutput(dj.Manual):
     """
     Table to identify source of Position Information from upstream options
     (e.g. DLC, Trodes, etc...) To add another upstream option, a new Part table
@@ -46,7 +46,7 @@ class FinalPosition(dj.Manual):
         """
 
         definition = """
-        -> FinalPosition
+        -> PositionOutput
         -> DLCPosV1
         ---
         -> AnalysisNwbfile
@@ -66,7 +66,7 @@ class FinalPosition(dj.Manual):
         """
 
         definition = """
-        -> FinalPosition
+        -> PositionOutput
         -> TrodesPosV1
         ---
         -> AnalysisNwbfile
@@ -86,7 +86,7 @@ class FinalPosition(dj.Manual):
         """
 
         definition = """
-        -> FinalPosition
+        -> PositionOutput
         -> CommonIntervalPositionInfo
         ---
         -> AnalysisNwbfile
@@ -313,7 +313,7 @@ class PositionVideo(dj.Computed):
         if key["plot"] == "DLC":
             assert position_ids["dlc_position_id"]
             pos_df = (
-                FinalPosition()
+                PositionOutput()
                 & {
                     "nwb_file_name": key["nwb_file_name"],
                     "interval_list_name": key["interval_list_name"],
@@ -324,7 +324,7 @@ class PositionVideo(dj.Computed):
         elif key["plot"] == "Trodes":
             assert position_ids["trodes_position_id"]
             pos_df = (
-                FinalPosition()
+                PositionOutput()
                 & {
                     "nwb_file_name": key["nwb_file_name"],
                     "interval_list_name": key["interval_list_name"],
@@ -337,7 +337,7 @@ class PositionVideo(dj.Computed):
             assert position_ids["dlc_position_id"]
             dlc_df = (
                 (
-                    FinalPosition()
+                    PositionOutput()
                     & {
                         "nwb_file_name": key["nwb_file_name"],
                         "interval_list_name": key["interval_list_name"],
@@ -350,7 +350,7 @@ class PositionVideo(dj.Computed):
             )
             trodes_df = (
                 (
-                    FinalPosition()
+                    PositionOutput()
                     & {
                         "nwb_file_name": key["nwb_file_name"],
                         "interval_list_name": key["interval_list_name"],
@@ -386,7 +386,7 @@ class PositionVideo(dj.Computed):
         ]
         video_frame_inds = pos_df[video_frame_col_name[0]].astype(int).to_numpy()
         if key["plot"] in ["DLC", "All"]:
-            temp_key = (FinalPosition.DLCPosV1 & key).fetch1("KEY")
+            temp_key = (PositionOutput.DLCPosV1 & key).fetch1("KEY")
             video_path = (DLCPoseEstimationSelection & temp_key).fetch1("video_path")
         else:
             video_path = check_videofile(video_dir, key["output_dir"], video_filename)[
