@@ -37,7 +37,7 @@ class SpikeSorterParameters(dj.Manual):
         """Default params from spike sorters available via spikeinterface"""
         sorters = sis.available_sorters()
         for sorter in sorters:
-            sorter_params = sis.get_default_params(sorter)
+            sorter_params = sis.get_default_sorter_params(sorter)
             self.insert1([sorter, "default", sorter_params], skip_duplicates=True)
 
         # Insert Frank lab defaults
