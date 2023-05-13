@@ -466,5 +466,5 @@ class FirFilter(dj.Manual):
             30000,
             "lowpass",
             [400, 425],
-            "standard LFP filter for 20 KHz data",
+            "standard LFP filter for 30 KHz data",
         )
