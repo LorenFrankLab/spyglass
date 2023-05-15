@@ -330,7 +330,9 @@ class DLCCentroid(dj.Computed):
                         **params["smoothing_params"],
                     )
                 else:
-                    raise KeyError("smoothing_duration needs to be passed within smoothing_params")
+                    raise KeyError(
+                        "smoothing_duration needs to be passed within smoothing_params"
+                    )
             else:
                 final_df = interp_df.copy()
             logger.logger.info("getting velocity")
