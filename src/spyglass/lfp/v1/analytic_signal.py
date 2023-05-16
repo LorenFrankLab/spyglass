@@ -47,7 +47,7 @@ class AnalyticSignal(dj.Computed):
         TimeStamps_selected = FilteredBand.timestamps[np.logical_and(FilteredBand.timestamps >= start,FilteredBand.timestamps <= end)]
         FilteredBand_selected = FilteredBand.data[np.logical_and(FilteredBand.timestamps >= start,FilteredBand.timestamps <= end)]
         
-        # Get analytic signal with the specified method (we're only using Hilbert tranform for now)
+        # Get analytic signal with the specified method (we're only using Hilbert transform for now)
         filtered_analytic = np.empty(shape=(FilteredBand_selected.shape[0],0),dtype=np.complex_)
         for lfp_electrode_id in range(FilteredBand_selected.shape[1]):
             filtered_lfp_one_channel = np.array(FilteredBand_selected)[:,lfp_electrode_id]
