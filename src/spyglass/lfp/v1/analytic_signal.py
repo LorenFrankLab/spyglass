@@ -91,5 +91,5 @@ class AnalyticSignal(dj.Computed):
         
     def compute_signal_power(self,electrode_id):
         analytic_df = self.fetch_nwb()[0]['analytic_signal']
-        signal_power = np.abs(analytic_df['electrode {0}'.format(electrode_id)]) ** 2
+        signal_power = np.abs(analytic_df[f"electrode {electrode_id}"]) ** 2
         return signal_power
