@@ -56,7 +56,7 @@ class AnalyticSignal(dj.Computed):
         
         # Combine times stamps and analytic signal results into a dataframe
         timestamps_selected_df = pd.DataFrame({"time stamps":TimeStamps_selected})
-        analytic_signal_df = pd.DataFrame(filtered_analytic,columns=['electrode '+str(e) for e in FilteredBand.electrodes.data[:]])
+        analytic_signal_df = pd.DataFrame(filtered_analytic,columns=[f"electrode {e}" for e in FilteredBand.electrodes.data[:]])
         analytic_signal_results = pd.concat((timestamps_selected_df,analytic_signal_df),axis=1)
         
         # Create an analysis nwb file to save the results (analytic signal and corresponding time stamps)
