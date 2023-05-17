@@ -8,17 +8,21 @@ schema = dj.schema("lfp")
 class LFPOutput(dj.Manual):
     definition = """
     lfp_id: uuid
+    ---
+    stream: varchar(40)
     """
 
     class LFP(dj.Part):
         definition = """
         -> LFPOutput
+        ---
         -> LFP
         """
 
     class ImportedLFP(dj.Part):
         definition = """
         -> LFPOutput
+        ---
         -> ImportedLFP
         """
 
