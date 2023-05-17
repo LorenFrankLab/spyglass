@@ -44,6 +44,7 @@ dependencies:
   - tensorflow>=2.0
   - numba>=0.48.0
   - pyfftw<=0.12.0  # used by ghostipy. install from conda-forge so that it works on Mac ARM processors
+  - pybind11 #To avoid isosplit5 build error
   - pip:
     - pubnub<6.4.0
     - mountainsort4
@@ -53,7 +54,7 @@ dependencies:
     - datajoint>=0.13.6
     - ghostipy
     - pymysql>=1.0.*
-    - sortingview>=0.8
+    - sortingview>=0.11
     - figurl-jupyter
     - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
     - pyyaml
