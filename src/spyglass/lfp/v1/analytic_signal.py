@@ -1,11 +1,10 @@
-import os
 import datajoint as dj
 import numpy as np
 import pandas as pd
 from scipy.signal import hilbert
 import math
 from spyglass.utils.dj_helper_fn import fetch_nwb
-from spyglass.lfp.v1.lfp import LFP,LFPBand
+from spyglass.lfp.v1.lfp import LFPBand
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 
