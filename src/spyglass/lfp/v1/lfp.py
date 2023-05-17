@@ -132,7 +132,7 @@ class LFP(dj.Computed):
         # get the LFP filter that matches the raw data
         filter = (
             FirFilter()
-            & {"filter_name": "LFP 0-400 Hz"}
+            & {"filter_name": key["filter_name"]}
             & {"filter_sampling_rate": sampling_rate}
         ).fetch(as_dict=True)
 
