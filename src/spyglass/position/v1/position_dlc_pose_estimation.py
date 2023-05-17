@@ -356,7 +356,7 @@ def add_timestamps(
     pd.DataFrame
         original df with timestamps and video_frame_ind as new columns
     """
-    first_video_frame = np.where(video_time == pos_time[0])[0][0]
+    first_video_frame = np.searchsorted(video_time, pos_time[0])
     video_frame_ind = np.arange(first_video_frame, len(video_time))
     time_df = pd.DataFrame(
         index=video_frame_ind, data=video_time[first_video_frame:], columns=["time"]
