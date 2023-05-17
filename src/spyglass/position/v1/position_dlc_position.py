@@ -10,6 +10,7 @@ from .dlc_utils import (
     interp_pos,
 )
 from .position_dlc_pose_estimation import DLCPoseEstimation
+import pynwb
 
 schema = dj.schema("position_v1_dlc_position")
 
@@ -174,11 +175,14 @@ class DLCSmoothInterp(dj.Computed):
     -> DLCSmoothInterpSelection
     ---
     -> AnalysisNwbfile
-    dlc_smooth_interp_object_id : varchar(80)
+    dlc_smooth_interp_position_object_id : varchar(80)
+    dlc_smooth_interp_info_object_id : varchar(80)
     """
 
     def make(self, key):
         from .dlc_utils import OutputLogger, infer_output_dir
+
+        METERS_PER_CM = 0.01
 
         output_dir = infer_output_dir(key=key, makedir=False)
         with OutputLogger(
@@ -188,6 +192,7 @@ class DLCSmoothInterp(dj.Computed):
         ) as logger:
             logger.logger.info("-----------------------")
             logger.logger.info("Determining Indices to NaN")
+            idx = pd.IndexSlice
             # Get labels to smooth from Parameters table
             params = (DLCSmoothInterpParams() & key).fetch1("params")
             # Get DLC output dataframe
@@ -235,12 +240,42 @@ class DLCSmoothInterp(dj.Computed):
                 smooth_df = interp_df.copy()
             final_df = smooth_df.drop(["likelihood"], axis=1)
             final_df = final_df.rename_axis("time").reset_index()
+            position_nwb_data = (
+                (DLCPoseEstimation.BodyPart() & key)
+                .fetch_nwb()[0]["dlc_pose_estimation_position"]
+                .get_spatial_series()
+            )
             key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
             # Add dataframe to AnalysisNwbfile
             nwb_analysis_file = AnalysisNwbfile()
-            key["dlc_smooth_interp_object_id"] = nwb_analysis_file.add_nwb_object(
+            position = pynwb.behavior.Position()
+            video_frame_ind = pynwb.behavior.BehavioralTimeSeries()
+            position.create_spatial_series(
+                name="position",
+                timestamps=final_df.time.to_numpy(),
+                conversion=METERS_PER_CM,
+                data=final_df.loc[:, idx[("x", "y")]].to_numpy(),
+                reference_frame=position_nwb_data.reference_frame,
+                comments=position_nwb_data.comments,
+                description="x_position, y_position",
+            )
+            video_frame_ind.create_timeseries(
+                name="video_frame_ind",
+                timestamps=final_df.time.to_numpy(),
+                data=final_df.loc[:, idx["video_frame_ind"]].to_numpy(),
+                unit="index",
+                comments="no comments",
+                description="video_frame_ind",
+            )
+            key[
+                "dlc_smooth_interp_position_object_id"
+            ] = nwb_analysis_file.add_nwb_object(
                 analysis_file_name=key["analysis_file_name"],
-                nwb_object=final_df,
+                nwb_object=position,
+            )
+            key["dlc_smooth_interp_info_object_id"] = nwb_analysis_file.add_nwb_object(
+                analysis_file_name=key["analysis_file_name"],
+                nwb_object=video_frame_ind,
             )
             nwb_analysis_file.add(
                 nwb_file_name=key["nwb_file_name"],
@@ -255,7 +290,36 @@ class DLCSmoothInterp(dj.Computed):
         )
 
     def fetch1_dataframe(self):
-        return self.fetch_nwb()[0]["dlc_smooth_interp"].set_index("time")
+        nwb_data = self.fetch_nwb()[0]
+        index = pd.Index(
+            np.asarray(
+                nwb_data["dlc_smooth_interp_position"].get_spatial_series().timestamps
+            ),
+            name="time",
+        )
+        COLUMNS = [
+            "video_frame_ind",
+            "x",
+            "y",
+        ]
+        return pd.DataFrame(
+            np.concatenate(
+                (
+                    np.asarray(
+                        nwb_data["dlc_smooth_interp_info"]
+                        .time_series["video_frame_ind"]
+                        .data,
+                        dtype=int,
+                    )[:, np.newaxis],
+                    np.asarray(
+                        nwb_data["dlc_smooth_interp_position"].get_spatial_series().data
+                    ),
+                ),
+                axis=1,
+            ),
+            columns=COLUMNS,
+            index=index,
+        )
 
 
 def nan_inds(
