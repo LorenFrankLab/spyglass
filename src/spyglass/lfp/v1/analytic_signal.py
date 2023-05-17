@@ -72,7 +72,7 @@ class AnalyticSignal(dj.Computed):
         key['analytic_signal_object_id'] = analytic_signal_object_id
         self.insert1(key)
         print(
-            '\nPopulated analytic signal table for nwb_file_name='+key['nwb_file_name']+' between {0}ms and {1}ms'.format(start,end)
+            f"\nPopulated analytic signal table for nwb_file_name={key['nwb_file_name']} between {start}ms and {end}ms"
         )
         
     def fetch_nwb(self, *attrs, **kwargs):
