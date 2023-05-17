@@ -48,15 +48,15 @@ class AnalyticSignal(dj.Computed):
         filtered_band_selected = filtered_band.data[np.logical_and(filtered_band.timestamps >= start, filtered_band.timestamps <= end)]
         
         # Get analytic signal with the specified method (we're only using Hilbert transform for now)
-        filtered_analytic = np.empty(shape=(FilteredBand_selected.shape[0],0),dtype=np.complex_)
-        for lfp_electrode_id in range(FilteredBand_selected.shape[1]):
-            filtered_lfp_one_channel = np.array(FilteredBand_selected)[:,lfp_electrode_id]
+        filtered_analytic = np.empty(shape=(filtered_band_selected.shape[0],0),dtype=np.complex_)
+        for lfp_electrode_id in range(filtered_band_selected.shape[1]):
+            filtered_lfp_one_channel = np.array(filtered_band_selected)[:,lfp_electrode_id]
             analytic_signal_one_channel = hilbert(filtered_lfp_one_channel, axis=0)
             filtered_analytic = np.column_stack((filtered_analytic,analytic_signal_one_channel))
         
         # Combine times stamps and analytic signal results into a dataframe
         timestamps_selected_df = pd.DataFrame({"time stamps":TimeStamps_selected})
-        analytic_signal_df = pd.DataFrame(filtered_analytic,columns=[f"electrode {e}" for e in FilteredBand.electrodes.data[:]])
+        analytic_signal_df = pd.DataFrame(filtered_analytic,columns=[f"electrode {e}" for e in filtered_band.electrodes.data[:]])
         analytic_signal_results = pd.concat((timestamps_selected_df,analytic_signal_df),axis=1)
         
         # Create an analysis nwb file to save the results (analytic signal and corresponding time stamps)
