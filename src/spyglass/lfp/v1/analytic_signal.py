@@ -45,7 +45,7 @@ class AnalyticSignal(dj.Computed):
         start = (IntervalList() & key).fetch1('valid_times')[0][0]
         end = (IntervalList() & key).fetch1('valid_times')[0][-1]
         time_stamps_selected = filtered_band.timestamps[np.logical_and(filtered_band.timestamps >= start, filtered_band.timestamps <= end)]
-        FilteredBand_selected = FilteredBand.data[np.logical_and(FilteredBand.timestamps >= start,FilteredBand.timestamps <= end)]
+        filtered_band_selected = filtered_band.data[np.logical_and(filtered_band.timestamps >= start, filtered_band.timestamps <= end)]
         
         # Get analytic signal with the specified method (we're only using Hilbert transform for now)
         filtered_analytic = np.empty(shape=(FilteredBand_selected.shape[0],0),dtype=np.complex_)
