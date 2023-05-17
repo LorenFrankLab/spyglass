@@ -39,7 +39,7 @@ class AnalyticSignal(dj.Computed):
     """
     def make(self, key):
         # First, get the filtered lfp data
-        FilteredBand = (LFPBand() & key).fetch_nwb()[0]['filtered_data']
+        filtered_band = (LFPBand() & key).fetch_nwb()[0]['filtered_data']
         
         # Next, select data using defined valid interval
         start = (IntervalList() & key).fetch1('valid_times')[0][0]
