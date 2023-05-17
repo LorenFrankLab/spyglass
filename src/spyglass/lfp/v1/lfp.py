@@ -769,8 +769,10 @@ class LFPBand(dj.Computed):
         lfp_band_elect_id = lfp_band_elect_id[lfp_sort_order]
         lfp_band_ref_id = lfp_band_ref_id[lfp_sort_order]
 
-        lfp_sampling_rate = (LFP() & {"nwb_file_name": key["nwb_file_name"]}).fetch1(
-            "lfp_sampling_rate"
+        lfp_sampling_rate = (
+            LFPOutput()
+            .get_lfp_object({"lfp_id": key["lfp_id"]})
+            .fetch1("lfp_sampling_rate")
         )
         interval_list_name, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1(
             "target_interval_list_name", "lfp_band_sampling_rate"
@@ -784,8 +786,10 @@ class LFPBand(dj.Computed):
         ).fetch1("valid_times")
         # the valid_times for this interval may be slightly beyond the valid times for the lfp itself,
         # so we have to intersect the two
-        lfp_interval_list = (LFP() & {"nwb_file_name": key["nwb_file_name"]}).fetch1(
-            "interval_list_name"
+        lfp_interval_list = (
+            LFPOutput()
+            .get_lfp_object({"lfp_id": key["lfp_id"]})
+            .fetch1("interval_list_name")
         )
         lfp_valid_times = (
             IntervalList()
