@@ -17,7 +17,15 @@ class AnalyticSignalParameters(dj.Manual):
     ---
     analytic_signal_params: blob # a dict of analytic-signal detection parameters(the method name, e.g., hilbert transform, and specific parameters if any)
     """
-
+    
+    def insert_default(self):
+        """Insert the default artifact parameters with an appropriate parameter dict."""
+        analytic_signal_params = dict()
+        analytic_signal_params["analytic_method_name"]='Hilbert transform'
+        analytic_signal_params["other_params"]='' #Hilbert transform doesn't contain other parameters; alternative methods may contain additional params.
+        self.insert1(["default", analytic_signal_params], skip_duplicates=True)
+    
+    
 @schema
 class AnalyticSignalSelection(dj.Manual):
     definition = """
