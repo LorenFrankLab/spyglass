@@ -86,7 +86,7 @@ class AnalyticSignal(dj.Computed):
     def compute_signal_phase(self,electrode_id):
         analytic_df = self.fetch_nwb()[0]['analytic_signal']
         # note that the conventional theta phase is 180 degrees shifted from the phase detected by hilbert transform.
-        signal_phase = np.angle(analytic_df['electrode {0}'.format(electrode_id)]) + math.pi 
+        signal_phase = np.angle(analytic_df[f"electrode {electrode_id}"]) + math.pi
         return signal_phase
         
     def compute_signal_power(self,electrode_id):
