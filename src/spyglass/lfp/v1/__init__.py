@@ -17,4 +17,4 @@ from .analytic_signal import (
     AnalyticSignalParameters,
     AnalyticSignalSelection,
     AnalyticSignal,
-) 
+)
