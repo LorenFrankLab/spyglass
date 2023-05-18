@@ -4,7 +4,7 @@ import pandas as pd
 from scipy.signal import hilbert
 import math
 from spyglass.utils.dj_helper_fn import fetch_nwb
-from spyglass.lfp.v1 import LFPBand,LFPElectrodeGroup
+from spyglass.lfp.v1 import LFPBand, LFPElectrodeGroup
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 
@@ -56,7 +56,7 @@ class AnalyticSignal(dj.Computed):
 
         # Next, select data using defined electrode id(s) and defined valid interval.
         electrode_list = (LFPElectrodeGroup.LFPElectrode() & key).fetch("electrode_id")
-        electrode_index = np.isin(filtered_band.electrodes.data[:],electrode_list)
+        electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
         start = (IntervalList() & key).fetch1("valid_times")[0][0]
         end = (IntervalList() & key).fetch1("valid_times")[0][-1]
         timestamps_selected = filtered_band.timestamps[
@@ -68,7 +68,7 @@ class AnalyticSignal(dj.Computed):
             np.logical_and(
                 filtered_band.timestamps >= start, filtered_band.timestamps <= end
             )
-        ][:,electrode_index]
+        ][:, electrode_index]
 
         # Get analytic signal with the specified method (we're only using Hilbert transform for now)
         filtered_analytic = np.empty(
