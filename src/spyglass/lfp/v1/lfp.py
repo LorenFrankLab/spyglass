@@ -172,12 +172,12 @@ class LFP(dj.Computed):
         # finally, we need to censor the valid times to account for the downsampling
         lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
         # add an interval list for the LFP valid times, skipping duplicates
-        key["interval_list_name"] = (
-            key["lfp_electrode_group_name"]
-            + "_"
-            + key["target_interval_list_name"]
-            + "_"
-            + "valid times"
+        key["interval_list_name"] = "_".join(
+            (
+                key["lfp_electrode_group_name"],
+                key["target_interval_list_name"],
+                "valid times",
+            )
         )
         IntervalList.insert1(
             {
