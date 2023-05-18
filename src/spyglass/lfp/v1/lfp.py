@@ -95,6 +95,8 @@ class LFP(dj.Computed):
     """
 
     def make(self, key):
+        from spyglass.lfp.lfp_merge import LFPOutput
+
         # get the NWB object with the data
         nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
         rawdata = (Raw & nwbf_key).fetch_nwb()[0]["raw"]
@@ -218,51 +220,6 @@ class ImportedLFP(dj.Imported):
     ---
     lfp_sampling_rate: float
     """
-
-
-@schema
-class LFPOutput(dj.Manual):
-    definition = """
-    lfp_id: uuid
-    """
-
-    class LFP(dj.Part):
-        definition = """
-        -> LFPOutput
-        -> LFP
-        """
-
-    class ImportedLFP(dj.Part):
-        definition = """
-        -> LFPOutput
-        -> ImportedLFP
-        """
-
-    @staticmethod
-    def get_lfp_object(key: dict):
-        """Returns the lfp object corresponding to the key
-
-        Parameters
-        ----------
-        key : dict
-            A dictionary containing some combination of
-                                    uuid,
-                                    nwb_file_name,
-                                    lfp_electrode_group_name,
-                                    interval_list_name,
-                                    fir_filter_name
-
-        Returns
-        -------
-        lfp_object
-            The entry or entries in the LFPOutput part table that corresponds to the key
-        """
-        # first check if this returns anything from the LFP table
-        lfp_object = LFPOutput.LFP & key
-        if lfp_object is not None:
-            return LFP & lfp_object.fetch("KEY")
-        else:
-            return ImportedLFP & (LFPOutput.ImportedLFP & key).fetch("KEY")
 
 
 # add artifact detection
@@ -656,6 +613,8 @@ class LFPBandSelection(dj.Manual):
         """
         # Error checks on parameters
         # electrode_list
+        from spyglass.lfp.lfp_merge import LFPOutput
+
         lfp_object = LFPOutput.get_lfp_object({"lfp_id": lfp_id})
         print(lfp_object)
         lfp_key = lfp_object.fetch1("KEY")
@@ -751,6 +710,8 @@ class LFPBand(dj.Computed):
     """
 
     def make(self, key):
+        from spyglass.lfp.lfp_merge import LFPOutput
+
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
         lfp_object = (LFP() & {"nwb_file_name": key["nwb_file_name"]}).fetch_nwb()[0][
             "lfp"
