@@ -7,7 +7,6 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
-import scipy.stats as stats
 
 from spyglass.common.common_ephys import Electrode, Raw
 from spyglass.common.common_filter import FirFilter
