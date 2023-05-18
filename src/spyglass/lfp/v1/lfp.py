@@ -26,7 +26,7 @@ from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_valid_interv
 
 schema = dj.schema("lfp_v1")
 
-min_lfp_interval_length = 1.0  # 1 second minimum interval length
+MIN_LFP_INTERVAL_DURATION = 1.0  # 1 second minimum interval duration
 
 
 @schema
@@ -120,10 +120,10 @@ class LFP(dj.Computed):
             }
         ).fetch1("valid_times")
         valid_times = interval_list_intersect(
-            user_valid_times, raw_valid_times, min_length=min_lfp_interval_length
+            user_valid_times, raw_valid_times, min_length=MIN_LFP_INTERVAL_DURATION
         )
         print(
-            f"LFP: found {len(valid_times)} intervals > {min_lfp_interval_length} sec long."
+            f"LFP: found {len(valid_times)} intervals > {MIN_LFP_INTERVAL_DURATION} sec long."
         )
 
         # target 1 KHz sampling rate
