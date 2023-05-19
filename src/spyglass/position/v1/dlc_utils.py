@@ -612,7 +612,7 @@ def smooth_moving_avg(
     import bottleneck as bn
 
     idx = pd.IndexSlice
-    moving_avg_window = int(smoothing_duration * sampling_rate)
+    moving_avg_window = int(np.round(smoothing_duration * sampling_rate))
     xy_arr = interp_df.loc[:, idx[("x", "y")]].values
     smoothed_xy_arr = bn.move_mean(
         xy_arr, window=moving_avg_window, axis=0, min_count=2
