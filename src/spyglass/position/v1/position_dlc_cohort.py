@@ -57,7 +57,9 @@ class DLCSmoothInterpCohort(dj.Computed):
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(
-                    nwb_data["dlc_smooth_interp_position"].get_spatial_series().timestamps
+                    nwb_data["dlc_smooth_interp_position"]
+                    .get_spatial_series()
+                    .timestamps
                 ),
                 name="time",
             )
@@ -76,7 +78,9 @@ class DLCSmoothInterpCohort(dj.Computed):
                             dtype=int,
                         )[:, np.newaxis],
                         np.asarray(
-                            nwb_data["dlc_smooth_interp_position"].get_spatial_series().data
+                            nwb_data["dlc_smooth_interp_position"]
+                            .get_spatial_series()
+                            .data
                         ),
                     ),
                     axis=1,
