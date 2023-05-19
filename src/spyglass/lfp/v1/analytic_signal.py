@@ -22,7 +22,7 @@ class AnalyticSignalParameters(dj.Manual):
     def insert_default(self):
         """Insert the default artifact parameters with an appropriate parameter dict."""
         analytic_signal_params = dict()
-        analytic_signal_params["analytic_method_name"] = "Hilbert transform"
+        analytic_signal_params["analytic_method_name"] = "hilbert_transform"
         analytic_signal_params[
             "other_params"
         ] = ""  # Hilbert transform doesn't contain other parameters; alternative methods may contain additional params.
