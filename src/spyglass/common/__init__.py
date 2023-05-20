@@ -22,7 +22,7 @@ from .common_ephys import (
     Raw,
     SampleCount,
 )
-from .common_filter import FirFilter
+from .common_filter import FirFilterParameters
 from .common_interval import (
     IntervalList,
     interval_list_censor,
