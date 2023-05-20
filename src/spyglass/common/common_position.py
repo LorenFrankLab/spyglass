@@ -401,8 +401,9 @@ class TrackGraph(dj.Manual):
     node_positions : blob  # 2D position of track_graph nodes, shape (n_nodes, 2)
     edges: blob                  # shape (n_edges, 2)
     linear_edge_order : blob  # order of track graph edges in the linear space, shape (n_edges, 2)
-    linear_edge_spacing : blob  # amount of space between edges in the linear space, shape (n_edges,)   
-    linear_edge_specialty = NULL: blob  # denote what edges (denote by 5) are going to be lumped to what edge (denote by 1), shape (n_edges,) 
+    linear_edge_spacing : blob  # amount of space between edges in the linear space, shape (n_edges,)
+    linear_edge_specialty = NULL: blob  # denote what edges (denote by 5) are going to be lumped to what edge (denote by 1), shape (n_edges,)
+    edge_map = NULL: blob  # like linear_edge_specialty but in dictionary, denote what edges id (key) are going to be lumped to what edge id (denote by value)
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):
@@ -499,7 +500,7 @@ class IntervalLinearizedPosition(dj.Computed):
         linear_position_df = get_linearized_position(
             position=position,
             track_graph=track_graph,
-            edge_specialty=track_graph_info['linear_edge_specialty'],
+            edge_map=track_graph_info['edge_map'],
             edge_spacing=track_graph_info['linear_edge_spacing'],
             edge_order=track_graph_info['linear_edge_order'],
             use_HMM=linearization_parameters['use_hmm'],
