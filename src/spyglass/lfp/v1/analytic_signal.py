@@ -70,14 +70,20 @@ class AnalyticSignal(dj.Computed):
             )
         ][:, electrode_index]
 
-        # Get analytic signal with the specified method (we're only using Hilbert transform for now)
+        # Get analytic signal with the specified method (we're only using Hilbert transform for now, and the algorithm will raise errors if other methods are defined by the user)
         filtered_analytic = np.empty(
             shape=(filtered_band_selected.shape[0], 0), dtype=np.complex_
         )
+        params = (AnalyticSignalParameters() & key).fetch1("analytic_signal_params")
         for lfp_electrode_index in range(filtered_band_selected.shape[1]):
-            analytic_signal_one_channel = hilbert(
-                np.array(filtered_band_selected)[:, lfp_electrode_index], axis=0
-            )
+            if params["analytic_method_name"] == "hilbert_transform":
+                analytic_signal_one_channel = hilbert(
+                    np.array(filtered_band_selected)[:, lfp_electrode_index], axis=0
+                )
+            else:
+                raise KeyError(
+                    f"analytic_method_name '{params['analytic_method_name']}' is not supported."
+                )
             filtered_analytic = np.column_stack(
                 (filtered_analytic, analytic_signal_one_channel)
             )
