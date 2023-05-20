@@ -303,6 +303,9 @@ class DLCCentroid(dj.Computed):
                     interp_df = interp_pos(
                         centroid_df.copy(), nan_spans, **params["interp_params"]
                     )
+                else:
+                    logger.logger.info("no NaNs to interpolate over")
+                    interp_df = centroid_df.copy()
             else:
                 interp_df = centroid_df.copy()
             if params["smooth"]:
@@ -325,6 +328,10 @@ class DLCCentroid(dj.Computed):
                         smoothing_duration=smoothing_duration,
                         sampling_rate=sampling_rate,
                         **params["smoothing_params"],
+                    )
+                else:
+                    raise KeyError(
+                        "smoothing_duration needs to be passed within smoothing_params"
                     )
             else:
                 final_df = interp_df.copy()
