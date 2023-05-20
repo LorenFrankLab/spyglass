@@ -115,7 +115,7 @@ class AnalyticSignal(dj.Computed):
         )
 
     def fetch1_dataframe(self):
-        return self.fetch_nwb()[0]["analytic_signal"]
+        return self.fetch_nwb()[0]["analytic_signal"].set_index("time stamps")
 
     def compute_signal_phase(self, electrode_id):
         analytic_df = self.fetch_nwb()[0]["analytic_signal"]
