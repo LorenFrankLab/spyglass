@@ -26,8 +26,6 @@ class AnalyticSignalParameters(dj.Manual):
         analytic_signal_params[
             "other_params"
         ] = None # Hilbert transform doesn't contain other parameters; alternative methods may contain additional params.
-            "other_params"
-        ] = ""  # Hilbert transform doesn't contain other parameters; alternative methods may contain additional params.
         self.insert1(["default", analytic_signal_params], skip_duplicates=True)
 
 
