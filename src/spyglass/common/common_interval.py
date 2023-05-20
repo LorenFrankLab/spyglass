@@ -440,3 +440,43 @@ def interval_from_inds(list_frames):
         group = list(group)
         interval_list.append([group[0][1], group[-1][1]])
     return np.asarray(interval_list)
+
+
+def interval_set_difference_inds(intervals1, intervals2):
+    """
+    e.g.
+    intervals1 = [(0, 5), (8, 10)]
+    intervals2 = [(1, 2), (3, 4), (6, 9)]
+
+    result = [(0, 1), (4, 5), (9, 10)]
+
+    Parameters
+    ----------
+    intervals1 : _type_
+        _description_
+    intervals2 : _type_
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    result = []
+    i = j = 0
+    while i < len(intervals1) and j < len(intervals2):
+        if intervals1[i][1] <= intervals2[j][0]:
+            result.append(intervals1[i])
+            i += 1
+        elif intervals2[j][1] <= intervals1[i][0]:
+            j += 1
+        else:
+            if intervals1[i][0] < intervals2[j][0]:
+                result.append((intervals1[i][0], intervals2[j][0]))
+            if intervals1[i][1] > intervals2[j][1]:
+                intervals1[i] = (intervals2[j][1], intervals1[i][1])
+                j += 1
+            else:
+                i += 1
+    result += intervals1[i:]
+    return result

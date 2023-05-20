@@ -37,7 +37,7 @@ class SpikeSorterParameters(dj.Manual):
         """Default params from spike sorters available via spikeinterface"""
         sorters = sis.available_sorters()
         for sorter in sorters:
-            sorter_params = sis.get_default_params(sorter)
+            sorter_params = sis.get_default_sorter_params(sorter)
             self.insert1([sorter, "default", sorter_params], skip_duplicates=True)
 
         # Insert Frank lab defaults
@@ -288,7 +288,7 @@ class SpikeSorting(dj.Computed):
         sorting_name = recording_name + "_" + str(uuid.uuid4())[0:8] + "_spikesorting"
         return sorting_name
 
-    # TODO: write a function to import sortings done outside of dj
+    # TODO: write a function to import sorting done outside of dj
 
     def _import_sorting(self, key):
         raise NotImplementedError

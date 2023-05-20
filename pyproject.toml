@@ -10,6 +10,7 @@ authors = [
     { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
     { name = "Eric Denovellis", email = "eric.denovellis@ucsf.edu" },
     { name = "Ryan Ly", email = "rly@lbl.gov" },
+    { name = "Daniel Gramling", email = "daniel.gramling@ucsf.edu" },
 ]
 description = "Neuroscience data analysis framework for reproducible research"
 readme = "README.md"
@@ -67,5 +68,16 @@ spyglass_cli = "spyglass.cli:cli"
 "Homepage" = "https://github.com/LorenFrankLab/spyglass"
 "Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
 
+[project.optional-dependencies]
+position = [
+    "ffmpeg",
+    "numba>=0.54",
+    "deeplabcut<2.3.0",
+]
 [tool.black]
 # line-length = 120
+
+[tool.codespell]
+skip = '.git,*.pdf,*.svg,*.ipynb'
+# Nevers - name in Citation
+ignore-words-list = 'nevers'

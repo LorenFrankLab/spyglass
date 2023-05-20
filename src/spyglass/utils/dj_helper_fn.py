@@ -117,7 +117,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
 
 
 def _get_nwb_object(objects, object_id):
-    """Retreive NWB object and try to convert to dataframe if possible"""
+    """Retrieve NWB object and try to convert to dataframe if possible"""
     try:
         return objects[object_id].to_dataframe()
     except AttributeError:
