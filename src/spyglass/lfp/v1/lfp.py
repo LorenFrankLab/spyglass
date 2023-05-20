@@ -459,7 +459,12 @@ def _get_artifact_times(
         # second, find artifacts with large baseline change
         big_artifacts = np.zeros((recording.data.shape[1], above_thresh_1st.shape[0]))
         for art_count in np.arange(above_thresh_1st.shape[0]):
-            local_max = np.max(
+            if above_thresh_1st[art_count] <= local_window:
+                print('early artifact',above_thresh_1st[art_count])
+                local_max = above_thresh_1st[art_count]
+                local_min = above_thresh_1st[art_count]
+            else:
+                local_max = np.max(
                 recording.data[
                     above_thresh_1st[art_count]
                     - local_window : above_thresh_1st[art_count]
@@ -468,7 +473,7 @@ def _get_artifact_times(
                 ],
                 axis=0,
             )
-            local_min = np.min(
+                local_min = np.min(
                 recording.data[
                     above_thresh_1st[art_count]
                     - local_window : above_thresh_1st[art_count]
