@@ -75,10 +75,9 @@ class AnalyticSignal(dj.Computed):
             shape=(filtered_band_selected.shape[0], 0), dtype=np.complex_
         )
         for lfp_electrode_index in range(filtered_band_selected.shape[1]):
-            filtered_lfp_one_channel = np.array(filtered_band_selected)[
-                :, lfp_electrode_index
-            ]
-            analytic_signal_one_channel = hilbert(filtered_lfp_one_channel, axis=0)
+            analytic_signal_one_channel = hilbert(
+                np.array(filtered_band_selected)[:, lfp_electrode_index], axis=0
+            )
             filtered_analytic = np.column_stack(
                 (filtered_analytic, analytic_signal_one_channel)
             )
