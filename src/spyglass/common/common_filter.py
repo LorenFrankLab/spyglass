@@ -27,7 +27,7 @@ def _import_ghostipy():
 
 
 @schema
-class FirFilter(dj.Manual):
+class FirFilterParameters(dj.Manual):
     definition = """
     filter_name: varchar(80)           # descriptive name of this filter
     filter_sampling_rate: int          # sampling rate for this filter

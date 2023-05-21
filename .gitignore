@@ -176,3 +176,5 @@ dj_local_conf.json
 
 !/.vscode/extensions.json
 !/.vscode/settings.json
+!/notebooks/dlc_scratch.png
+!/notebooks/dlc_existing.png

@@ -10,7 +10,7 @@ import pynwb
 import scipy.stats as stats
 
 from spyglass.common.common_ephys import Electrode, Raw
-from spyglass.common.common_filter import FirFilter
+from spyglass.common.common_filter import FirFilterParameters
 from spyglass.common.common_interval import interval_list_censor  # noqa: F401
 from spyglass.common.common_interval import (
     IntervalList,
@@ -80,7 +80,7 @@ class LFPSelection(dj.Manual):
     definition = """
      -> LFPElectrodeGroup
      -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
-     -> FirFilter
+     -> FirFilterParameters
      """
 
 
@@ -131,8 +131,8 @@ class LFP(dj.Computed):
 
         # get the LFP filter that matches the raw data
         filter = (
-            FirFilter()
-            & {"filter_name": "LFP 0-400 Hz"}
+            FirFilterParameters()
+            & {"filter_name": key["filter_name"]}
             & {"filter_sampling_rate": sampling_rate}
         ).fetch(as_dict=True)
 
@@ -154,7 +154,7 @@ class LFP(dj.Computed):
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
-        lfp_object_id, timestamp_interval = FirFilter().filter_data_nwb(
+        lfp_object_id, timestamp_interval = FirFilterParameters().filter_data_nwb(
             lfp_file_abspath,
             rawdata,
             filter_coeff,
@@ -615,7 +615,7 @@ def _check_artifact_thresholds(
 class LFPBandSelection(dj.Manual):
     definition = """
     -> LFPOutput
-    -> FirFilter                   # the filter to use for the data
+    -> FirFilterParameters                   # the filter to use for the data
     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
     lfp_band_sampling_rate: int    # the sampling rate for this band
     ---
@@ -647,7 +647,7 @@ class LFPBandSelection(dj.Manual):
         :param nwb_file_name: string - the name of the nwb file for the desired session
         :param lfp_id: uuid - the uuid for the LFPOutput to use
         :param electrode_list: list of LFP electrodes (electrode ids) to be filtered
-        :param filter_name: the name of the filter (from the FirFilter schema)
+        :param filter_name: the name of the filter (from the FirFilterParameters schema)
         :param interval_name: the name of the interval list (from the IntervalList schema)
         :param reference_electrode_list: A single electrode id corresponding to the reference to use for all
         electrodes or a list with one element per entry in the electrode_list
@@ -676,13 +676,13 @@ class LFPBandSelection(dj.Manual):
                 f"samping rate {lfp_sampling_rate}"
             )
         # filter
-        query = FirFilter() & {
+        query = FirFilterParameters() & {
             "filter_name": filter_name,
             "filter_sampling_rate": lfp_sampling_rate,
         }
         if not query:
             raise ValueError(
-                f"filter {filter_name}, sampling rate {lfp_sampling_rate} is not in the FirFilter table"
+                f"filter {filter_name}, sampling rate {lfp_sampling_rate} is not in the FirFilterParameters table"
             )
         # interval_list
         query = IntervalList() & {
@@ -769,8 +769,10 @@ class LFPBand(dj.Computed):
         lfp_band_elect_id = lfp_band_elect_id[lfp_sort_order]
         lfp_band_ref_id = lfp_band_ref_id[lfp_sort_order]
 
-        lfp_sampling_rate = (LFP() & {"nwb_file_name": key["nwb_file_name"]}).fetch1(
-            "lfp_sampling_rate"
+        lfp_sampling_rate = (
+            LFPOutput()
+            .get_lfp_object({"lfp_id": key["lfp_id"]})
+            .fetch1("lfp_sampling_rate")
         )
         interval_list_name, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1(
             "target_interval_list_name", "lfp_band_sampling_rate"
@@ -784,8 +786,10 @@ class LFPBand(dj.Computed):
         ).fetch1("valid_times")
         # the valid_times for this interval may be slightly beyond the valid times for the lfp itself,
         # so we have to intersect the two
-        lfp_interval_list = (LFP() & {"nwb_file_name": key["nwb_file_name"]}).fetch1(
-            "interval_list_name"
+        lfp_interval_list = (
+            LFPOutput()
+            .get_lfp_object({"lfp_id": key["lfp_id"]})
+            .fetch1("interval_list_name")
         )
         lfp_valid_times = (
             IntervalList()
@@ -836,14 +840,14 @@ class LFPBand(dj.Computed):
 
         # get the LFP filter that matches the raw data
         filter = (
-            FirFilter()
+            FirFilterParameters()
             & {"filter_name": filter_name}
             & {"filter_sampling_rate": filter_sampling_rate}
         ).fetch(as_dict=True)
         if len(filter) == 0:
             raise ValueError(
                 f"Filter {filter_name} and sampling_rate {lfp_band_sampling_rate} does not exit in the "
-                "FirFilter table"
+                "FirFilterParameters table"
             )
 
         filter_coeff = filter[0]["filter_coeff"]
@@ -857,7 +861,7 @@ class LFPBand(dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
         # filter the data and write to an the nwb file
-        filtered_data, new_timestamps = FirFilter().filter_data(
+        filtered_data, new_timestamps = FirFilterParameters().filter_data(
             timestamps,
             lfp_data,
             filter_coeff,
