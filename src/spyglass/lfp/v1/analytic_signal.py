@@ -28,6 +28,14 @@ class AnalyticSignalParameters(dj.Manual):
         ] = None  # Hilbert transform doesn't contain other parameters; alternative methods may contain additional params.
         self.insert1(["default", analytic_signal_params], skip_duplicates=True)
 
+    def insert1(self, key, skip_duplicates):
+        if key[1]["analytic_method_name"] == "hilbert_transform":
+            super().insert1(key, skip_duplicates=skip_duplicates)
+        else:
+            raise KeyError(
+                f"analytic_method_name '{key[1]['analytic_method_name']}' is not currently supported."
+            )
+
 
 @schema
 class AnalyticSignalSelection(dj.Manual):
