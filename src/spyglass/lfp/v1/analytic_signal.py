@@ -66,7 +66,6 @@ class AnalyticSignal(dj.Computed):
         electrode_list = (LFPElectrodeGroup.LFPElectrode() & key).fetch("electrode_id")
         electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
         start, end = (IntervalList() & key).fetch1("valid_times")[0]
-        end = (IntervalList() & key).fetch1("valid_times")[0][-1]
         timestamps_selected = filtered_band.timestamps[
             np.logical_and(
                 filtered_band.timestamps >= start, filtered_band.timestamps <= end
