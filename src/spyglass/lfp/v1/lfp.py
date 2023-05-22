@@ -460,28 +460,28 @@ def _get_artifact_times(
         big_artifacts = np.zeros((recording.data.shape[1], above_thresh_1st.shape[0]))
         for art_count in np.arange(above_thresh_1st.shape[0]):
             if above_thresh_1st[art_count] <= local_window:
-                print('early artifact',above_thresh_1st[art_count])
+                print("early artifact", above_thresh_1st[art_count])
                 local_max = above_thresh_1st[art_count]
                 local_min = above_thresh_1st[art_count]
             else:
                 local_max = np.max(
-                recording.data[
-                    above_thresh_1st[art_count]
-                    - local_window : above_thresh_1st[art_count]
-                    + local_window,
-                    :,
-                ],
-                axis=0,
-            )
+                    recording.data[
+                        above_thresh_1st[art_count]
+                        - local_window : above_thresh_1st[art_count]
+                        + local_window,
+                        :,
+                    ],
+                    axis=0,
+                )
                 local_min = np.min(
-                recording.data[
-                    above_thresh_1st[art_count]
-                    - local_window : above_thresh_1st[art_count]
-                    + local_window,
-                    :,
-                ],
-                axis=0,
-            )
+                    recording.data[
+                        above_thresh_1st[art_count]
+                        - local_window : above_thresh_1st[art_count]
+                        + local_window,
+                        :,
+                    ],
+                    axis=0,
+                )
             big_artifacts[:, art_count] = (
                 np.abs(local_max - local_min) > amplitude_thresh_2nd
             )
