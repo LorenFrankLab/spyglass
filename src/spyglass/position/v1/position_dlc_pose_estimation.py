@@ -6,6 +6,7 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pynwb
 from IPython.display import display
 
 from ...common.common_behav import RawPosition, VideoFile  # noqa: F401
@@ -13,7 +14,6 @@ from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import OutputLogger, infer_output_dir
 from .position_dlc_model import DLCModel
-import pynwb
 
 schema = dj.schema("position_v1_dlc_pose_estimation")
 

@@ -1,6 +1,7 @@
 import datajoint as dj
 import numpy as np
 import pandas as pd
+import pynwb
 
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
@@ -10,7 +11,6 @@ from .dlc_utils import (
     interp_pos,
 )
 from .position_dlc_pose_estimation import DLCPoseEstimation
-import pynwb
 
 schema = dj.schema("position_v1_dlc_position")
 
