@@ -1,5 +1,5 @@
 import datajoint as dj
-from spyglass.lfp.v1 import LFP, ImportedLFP
+from spyglass.lfp.v1 import LFPV1, ImportedLFPV1
 
 schema = dj.schema("lfp")
 
@@ -12,18 +12,18 @@ class LFPOutput(dj.Manual):
     stream: varchar(40)
     """
 
-    class LFP(dj.Part):
+    class LFPV1(dj.Part):
         definition = """
         -> LFPOutput
         ---
-        -> LFP
+        -> LFPV1
         """
 
     class ImportedLFP(dj.Part):
         definition = """
         -> LFPOutput
         ---
-        -> ImportedLFP
+        -> ImportedLFPV1
         """
 
     @staticmethod
@@ -48,6 +48,6 @@ class LFPOutput(dj.Manual):
         # first check if this returns anything from the LFP table
         lfp_object = LFPOutput.LFP & key
         if lfp_object is not None:
-            return LFP & lfp_object.fetch("KEY")
+            return LFPV1 & lfp_object.fetch("KEY")
         else:
-            return ImportedLFP & (LFPOutput.ImportedLFP & key).fetch("KEY")
+            return ImportedLFPV1 & (LFPOutput.ImportedLFP & key).fetch("KEY")

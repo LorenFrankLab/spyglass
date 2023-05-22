@@ -84,7 +84,7 @@ class LFPSelection(dj.Manual):
 
 
 @schema
-class LFP(dj.Computed):
+class LFPV1(dj.Computed):
     definition = """
     -> LFPSelection
     ---
@@ -211,7 +211,7 @@ class LFP(dj.Computed):
 
 
 @schema
-class ImportedLFP(dj.Imported):
+class ImportedLFPV1(dj.Imported):
     definition = """
     -> Session
     -> LFPElectrodeGroup
