@@ -461,7 +461,7 @@ def _get_artifact_times(
         for art_count in np.arange(above_thresh_1st.shape[0]):
             if above_thresh_1st[art_count] <= local_window:
                 print("early artifact", above_thresh_1st[art_count])
-                local_max = above_thresh_1st[art_count]
+              local_min = local_max = above_thresh_1st[art_count]
                 local_min = above_thresh_1st[art_count]
             else:
                 local_max = np.max(
