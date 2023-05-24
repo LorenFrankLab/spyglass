@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import pynwb
 import scipy.stats as stats
+from scipy.signal import hilbert
+import math
 
 from spyglass.common.common_ephys import Electrode, Raw
 from spyglass.common.common_filter import FirFilterParameters
@@ -946,4 +948,36 @@ class LFPBand(dj.Computed):
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,
             index=pd.Index(filtered_nwb["filtered_data"].timestamps, name="time"),
+        )
+
+    def compute_analytic_signal(self, electrode_list, **kwargs):
+        filtered_band = self.fetch_nwb()[0]["filtered_data"]
+        electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
+        analytic_signal_df = pd.DataFrame(
+            hilbert(filtered_band.data[:, electrode_index], axis=0),
+            index=pd.Index(filtered_band.timestamps, name="time"),
+            columns=[f"electrode {e}" for e in electrode_list],
+        )
+        return analytic_signal_df
+
+    def compute_signal_phase(self, electrode_list=[], **kwargs):
+        analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+        return pd.DataFrame(
+            {
+                str(electrode): np.angle(analytic_signal_df[f"electrode {electrode}"])
+                + math.pi
+                for electrode in electrode_list
+            },
+            index=analytic_signal_df.index,
+        )
+
+    def compute_signal_power(self, electrode_list=[], **kwargs):
+        analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+        return pd.DataFrame(
+            {
+                str(electrode): np.abs(analytic_signal_df[f"electrode {electrode}"])
+                ** 2
+                for electrode in electrode_list
+            },
+            index=analytic_signal_df.index,
         )
