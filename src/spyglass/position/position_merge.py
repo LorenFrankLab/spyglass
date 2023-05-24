@@ -1,4 +1,5 @@
 import os
+import functools as ft
 from pathlib import Path
 from typing import Dict
 
@@ -310,13 +311,16 @@ class PositionVideo(dj.Computed):
         #         "interval_list_name": key["interval_list_name"],
         #     }
         # ).fetch1_dataframe()
+        query = {
+            "nwb_file_name": key["nwb_file_name"],
+            "interval_list_name": key["interval_list_name"],
+        }
         if key["plot"] == "DLC":
             assert position_ids["dlc_position_id"]
             pos_df = (
                 PositionOutput()
                 & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "interval_list_name": key["interval_list_name"],
+                    **query,
                     "source": "DLC",
                     "position_id": position_ids["dlc_position_id"],
                 }
@@ -326,46 +330,108 @@ class PositionVideo(dj.Computed):
             pos_df = (
                 PositionOutput()
                 & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "interval_list_name": key["interval_list_name"],
+                    **query,
                     "source": "Trodes",
                     "position_id": position_ids["trodes_position_id"],
                 }
             ).fetch1_dataframe()
+        elif key["plot"] == "Common":
+            assert position_ids["common_position_id"]
+            pos_df = (
+                PositionOutput()
+                & {
+                    **query,
+                    "source": "Common",
+                    "position_id": position_ids["common_position_id"],
+                }
+            ).fetch1_dataframe()
         elif key["plot"] == "All":
-            assert position_ids["trodes_position_id"]
-            assert position_ids["dlc_position_id"]
-            dlc_df = (
-                (
-                    PositionOutput()
-                    & {
-                        "nwb_file_name": key["nwb_file_name"],
-                        "interval_list_name": key["interval_list_name"],
-                        "source": "DLC",
-                        "position_id": position_ids["dlc_position_id"],
-                    }
-                )
-                .fetch1_dataframe()
-                .drop(columns=["velocity_x", "velocity_y", "speed"])
-            )
-            trodes_df = (
-                (
-                    PositionOutput()
-                    & {
-                        "nwb_file_name": key["nwb_file_name"],
-                        "interval_list_name": key["interval_list_name"],
-                        "source": "Trodes",
-                        "position_id": position_ids["trodes_position_id"],
-                    }
-                )
-                .fetch1_dataframe()
-                .drop(columns=["velocity_x", "velocity_y", "speed"])
-            )
-            pos_df = dlc_df.merge(
-                trodes_df,
-                left_index=True,
-                right_index=True,
-                suffixes=["_DLC", "_Trodes"],
+            # Check which entries exist in PositionOutput
+            merge_dict = {}
+            if "dlc_position_id" in position_ids:
+                if (
+                    len(
+                        PositionOutput()
+                        & {
+                            **query,
+                            "source": "DLC",
+                            "position_id": position_ids["dlc_position_id"],
+                        }
+                    )
+                    > 0
+                ):
+                    dlc_df = (
+                        (
+                            PositionOutput()
+                            & {
+                                **query,
+                                "source": "DLC",
+                                "position_id": position_ids["dlc_position_id"],
+                            }
+                        )
+                        .fetch1_dataframe()
+                        .drop(columns=["velocity_x", "velocity_y", "speed"])
+                    )
+                    merge_dict["DLC"] = dlc_df
+            if "trodes_position_id" in position_ids:
+                if (
+                    len(
+                        PositionOutput()
+                        & {
+                            **query,
+                            "source": "Trodes",
+                            "position_id": position_ids["trodes_position_id"],
+                        }
+                    )
+                    > 0
+                ):
+                    trodes_df = (
+                        (
+                            PositionOutput()
+                            & {
+                                **query,
+                                "source": "Trodes",
+                                "position_id": position_ids["trodes_position_id"],
+                            }
+                        )
+                        .fetch1_dataframe()
+                        .drop(columns=["velocity_x", "velocity_y", "speed"])
+                    )
+                    merge_dict["Trodes"] = trodes_df
+            if "common_position_id" in position_ids:
+                if (
+                    len(
+                        PositionOutput()
+                        & {
+                            **query,
+                            "source": "Common",
+                            "position_id": position_ids["common_position_id"],
+                        }
+                    )
+                    > 0
+                ):
+                    common_df = (
+                        (
+                            PositionOutput()
+                            & {
+                                **query,
+                                "source": "Common",
+                                "position_id": position_ids["common_position_id"],
+                            }
+                        )
+                        .fetch1_dataframe()
+                        .drop(columns=["velocity_x", "velocity_y", "speed"])
+                    )
+                    merge_dict["Common"] = common_df
+            pos_df = ft.reduce(
+                lambda left, right,: pd.merge(
+                    left[1],
+                    right[1],
+                    left_index=True,
+                    right_index=True,
+                    suffixes=[f"_{left[0]}", f"_{right[0]}"],
+                ),
+                merge_dict.items(),
             )
         print("Loading video data...")
         epoch = (
@@ -402,21 +468,23 @@ class PositionVideo(dj.Computed):
         # centroids = {'red': np.asarray(raw_position_df[['xloc', 'yloc']]),
         #              'green':  np.asarray(raw_position_df[['xloc2', 'yloc2']])}
         position_mean_dict = {}
-        orientation_mean_dict = {}
-        if key["plot"] in ["DLC", "Trodes"]:
-            position_mean_dict[key["plot"]] = np.asarray(
+        if key["plot"] in ["DLC", "Trodes", "Common"]:
+            position_mean_dict[key["plot"]]["position"] = np.asarray(
                 pos_df[["position_x", "position_y"]]
             )
-            orientation_mean_dict[key["plot"]] = np.asarray(pos_df[["orientation"]])
+            position_mean_dict[key["plot"]]["orientation"] = np.asarray(
+                pos_df[["orientation"]]
+            )
         elif key["plot"] == "All":
-            position_mean_dict["DLC"] = np.asarray(
-                pos_df[["position_x_DLC", "position_y_DLC"]]
-            )
-            orientation_mean_dict["DLC"] = np.asarray(pos_df[["orientation_DLC"]])
-            position_mean_dict["Trodes"] = np.asarray(
-                pos_df[["position_x_Trodes", "position_y_Trodes"]]
-            )
-            orientation_mean_dict["Trodes"] = np.asarray(pos_df[["orientation_Trodes"]])
+            position_mean_dict = {
+                source: {
+                    "position": np.asarray(
+                        pos_df[[f"position_x_{source}", f"position_y_{source}"]]
+                    ),
+                    "orientation": np.asarray(pos_df[[f"orientation_{source}"]]),
+                }
+                for source in merge_dict.keys()
+            }
         position_time = np.asarray(pos_df.index)
         cm_per_pixel = meters_per_pixel * M_TO_CM
         print("Making video...")
@@ -425,7 +493,6 @@ class PositionVideo(dj.Computed):
             video_path,
             video_frame_inds,
             position_mean_dict,
-            orientation_mean_dict,
             video_time,
             position_time,
             processor="opencv",

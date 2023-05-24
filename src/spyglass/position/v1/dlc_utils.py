@@ -660,7 +660,6 @@ def make_video(
     video_filename,
     video_frame_inds,
     position_mean,
-    orientation_mean,
     centroids,
     likelihoods,
     position_time,
@@ -715,11 +714,13 @@ def make_video(
         # }
         if video_time:
             position_mean = {
-                key: fill_nan(position_mean[key], video_time, position_time)
+                key: fill_nan(position_mean[key]["position"], video_time, position_time)
                 for key in position_mean.keys()
             }
             orientation_mean = {
-                key: fill_nan(orientation_mean[key], video_time, position_time)
+                key: fill_nan(
+                    position_mean[key]["orientation"], video_time, position_time
+                )
                 for key in orientation_mean.keys()
             }
         print(
@@ -788,6 +789,8 @@ def make_video(
                         color = RGB_BLUE
                     if key == "Trodes":
                         color = RGB_ORANGE
+                    if key == "Common":
+                        color = RGB_PINK
                     if np.all(~np.isnan(position)) & np.all(~np.isnan(orientation)):
                         arrow_tip = (
                             int(position[0] + arrow_radius * np.cos(orientation)),
