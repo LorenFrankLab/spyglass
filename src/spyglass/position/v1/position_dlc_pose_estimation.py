@@ -319,11 +319,15 @@ class DLCPoseEstimation(dj.Computed):
 
     def fetch_dataframe(self, *attrs, **kwargs):
         entries = (self.BodyPart & self).fetch("KEY")
-
-        nwb_data = self.fetch_nwb()[0]
+        nwb_data_dict = {
+            entry["bodypart"]: (self.BodyPart() & entry).fetch_nwb()[0]
+            for entry in entries
+        }
         index = pd.Index(
             np.asarray(
-                nwb_data["dlc_pose_estimation_position"].get_spatial_series().timestamps
+                nwb_data_dict[entries[0]["bodypart"]]["dlc_pose_estimation_position"]
+                .get_spatial_series()
+                .timestamps
             ),
             name="time",
         )
@@ -339,18 +343,24 @@ class DLCPoseEstimation(dj.Computed):
                     np.concatenate(
                         (
                             np.asarray(
-                                nwb_data["dlc_pose_estimation_likelihood"]
+                                nwb_data_dict[entry["bodypart"]][
+                                    "dlc_pose_estimation_likelihood"
+                                ]
                                 .time_series["video_frame_ind"]
                                 .data,
                                 dtype=int,
                             )[:, np.newaxis],
                             np.asarray(
-                                nwb_data["dlc_pose_estimation_position"]
+                                nwb_data_dict[entry["bodypart"]][
+                                    "dlc_pose_estimation_position"
+                                ]
                                 .get_spatial_series()
                                 .data
                             ),
                             np.asarray(
-                                nwb_data["dlc_pose_estimation_likelihood"]
+                                nwb_data_dict[entry["bodypart"]][
+                                    "dlc_pose_estimation_likelihood"
+                                ]
                                 .time_series["likelihood"]
                                 .data
                             )[:, np.newaxis],
