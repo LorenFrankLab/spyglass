@@ -949,24 +949,23 @@ class LFPBand(dj.Computed):
             filtered_nwb["filtered_data"].data,
             index=pd.Index(filtered_nwb["filtered_data"].timestamps, name="time"),
         )
-    
+
     def compute_analytic_signal(key, electrode_list, **kwargs):
         filtered_band = self.fetch_nwb()[0]["filtered_data"]
         electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
         analytic_signal_df = pd.DataFrame(
-            hilbert(
-            filtered_band.data[:, electrode_index], axis=0
-            ),
+            hilbert(filtered_band.data[:, electrode_index], axis=0),
             index=pd.Index(filtered_band["filtered_data"].timestamps, name="time"),
             columns=[f"electrode {e}" for e in electrode_list],
         )
         return analytic_signal_df
-    
+
     def compute_signal_phase(self, key, electrode_list=[], **kwargs):
         analytic_signal_df = self.compute_analytic_signal(key, electrode_list, **kwargs)
         return pd.DataFrame(
             {
-                str(electrode): np.angle(analytic_signal_df[f"electrode {electrode}"]) + math.pi
+                str(electrode): np.angle(analytic_signal_df[f"electrode {electrode}"])
+                + math.pi
                 for electrode in electrode_list
             },
             index=analytic_signal_df.index,
@@ -976,7 +975,8 @@ class LFPBand(dj.Computed):
         analytic_signal_df = self.compute_analytic_signal(key, electrode_list, **kwargs)
         return pd.DataFrame(
             {
-                str(electrode): np.abs(analytic_signal_df[f"electrode {electrode_id}"]) ** 2
+                str(electrode): np.abs(analytic_signal_df[f"electrode {electrode_id}"])
+                ** 2
                 for electrode in electrode_list
             },
             index=analytic_signal_df.index,
