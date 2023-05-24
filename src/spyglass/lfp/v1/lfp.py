@@ -963,21 +963,15 @@ class LFPBand(dj.Computed):
     def compute_signal_phase(self, electrode_list=[], **kwargs):
         analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
         return pd.DataFrame(
-            {
-                str(electrode): np.angle(analytic_signal_df[f"electrode {electrode}"])
-                + math.pi
-                for electrode in electrode_list
-            },
+            np.angle(analytic_signal_df) + math.pi,
+            columns=analytic_signal_df.columns,
             index=analytic_signal_df.index,
         )
 
     def compute_signal_power(self, electrode_list=[], **kwargs):
         analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
         return pd.DataFrame(
-            {
-                str(electrode): np.abs(analytic_signal_df[f"electrode {electrode}"])
-                ** 2
-                for electrode in electrode_list
-            },
+            np.abs(analytic_signal_df) ** 2,
+            columns=analytic_signal_df.columns,
             index=analytic_signal_df.index,
         )
