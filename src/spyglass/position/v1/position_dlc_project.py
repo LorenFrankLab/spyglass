@@ -291,7 +291,9 @@ class DLCProject(dj.Manual):
                 raise ValueError(f"bodypart: {bodypart} not found in BodyPart table")
         kwargs_copy = kwargs.copy()
         kwargs_copy.update({"numframes2pick": frames_per_video, "dotsize": 3})
-        add_to_config(config_path, bodyparts, skeleton_node=skeleton_node, **kwargs_copy)
+        add_to_config(
+            config_path, bodyparts, skeleton_node=skeleton_node, **kwargs_copy
+        )
         key = {
             "project_name": project_name,
             "team_name": lab_team,
