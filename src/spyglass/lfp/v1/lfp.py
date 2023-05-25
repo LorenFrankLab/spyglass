@@ -951,14 +951,38 @@ class LFPBand(dj.Computed):
         )
 
     def compute_analytic_signal(self, electrode_list, **kwargs):
+        """Computes the hilbert transform of a given LFPBand signal using scipy.signal.hilbert
+
+        Parameters
+        ----------
+        electrode_list: list
+            A list of the electrodes to compute the hilbert transform of
+
+        Returns
+        -------
+        analytic_signal_df: pd.DataFrame
+            DataFrame containing hilbert transform of signal
+
+        Raises
+        ------
+        ValueError
+            If any electrodes passed to electrode_list are invalid for the dataset
+        """
+
         filtered_band = self.fetch_nwb()[0]["filtered_data"]
-        electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
-        analytic_signal_df = pd.DataFrame(
-            hilbert(filtered_band.data[:, electrode_index], axis=0),
-            index=pd.Index(filtered_band.timestamps, name="time"),
-            columns=[f"electrode {e}" for e in electrode_list],
-        )
-        return analytic_signal_df
+        electrode_exist = np.isin(electrode_list, filtered_band.electrodes.data[:])
+        if all(electrode_exist):
+            electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
+            analytic_signal_df = pd.DataFrame(
+                hilbert(filtered_band.data[:, electrode_index], axis=0),
+                index=pd.Index(filtered_band.timestamps, name="time"),
+                columns=[f"electrode {e}" for e in electrode_list],
+            )
+            return analytic_signal_df
+        else:
+            raise ValueError(
+                f"Electrodes {np.array(electrode_list)[electrode_exist==False]} are missing in the current LFPBand table."
+            )
 
     def compute_signal_phase(self, electrode_list=[], **kwargs):
         analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
