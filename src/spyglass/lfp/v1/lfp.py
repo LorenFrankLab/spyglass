@@ -7,9 +7,12 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
+import scipy.stats as stats
+from scipy.signal import hilbert
+import math
 
 from spyglass.common.common_ephys import Electrode, Raw
-from spyglass.common.common_filter import FirFilter
+from spyglass.common.common_filter import FirFilterParameters
 from spyglass.common.common_interval import interval_list_censor  # noqa: F401
 from spyglass.common.common_interval import (
     IntervalList,
@@ -79,7 +82,7 @@ class LFPSelection(dj.Manual):
     definition = """
      -> LFPElectrodeGroup
      -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
-     -> FirFilter
+     -> FirFilterParameters
      """
 
 
@@ -132,7 +135,7 @@ class LFPV1(dj.Computed):
 
         # get the LFP filter that matches the raw data
         filter = (
-            FirFilter()
+            FirFilterParameters()
             & {"filter_name": key["filter_name"]}
             & {"filter_sampling_rate": sampling_rate}
         ).fetch(as_dict=True)
@@ -155,7 +158,7 @@ class LFPV1(dj.Computed):
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
-        lfp_object_id, timestamp_interval = FirFilter().filter_data_nwb(
+        lfp_object_id, timestamp_interval = FirFilterParameters().filter_data_nwb(
             lfp_file_abspath,
             rawdata,
             filter_coeff,
@@ -415,24 +418,27 @@ def _get_artifact_times(
         # second, find artifacts with large baseline change
         big_artifacts = np.zeros((recording.data.shape[1], above_thresh_1st.shape[0]))
         for art_count in np.arange(above_thresh_1st.shape[0]):
-            local_max = np.max(
-                recording.data[
-                    above_thresh_1st[art_count]
-                    - local_window : above_thresh_1st[art_count]
-                    + local_window,
-                    :,
-                ],
-                axis=0,
-            )
-            local_min = np.min(
-                recording.data[
-                    above_thresh_1st[art_count]
-                    - local_window : above_thresh_1st[art_count]
-                    + local_window,
-                    :,
-                ],
-                axis=0,
-            )
+            if above_thresh_1st[art_count] <= local_window:
+                local_min = local_max = above_thresh_1st[art_count]
+            else:
+                local_max = np.max(
+                    recording.data[
+                        above_thresh_1st[art_count]
+                        - local_window : above_thresh_1st[art_count]
+                        + local_window,
+                        :,
+                    ],
+                    axis=0,
+                )
+                local_min = np.min(
+                    recording.data[
+                        above_thresh_1st[art_count]
+                        - local_window : above_thresh_1st[art_count]
+                        + local_window,
+                        :,
+                    ],
+                    axis=0,
+                )
             big_artifacts[:, art_count] = (
                 np.abs(local_max - local_min) > amplitude_thresh_2nd
             )
@@ -571,7 +577,7 @@ def _check_artifact_thresholds(
 class LFPBandSelection(dj.Manual):
     definition = """
     -> LFPOutput
-    -> FirFilter                   # the filter to use for the data
+    -> FirFilterParameters                   # the filter to use for the data
     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
     lfp_band_sampling_rate: int    # the sampling rate for this band
     ---
@@ -603,7 +609,7 @@ class LFPBandSelection(dj.Manual):
         :param nwb_file_name: string - the name of the nwb file for the desired session
         :param lfp_id: uuid - the uuid for the LFPOutput to use
         :param electrode_list: list of LFP electrodes (electrode ids) to be filtered
-        :param filter_name: the name of the filter (from the FirFilter schema)
+        :param filter_name: the name of the filter (from the FirFilterParameters schema)
         :param interval_name: the name of the interval list (from the IntervalList schema)
         :param reference_electrode_list: A single electrode id corresponding to the reference to use for all
         electrodes or a list with one element per entry in the electrode_list
@@ -634,13 +640,13 @@ class LFPBandSelection(dj.Manual):
                 f"samping rate {lfp_sampling_rate}"
             )
         # filter
-        query = FirFilter() & {
+        query = FirFilterParameters() & {
             "filter_name": filter_name,
             "filter_sampling_rate": lfp_sampling_rate,
         }
         if not query:
             raise ValueError(
-                f"filter {filter_name}, sampling rate {lfp_sampling_rate} is not in the FirFilter table"
+                f"filter {filter_name}, sampling rate {lfp_sampling_rate} is not in the FirFilterParameters table"
             )
         # interval_list
         query = IntervalList() & {
@@ -800,14 +806,14 @@ class LFPBand(dj.Computed):
 
         # get the LFP filter that matches the raw data
         filter = (
-            FirFilter()
+            FirFilterParameters()
             & {"filter_name": filter_name}
             & {"filter_sampling_rate": filter_sampling_rate}
         ).fetch(as_dict=True)
         if len(filter) == 0:
             raise ValueError(
                 f"Filter {filter_name} and sampling_rate {lfp_band_sampling_rate} does not exit in the "
-                "FirFilter table"
+                "FirFilterParameters table"
             )
 
         filter_coeff = filter[0]["filter_coeff"]
@@ -821,7 +827,7 @@ class LFPBand(dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
         # filter the data and write to an the nwb file
-        filtered_data, new_timestamps = FirFilter().filter_data(
+        filtered_data, new_timestamps = FirFilterParameters().filter_data(
             timestamps,
             lfp_data,
             filter_coeff,
@@ -903,4 +909,52 @@ class LFPBand(dj.Computed):
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,
             index=pd.Index(filtered_nwb["filtered_data"].timestamps, name="time"),
+        )
+
+    def compute_analytic_signal(self, electrode_list, **kwargs):
+        """Computes the hilbert transform of a given LFPBand signal using scipy.signal.hilbert
+
+        Parameters
+        ----------
+        electrode_list: list
+            A list of the electrodes to compute the hilbert transform of
+
+        Returns
+        -------
+        analytic_signal_df: pd.DataFrame
+            DataFrame containing hilbert transform of signal
+
+        Raises
+        ------
+        ValueError
+            If any electrodes passed to electrode_list are invalid for the dataset
+        """
+
+        filtered_band = self.fetch_nwb()[0]["filtered_data"]
+        electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
+        if len(electrode_list) != np.sum(electrode_index):
+            raise ValueError(
+                "Some of the electrodes specified in electrode_list are missing in the current LFPBand table."
+            )
+        analytic_signal_df = pd.DataFrame(
+            hilbert(filtered_band.data[:, electrode_index], axis=0),
+            index=pd.Index(filtered_band.timestamps, name="time"),
+            columns=[f"electrode {e}" for e in electrode_list],
+        )
+        return analytic_signal_df
+
+    def compute_signal_phase(self, electrode_list=[], **kwargs):
+        analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+        return pd.DataFrame(
+            np.angle(analytic_signal_df) + math.pi,
+            columns=analytic_signal_df.columns,
+            index=analytic_signal_df.index,
+        )
+
+    def compute_signal_power(self, electrode_list=[], **kwargs):
+        analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+        return pd.DataFrame(
+            np.abs(analytic_signal_df) ** 2,
+            columns=analytic_signal_df.columns,
+            index=analytic_signal_df.index,
         )

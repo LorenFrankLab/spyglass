@@ -21,6 +21,7 @@ mysql_config
 !notebooks/10_1D_Clusterless_Decoding.ipynb
 !notebooks/11_2D_Clusterless_Decoding.ipynb
 !notebooks/12_Ripple_Detection.ipynb
+!notebooks/13_Theta_phase_and_power.ipynb
 
 
 # Byte-compiled / optimized / DLL files
