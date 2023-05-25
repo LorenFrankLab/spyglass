@@ -615,7 +615,7 @@ def smooth_moving_avg(
     moving_avg_window = int(np.round(smoothing_duration * sampling_rate))
     xy_arr = interp_df.loc[:, idx[("x", "y")]].values
     smoothed_xy_arr = bn.move_mean(
-        xy_arr, window=moving_avg_window, axis=0, min_count=2
+        xy_arr, window=moving_avg_window, axis=0, min_count=1
     )
     interp_df.loc[:, idx["x"]], interp_df.loc[:, idx["y"]] = [
         *zip(*smoothed_xy_arr.tolist())
