@@ -975,17 +975,13 @@ class LFPBand(dj.Computed):
             raise ValueError(
                 f"Electrodes {np.array(electrode_list)[electrode_exist==False]} are missing in the current LFPBand table."
             )
-            electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
-            analytic_signal_df = pd.DataFrame(
-                hilbert(filtered_band.data[:, electrode_index], axis=0),
-                index=pd.Index(filtered_band.timestamps, name="time"),
-                columns=[f"electrode {e}" for e in electrode_list],
-            )
-            return analytic_signal_df
-        else:
-            raise ValueError(
-                f"Electrodes {np.array(electrode_list)[electrode_exist==False]} are missing in the current LFPBand table."
-            )
+        electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
+        analytic_signal_df = pd.DataFrame(
+            hilbert(filtered_band.data[:, electrode_index], axis=0),
+            index=pd.Index(filtered_band.timestamps, name="time"),
+            columns=[f"electrode {e}" for e in electrode_list],
+        )
+        return analytic_signal_df
 
     def compute_signal_phase(self, electrode_list=[], **kwargs):
         analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
