@@ -7,9 +7,7 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
-import scipy.stats as stats
 from scipy.signal import hilbert
-import math
 
 from spyglass.common.common_ephys import Electrode, Raw
 from spyglass.common.common_filter import FirFilterParameters
@@ -946,7 +944,7 @@ class LFPBand(dj.Computed):
     def compute_signal_phase(self, electrode_list=[], **kwargs):
         analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
         return pd.DataFrame(
-            np.angle(analytic_signal_df) + math.pi,
+            np.angle(analytic_signal_df) + np.pi,
             columns=analytic_signal_df.columns,
             index=analytic_signal_df.index,
         )
