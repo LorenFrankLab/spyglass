@@ -970,12 +970,11 @@ class LFPBand(dj.Computed):
         """
 
         filtered_band = self.fetch_nwb()[0]["filtered_data"]
-        electrode_exist = np.isin(electrode_list, filtered_band.electrodes.data[:])
-        if not all(electrode_exist):
-            raise ValueError(
-                f"Electrodes {np.array(electrode_list)[electrode_exist==False]} are missing in the current LFPBand table."
-            )
         electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
+        if len(electrode_list) != np.sum(electrode_index):
+            raise ValueError(
+                "Some of the electrodes specified in electrode_list are missing in the current LFPBand table."
+            )
         analytic_signal_df = pd.DataFrame(
             hilbert(filtered_band.data[:, electrode_index], axis=0),
             index=pd.Index(filtered_band.timestamps, name="time"),
