@@ -287,7 +287,7 @@ class LFPArtifactDetection(dj.Computed):
             )
 
             # get LFP data
-            lfp_eseries = (LFP() & key).fetch_nwb()[0]["lfp"]
+            lfp_eseries = (LFPV1() & key).fetch_nwb()[0]["lfp"]
 
             artifact_removed_valid_times, artifact_times = _get_artifact_times(
                 lfp_eseries,
@@ -470,7 +470,7 @@ def _get_artifact_times(
     artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
 
     # im not sure how to get the key in this function
-    sampling_frequency = (LFP() & key).fetch("lfp_sampling_rate")[0]
+    sampling_frequency = (LFPV1() & key).fetch("lfp_sampling_rate")[0]
 
     valid_intervals = get_valid_intervals(
         valid_timestamps, sampling_frequency, 1.5, 0.000001
@@ -717,7 +717,7 @@ class LFPBand(dj.Computed):
         from spyglass.lfp.lfp_merge import LFPOutput
 
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
-        lfp_object = (LFP() & {"nwb_file_name": key["nwb_file_name"]}).fetch_nwb()[0][
+        lfp_object = (LFPV1() & {"nwb_file_name": key["nwb_file_name"]}).fetch_nwb()[0][
             "lfp"
         ]
 
