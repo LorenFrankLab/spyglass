@@ -22,6 +22,7 @@ class LFPOutput(dj.Manual):
         -> LFPV1
         ---
         -> AnalysisNwbfile
+        lfp_object_id: varchar(40)
         """
 
         def fetch_nwb(self, *attrs, **kwargs):
@@ -42,6 +43,7 @@ class LFPOutput(dj.Manual):
         -> ImportedLFPV1
         ---
         -> AnalysisNwbfile
+        lfp_object_id: varchar(40)
         """
 
         def fetch_nwb(self, *attrs, **kwargs):
