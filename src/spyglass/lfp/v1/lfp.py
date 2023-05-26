@@ -122,6 +122,7 @@ class LFPV1(dj.Computed):
         # add an interval list for the LFP valid times, skipping duplicates
         key["interval_list_name"] = "_".join(
             (
+                "lfp",
                 key["lfp_electrode_group_name"],
                 key["target_interval_list_name"],
                 "valid times",
