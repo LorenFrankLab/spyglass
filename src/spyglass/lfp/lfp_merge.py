@@ -5,7 +5,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.v1.lfp import LFPV1, ImportedLFPV1
 from spyglass.utils.dj_helper_fn import fetch_nwb
 
-schema = dj.schema("lfp")
+schema = dj.schema("lfp_merge")
 
 
 @schema
