@@ -1,5 +1,5 @@
 # flake8: noqa
-from .lfp import (
+from spyglass.lfp import (
     LFP,
     ImportedLFP,
     LFPArtifactDetection,
@@ -9,6 +9,5 @@ from .lfp import (
     LFPBand,
     LFPBandSelection,
     LFPElectrodeGroup,
-    LFPOutput,
     LFPSelection,
 )
