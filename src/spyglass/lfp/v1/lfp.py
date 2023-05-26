@@ -80,7 +80,7 @@ class LFPV1(dj.Computed):
             FirFilterParameters()
             & {"filter_name": key["filter_name"]}
             & {"filter_sampling_rate": sampling_rate}
-        ).fetch1(as_dict=True)
+        ).fetch(as_dict=True)[0]
 
         # there should only be one filter that matches, so we take the first of the dictionaries
         key["filter_name"] = filter["filter_name"]
