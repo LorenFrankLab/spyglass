@@ -11,8 +11,8 @@ from spyglass.common.common_interval import (
     interval_from_inds,
     interval_list_intersect,
 )
-from spyglass.utils.nwb_helper_fn import get_valid_intervals
 from spyglass.lfp.v1.lfp import LFPV1
+from spyglass.utils.nwb_helper_fn import get_valid_intervals
 
 schema = dj.schema("lfp_v1")
 
@@ -54,7 +54,7 @@ class LFPArtifactDetectionParameters(dj.Manual):
 class LFPArtifactDetectionSelection(dj.Manual):
     definition = """
     # Specifies artifact detection parameters to apply to a sort group's recording.
-    -> LFP
+    -> LFPV1
     -> LFPArtifactDetectionParameters
     ---
     custom_artifact_detection=0 : tinyint
