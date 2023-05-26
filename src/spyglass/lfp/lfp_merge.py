@@ -36,7 +36,7 @@ class LFPOutput(dj.Manual):
                 index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
             )
 
-    class ImportedLFP(dj.Part):
+    class ImportedLFPV1(dj.Part):
         definition = """
         -> LFPOutput
         -> ImportedLFPV1
