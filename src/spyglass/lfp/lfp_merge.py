@@ -13,7 +13,9 @@ class LFPOutput(dj.Manual):
     definition = """
     lfp_id: uuid
     ---
-    stream: varchar(40)
+    source: varchar(40)
+    version: int
+
     """
 
     class LFPV1(dj.Part):
