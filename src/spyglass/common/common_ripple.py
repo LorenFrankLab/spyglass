@@ -8,7 +8,7 @@ from spyglass.common import (
     IntervalList,  # noqa
     IntervalPositionInfo,
 )
-from spyglass.lfp.v1 import LFPBand, LFPBandSelection
+from spyglass.common import LFPBand, LFPBandSelection
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.utils.dj_helper_fn import fetch_nwb
 
