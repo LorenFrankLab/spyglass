@@ -250,7 +250,7 @@ class RippleTimes(dj.Computed):
         )
 
         position_info = interpolate_to_new_time(
-            valid_position_info, interval_ripple_lfps.index
+            position_info, interval_ripple_lfps.index
         )
 
         return (
