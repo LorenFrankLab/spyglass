@@ -13,14 +13,17 @@ import spikeinterface as si
 import spikeinterface.preprocessing as sp
 import spikeinterface.qualitymetrics as sq
 
-from ..common.common_interval import IntervalList
-from ..common.common_nwbfile import AnalysisNwbfile
-from ..utils.dj_helper_fn import fetch_nwb
-from .merged_sorting_extractor import MergedSortingExtractor
-from .spikesorting_recording import SortInterval, SpikeSortingRecording
-from .spikesorting_sorting import SpikeSorting
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.v1.merged_sorting_extractor import MergedSortingExtractor
+from spyglass.spikesorting.v1.spikesorting_recording import (
+    SortInterval,
+    SpikeSortingRecording,
+)
+from spyglass.spikesorting.v1.spikesorting_sorting import SpikeSorting
+from spyglass.utils.dj_helper_fn import fetch_nwb
 
-schema = dj.schema("spikesorting_curation")
+schema = dj.schema("spikesorting_curation_v1")
 
 valid_labels = ["reject", "noise", "artifact", "mua", "accept"]
 
@@ -830,7 +833,7 @@ class CuratedSpikeSortingSelection(dj.Manual):
 
 
 @schema
-class CuratedSpikeSorting(dj.Computed):
+class CuratedSpikeSortingV1(dj.Computed):
     definition = """
     -> CuratedSpikeSortingSelection
     ---
@@ -898,7 +901,6 @@ class CuratedSpikeSorting(dj.Computed):
         recording = Curation.get_recording(key)
 
         # get the sort_interval and sorting interval list
-        sort_interval_name = (SpikeSortingRecording & key).fetch1("sort_interval_name")
         sort_interval = (SortInterval & key).fetch1("sort_interval")
         sort_interval_list_name = (SpikeSorting & key).fetch1(
             "artifact_removed_interval_list_name"
@@ -919,7 +921,19 @@ class CuratedSpikeSorting(dj.Computed):
             unit_ids=accepted_units,
             labels=labels,
         )
-        self.insert1(key)
+
+        from spyglass.spikesorting.spikesorting_merge import CuratedSpikeSortingOutput
+
+        spikesorting_output_key = {
+            "spikesorting_id": uuid.uuid1(),
+            "source": "CuratedSpikeSorting",
+            "version": 1,
+            "analysis_file_name": key["analysis_file_name"],
+            "units_object_id": key["units_object_id"],
+        }
+        CuratedSpikeSortingOutput.insert1(spikesorting_output_key)
+
+        CuratedSpikeSortingOutput.CuratedSpikeSortingV1.insert1(key)
 
         # now add the units
         # Remove the non primary key entries.
@@ -938,7 +952,7 @@ class CuratedSpikeSorting(dj.Computed):
                     Warning(
                         f"No metric named {field} in computed unit quality metrics; skipping"
                     )
-            CuratedSpikeSorting.Unit.insert1(key)
+            CuratedSpikeSortingV1.Unit.insert1(key)
 
     def metrics_fields(self):
         """Returns a list of the metrics that are currently in the Units table."""

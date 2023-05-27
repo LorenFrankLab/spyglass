@@ -1,19 +1,14 @@
 import datajoint as dj
-
 import sortingview as sv
 
-from ..common.common_lab import LabMember, LabTeam
-from .sortingview_helper_fn import (
-    _create_spikesortingview_workspace,
-    _generate_url,
-)
-from .spikesorting_curation import Curation
-from .spikesorting_recording import SpikeSortingRecording
-from .spikesorting_sorting import SpikeSorting
+from spyglass.common.common_lab import LabMember, LabTeam
+from spyglass.spikesorting.v1.spikesorting_curation import Curation
+from spyglass.spikesorting.v1.spikesorting_recording import SpikeSortingRecording
+from spyglass.spikesorting.v1.spikesorting_sorting import SpikeSorting
 
-import spikeinterface as si
+from .sortingview_helper_fn import _create_spikesortingview_workspace, _generate_url
 
-schema = dj.schema("spikesorting_sortingview")
+schema = dj.schema("spikesorting_sortingview_v1")
 
 
 @schema

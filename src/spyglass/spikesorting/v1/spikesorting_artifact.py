@@ -8,16 +8,16 @@ import scipy.stats as stats
 import spikeinterface as si
 from spikeinterface.core.job_tools import ChunkRecordingExecutor, ensure_n_jobs
 
-from ..common.common_interval import (
+from spyglass.common.common_interval import (
     IntervalList,
     _union_concat,
     interval_from_inds,
     interval_set_difference_inds,
 )
-from ..utils.nwb_helper_fn import get_valid_intervals
+
 from .spikesorting_recording import SpikeSortingRecording
 
-schema = dj.schema("spikesorting_artifact")
+schema = dj.schema("spikesorting_artifact_v1")
 
 
 @schema

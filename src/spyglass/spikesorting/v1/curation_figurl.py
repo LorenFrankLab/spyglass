@@ -1,18 +1,16 @@
+from typing import Any, Dict, List, Union
+
 import datajoint as dj
-
-from typing import Any, Union, List, Dict
-
-from .spikesorting_curation import Curation
-from .spikesorting_recording import SpikeSortingRecording
-from .spikesorting_sorting import SpikeSorting
-
-import spikeinterface as si
-
-from sortingview.SpikeSortingView import SpikeSortingView
 import kachery_cloud as kcl
 import sortingview.views as vv
+import spikeinterface as si
+from sortingview.SpikeSortingView import SpikeSortingView
 
-schema = dj.schema("spikesorting_curation_figurl")
+from spyglass.spikesorting.v1.spikesorting_curation import Curation
+from spyglass.spikesorting.v1.spikesorting_recording import SpikeSortingRecording
+from spyglass.spikesorting.v1.spikesorting_sorting import SpikeSorting
+
+schema = dj.schema("spikesorting_curation_figurl_v1")
 
 # A curation figURL is a link to a visualization of a curation.
 # Optionally you can specify a new_curation_uri which will be

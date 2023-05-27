@@ -9,20 +9,20 @@ import probeinterface as pi
 import spikeinterface as si
 import spikeinterface.extractors as se
 
-from ..common.common_device import Probe, ProbeType
-from ..common.common_ephys import Electrode, ElectrodeGroup
-from ..common.common_interval import (
+from spyglass.common.common_device import Probe
+from spyglass.common.common_ephys import Electrode, ElectrodeGroup
+from spyglass.common.common_interval import (
     IntervalList,
     interval_list_intersect,
     intervals_by_length,
     union_adjacent_index,
 )
-from ..common.common_lab import LabTeam
-from ..common.common_nwbfile import Nwbfile
-from ..common.common_session import Session
-from ..utils.dj_helper_fn import dj_replace
+from spyglass.common.common_lab import LabTeam  # noqa F401
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_session import Session  # noqa F401
+from spyglass.utils.dj_helper_fn import dj_replace
 
-schema = dj.schema("spikesorting_recording")
+schema = dj.schema("spikesorting_recording_v1")
 
 
 @schema

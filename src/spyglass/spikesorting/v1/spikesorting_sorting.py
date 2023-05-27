@@ -12,16 +12,14 @@ import spikeinterface.preprocessing as sip
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
-from ..common.common_lab import LabMember, LabTeam
-from ..common.common_nwbfile import AnalysisNwbfile
-from ..utils.dj_helper_fn import fetch_nwb
-from .spikesorting_artifact import ArtifactRemovedIntervalList
-from .spikesorting_recording import (
+from spyglass.common.common_lab import LabMember, LabTeam
+from spyglass.spikesorting.v1.spikesorting_artifact import ArtifactRemovedIntervalList
+from spyglass.spikesorting.v1.spikesorting_recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
 
-schema = dj.schema("spikesorting_sorting")
+schema = dj.schema("spikesorting_sorting_v1")
 
 
 @schema
@@ -265,8 +263,6 @@ class SpikeSorting(dj.Computed):
 
     def fetch_nwb(self, *attrs, **kwargs):
         raise NotImplementedError
-        return None
-        # return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
     def nightly_cleanup(self):
         """Clean up spike sorting directories that are not in the SpikeSorting table.
