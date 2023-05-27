@@ -1,4 +1,5 @@
 import copy
+import uuid
 
 import datajoint as dj
 import matplotlib.pyplot as plt
@@ -172,6 +173,24 @@ class RippleTimesV1(dj.Computed):
         )
 
         self.insert1(key)
+
+        # finally, we insert this into the LFP output table.
+        from spyglass.ripple.ripple_merge import RippleTimesOutput
+
+        ripple_times_object_id = uuid.uuid1()
+        ripple_times_output_key = {
+            "lfp_id": ripple_times_object_id,
+            "source": "LFP",
+            "version": 1,
+        }
+        RippleTimesOutput.insert1(ripple_times_output_key)
+
+        key.update(ripple_times_output_key)
+        del key["source"]
+        del key["version"]
+
+        key["ripple_time_object_id"] = ripple_times_object_id
+        RippleTimesOutput.RippleTimesV1.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
