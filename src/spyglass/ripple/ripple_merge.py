@@ -17,13 +17,13 @@ class RippleTimesOutput(dj.Manual):
 
     """
 
-    class RippleTimesOutput(dj.Part):
+    class RippleTimesV1(dj.Part):
         definition = """
         -> RippleTimesOutput
         -> RippleTimesV1
         ---
         -> AnalysisNwbfile
-        lfp_object_id: varchar(40)
+        ripple_times_object_id : varchar(40)
         """
 
     def fetch_nwb(self, *attrs, **kwargs):
