@@ -844,7 +844,7 @@ class CuratedSpikeSortingV1(dj.Computed):
     class Unit(dj.Part):
         definition = """
         # Table for holding sorted units
-        -> CuratedSpikeSorting
+        -> CuratedSpikeSortingV1
         unit_id: int   # ID for each unit
         ---
         label='': varchar(200)   # optional set of labels for each unit
@@ -982,7 +982,7 @@ class UnitInclusionParameters(dj.Manual):
         #    where operator is '<', '>', <=', '>=', or '==' and value is the comparison (float) value to be used ()
         # param_dict['exclude_labels'] = [list of labels to exclude]
         pdict = key["inclusion_param_dict"]
-        metrics_list = CuratedSpikeSorting().metrics_fields()
+        metrics_list = CuratedSpikeSortingV1().metrics_fields()
 
         for k in pdict:
             if k not in metrics_list and k != "exclude_labels":
@@ -1017,15 +1017,15 @@ class UnitInclusionParameters(dj.Manual):
         dict
             key to select all of the included units
         """
-        curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
+        curated_sortings = (CuratedSpikeSortingV1() & curated_sorting_key).fetch()
         inc_param_dict = (
             UnitInclusionParameters
             & {"unit_inclusion_param_name": unit_inclusion_param_name}
         ).fetch1("inclusion_param_dict")
-        units = (CuratedSpikeSorting().Unit() & curated_sortings).fetch()
-        units_key = (CuratedSpikeSorting().Unit() & curated_sortings).fetch("KEY")
+        units = (CuratedSpikeSortingV1().Unit() & curated_sortings).fetch()
+        units_key = (CuratedSpikeSortingV1().Unit() & curated_sortings).fetch("KEY")
         # get a list of the metrics in the units table
-        metrics_list = CuratedSpikeSorting().metrics_fields()
+        metrics_list = CuratedSpikeSortingV1().metrics_fields()
         # get the list of labels to exclude if there is one
         if "exclude_labels" in inc_param_dict:
             exclude_labels = inc_param_dict["exclude_labels"]
