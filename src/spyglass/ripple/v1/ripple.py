@@ -10,7 +10,7 @@ from ripple_detection.core import gaussian_smooth, get_envelope
 
 from spyglass.common import IntervalList  # noqa
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.lfp.v1.filtered_lfp import LFPBand, LFPBandSelection
+from spyglass.lfp_band.v1.lfp_band import LFPBand, LFPBandSelection
 from spyglass.position import PositionOutput
 from spyglass.utils.dj_helper_fn import fetch_nwb
 
