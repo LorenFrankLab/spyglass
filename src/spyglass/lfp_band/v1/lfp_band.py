@@ -1,3 +1,5 @@
+import uuid
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -15,10 +17,10 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.lfp.v1.lfp import LFPElectrodeGroup
-from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
+from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
-schema = dj.schema("lfp_v1")
+schema = dj.schema("lfp_band_v1")
 
 
 @schema
@@ -153,13 +155,13 @@ class LFPBandSelection(dj.Manual):
 
 
 @schema
-class LFPBand(dj.Computed):
+class LFPBandV1(dj.Computed):
     definition = """
     -> LFPBandSelection
     ---
     -> AnalysisNwbfile
     -> IntervalList
-    filtered_data_object_id: varchar(40)  # the NWB object ID for loading this object from the file
+    lfp_band_object_id: varchar(40)  # the NWB object ID for loading this object from the file
     """
 
     def make(self, key):
@@ -305,12 +307,12 @@ class LFPBand(dj.Computed):
             )
             ecephys_module.add(lfp)
             io.write(nwbf)
-            filtered_data_object_id = es.object_id
+            lfp_band_object_id = es.object_id
         #
         # add the file to the AnalysisNwbfile table
         AnalysisNwbfile().add(key["nwb_file_name"], lfp_band_file_name)
         key["analysis_file_name"] = lfp_band_file_name
-        key["filtered_data_object_id"] = filtered_data_object_id
+        key["lfp_band_object_id"] = lfp_band_object_id
 
         # finally, we need to censor the valid times to account for the downsampling if this is the first time we've
         # downsampled these data
@@ -342,7 +344,17 @@ class LFPBand(dj.Computed):
                 tmp_valid_times[0], lfp_band_valid_times
             ).all(), "previously saved lfp band times do not match current times"
 
-        self.insert1(key)
+        from spyglass.lfp_band.lfp_band_merge import LFPBandOutput
+
+        lfp_band_output_key = {
+            "lfp_band_id": uuid.uuid1(),
+            "source": "LFPBand",
+            "version": "1",
+            "analysis_file_name": lfp_band_file_name,
+            "lfp_band_object_id": lfp_band_object_id,
+        }
+        LFPBandOutput.insert1(lfp_band_output_key)
+        LFPBandOutput.LFPBandV1.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
