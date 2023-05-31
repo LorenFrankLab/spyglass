@@ -60,7 +60,12 @@ def generate_config_yaml(filename: str, **kwargs):
         },
     }
     with open(filename, "w") as outfile:
-        yaml.dump(config, outfile, default_flow_style=False)
+        if filename.endswith("json"):
+            import json  # noqa: F821
+
+            json.dump(config, outfile, indent=2)
+        else:
+            yaml.dump(config, outfile, default_flow_style=False)
 
 
 def set_configuration(user_name: str, file_name: str = None):
