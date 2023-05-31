@@ -139,8 +139,6 @@ def _get_artifact_times(
     proportion_above_thresh_2nd: float = 1.0,
     removal_window_ms: float = 1.0,
     local_window_ms: float = 1.0,
-    # verbose: bool = False,
-    # **job_kwargs,
 ):
     """Detects times during which artifacts do and do not occur.
     Artifacts are defined as periods where the absolute value of the change in LFP exceeds
