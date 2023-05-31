@@ -17,9 +17,9 @@ schema = dj.schema("position_v1_dlc_position")
 @schema
 class DLCSmoothInterpParams(dj.Manual):
     """
-     Parameters for extracting the smoothed head position.
+    Parameters for extracting the smoothed head position.
 
-    Parameters
+    Attributes
     ----------
     interpolate : bool, default True
         whether to interpolate over NaN spans

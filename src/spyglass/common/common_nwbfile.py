@@ -520,11 +520,8 @@ class AnalysisNwbfile(dj.Manual):
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        waveform_extractor : si.WaveformExtractor object
         metrics : dict, optional
             Cluster metrics.
-        labels : dict, optional
-            Curation labels for clusters
 
         Returns
         -------

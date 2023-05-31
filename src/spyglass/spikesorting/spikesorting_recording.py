@@ -229,7 +229,6 @@ class SortGroup(dj.Manual):
         ----------
         sort_group_id : int
         nwb_file_name : str
-        prb_file_name : str
 
         Returns
         -------

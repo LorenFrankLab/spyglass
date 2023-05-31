@@ -219,9 +219,11 @@ def do_pose_estimation(
     robust_nframes=False,
     allow_growth=False,
     use_shelve=False,
-    modelprefix="",  # need from paramset
 ):
     """Launch DLC's analyze_videos within element-deeplabcut
+    
+    Other optional parameters may be set other than those described below. See 
+    deeplabcut.analyze_videos parameters for descriptions/defaults.
 
     Parameters
     ----------
@@ -229,7 +231,6 @@ def do_pose_estimation(
     dlc_model: element-deeplabcut dlc.Model dict
     project_path: path to project config.yml
     output_dir: where to save output
-    OTHERS: Optional, set with defaults. See deeplabcut.analyze_videos parameters
     """
     from deeplabcut.pose_estimation_tensorflow import analyze_videos
 

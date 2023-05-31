@@ -179,4 +179,5 @@ docs/site/
 docs/src/CHANGELOG.md
 docs/src/LICENSE.md
 docs/src/notebooks/
+!docs/src/images/*png
 temp*

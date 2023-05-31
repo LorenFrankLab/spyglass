@@ -36,8 +36,6 @@ theme:
       - navigation.instant   # saves loading time - 1 browser page
       - navigation.tracking  # even with above, changes URL by section
       - navigation.top
-      # - navigation.tabs      # moves top level heading to tabs
-      # - toc.integrate        # move TOC to left
       - search.suggest
       - search.share
 
@@ -94,10 +92,12 @@ plugins:
             members_order: source      
             group_by_category: false
             line_length: 80
-            docsting_style: numpy
+            docstring_style: numpy
+          selection:
+            docstring_style: numpy
       enabled: true # Set to false to reduce build time
       watch:
-        - src/spyglass
+        - src/spyglass/
   - literate-nav:
       nav_file: navigation.md
   - exclude-search:

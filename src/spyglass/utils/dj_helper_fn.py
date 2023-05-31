@@ -20,8 +20,6 @@ def dj_replace(original_table, new_values, key_column, replace_column):
         Result of a datajoint .fetch() call on a schema query.
     new_values : list
         List of tuples, each containing (key_value, replace_value).
-    index_column : str
-        The name of the column where the key_values are located.
     replace_column : str
         The name of the column where to-be-replaced values are located.
 
@@ -48,16 +46,16 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
 
     Parameters
     ----------
-    query_expression
+    query_expression : query
         A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.
     nwb_master : tuple
         Tuple (table, attr) to get the NWB filepath from.
         i.e. absolute path to NWB file can be obtained by looking up attr column of table
         table is usually Nwbfile or AnalysisNwbfile;
         attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'
-    attrs : list
+    *attrs : list
         Attributes from normal DataJoint fetch call.
-    kwargs : dict
+    **kwargs : dict
         Keyword arguments from normal DataJoint fetch call.
 
     Returns

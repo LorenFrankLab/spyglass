@@ -36,7 +36,7 @@ class BodyPart(dj.Manual):
         ----------
         bodyparts : List
             list of bodyparts from config
-        description : List, default None
+        descriptions : List, default None
             optional list of descriptions for bodyparts.
             If None, description is set to bodypart name
         """

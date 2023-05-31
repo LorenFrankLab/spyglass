@@ -649,6 +649,7 @@ def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
     data : ndarray, shape (n_time, 2)
     frame_size : array_like, shape (2,)
     cm_to_pixels : float
+
     Returns
     -------
     converted_data : ndarray, shape (n_time, 2)

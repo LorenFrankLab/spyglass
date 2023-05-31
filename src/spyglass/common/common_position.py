@@ -731,6 +731,7 @@ class PositionVideo(dj.Computed):
         data : ndarray, shape (n_time, 2)
         frame_size : array_like, shape (2,)
         cm_to_pixels : float
+
         Returns
         -------
         converted_data : ndarray, shape (n_time, 2)
@@ -876,7 +877,7 @@ class SelectFromCollection:
     Note that this tool selects collection objects based on their *origins*
     (i.e., `offsets`).
 
-    Parameters
+    Attributes
     ----------
     ax : `~matplotlib.axes.Axes`
         Axes to interact with.

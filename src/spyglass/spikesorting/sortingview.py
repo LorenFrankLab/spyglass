@@ -119,12 +119,14 @@ class SortingviewWorkspace(dj.Computed):
     def url_trythis(self, key: dict, sortingview_sorting_id: str = None):
         """Generate a URL for visualizing and curating a sorting on the web.
         Will print instructions on how to do the curation.
+
         Parameters
         ----------
         key : dict
             An entry from SortingviewWorkspace table
         sortingview_sorting_id : str, optional
-            sortingview sorting ID to visualize; if None then chooses the first one
+            sortingview sorting ID to visualize. If None then chooses the first one
+
         Returns
         -------
         url : str

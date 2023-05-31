@@ -497,6 +497,7 @@ class TrodesPosVideo(dj.Computed):
         data : ndarray, shape (n_time, 2)
         frame_size : array_like, shape (2,)
         cm_to_pixels : float
+
         Returns
         -------
         converted_data : ndarray, shape (n_time, 2)

@@ -466,7 +466,7 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
     pos_df : pd.DataFrame
         dataframe containing x and y position for each LED of interest,
         index is timestamps. Column names specified by params
-    **kwargs : dict
+    **params : dict
         contains 'greenLED' and 'redLED_C', 'redLED_R', 'redLED_L' keys,
         whose values specify the column names in `pos_df`
 
@@ -729,7 +729,7 @@ def two_pt_centroid(pos_df: pd.DataFrame, **params):
     pos_df : pd.DataFrame
         dataframe containing x and y position for each point of interest,
         index is timestamps. Column names specified by params
-    **kwargs : dict
+    **params : dict
         contains 'point1' and 'point2' keys,
         whose values specify the column names in `pos_df`
 
