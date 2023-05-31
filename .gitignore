@@ -91,9 +91,6 @@ instance/
 # Scrapy stuff:
 .scrapy
 
-# Sphinx documentation
-docs/_build/
-
 # PyBuilder
 target/
 
@@ -136,9 +133,6 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
-
 # mypy
 .mypy_cache/
 .dmypy.json
@@ -178,3 +172,10 @@ dj_local_conf.json
 !/.vscode/settings.json
 !/notebooks/dlc_scratch.png
 !/notebooks/dlc_existing.png
+
+# Documentation
+docs/site/
+docs/src/CHANGELOG.md
+docs/src/LICENSE.md
+docs/src/notebooks/
+temp*

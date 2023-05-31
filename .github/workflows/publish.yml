@@ -1,0 +1,51 @@
+name: build
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+  push:
+    branches:
+      - page-test
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  repository-projects: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      REPO_OWNER: ${{ github.repository_owner }}
+    permissions:
+      contents: write
+      issues: write 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          
+      - name: Set up Python runtime
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.x
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup - pip & config
+        run: |
+          pip install -r requirements_docs.txt
+          pip install -e .
+          git config user.name 'github-actions[bot]' && git config user.email 'github-actions[bot]@users.noreply.github.com'
+      
+      - name: Deploy
+        run: |
+          echo "OWNER: ${REPO_OWNER}"
+          bash ./docs/build-docs.sh push $REPO_OWNER
+        env:
+          USERNAME: github-actions[bot]
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

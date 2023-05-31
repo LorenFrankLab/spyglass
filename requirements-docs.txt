@@ -1,0 +1,9 @@
+mike # Docs versioning
+mkdocs # Docs core
+mkdocs-exclude # Docs exclude files
+mkdocs-exclude-search # Docs exclude files in search
+mkdocs-gen-files # Docs API generator
+mkdocs-jupyter # Docs render notebooks
+mkdocs-literate-nav # Dynamic page list for API docs
+mkdocs-material # Docs theme
+mkdocstrings[python] # Docs API docstrings
