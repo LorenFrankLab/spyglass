@@ -185,7 +185,10 @@ def save_yaml(output_dir, config_dict, filename="dj_dlc_config", mkdir=True):
               If extension is included, removed and replaced with "yaml".
     mkdir (bool): Optional, True. Make new directory if output_dir not exist
 
-    Returns: path of saved file as string - due to DLC func preference for strings
+    Returns
+    -------
+    str
+        path of saved file as string - due to DLC func preference for strings
     """
     from deeplabcut.utils.auxiliaryfunctions import write_config
 

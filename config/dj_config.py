@@ -16,6 +16,8 @@ def generate_config_yaml(filename: str, **kwargs):
     ----------
     filename : str
         The name of the file to generate
+    output : str
+        File type to generate. Either yaml or json
     **kwargs: list of parameters names and values that can include
         database_host : host name of system running mysql (default lmf-db.cin.ucsf.edu)
         database_port : port number for mysql server (default 3306)
