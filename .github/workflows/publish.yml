@@ -1,4 +1,4 @@
-name: build
+name: Publish docs
 on:
   pull_request:
     branches:
@@ -22,25 +22,25 @@ jobs:
       REPO_OWNER: ${{ github.repository_owner }}
     permissions:
       contents: write
-      issues: write 
+      issues: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-          
+
       - name: Set up Python runtime
         uses: actions/setup-python@v4
         with:
           python-version: 3.9
           token: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Setup - pip & config
         run: |
           pip install -r requirements-docs.txt
           git config user.name 'github-actions[bot]' && git config user.email 'github-actions[bot]@users.noreply.github.com'
-      
+
       - name: Deploy
         run: |
           echo "OWNER: ${REPO_OWNER}"
