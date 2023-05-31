@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import pynwb
 import scipy.stats as stats
+from scipy.signal import hilbert
+import math
 
 from spyglass.common.common_ephys import Electrode, Raw
 from spyglass.common.common_filter import FirFilterParameters
@@ -946,4 +948,52 @@ class LFPBand(dj.Computed):
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,
             index=pd.Index(filtered_nwb["filtered_data"].timestamps, name="time"),
+        )
+
+    def compute_analytic_signal(self, electrode_list, **kwargs):
+        """Computes the hilbert transform of a given LFPBand signal using scipy.signal.hilbert
+
+        Parameters
+        ----------
+        electrode_list: list
+            A list of the electrodes to compute the hilbert transform of
+
+        Returns
+        -------
+        analytic_signal_df: pd.DataFrame
+            DataFrame containing hilbert transform of signal
+
+        Raises
+        ------
+        ValueError
+            If any electrodes passed to electrode_list are invalid for the dataset
+        """
+
+        filtered_band = self.fetch_nwb()[0]["filtered_data"]
+        electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
+        if len(electrode_list) != np.sum(electrode_index):
+            raise ValueError(
+                "Some of the electrodes specified in electrode_list are missing in the current LFPBand table."
+            )
+        analytic_signal_df = pd.DataFrame(
+            hilbert(filtered_band.data[:, electrode_index], axis=0),
+            index=pd.Index(filtered_band.timestamps, name="time"),
+            columns=[f"electrode {e}" for e in electrode_list],
+        )
+        return analytic_signal_df
+
+    def compute_signal_phase(self, electrode_list=[], **kwargs):
+        analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+        return pd.DataFrame(
+            np.angle(analytic_signal_df) + math.pi,
+            columns=analytic_signal_df.columns,
+            index=analytic_signal_df.index,
+        )
+
+    def compute_signal_power(self, electrode_list=[], **kwargs):
+        analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+        return pd.DataFrame(
+            np.abs(analytic_signal_df) ** 2,
+            columns=analytic_signal_df.columns,
+            index=analytic_signal_df.index,
         )
