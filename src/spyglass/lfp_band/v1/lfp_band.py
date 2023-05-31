@@ -89,20 +89,20 @@ class LFPBandSelection(dj.Manual):
                 f"samping rate {lfp_sampling_rate}"
             )
         # filter
-        query = FirFilterParameters() & {
+        filter_query = FirFilterParameters() & {
             "filter_name": filter_name,
             "filter_sampling_rate": lfp_sampling_rate,
         }
-        if not query:
+        if not filter_query:
             raise ValueError(
                 f"filter {filter_name}, sampling rate {lfp_sampling_rate} is not in the FirFilterParameters table"
             )
         # interval_list
-        query = IntervalList() & {
+        interval_query = IntervalList() & {
             "nwb_file_name": nwb_file_name,
             "interval_name": interval_list_name,
         }
-        if not query:
+        if not interval_query:
             raise ValueError(
                 f"interval list {interval_list_name} is not in the IntervalList table; the list must be "
                 "added before this function is called"
