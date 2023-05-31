@@ -144,7 +144,9 @@ def list_sort_groups(nwb_file_name: str):
 def list_sort_group_electrodes(nwb_file_name: str):
     import spyglass.spikesorting as nds
 
-    results = nds.SortGroup.SortGroupElectrode & {"nwb_file_name": nwb_file_name}
+    results = nds.SortGroup.SortGroupElectrode & {
+        "nwb_file_name": nwb_file_name
+    }
     print(results)
 
 
@@ -180,7 +182,9 @@ sample_spike_sorting_preprocessing_parameters = {
 
 @click.command(help="Insert spike sorting preprocessing parameters")
 @click.argument("yaml_file_name", required=False)
-def insert_spike_sorting_preprocessing_parameters(yaml_file_name: Union[str, None]):
+def insert_spike_sorting_preprocessing_parameters(
+    yaml_file_name: Union[str, None]
+):
     if yaml_file_name is None:
         print("You must specify a yaml file. Sample content:")
         print("==========================================")
@@ -225,7 +229,11 @@ def insert_artifact_detection_parameters(yaml_file_name: Union[str, None]):
     if yaml_file_name is None:
         print("You must specify a yaml file. Sample content:")
         print("==========================================")
-        print(yaml.safe_dump(sample_artifact_detection_parameters, sort_keys=False))
+        print(
+            yaml.safe_dump(
+                sample_artifact_detection_parameters, sort_keys=False
+            )
+        )
         return
 
     import spyglass.spikesorting as nds
@@ -313,7 +321,9 @@ def create_spike_sorting_recording_view(
     x = {k: x[k] for k in sample_spike_sorting_recording_selection_key.keys()}
     if replace:
         (ndf.SpikeSortingRecordingView & x).delete()
-    ndf.SpikeSortingRecordingView.populate([(nds.SpikeSortingRecording & x).proj()])
+    ndf.SpikeSortingRecordingView.populate(
+        [(nds.SpikeSortingRecording & x).proj()]
+    )
     figurl = (ndf.SpikeSortingRecordingView & x).fetch1("figurl")
     print(figurl)
 
@@ -383,7 +393,9 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
         k: x[k] for k in sample_spike_sorting_recording_selection_key.keys()
     }
     spike_sorting_recording_key = (
-        (nds.SpikeSortingRecording & spike_sorting_recording_query).proj().fetch1()
+        (nds.SpikeSortingRecording & spike_sorting_recording_query)
+        .proj()
+        .fetch1()
     )
 
     artifact_key = dict(
@@ -394,9 +406,9 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
     nds.ArtifactDetection.populate(
         [(nds.ArtifactDetectionSelection & artifact_key).proj()]
     )
-    artifact_removed_interval_list_name = (nds.ArtifactDetection & artifact_key).fetch1(
-        "artifact_removed_interval_list_name"
-    )
+    artifact_removed_interval_list_name = (
+        nds.ArtifactDetection & artifact_key
+    ).fetch1("artifact_removed_interval_list_name")
 
     sorter_params_name = x["sorter_params_name"]
     sorter = (
@@ -413,7 +425,9 @@ def run_spike_sorting(yaml_file_name: Union[str, None]):
     )
 
     nds.SpikeSortingSelection.insert1(sorting_key, skip_duplicates=True)
-    nds.SpikeSorting.populate([(nds.SpikeSortingSelection & sorting_key).proj()])
+    nds.SpikeSorting.populate(
+        [(nds.SpikeSortingSelection & sorting_key).proj()]
+    )
 
 
 @click.command(help="List spike sorting for a session.")

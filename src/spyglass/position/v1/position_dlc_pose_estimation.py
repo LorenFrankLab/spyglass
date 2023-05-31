@@ -138,7 +138,10 @@ class DLCPoseEstimation(dj.Computed):
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
-                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
             )
 
         def fetch1_dataframe(self):
@@ -180,9 +183,9 @@ class DLCPoseEstimation(dj.Computed):
                     **analyze_video_params,
                 )
             dlc_result = dlc_reader.PoseEstimation(output_dir)
-            creation_time = datetime.fromtimestamp(dlc_result.creation_time).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
+            creation_time = datetime.fromtimestamp(
+                dlc_result.creation_time
+            ).strftime("%Y-%m-%d %H:%M:%S")
 
             logger.logger.info("getting raw position")
             interval_list_name = f"pos {key['epoch']-1} valid times"
@@ -195,7 +198,9 @@ class DLCPoseEstimation(dj.Computed):
             ).fetch_nwb()[0]
             raw_pos_df = pd.DataFrame(
                 data=raw_position["raw_position"].data,
-                index=pd.Index(raw_position["raw_position"].timestamps, name="time"),
+                index=pd.Index(
+                    raw_position["raw_position"].timestamps, name="time"
+                ),
                 columns=raw_position["raw_position"].description.split(", "),
             )
             # TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,
@@ -232,7 +237,9 @@ class DLCPoseEstimation(dj.Computed):
                     key["nwb_file_name"]
                 )
                 nwb_analysis_file = AnalysisNwbfile()
-                key["dlc_pose_estimation_object_id"] = nwb_analysis_file.add_nwb_object(
+                key[
+                    "dlc_pose_estimation_object_id"
+                ] = nwb_analysis_file.add_nwb_object(
                     analysis_file_name=key["analysis_file_name"],
                     nwb_object=part_df,
                 )
@@ -283,7 +290,9 @@ def add_timestamps(df: pd.DataFrame, raw_pos_df: pd.DataFrame) -> pd.DataFrame:
 
     raw_pos_df = raw_pos_df.drop(
         columns=[
-            column for column in raw_pos_df.columns if column not in ["video_frame_ind"]
+            column
+            for column in raw_pos_df.columns
+            if column not in ["video_frame_ind"]
         ]
     )
     raw_pos_df["time"] = raw_pos_df.index

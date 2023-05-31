@@ -29,7 +29,9 @@ def generate_config_yaml(filename: str, **kwargs):
     print("printing kwargs")
     print(kwargs)
     config["database.host"] = (
-        kwargs["database_host"] if "database_host" in kwargs else "lmf-db.cin.ucsf.edu"
+        kwargs["database_host"]
+        if "database_host" in kwargs
+        else "lmf-db.cin.ucsf.edu"
     )
     config["database.port"] = (
         kwargs["database_port"] if "database_port" in kwargs else 3306
@@ -52,7 +54,11 @@ def generate_config_yaml(filename: str, **kwargs):
     analysis_dir = data_dir / "analysis"
 
     config["stores"] = {
-        "raw": {"protocol": "file", "location": str(raw_dir), "stage": str(raw_dir)},
+        "raw": {
+            "protocol": "file",
+            "location": str(raw_dir),
+            "stage": str(raw_dir),
+        },
         "analysis": {
             "protocol": "file",
             "location": str(analysis_dir),

@@ -79,7 +79,8 @@ class FirFilterParameters(dj.Manual):
                 return None
             # the transition width is the mean of the widths of left and right transition regions
             tw = (
-                (band_edges[1] - band_edges[0]) + (band_edges[3] - band_edges[2])
+                (band_edges[1] - band_edges[0])
+                + (band_edges[3] - band_edges[2])
             ) / 2.0
 
         else:
@@ -287,12 +288,14 @@ class FirFilterParameters(dj.Manual):
                     mem = psutil.virtual_memory()
                     interval_samples = stop - start
                     if (
-                        interval_samples * (timestamp_size + n_electrodes * data_size)
+                        interval_samples
+                        * (timestamp_size + n_electrodes * data_size)
                         < 0.9 * mem.available
                     ):
                         print(f"Interval {ii}: loading data into memory")
                         timestamps = np.asarray(
-                            timestamps_on_disk[start:stop], dtype=timestamp_dtype
+                            timestamps_on_disk[start:stop],
+                            dtype=timestamp_dtype,
                         )
                         if time_axis == 0:
                             data = np.asarray(
@@ -354,7 +357,13 @@ class FirFilterParameters(dj.Manual):
         return es.object_id, start_end
 
     def filter_data(
-        self, timestamps, data, filter_coeff, valid_times, electrodes, decimation
+        self,
+        timestamps,
+        data,
+        filter_coeff,
+        valid_times,
+        electrodes,
+        decimation,
     ):
         """
         :param timestamps: numpy array with list of timestamps for data
@@ -414,7 +423,9 @@ class FirFilterParameters(dj.Manual):
         # create the dataset and the timestamps array
         filtered_data = np.empty(tuple(output_shape_list), dtype=data.dtype)
 
-        new_timestamps = np.empty((output_shape_list[time_axis],), timestamps.dtype)
+        new_timestamps = np.empty(
+            (output_shape_list[time_axis],), timestamps.dtype
+        )
 
         indices = np.array(indices, ndmin=2)
 
@@ -425,7 +436,9 @@ class FirFilterParameters(dj.Manual):
             extracted_ts = timestamps[start:stop:decimation]
 
             # print(f"Diffs {np.diff(extracted_ts)}")
-            new_timestamps[ts_offset : ts_offset + len(extracted_ts)] = extracted_ts
+            new_timestamps[
+                ts_offset : ts_offset + len(extracted_ts)
+            ] = extracted_ts
             ts_offset += len(extracted_ts)
 
             # finally ready to filter data!

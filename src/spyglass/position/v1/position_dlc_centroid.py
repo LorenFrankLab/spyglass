@@ -63,7 +63,9 @@ class DLCCentroidParams(dj.Manual):
             "max_LED_separation": 12,
             "speed_smoothing_std_dev": 0.100,
         }
-        cls.insert1({"dlc_centroid_params_name": "default", "params": params}, **kwargs)
+        cls.insert1(
+            {"dlc_centroid_params_name": "default", "params": params}, **kwargs
+        )
 
     @classmethod
     def get_default(cls):
@@ -84,14 +86,18 @@ class DLCCentroidParams(dj.Manual):
         if "centroid_method" in params:
             if params["centroid_method"] in self._available_centroid_methods:
                 if params["centroid_method"] == "four_led_centroid":
-                    if any(x not in self._four_led_labels for x in params["points"]):
+                    if any(
+                        x not in self._four_led_labels for x in params["points"]
+                    ):
                         raise KeyError(
                             f"Please make sure to specify all necessary labels: "
                             f"{self._four_led_labels} "
                             f"if using the 'four_led_centroid' method"
                         )
                 elif params["centroid_method"] == "two_pt_centroid":
-                    if any(x not in self._two_pt_labels for x in params["points"]):
+                    if any(
+                        x not in self._two_pt_labels for x in params["points"]
+                    ):
                         raise KeyError(
                             f"Please make sure to specify all necessary labels: "
                             f"{self._two_pt_labels} "
@@ -113,7 +119,9 @@ class DLCCentroidParams(dj.Manual):
                     f"{self._available_centroid_methods}"
                 )
         else:
-            raise KeyError("'centroid_method' needs to be provided as a parameter")
+            raise KeyError(
+                "'centroid_method' needs to be provided as a parameter"
+            )
 
         if "max_LED_separation" in params:
             if not isinstance(params["max_LED_separation"], (int, float)):
@@ -126,7 +134,9 @@ class DLCCentroidParams(dj.Manual):
             if params["smooth"]:
                 if "smoothing_params" in params:
                     if "smooth_method" in params["smoothing_params"]:
-                        smooth_method = params["smoothing_params"]["smooth_method"]
+                        smooth_method = params["smoothing_params"][
+                            "smooth_method"
+                        ]
                         if smooth_method not in _key_to_smooth_func_dict:
                             raise KeyError(
                                 f"smooth_method: {smooth_method} not an available method."
@@ -283,7 +293,9 @@ class DLCCentroid(dj.Computed):
             )
             dt = np.median(np.diff(pos_df.index.to_numpy()))
             sampling_rate = 1 / dt
-            logger.logger.info("Calculating centroid with %s", str(centroid_method))
+            logger.logger.info(
+                "Calculating centroid with %s", str(centroid_method)
+            )
             centroid = centroid_func(pos_df, **params)
             centroid_df = pd.DataFrame(
                 centroid,
@@ -349,7 +361,9 @@ class DLCCentroid(dj.Computed):
                 columns=["velocity_x", "velocity_y", "speed"],
                 index=pos_df.index.to_numpy(),
             )
-            total_nan = np.sum(final_df.loc[:, idx[("x", "y")]].isna().any(axis=1))
+            total_nan = np.sum(
+                final_df.loc[:, idx[("x", "y")]].isna().any(axis=1)
+            )
             pretrack_nan = np.sum(
                 final_df.iloc[:1000].loc[:, idx[("x", "y")]].isna().any(axis=1)
             )
@@ -359,7 +373,9 @@ class DLCCentroid(dj.Computed):
             )
             position = pynwb.behavior.Position()
             velocity = pynwb.behavior.BehavioralTimeSeries()
-            spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
+            spatial_series = (RawPosition() & key).fetch_nwb()[0][
+                "raw_position"
+            ]
             METERS_PER_CM = 0.01
             position.create_spatial_series(
                 name="position",
@@ -385,12 +401,16 @@ class DLCCentroid(dj.Computed):
                 name="video_frame_ind",
                 unit="index",
                 timestamps=final_df.index.to_numpy(),
-                data=pos_df[pos_df.columns.levels[0][0]].video_frame_ind.to_numpy(),
+                data=pos_df[
+                    pos_df.columns.levels[0][0]
+                ].video_frame_ind.to_numpy(),
                 description="video_frame_ind",
                 comments="no comments",
             )
             # Add to Analysis NWB file
-            key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+            key["analysis_file_name"] = AnalysisNwbfile().create(
+                key["nwb_file_name"]
+            )
             nwb_analysis_file = AnalysisNwbfile()
             key["dlc_position_object_id"] = nwb_analysis_file.add_nwb_object(
                 key["analysis_file_name"], position
@@ -414,7 +434,9 @@ class DLCCentroid(dj.Computed):
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
-            np.asarray(nwb_data["dlc_position"].get_spatial_series().timestamps),
+            np.asarray(
+                nwb_data["dlc_position"].get_spatial_series().timestamps
+            ),
             name="time",
         )
         COLUMNS = [
@@ -429,11 +451,17 @@ class DLCCentroid(dj.Computed):
             np.concatenate(
                 (
                     np.asarray(
-                        nwb_data["dlc_velocity"].time_series["video_frame_ind"].data,
+                        nwb_data["dlc_velocity"]
+                        .time_series["video_frame_ind"]
+                        .data,
                         dtype=int,
                     )[:, np.newaxis],
-                    np.asarray(nwb_data["dlc_position"].get_spatial_series().data),
-                    np.asarray(nwb_data["dlc_velocity"].time_series["velocity"].data),
+                    np.asarray(
+                        nwb_data["dlc_position"].get_spatial_series().data
+                    ),
+                    np.asarray(
+                        nwb_data["dlc_velocity"].time_series["velocity"].data
+                    ),
                 ),
                 axis=1,
             ),
@@ -493,10 +521,18 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         pos_df.loc[:, idx[red_led_C, ("x", "y")]].to_numpy(),
         pos_df.loc[:, idx[green_led, ("x", "y")]].to_numpy(),
     )
-    g_c_is_too_separated = dist_between_green_red >= params["max_LED_separation"]
+    g_c_is_too_separated = (
+        dist_between_green_red >= params["max_LED_separation"]
+    )
     all_good_mask = reduce(
         np.logical_and,
-        (~green_nans, ~red_C_nans, ~red_L_nans, ~red_R_nans, ~g_c_is_too_separated),
+        (
+            ~green_nans,
+            ~red_C_nans,
+            ~red_L_nans,
+            ~red_R_nans,
+            ~g_c_is_too_separated,
+        ),
     )
     centroid[all_good_mask] = [
         *zip(
@@ -513,7 +549,9 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         )
     ]
     # If green LED and red center LED are both not NaN
-    green_red_C = np.logical_and(~green_nans, ~red_C_nans, ~g_c_is_too_separated)
+    green_red_C = np.logical_and(
+        ~green_nans, ~red_C_nans, ~g_c_is_too_separated
+    )
     if np.sum(green_red_C) > 0:
         centroid[green_red_C] = [
             *zip(
@@ -548,23 +586,35 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         pos_df.loc[:, idx[red_led_L, ("x", "y")]].to_numpy(),
         pos_df.loc[:, idx[red_led_R, ("x", "y")]].to_numpy(),
     )
-    l_r_is_too_separated = dist_between_left_right >= params["max_LED_separation"]
+    l_r_is_too_separated = (
+        dist_between_left_right >= params["max_LED_separation"]
+    )
     no_green_no_red_C_red_L_red_R = reduce(
         np.logical_and,
-        (green_nans, red_C_nans, ~red_L_nans, ~red_R_nans, ~l_r_is_too_separated),
+        (
+            green_nans,
+            red_C_nans,
+            ~red_L_nans,
+            ~red_R_nans,
+            ~l_r_is_too_separated,
+        ),
     )
     if np.sum(no_green_no_red_C_red_L_red_R) > 0:
         centroid[no_green_no_red_C_red_L_red_R] = [
             *zip(
                 (
-                    pos_df.loc[idx[no_green_no_red_C_red_L_red_R], idx[red_led_L, "x"]]
+                    pos_df.loc[
+                        idx[no_green_no_red_C_red_L_red_R], idx[red_led_L, "x"]
+                    ]
                     + pos_df.loc[
                         idx[no_green_no_red_C_red_L_red_R], idx[red_led_R, "x"]
                     ]
                 )
                 / 2,
                 (
-                    pos_df.loc[idx[no_green_no_red_C_red_L_red_R], idx[red_led_L, "y"]]
+                    pos_df.loc[
+                        idx[no_green_no_red_C_red_L_red_R], idx[red_led_L, "y"]
+                    ]
                     + pos_df.loc[
                         idx[no_green_no_red_C_red_L_red_R], idx[red_led_R, "y"]
                     ]
@@ -581,8 +631,12 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         pos_df.loc[:, idx[red_led_R, ("x", "y")]].to_numpy(),
         pos_df.loc[:, idx[green_led, ("x", "y")]].to_numpy(),
     )
-    l_g_is_too_separated = dist_between_left_green >= params["max_LED_separation"]
-    r_g_is_too_separated = dist_between_right_green >= params["max_LED_separation"]
+    l_g_is_too_separated = (
+        dist_between_left_green >= params["max_LED_separation"]
+    )
+    r_g_is_too_separated = (
+        dist_between_right_green >= params["max_LED_separation"]
+    )
     green_red_L_red_R_no_red_C = reduce(
         np.logical_and,
         (
@@ -599,12 +653,16 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         midpoint = (
             (
                 pos_df.loc[idx[green_red_L_red_R_no_red_C], idx[red_led_L, "x"]]
-                + pos_df.loc[idx[green_red_L_red_R_no_red_C], idx[red_led_R, "x"]]
+                + pos_df.loc[
+                    idx[green_red_L_red_R_no_red_C], idx[red_led_R, "x"]
+                ]
             )
             / 2,
             (
                 pos_df.loc[idx[green_red_L_red_R_no_red_C], idx[red_led_L, "y"]]
-                + pos_df.loc[idx[green_red_L_red_R_no_red_C], idx[red_led_R, "y"]]
+                + pos_df.loc[
+                    idx[green_red_L_red_R_no_red_C], idx[red_led_R, "y"]
+                ]
             )
             / 2,
         )
@@ -612,12 +670,16 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
             *zip(
                 (
                     midpoint[0]
-                    + pos_df.loc[idx[green_red_L_red_R_no_red_C], idx[green_led, "x"]]
+                    + pos_df.loc[
+                        idx[green_red_L_red_R_no_red_C], idx[green_led, "x"]
+                    ]
                 )
                 / 2,
                 (
                     midpoint[1]
-                    + pos_df.loc[idx[green_red_L_red_R_no_red_C], idx[green_led, "y"]]
+                    + pos_df.loc[
+                        idx[green_red_L_red_R_no_red_C], idx[green_led, "y"]
+                    ]
                 )
                 / 2,
             )
@@ -625,20 +687,30 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
     # If red center and left LED is NaN, but green and red right LED are not
     green_red_R_no_red_C_no_red_L = reduce(
         np.logical_and,
-        (~green_nans, red_C_nans, red_L_nans, ~red_R_nans, ~r_g_is_too_separated),
+        (
+            ~green_nans,
+            red_C_nans,
+            red_L_nans,
+            ~red_R_nans,
+            ~r_g_is_too_separated,
+        ),
     )
     if np.sum(green_red_R_no_red_C_no_red_L) > 0:
         centroid[green_red_R_no_red_C_no_red_L] = [
             *zip(
                 (
-                    pos_df.loc[idx[green_red_R_no_red_C_no_red_L], idx[red_led_R, "x"]]
+                    pos_df.loc[
+                        idx[green_red_R_no_red_C_no_red_L], idx[red_led_R, "x"]
+                    ]
                     + pos_df.loc[
                         idx[green_red_R_no_red_C_no_red_L], idx[green_led, "x"]
                     ]
                 )
                 / 2,
                 (
-                    pos_df.loc[idx[green_red_R_no_red_C_no_red_L], idx[red_led_R, "y"]]
+                    pos_df.loc[
+                        idx[green_red_R_no_red_C_no_red_L], idx[red_led_R, "y"]
+                    ]
                     + pos_df.loc[
                         idx[green_red_R_no_red_C_no_red_L], idx[green_led, "y"]
                     ]
@@ -649,20 +721,30 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
     # If red center and right LED is NaN, but green and red left LED are not
     green_red_L_no_red_C_no_red_R = reduce(
         np.logical_and,
-        (~green_nans, red_C_nans, ~red_L_nans, red_R_nans, ~l_g_is_too_separated),
+        (
+            ~green_nans,
+            red_C_nans,
+            ~red_L_nans,
+            red_R_nans,
+            ~l_g_is_too_separated,
+        ),
     )
     if np.sum(green_red_L_no_red_C_no_red_R) > 0:
         centroid[green_red_L_no_red_C_no_red_R] = [
             *zip(
                 (
-                    pos_df.loc[idx[green_red_L_no_red_C_no_red_R], idx[red_led_L, "x"]]
+                    pos_df.loc[
+                        idx[green_red_L_no_red_C_no_red_R], idx[red_led_L, "x"]
+                    ]
                     + pos_df.loc[
                         idx[green_red_L_no_red_C_no_red_R], idx[green_led, "x"]
                     ]
                 )
                 / 2,
                 (
-                    pos_df.loc[idx[green_red_L_no_red_C_no_red_R], idx[red_led_L, "y"]]
+                    pos_df.loc[
+                        idx[green_red_L_no_red_C_no_red_R], idx[red_led_L, "y"]
+                    ]
                     + pos_df.loc[
                         idx[green_red_L_no_red_C_no_red_R], idx[green_led, "y"]
                     ]
@@ -677,8 +759,12 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
     if np.sum(red_L_no_green_no_red_C_no_red_R) > 0:
         centroid[red_L_no_green_no_red_C_no_red_R] = [
             *zip(
-                pos_df.loc[idx[red_L_no_green_no_red_C_no_red_R], idx[red_led_L, "x"]],
-                pos_df.loc[idx[red_L_no_green_no_red_C_no_red_R], idx[red_led_L, "y"]],
+                pos_df.loc[
+                    idx[red_L_no_green_no_red_C_no_red_R], idx[red_led_L, "x"]
+                ],
+                pos_df.loc[
+                    idx[red_L_no_green_no_red_C_no_red_R], idx[red_led_L, "y"]
+                ],
             )
         ]
     # If all LEDS are NaN except red right LED
@@ -688,8 +774,12 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
     if np.sum(red_R_no_green_no_red_C_no_red_L) > 0:
         centroid[red_R_no_green_no_red_C_no_red_L] = [
             *zip(
-                pos_df.loc[idx[red_R_no_green_no_red_C_no_red_L], idx[red_led_R, "x"]],
-                pos_df.loc[idx[red_R_no_green_no_red_C_no_red_L], idx[red_led_R, "y"]],
+                pos_df.loc[
+                    idx[red_R_no_green_no_red_C_no_red_L], idx[red_led_R, "x"]
+                ],
+                pos_df.loc[
+                    idx[red_R_no_green_no_red_C_no_red_L], idx[red_led_R, "y"]
+                ],
             )
         ]
     # If all red LEDs are NaN, but green LED is not

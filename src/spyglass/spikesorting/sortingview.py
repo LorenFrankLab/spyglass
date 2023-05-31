@@ -80,7 +80,11 @@ class SortingviewWorkspace(dj.Computed):
             google_user_ids.append(google_user_id[0])
 
         # do
-        workspace_uri, recording_id, sorting_id = _create_spikesortingview_workspace(
+        (
+            workspace_uri,
+            recording_id,
+            sorting_id,
+        ) = _create_spikesortingview_workspace(
             recording_path=recording_path,
             sorting_path=sorting_path,
             merge_groups=merge_groups,
@@ -150,7 +154,9 @@ class SortingviewWorkspace(dj.Computed):
         initial_curation = {"labelsByUnit": initial_labels}
 
         # custom metrics
-        unit_metrics = workspace.get_unit_metrics_for_sorting(sortingview_sorting_id)
+        unit_metrics = workspace.get_unit_metrics_for_sorting(
+            sortingview_sorting_id
+        )
 
         # This will print some instructions on how to do the curation
         # old: sv.trythis_start_sorting_curation

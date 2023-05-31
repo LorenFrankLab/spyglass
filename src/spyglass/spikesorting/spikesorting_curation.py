@@ -32,7 +32,9 @@ def apply_merge_groups_to_sorting(
     # merge_groups is a list of lists of unit_ids.
     # for example: merge_groups = [[1, 2], [5, 8, 4]]]
 
-    return MergedSortingExtractor(parent_sorting=sorting, merge_groups=merge_groups)
+    return MergedSortingExtractor(
+        parent_sorting=sorting, merge_groups=merge_groups
+    )
 
 
 @schema
@@ -220,7 +222,9 @@ class Curation(dj.Manual):
             unit_ids = sorting.get_unit_ids()
 
         for unit_id in unit_ids:
-            spike_times_in_samples = sorting.get_unit_spike_train(unit_id=unit_id)
+            spike_times_in_samples = sorting.get_unit_spike_train(
+                unit_id=unit_id
+            )
             units[unit_id] = timestamps[spike_times_in_samples]
             units_valid_times[unit_id] = sort_interval_valid_times
             units_sort_interval[unit_id] = [sort_interval]
@@ -271,7 +275,9 @@ class WaveformParameters(dj.Manual):
             "total_memory": "5G",
             "whiten": False,
         }
-        self.insert1([waveform_params_name, waveform_params], skip_duplicates=True)
+        self.insert1(
+            [waveform_params_name, waveform_params], skip_duplicates=True
+        )
         waveform_params_name = "default_whitened"
         waveform_params = {
             "ms_before": 0.5,
@@ -281,7 +287,9 @@ class WaveformParameters(dj.Manual):
             "total_memory": "5G",
             "whiten": True,
         }
-        self.insert1([waveform_params_name, waveform_params], skip_duplicates=True)
+        self.insert1(
+            [waveform_params_name, waveform_params], skip_duplicates=True
+        )
 
 
 @schema
@@ -318,7 +326,8 @@ class Waveforms(dj.Computed):
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key["waveform_extractor_path"] = str(
-            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"]) / Path(waveform_extractor_name)
+            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"])
+            / Path(waveform_extractor_name)
         )
         if os.path.exists(key["waveform_extractor_path"]):
             shutil.rmtree(key["waveform_extractor_path"])
@@ -329,7 +338,9 @@ class Waveforms(dj.Computed):
             **waveform_params,
         )
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["nwb_file_name"]
+        )
         object_id = AnalysisNwbfile().add_units_waveforms(
             key["analysis_file_name"], waveform_extractor=waveforms
         )
@@ -360,7 +371,9 @@ class Waveforms(dj.Computed):
         return NotImplementedError
 
     def _get_waveform_extractor_name(self, key):
-        waveform_params_name = (WaveformParameters & key).fetch1("waveform_params_name")
+        waveform_params_name = (WaveformParameters & key).fetch1(
+            "waveform_params_name"
+        )
 
         return (
             f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
@@ -422,7 +435,8 @@ class MetricParameters(dj.Manual):
 
     def insert_default(self):
         self.insert1(
-            ["franklab_default3", self.metric_default_params], skip_duplicates=True
+            ["franklab_default3", self.metric_default_params],
+            skip_duplicates=True,
         )
 
     def get_available_metrics(self):
@@ -498,7 +512,9 @@ class QualityMetrics(dj.Computed):
         print(f"Computed all metrics: {qm}")
         self._dump_to_json(qm, key["quality_metrics_path"])
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["nwb_file_name"]
+        )
         key["object_id"] = AnalysisNwbfile().add_units_metrics(
             key["analysis_file_name"], metrics=qm
         )
@@ -555,7 +571,9 @@ def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
 
     # Extract the total number of spikes that violated the isi_threshold for each unit
     isi_violation_counts = sq.compute_isi_violations(
-        waveform_extractor, isi_threshold_ms=isi_threshold_ms, min_isi_ms=min_isi_ms
+        waveform_extractor,
+        isi_threshold_ms=isi_threshold_ms,
+        min_isi_ms=min_isi_ms,
     ).isi_violations_count
 
     # Extract the total number of spikes from each unit. The number of ISIs is one less than this
@@ -575,8 +593,12 @@ def _get_peak_offset(
     """Computes the shift of the waveform peak from center of window."""
     if "peak_sign" in metric_params:
         del metric_params["peak_sign"]
-    peak_offset_inds = si.postprocessing.get_template_extremum_channel_peak_shift(
-        waveform_extractor=waveform_extractor, peak_sign=peak_sign, **metric_params
+    peak_offset_inds = (
+        si.postprocessing.get_template_extremum_channel_peak_shift(
+            waveform_extractor=waveform_extractor,
+            peak_sign=peak_sign,
+            **metric_params,
+        )
     )
     peak_offset = {key: int(abs(val)) for key, val in peak_offset_inds.items()}
     return peak_offset
@@ -589,13 +611,17 @@ def _get_peak_channel(
     if "peak_sign" in metric_params:
         del metric_params["peak_sign"]
     peak_channel_dict = si.postprocessing.get_template_extremum_channel(
-        waveform_extractor=waveform_extractor, peak_sign=peak_sign, **metric_params
+        waveform_extractor=waveform_extractor,
+        peak_sign=peak_sign,
+        **metric_params,
     )
     peak_channel = {key: int(val) for key, val in peak_channel_dict.items()}
     return peak_channel
 
 
-def _get_num_spikes(waveform_extractor: si.WaveformExtractor, this_unit_id: int):
+def _get_num_spikes(
+    waveform_extractor: si.WaveformExtractor, this_unit_id: int
+):
     """Computes the number of spikes for each unit."""
     all_spikes = sq.compute_num_spikes(waveform_extractor)
     cluster_spikes = all_spikes[this_unit_id]
@@ -654,7 +680,9 @@ class AutomaticCurationParameters(dj.Manual):
         default_params = {
             "auto_curation_params_name": "default",
             "merge_params": {},
-            "label_params": {"nn_noise_overlap": [">", 0.1, ["noise", "reject"]]},
+            "label_params": {
+                "nn_noise_overlap": [">", 0.1, ["noise", "reject"]]
+            },
         }
         self.insert1(default_params, skip_duplicates=True)
 
@@ -705,12 +733,16 @@ class AutomaticCuration(dj.Computed):
         parent_curation_id = parent_curation["curation_id"]
         parent_sorting = Curation.get_curated_sorting(key)
 
-        merge_params = (AutomaticCurationParameters & key).fetch1("merge_params")
+        merge_params = (AutomaticCurationParameters & key).fetch1(
+            "merge_params"
+        )
         merge_groups, units_merged = self.get_merge_groups(
             parent_sorting, parent_merge_groups, quality_metrics, merge_params
         )
 
-        label_params = (AutomaticCurationParameters & key).fetch1("label_params")
+        label_params = (AutomaticCurationParameters & key).fetch1(
+            "label_params"
+        )
         labels = self.get_labels(
             parent_sorting, parent_labels, quality_metrics, label_params
         )
@@ -734,7 +766,9 @@ class AutomaticCuration(dj.Computed):
         self.insert1(key)
 
     @staticmethod
-    def get_merge_groups(sorting, parent_merge_groups, quality_metrics, merge_params):
+    def get_merge_groups(
+        sorting, parent_merge_groups, quality_metrics, merge_params
+    ):
         """Identifies units to be merged based on the quality_metrics and
         merge parameters and returns an updated list of merges for the curation.
 
@@ -812,13 +846,19 @@ class AutomaticCuration(dj.Computed):
                         # note that label_params[metric] is a three element list with a comparison operator as a string,
                         # the threshold value, and a list of labels to be applied if the comparison is true
                         if compare(
-                            quality_metrics[metric][unit_id], label_params[metric][1]
+                            quality_metrics[metric][unit_id],
+                            label_params[metric][1],
                         ):
                             if unit_id not in parent_labels:
                                 parent_labels[unit_id] = label_params[metric][2]
                             # check if the label is already there, and if not, add it
-                            elif label_params[metric][2] not in parent_labels[unit_id]:
-                                parent_labels[unit_id].extend(label_params[metric][2])
+                            elif (
+                                label_params[metric][2]
+                                not in parent_labels[unit_id]
+                            ):
+                                parent_labels[unit_id].extend(
+                                    label_params[metric][2]
+                                )
             return parent_labels
 
 
@@ -870,7 +910,10 @@ class CuratedSpikeSorting(dj.Computed):
         accepted_units = []
         for unit_id in unit_ids:
             if unit_id in unit_labels:
-                if len(set(unit_labels_to_remove) & set(unit_labels[unit_id])) == 0:
+                if (
+                    len(set(unit_labels_to_remove) & set(unit_labels[unit_id]))
+                    == 0
+                ):
                     accepted_units.append(unit_id)
             else:
                 accepted_units.append(unit_id)
@@ -898,7 +941,9 @@ class CuratedSpikeSorting(dj.Computed):
         recording = Curation.get_recording(key)
 
         # get the sort_interval and sorting interval list
-        sort_interval_name = (SpikeSortingRecording & key).fetch1("sort_interval_name")
+        sort_interval_name = (SpikeSortingRecording & key).fetch1(
+            "sort_interval_name"
+        )
         sort_interval = (SortInterval & key).fetch1("sort_interval")
         sort_interval_list_name = (SpikeSorting & key).fetch1(
             "artifact_removed_interval_list_name"
@@ -988,7 +1033,9 @@ class UnitInclusionParameters(dj.Manual):
                         )
         super().insert1(key, **kwargs)
 
-    def get_included_units(self, curated_sorting_key, unit_inclusion_param_name):
+    def get_included_units(
+        self, curated_sorting_key, unit_inclusion_param_name
+    ):
         """given a reference to a set of curated sorting units and the name of a unit inclusion parameter list, returns
 
         Parameters
@@ -1009,7 +1056,9 @@ class UnitInclusionParameters(dj.Manual):
             & {"unit_inclusion_param_name": unit_inclusion_param_name}
         ).fetch1("inclusion_param_dict")
         units = (CuratedSpikeSorting().Unit() & curated_sortings).fetch()
-        units_key = (CuratedSpikeSorting().Unit() & curated_sortings).fetch("KEY")
+        units_key = (CuratedSpikeSorting().Unit() & curated_sortings).fetch(
+            "KEY"
+        )
         # get a list of the metrics in the units table
         metrics_list = CuratedSpikeSorting().metrics_fields()
         # get the list of labels to exclude if there is one
