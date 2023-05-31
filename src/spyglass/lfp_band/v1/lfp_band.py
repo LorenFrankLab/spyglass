@@ -126,13 +126,14 @@ class LFPBandSelection(dj.Manual):
         ref_list = np.zeros((len(electrode_list),))
         ref_list[:] = reference_electrode_list
 
-        key = dict()
-        key["nwb_file_name"] = nwb_file_name
-        key["lfp_id"] = lfp_id
-        key["filter_name"] = filter_name
-        key["filter_sampling_rate"] = lfp_sampling_rate
-        key["target_interval_list_name"] = interval_list_name
-        key["lfp_band_sampling_rate"] = lfp_sampling_rate // decimation
+        key = dict(
+            nwb_file_name=nwb_file_name,
+            lfp_id=lfp_id,
+            filter_name=filter_name,
+            filter_sampling_rate=lfp_sampling_rate,
+            target_interval_list_name=interval_list_name,
+            lfp_band_sampling_rate=lfp_sampling_rate // decimation,
+        )
         # insert an entry into the main LFPBandSelectionTable
         self.insert1(key, skip_duplicates=True)
 
