@@ -68,17 +68,25 @@ class ArtifactDetection(dj.Computed):
     """
 
     def make(self, key):
-        if not (ArtifactDetectionSelection & key).fetch1("custom_artifact_detection"):
+        if not (ArtifactDetectionSelection & key).fetch1(
+            "custom_artifact_detection"
+        ):
             # get the dict of artifact params associated with this artifact_params_name
             artifact_params = (ArtifactDetectionParameters & key).fetch1(
                 "artifact_params"
             )
 
-            recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
+            recording_path = (SpikeSortingRecording & key).fetch1(
+                "recording_path"
+            )
             recording_name = SpikeSortingRecording._get_recording_name(key)
             recording = si.load_extractor(recording_path)
 
-            job_kwargs = {"chunk_duration": "10s", "n_jobs": 4, "progress_bar": "True"}
+            job_kwargs = {
+                "chunk_duration": "10s",
+                "n_jobs": 4,
+                "progress_bar": "True",
+            }
 
             artifact_removed_valid_times, artifact_times = _get_artifact_times(
                 recording, **artifact_params, **job_kwargs
@@ -117,7 +125,9 @@ class ArtifactDetection(dj.Computed):
             # also insert into IntervalList
             tmp_key = {}
             tmp_key["nwb_file_name"] = key["nwb_file_name"]
-            tmp_key["interval_list_name"] = key["artifact_removed_interval_list_name"]
+            tmp_key["interval_list_name"] = key[
+                "artifact_removed_interval_list_name"
+            ]
             tmp_key["valid_times"] = key["artifact_removed_valid_times"]
             IntervalList.insert1(tmp_key, replace=True)
 
@@ -186,7 +196,9 @@ def _get_artifact_times(
 
     # if both thresholds are None, we skip artifract detection
     if (amplitude_thresh is None) and (zscore_thresh is None):
-        recording_interval = np.asarray([valid_timestamps[0], valid_timestamps[-1]])
+        recording_interval = np.asarray(
+            [valid_timestamps[0], valid_timestamps[-1]]
+        )
         artifact_times_empty = np.asarray([])
         print(
             "Amplitude and zscore thresholds are both None, skipping artifact detection"
@@ -240,7 +252,9 @@ def _get_artifact_times(
     half_removal_window_s = removal_window_ms / 1000 * 0.5
 
     if len(artifact_frames) == 0:
-        recording_interval = np.asarray([[valid_timestamps[0], valid_timestamps[-1]]])
+        recording_interval = np.asarray(
+            [[valid_timestamps[0], valid_timestamps[-1]]]
+        )
         artifact_times_empty = np.asarray([])
         print("No artifacts detected.")
         return recording_interval, artifact_times_empty
@@ -249,7 +263,9 @@ def _get_artifact_times(
     artifact_intervals = interval_from_inds(artifact_frames)
 
     # convert to seconds and pad with window
-    artifact_intervals_s = np.zeros((len(artifact_intervals), 2), dtype=np.float64)
+    artifact_intervals_s = np.zeros(
+        (len(artifact_intervals), 2), dtype=np.float64
+    )
     for interval_idx, interval in enumerate(artifact_intervals):
         artifact_intervals_s[interval_idx] = [
             valid_timestamps[interval[0]] - half_removal_window_s,
@@ -281,7 +297,10 @@ def _get_artifact_times(
 
 
 def _init_artifact_worker(
-    recording, zscore_thresh=None, amplitude_thresh=None, proportion_above_thresh=1.0
+    recording,
+    zscore_thresh=None,
+    amplitude_thresh=None,
+    proportion_above_thresh=1.0,
 ):
     # create a local dict per worker
     worker_ctx = {}
@@ -301,23 +320,29 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     amplitude_thresh = worker_ctx["amplitude_thresh"]
     proportion_above_thresh = worker_ctx["proportion_above_thresh"]
     # compute the number of electrodes that have to be above threshold
-    nelect_above = np.ceil(proportion_above_thresh * len(recording.get_channel_ids()))
+    nelect_above = np.ceil(
+        proportion_above_thresh * len(recording.get_channel_ids())
+    )
 
     traces = recording.get_traces(
-        segment_index=segment_index, start_frame=start_frame, end_frame=end_frame
+        segment_index=segment_index,
+        start_frame=start_frame,
+        end_frame=end_frame,
     )
 
     # find the artifact occurrences using one or both thresholds, across channels
     if (amplitude_thresh is not None) and (zscore_thresh is None):
         above_a = np.abs(traces) > amplitude_thresh
         above_thresh = (
-            np.ravel(np.argwhere(np.sum(above_a, axis=1) >= nelect_above)) + start_frame
+            np.ravel(np.argwhere(np.sum(above_a, axis=1) >= nelect_above))
+            + start_frame
         )
     elif (amplitude_thresh is None) and (zscore_thresh is not None):
         dataz = np.abs(stats.zscore(traces, axis=1))
         above_z = dataz > zscore_thresh
         above_thresh = (
-            np.ravel(np.argwhere(np.sum(above_z, axis=1) >= nelect_above)) + start_frame
+            np.ravel(np.argwhere(np.sum(above_z, axis=1) >= nelect_above))
+            + start_frame
         )
     else:
         above_a = np.abs(traces) > amplitude_thresh
@@ -326,7 +351,8 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
         above_thresh = (
             np.ravel(
                 np.argwhere(
-                    np.sum(np.logical_or(above_z, above_a), axis=1) >= nelect_above
+                    np.sum(np.logical_or(above_z, above_a), axis=1)
+                    >= nelect_above
                 )
             )
             + start_frame
@@ -357,10 +383,14 @@ def _check_artifact_thresholds(
     ValueError: if signal thresholds are negative
     """
     # amplitude or zscore thresholds should be negative, as they are applied to an absolute signal
-    signal_thresholds = [t for t in [amplitude_thresh, zscore_thresh] if t is not None]
+    signal_thresholds = [
+        t for t in [amplitude_thresh, zscore_thresh] if t is not None
+    ]
     for t in signal_thresholds:
         if t < 0:
-            raise ValueError("Amplitude and Z-Score thresholds must be >= 0, or None")
+            raise ValueError(
+                "Amplitude and Z-Score thresholds must be >= 0, or None"
+            )
 
     # proportion_above_threshold should be in [0:1] inclusive
     if proportion_above_thresh < 0:

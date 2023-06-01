@@ -1,6 +1,7 @@
 # Session groups
 
-A session group is a collection of sessions. Each group has a name (primary key) and a description.
+A session group is a collection of sessions. Each group has a name (primary key)
+and a description.
 
 ```python
 from spyglass.common import SessionGroup

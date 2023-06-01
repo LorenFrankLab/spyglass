@@ -32,7 +32,9 @@ def make_single_environment_movie(
     else:
         multiunit_spikes = np.asarray(marks, dtype=float)
     multiunit_firing_rate = pd.DataFrame(
-        get_multiunit_population_firing_rate(multiunit_spikes, sampling_frequency),
+        get_multiunit_population_firing_rate(
+            multiunit_spikes, sampling_frequency
+        ),
         index=position_info.index,
         columns=["firing_rate"],
     )
@@ -65,7 +67,9 @@ def make_single_environment_movie(
 
     window_ind = np.arange(window_size) - window_size // 2
     rate = multiunit_firing_rate.iloc[
-        slice(time_slice.start + window_ind[0], time_slice.stop + window_ind[-1])
+        slice(
+            time_slice.start + window_ind[0], time_slice.stop + window_ind[-1]
+        )
     ]
 
     with plt.style.context("dark_background"):
@@ -150,7 +154,10 @@ def make_single_environment_movie(
         )
         axes[1].set_ylim((0.0, np.asarray(rate.max())))
         axes[1].set_xlim(
-            (window_ind[0] / sampling_frequency, window_ind[-1] / sampling_frequency)
+            (
+                window_ind[0] / sampling_frequency,
+                window_ind[-1] / sampling_frequency,
+            )
         )
         axes[1].set_xlabel("Time [s]")
         axes[1].set_ylabel("Multiunit\n[spikes/s]")
@@ -181,16 +188,24 @@ def make_single_environment_movie(
             )
 
             map_dot.set_offsets(map_position[time_ind])
-            map_line.set_data(map_position[time_slice, 0], map_position[time_slice, 1])
+            map_line.set_data(
+                map_position[time_slice, 0], map_position[time_slice, 1]
+            )
 
-            mesh.set_array(posterior.isel(time=time_ind).values.ravel(order="F"))
+            mesh.set_array(
+                posterior.isel(time=time_ind).values.ravel(order="F")
+            )
 
-            title.set_text(f"time = {posterior.isel(time=time_ind).time.values:0.2f}")
+            title.set_text(
+                f"time = {posterior.isel(time=time_ind).time.values:0.2f}"
+            )
 
             try:
                 multiunit_firing_line.set_data(
                     window_ind / sampling_frequency,
-                    np.asarray(rate.iloc[time_ind + (window_size // 2) + window_ind]),
+                    np.asarray(
+                        rate.iloc[time_ind + (window_size // 2) + window_ind]
+                    ),
                 )
             except IndexError:
                 pass
@@ -216,7 +231,9 @@ def make_single_environment_movie(
         return fig, movie
 
 
-def setup_subplots(classifier, window_ind=None, rate=None, sampling_frequency=None):
+def setup_subplots(
+    classifier, window_ind=None, rate=None, sampling_frequency=None
+):
     env_names = [env.environment_name for env in classifier.environments]
 
     mosaic = []
@@ -263,7 +280,10 @@ def setup_subplots(classifier, window_ind=None, rate=None, sampling_frequency=No
 
     if window_ind is not None and sampling_frequency is not None:
         ax.set_xlim(
-            (window_ind[0] / sampling_frequency, window_ind[-1] / sampling_frequency)
+            (
+                window_ind[0] / sampling_frequency,
+                window_ind[-1] / sampling_frequency,
+            )
         )
     sns.despine(ax=ax)
 
@@ -290,7 +310,9 @@ def make_multi_environment_movie(
     writer = Writer(fps=fps, bitrate=-1)
 
     # Set up neural data
-    probability = results.isel(time=time_slice).acausal_posterior.sum("position")
+    probability = results.isel(time=time_slice).acausal_posterior.sum(
+        "position"
+    )
     most_prob_env = probability.idxmax("state")
     env_names = [env.environment_name for env in classifier.environments]
 
@@ -316,7 +338,9 @@ def make_multi_environment_movie(
         multiunit_spikes = np.asarray(marks, dtype=float)
 
     multiunit_firing_rate = pd.DataFrame(
-        get_multiunit_population_firing_rate(multiunit_spikes, sampling_frequency),
+        get_multiunit_population_firing_rate(
+            multiunit_spikes, sampling_frequency
+        ),
         index=position_info.index,
         columns=["firing_rate"],
     )
@@ -325,7 +349,9 @@ def make_multi_environment_movie(
 
     window_ind = np.arange(window_size) - window_size // 2
     rate = multiunit_firing_rate.iloc[
-        slice(time_slice.start + window_ind[0], time_slice.stop + window_ind[-1])
+        slice(
+            time_slice.start + window_ind[0], time_slice.stop + window_ind[-1]
+        )
     ]
 
     # Set up behavioral data
@@ -399,10 +425,14 @@ def make_multi_environment_movie(
 
             for env_name, mesh in meshes.items():
                 posterior = (
-                    env_posteriors[env_name].isel(time=time_ind).values.ravel(order="F")
+                    env_posteriors[env_name]
+                    .isel(time=time_ind)
+                    .values.ravel(order="F")
                 )
                 mesh.set_array(posterior)
-                prob = float(probability.isel(time=time_ind).sel(state=env_name))
+                prob = float(
+                    probability.isel(time=time_ind).sel(state=env_name)
+                )
                 titles[env_name].set_text(
                     f"environment = {env_name}\nprob. = {prob:0.2f}"
                 )
@@ -419,7 +449,9 @@ def make_multi_environment_movie(
 
             multiunit_firing_line.set_data(
                 window_ind / sampling_frequency,
-                np.asarray(rate.iloc[time_ind + (window_size // 2) + window_ind]),
+                np.asarray(
+                    rate.iloc[time_ind + (window_size // 2) + window_ind]
+                ),
             )
 
             progress_bar.update()
@@ -504,7 +536,9 @@ def create_interactive_1D_decoding_figurl(
     )
     vertical_panel_content = [
         vv.LayoutItem(decode_view, stretch=3, title="Decode"),
-        vv.LayoutItem(probability_view, stretch=1, title="Probability of State"),
+        vv.LayoutItem(
+            probability_view, stretch=1, title="Probability of State"
+        ),
         vv.LayoutItem(speed_view, stretch=1, title="Speed"),
         vv.LayoutItem(multiunit_firing_rate_view, stretch=1, title="Multiunit"),
     ]
@@ -600,7 +634,9 @@ def create_interactive_2D_decoding_figurl(
     ]
 
     vertical_panel2_content = [
-        vv.LayoutItem(probability_view, stretch=1, title="Probability of State"),
+        vv.LayoutItem(
+            probability_view, stretch=1, title="Probability of State"
+        ),
         vv.LayoutItem(speed_view, stretch=1, title="Speed"),
         vv.LayoutItem(multiunit_firing_rate_view, stretch=1, title="Multiunit"),
     ]

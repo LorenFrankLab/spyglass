@@ -121,7 +121,9 @@ class DLCModelParams(dj.Manual):
             "trainingsetindex": 0,
             "model_prefix": "",
         }
-        cls.insert1({"dlc_model_params_name": "default", "params": params}, **kwargs)
+        cls.insert1(
+            {"dlc_model_params_name": "default", "params": params}, **kwargs
+        )
 
     @classmethod
     def get_default(cls):
@@ -218,14 +220,18 @@ class DLCModel(dj.Computed):
                 "TrainingFraction",
             ]
             for attribute in needed_attributes:
-                assert attribute in dlc_config, f"Couldn't find {attribute} in config"
+                assert (
+                    attribute in dlc_config
+                ), f"Couldn't find {attribute} in config"
 
             scorer_legacy = str_to_bool(dlc_config.get("scorer_legacy", "f"))
 
             dlc_scorer = GetScorerName(
                 cfg=dlc_config,
                 shuffle=shuffle,
-                trainFraction=dlc_config["TrainingFraction"][int(trainingsetindex)],
+                trainFraction=dlc_config["TrainingFraction"][
+                    int(trainingsetindex)
+                ],
                 modelprefix=model_prefix,
             )[scorer_legacy]
             if dlc_config["snapshotindex"] == -1:
@@ -307,7 +313,9 @@ class DLCModelEvaluation(dj.Computed):
             modelprefix=model_prefix,
         )
         eval_path = project_path / eval_folder
-        assert eval_path.exists(), f"Couldn't find evaluation folder:\n{eval_path}"
+        assert (
+            eval_path.exists()
+        ), f"Couldn't find evaluation folder:\n{eval_path}"
 
         eval_csvs = list(eval_path.glob("*csv"))
         max_modified_time = 0

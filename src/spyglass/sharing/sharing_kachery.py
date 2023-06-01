@@ -101,7 +101,9 @@ class KacheryZone(dj.Manual):
     def reset_resource_url():
         KacheryZone.reset_zone()
         if default_kachery_resource_url is not None:
-            os.environ[kachery_resource_url_envar] = default_kachery_resource_url
+            os.environ[
+                kachery_resource_url_envar
+            ] = default_kachery_resource_url
 
 
 @schema
@@ -138,7 +140,9 @@ class AnalysisNwbfileKachery(dj.Computed):
         key["analysis_file_uri"] = kcl.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )
-        print(os.environ[kachery_zone_envar], os.environ[kachery_cloud_dir_envar])
+        print(
+            os.environ[kachery_zone_envar], os.environ[kachery_cloud_dir_envar]
+        )
         print(AnalysisNwbfile().get_abs_path(key["analysis_file_name"]))
         print(kcl.load_file(key["analysis_file_uri"]))
         self.insert1(key)
@@ -188,8 +192,12 @@ class AnalysisNwbfileKachery(dj.Computed):
                 os.environ["SPYGLASS_BASE_DIR"] + file["linked_file_rel_path"]
             )
             if not kachery_download_file(
-                uri=uri, dest=linked_file_path, kachery_zone_name=kachery_zone_name
+                uri=uri,
+                dest=linked_file_path,
+                kachery_zone_name=kachery_zone_name,
             ):
-                raise Exception(f"Linked file {linked_file_path} cannot be downloaded")
+                raise Exception(
+                    f"Linked file {linked_file_path} cannot be downloaded"
+                )
 
         return True

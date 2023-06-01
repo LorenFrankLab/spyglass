@@ -21,7 +21,9 @@ def add_module(module_name):
 
     # get a list of usernames
     for user in group.gr_mem:
-        file.write(f"GRANT ALL PRIVILEGES ON `{module_name}\_%`.* TO `{user}`@'%';\n")
+        file.write(
+            f"GRANT ALL PRIVILEGES ON `{module_name}\_%`.* TO `{user}`@'%';\n"
+        )
     file.flush()
 
     # run those commands in sql

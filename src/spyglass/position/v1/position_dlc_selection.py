@@ -12,7 +12,10 @@ from .dlc_utils import get_video_path, make_video
 from .position_dlc_centroid import DLCCentroid
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_orient import DLCOrientation
-from .position_dlc_pose_estimation import DLCPoseEstimation, DLCPoseEstimationSelection
+from .position_dlc_pose_estimation import (
+    DLCPoseEstimation,
+    DLCPoseEstimationSelection,
+)
 from .position_dlc_position import DLCSmoothInterpParams
 
 schema = dj.schema("position_v1_dlc_selection")
@@ -52,14 +55,18 @@ class DLCPosV1(dj.Computed):
         key["pose_eval_result"] = self.evaluate_pose_estimation(key)
         position_nwb_data = (DLCCentroid & key).fetch_nwb()[0]
         orientation_nwb_data = (DLCOrientation & key).fetch_nwb()[0]
-        position_object = position_nwb_data["dlc_position"].spatial_series["position"]
-        velocity_object = position_nwb_data["dlc_velocity"].time_series["velocity"]
+        position_object = position_nwb_data["dlc_position"].spatial_series[
+            "position"
+        ]
+        velocity_object = position_nwb_data["dlc_velocity"].time_series[
+            "velocity"
+        ]
         video_frame_object = position_nwb_data["dlc_velocity"].time_series[
             "video_frame_ind"
         ]
-        orientation_object = orientation_nwb_data["dlc_orientation"].spatial_series[
-            "orientation"
-        ]
+        orientation_object = orientation_nwb_data[
+            "dlc_orientation"
+        ].spatial_series["orientation"]
         position = pynwb.behavior.Position()
         orientation = pynwb.behavior.CompassDirection()
         velocity = pynwb.behavior.BehavioralTimeSeries()
@@ -99,7 +106,9 @@ class DLCPosV1(dj.Computed):
             comments=video_frame_object.comments,
         )
         # Add to Analysis NWB file
-        key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["nwb_file_name"]
+        )
         nwb_analysis_file = AnalysisNwbfile()
         key["orientation_object_id"] = nwb_analysis_file.add_nwb_object(
             key["analysis_file_name"], orientation
@@ -125,7 +134,9 @@ class DLCPosV1(dj.Computed):
         del dlc_key["pose_eval_result"]
         key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
         valid_fields = PositionOutput().fetch().dtype.fields.keys()
-        entries_to_delete = [entry for entry in key.keys() if entry not in valid_fields]
+        entries_to_delete = [
+            entry for entry in key.keys() if entry not in valid_fields
+        ]
         for entry in entries_to_delete:
             del key[entry]
 
@@ -155,14 +166,18 @@ class DLCPosV1(dj.Computed):
             np.concatenate(
                 (
                     np.asarray(
-                        nwb_data["velocity"].time_series["video_frame_ind"].data,
+                        nwb_data["velocity"]
+                        .time_series["video_frame_ind"]
+                        .data,
                         dtype=int,
                     )[:, np.newaxis],
                     np.asarray(nwb_data["position"].get_spatial_series().data),
-                    np.asarray(nwb_data["orientation"].get_spatial_series().data)[
-                        :, np.newaxis
-                    ],
-                    np.asarray(nwb_data["velocity"].time_series["velocity"].data),
+                    np.asarray(
+                        nwb_data["orientation"].get_spatial_series().data
+                    )[:, np.newaxis],
+                    np.asarray(
+                        nwb_data["velocity"].time_series["velocity"].data
+                    ),
                 ),
                 axis=1,
             ),
@@ -173,9 +188,13 @@ class DLCPosV1(dj.Computed):
     @classmethod
     def evaluate_pose_estimation(cls, key):
         likelihood_thresh = []
-        valid_fields = DLCSmoothInterpCohort.BodyPart().fetch().dtype.fields.keys()
+        valid_fields = (
+            DLCSmoothInterpCohort.BodyPart().fetch().dtype.fields.keys()
+        )
         centroid_key = {k: val for k, val in key.items() if k in valid_fields}
-        centroid_key["dlc_si_cohort_selection_name"] = key["dlc_si_cohort_centroid"]
+        centroid_key["dlc_si_cohort_selection_name"] = key[
+            "dlc_si_cohort_centroid"
+        ]
         orientation_key = centroid_key.copy()
         orientation_key["dlc_si_cohort_selection_name"] = key[
             "dlc_si_cohort_orientation"
@@ -190,9 +209,9 @@ class DLCPosV1(dj.Computed):
             np.concatenate((centroid_si_params, orientation_si_params))
         ):
             likelihood_thresh.append(
-                (DLCSmoothInterpParams() & {"dlc_si_params_name": param}).fetch1(
-                    "params"
-                )["likelihood_thresh"]
+                (
+                    DLCSmoothInterpParams() & {"dlc_si_params_name": param}
+                ).fetch1("params")["likelihood_thresh"]
             )
 
         if len(np.unique(likelihood_thresh)) > 1:
@@ -324,7 +343,9 @@ class DLCPosVideo(dj.Computed):
         }
         pose_estimation_params, video_filename, output_dir = (
             DLCPoseEstimationSelection() & pose_estimation_key
-        ).fetch1("pose_estimation_params", "video_path", "pose_estimation_output_dir")
+        ).fetch1(
+            "pose_estimation_params", "video_path", "pose_estimation_output_dir"
+        )
         print(f"video filename: {video_filename}")
         meters_per_pixel = (DLCPoseEstimation() & pose_estimation_key).fetch1(
             "meters_per_pixel"
@@ -341,7 +362,9 @@ class DLCPosVideo(dj.Computed):
                 "dlc_si_cohort_centroid": key["dlc_si_cohort_centroid"],
                 "dlc_centroid_params_name": key["dlc_centroid_params_name"],
                 "dlc_si_cohort_orientation": key["dlc_si_cohort_orientation"],
-                "dlc_orientation_params_name": key["dlc_orientation_params_name"],
+                "dlc_orientation_params_name": key[
+                    "dlc_orientation_params_name"
+                ],
             }
         ).fetch1_dataframe()
         pose_estimation_df = pd.concat(
@@ -350,7 +373,9 @@ class DLCPosVideo(dj.Computed):
                     DLCPoseEstimation.BodyPart()
                     & {**pose_estimation_key, **{"bodypart": bodypart}}
                 ).fetch1_dataframe()
-                for bodypart in (DLCSmoothInterpCohort.BodyPart & pose_estimation_key)
+                for bodypart in (
+                    DLCSmoothInterpCohort.BodyPart & pose_estimation_key
+                )
                 .fetch("bodypart")
                 .tolist()
             },
@@ -378,9 +403,13 @@ class DLCPosVideo(dj.Computed):
                 f'{key["dlc_orientation_params_name"]}.mp4'
             )
         idx = pd.IndexSlice
-        video_frame_inds = position_info_df["video_frame_ind"].astype(int).to_numpy()
+        video_frame_inds = (
+            position_info_df["video_frame_ind"].astype(int).to_numpy()
+        )
         centroids = {
-            bodypart: pose_estimation_df.loc[:, idx[bodypart, ("x", "y")]].to_numpy()
+            bodypart: pose_estimation_df.loc[
+                :, idx[bodypart, ("x", "y")]
+            ].to_numpy()
             for bodypart in pose_estimation_df.columns.levels[0]
         }
         if params.get("incl_likelihood", None):
@@ -395,7 +424,9 @@ class DLCPosVideo(dj.Computed):
         position_mean = {
             "DLC": np.asarray(position_info_df[["position_x", "position_y"]])
         }
-        orientation_mean = {"DLC": np.asarray(position_info_df[["orientation"]])}
+        orientation_mean = {
+            "DLC": np.asarray(position_info_df[["orientation"]])
+        }
         position_time = np.asarray(position_info_df.index)
         cm_per_pixel = meters_per_pixel * M_TO_CM
         percent_frames = params.get("percent_frames", None)
