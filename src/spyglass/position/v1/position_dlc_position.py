@@ -191,7 +191,6 @@ class DLCSmoothInterp(dj.Computed):
             print_console=False,
         ) as logger:
             logger.logger.info("-----------------------")
-            logger.logger.info("Determining Indices to NaN")
             idx = pd.IndexSlice
             # Get labels to smooth from Parameters table
             params = (DLCSmoothInterpParams() & key).fetch1("params")
@@ -200,6 +199,7 @@ class DLCSmoothInterp(dj.Computed):
             dlc_df = (DLCPoseEstimation.BodyPart() & key).fetch1_dataframe()
             dt = np.median(np.diff(dlc_df.index.to_numpy()))
             sampling_rate = 1 / dt
+            logger.logger.info("Identifying indices to NaN")
             df_w_nans, bad_inds = nan_inds(
                 dlc_df.copy(),
                 params["max_cm_between_pts"],
@@ -215,6 +215,7 @@ class DLCSmoothInterp(dj.Computed):
                 )
             else:
                 interp_df = df_w_nans.copy()
+                logger.logger.info("skipping interpolation")
             if params["smooth"]:
                 if "smoothing_duration" in params["smoothing_params"]:
                     smoothing_duration = params["smoothing_params"].pop(
@@ -238,6 +239,7 @@ class DLCSmoothInterp(dj.Computed):
                 )
             else:
                 smooth_df = interp_df.copy()
+                logger.logger.info("skipping smoothing")
             final_df = smooth_df.drop(["likelihood"], axis=1)
             final_df = final_df.rename_axis("time").reset_index()
             position_nwb_data = (
@@ -250,6 +252,7 @@ class DLCSmoothInterp(dj.Computed):
             nwb_analysis_file = AnalysisNwbfile()
             position = pynwb.behavior.Position()
             video_frame_ind = pynwb.behavior.BehavioralTimeSeries()
+            logger.logger.info("Creating NWB objects")
             position.create_spatial_series(
                 name="position",
                 timestamps=final_df.time.to_numpy(),
