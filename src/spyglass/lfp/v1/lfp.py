@@ -81,7 +81,9 @@ class LFPV1(dj.Computed):
             }
         ).fetch1("valid_times")
         valid_times = interval_list_intersect(
-            user_valid_times, raw_valid_times, min_length=MIN_LFP_INTERVAL_DURATION
+            user_valid_times,
+            raw_valid_times,
+            min_length=MIN_LFP_INTERVAL_DURATION,
         )
         print(
             f"LFP: found {len(valid_times)} intervals > {MIN_LFP_INTERVAL_DURATION} sec long."
@@ -115,7 +117,10 @@ class LFPV1(dj.Computed):
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
-        lfp_object_id, timestamp_interval = FirFilterParameters().filter_data_nwb(
+        (
+            lfp_object_id,
+            timestamp_interval,
+        ) = FirFilterParameters().filter_data_nwb(
             lfp_file_abspath,
             rawdata,
             filter_coeff,
@@ -175,7 +180,8 @@ class LFPV1(dj.Computed):
     def fetch1_dataframe(self, *attrs, **kwargs):
         nwb_lfp = self.fetch_nwb()[0]
         return pd.DataFrame(
-            nwb_lfp["lfp"].data, index=pd.Index(nwb_lfp["lfp"].timestamps, name="time")
+            nwb_lfp["lfp"].data,
+            index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
         )
 
 
@@ -221,7 +227,10 @@ class LFPElectrodeGroup(dj.Manual):
         """
         # remove the session and then recreate the session and Electrode list
         # check to see if the user allowed the deletion
-        key = {"nwb_file_name": nwb_file_name, "lfp_electrode_group_name": group_name}
+        key = {
+            "nwb_file_name": nwb_file_name,
+            "lfp_electrode_group_name": group_name,
+        }
         LFPElectrodeGroup().insert1(key, skip_duplicates=True)
 
         # TODO: do this in a better way
