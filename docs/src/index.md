@@ -7,7 +7,7 @@ format and integrates open-source tools into a coherent framework.
 
 ## Installation
 
-To contribute to this project, see [Installation](./installation/).
+To install to this project, see [Installation](./installation/).
 
 ## Contributing
 
