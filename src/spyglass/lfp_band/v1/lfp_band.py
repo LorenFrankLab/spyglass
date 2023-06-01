@@ -25,18 +25,20 @@ schema = dj.schema("lfp_band_v1")
 
 @schema
 class LFPBandSelection(dj.Manual):
+    """The user's selection of LFP data to be filtered in a given frequency band."""
+
     definition = """
-    -> LFPOutput
-    -> FirFilterParameters                   # the filter to use for the data
+    -> LFPOutput                                                          # the LFP data to be filtered
+    -> FirFilterParameters                                                # the filter to use for the data
     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
-    lfp_band_sampling_rate: int    # the sampling rate for this band
+    lfp_band_sampling_rate: int                                           # the sampling rate for this band
     ---
     min_interval_len = 1.0: float  # the minimum length of a valid interval to filter
     """
 
     class LFPBandElectrode(dj.Part):
         definition = """
-        -> LFPBandSelection
+        -> LFPBandSelection # the LFP band selection
         -> LFPElectrodeGroup.LFPElectrode  # the LFP electrode to be filtered
         reference_elect_id = -1: int  # the reference electrode to use; -1 for no reference
         ---
@@ -44,28 +46,31 @@ class LFPBandSelection(dj.Manual):
 
     def set_lfp_band_electrodes(
         self,
-        nwb_file_name,
-        lfp_id,
-        electrode_list,
-        filter_name,
-        interval_list_name,
-        reference_electrode_list,
-        lfp_band_sampling_rate,
+        nwb_file_name: str,
+        lfp_id: int,
+        electrode_list: list[int],
+        filter_name: str,
+        interval_list_name: str,
+        reference_electrode_list: list[int],
+        lfp_band_sampling_rate: int,
     ):
-        # TODO: fix docstring to match normal format.
-        """
-        Adds an entry for each electrode in the electrode_list with the specified filter, interval_list, and
-        reference electrode.
-        :param nwb_file_name: string - the name of the nwb file for the desired session
-        :param lfp_id: uuid - the uuid for the LFPOutput to use
-        :param electrode_list: list of LFP electrodes (electrode ids) to be filtered
-        :param filter_name: the name of the filter (from the FirFilterParameters schema)
-        :param interval_name: the name of the interval list (from the IntervalList schema)
-        :param reference_electrode_list: A single electrode id corresponding to the reference to use for all
-        electrodes or a list with one element per entry in the electrode_list
-        :param lfp_band_sampling_rate: The output sampling rate to be used for the filtered data; must be an
-        integer divisor of the LFP sampling rate
-        :return: none
+        """Sets the electrodes to be filtered for a given LFP
+
+        Parameters
+        ----------
+        nwb_file_name: str
+            The name of the NWB file containing the LFP data
+        lfp_id: int
+            The id of the LFP data to be filtered
+        electrode_list: list
+            A list of the electrodes to be filtered
+        filter_name: str
+            The name of the filter to be used
+        interval_list_name: str
+            The name of the interval list to be used
+        reference_electrode_list: list
+            A list of the reference electrodes to be used
+        lfp_band_sampling_rate: int
         """
         # Error checks on parameters
         # electrode_list
@@ -158,10 +163,10 @@ class LFPBandSelection(dj.Manual):
 @schema
 class LFPBandV1(dj.Computed):
     definition = """
-    -> LFPBandSelection
+    -> LFPBandSelection              # the LFP band selection
     ---
-    -> AnalysisNwbfile
-    -> IntervalList
+    -> AnalysisNwbfile               # the name of the nwb file with the lfp data
+    -> IntervalList                  # the final interval list of valid times for the data
     lfp_band_object_id: varchar(40)  # the NWB object ID for loading this object from the file
     """
 
@@ -363,18 +368,19 @@ class LFPBandV1(dj.Computed):
         )
 
     def fetch1_dataframe(self, *attrs, **kwargs):
+        """Fetches the filtered data as a dataframe"""
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,
             index=pd.Index(filtered_nwb["filtered_data"].timestamps, name="time"),
         )
 
-    def compute_analytic_signal(self, electrode_list, **kwargs):
+    def compute_analytic_signal(self, electrode_list: list[int], **kwargs):
         """Computes the hilbert transform of a given LFPBand signal using scipy.signal.hilbert
 
         Parameters
         ----------
-        electrode_list: list
+        electrode_list: list[int]
             A list of the electrodes to compute the hilbert transform of
 
         Returns
@@ -401,16 +407,52 @@ class LFPBandV1(dj.Computed):
         )
         return analytic_signal_df
 
-    def compute_signal_phase(self, electrode_list=[], **kwargs):
+    def compute_signal_phase(
+        self, electrode_list: list[int] = None, **kwargs
+    ) -> pd.DataFrame:
+        """Computes the phase of a given LFPBand signals using the hilbert transform
+
+        Parameters
+        ----------
+        electrode_list : list[int], optional
+            A list of the electrodes to compute the phase of, by default None
+
+        Returns
+        -------
+        signal_phase_df : pd.DataFrame
+            DataFrame containing the phase of the signals
+        """
+        if electrode_list is None:
+            electrode_list = []
+
         analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+
         return pd.DataFrame(
             np.angle(analytic_signal_df) + np.pi,
             columns=analytic_signal_df.columns,
             index=analytic_signal_df.index,
         )
 
-    def compute_signal_power(self, electrode_list=[], **kwargs):
+    def compute_signal_power(
+        self, electrode_list: list[int] = None, **kwargs
+    ) -> pd.DataFrame:
+        """Computes the power of a given LFPBand signals using the hilbert transform
+
+        Parameters
+        ----------
+        electrode_list : list[int], optional
+            A list of the electrodes to compute the power of, by default None
+
+        Returns
+        -------
+        signal_power_df : pd.DataFrame
+            DataFrame containing the power of the signals
+        """
+        if electrode_list is None:
+            electrode_list = []
+
         analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+
         return pd.DataFrame(
             np.abs(analytic_signal_df) ** 2,
             columns=analytic_signal_df.columns,
