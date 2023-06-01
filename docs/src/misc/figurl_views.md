@@ -1,6 +1,6 @@
 # Creating figurl views
 
-### Spike sorting recording view
+## Spike sorting recording view
 
 ```python
 import spyglass.common as ndc
@@ -14,7 +14,7 @@ query = ...
 ndf.SpikeSortingRecordingView.populate([(ndc.SpikeSortingRecording & query).proj()])
 ```
 
-### Spike sorting view
+## Spike sorting view
 
 ```python
 import spyglass.common as ndc

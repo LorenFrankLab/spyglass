@@ -21,18 +21,25 @@ def prepare_spikesortingview_data(
     channel_ids = np.array(recording.get_channel_ids()).astype(np.int32)
     sampling_frequency = recording.get_sampling_frequency()
     num_frames = recording.get_num_frames()
-    num_frames_per_segment = math.ceil(segment_duration_sec * sampling_frequency)
+    num_frames_per_segment = math.ceil(
+        segment_duration_sec * sampling_frequency
+    )
     num_segments = math.ceil(num_frames / num_frames_per_segment)
     with h5py.File(output_file_name, "w") as f:
         f.create_dataset("unit_ids", data=unit_ids)
         f.create_dataset(
-            "sampling_frequency", data=np.array([sampling_frequency]).astype(np.float32)
+            "sampling_frequency",
+            data=np.array([sampling_frequency]).astype(np.float32),
         )
         f.create_dataset("channel_ids", data=channel_ids)
-        f.create_dataset("num_frames", data=np.array([num_frames]).astype(np.int32))
+        f.create_dataset(
+            "num_frames", data=np.array([num_frames]).astype(np.int32)
+        )
         channel_locations = recording.get_channel_locations()
         f.create_dataset("channel_locations", data=np.array(channel_locations))
-        f.create_dataset("num_segments", data=np.array([num_segments]).astype(np.int32))
+        f.create_dataset(
+            "num_segments", data=np.array([num_segments]).astype(np.int32)
+        )
         f.create_dataset(
             "num_frames_per_segment",
             data=np.array([num_frames_per_segment]).astype(np.int32),
@@ -69,12 +76,15 @@ def prepare_spikesortingview_data(
             start_frame_with_padding = max(start_frame - snippet_len[0], 0)
             end_frame_with_padding = min(end_frame + snippet_len[1], num_frames)
             traces_with_padding = recording.get_traces(
-                start_frame=start_frame_with_padding, end_frame=end_frame_with_padding
+                start_frame=start_frame_with_padding,
+                end_frame=end_frame_with_padding,
             )
             for unit_id in unit_ids:
                 if str(unit_id) not in unit_peak_channel_ids:
                     spike_train = sorting.get_unit_spike_train(
-                        unit_id=unit_id, start_frame=start_frame, end_frame=end_frame
+                        unit_id=unit_id,
+                        start_frame=start_frame,
+                        end_frame=end_frame,
                     )
                     if len(spike_train) > 0:
                         values = traces_with_padding[
@@ -90,16 +100,22 @@ def prepare_spikesortingview_data(
                             channel_neighborhood_size=channel_neighborhood_size,
                         )
                         if len(spike_train) >= 10:
-                            unit_peak_channel_ids[str(unit_id)] = peak_channel_id
+                            unit_peak_channel_ids[
+                                str(unit_id)
+                            ] = peak_channel_id
                         else:
                             fallback_unit_peak_channel_ids[
                                 str(unit_id)
                             ] = peak_channel_id
-                        unit_channel_neighborhoods[str(unit_id)] = channel_neighborhood
+                        unit_channel_neighborhoods[
+                            str(unit_id)
+                        ] = channel_neighborhood
         for unit_id in unit_ids:
             peak_channel_id = unit_peak_channel_ids.get(str(unit_id), None)
             if peak_channel_id is None:
-                peak_channel_id = fallback_unit_peak_channel_ids.get(str(unit_id), None)
+                peak_channel_id = fallback_unit_peak_channel_ids.get(
+                    str(unit_id), None
+                )
             if peak_channel_id is None:
                 raise Exception(
                     f"Peak channel not found for unit {unit_id}. This is probably because no spikes were found in any segment for this unit."
@@ -121,7 +137,8 @@ def prepare_spikesortingview_data(
             start_frame_with_padding = max(start_frame - snippet_len[0], 0)
             end_frame_with_padding = min(end_frame + snippet_len[1], num_frames)
             traces_with_padding = recording.get_traces(
-                start_frame=start_frame_with_padding, end_frame=end_frame_with_padding
+                start_frame=start_frame_with_padding,
+                end_frame=end_frame_with_padding,
             )
             traces_sample = traces_with_padding[
                 start_frame
@@ -130,7 +147,9 @@ def prepare_spikesortingview_data(
                 + int(sampling_frequency * 1),
                 :,
             ]
-            f.create_dataset(f"segment/{iseg}/traces_sample", data=traces_sample)
+            f.create_dataset(
+                f"segment/{iseg}/traces_sample", data=traces_sample
+            )
             all_subsampled_spike_trains = []
             for unit_id in unit_ids:
                 peak_channel_id = unit_peak_channel_ids.get(str(unit_id), None)
@@ -143,10 +162,13 @@ def prepare_spikesortingview_data(
                         f"Peak channel not found for unit {unit_id}. This is probably because no spikes were found in any segment for this unit."
                     )
                 spike_train = sorting.get_unit_spike_train(
-                    unit_id=unit_id, start_frame=start_frame, end_frame=end_frame
+                    unit_id=unit_id,
+                    start_frame=start_frame,
+                    end_frame=end_frame,
                 ).astype(np.int32)
                 f.create_dataset(
-                    f"segment/{iseg}/unit/{unit_id}/spike_train", data=spike_train
+                    f"segment/{iseg}/unit/{unit_id}/spike_train",
+                    data=spike_train,
                 )
                 channel_neighborhood = unit_channel_neighborhoods[str(unit_id)]
                 peak_channel_ind = channel_ids.tolist().index(peak_channel_id)
@@ -185,7 +207,8 @@ def prepare_spikesortingview_data(
             for ii, unit_id in enumerate(unit_ids):
                 channel_neighborhood = unit_channel_neighborhoods[str(unit_id)]
                 channel_neighborhood_indices = [
-                    channel_ids.tolist().index(ch_id) for ch_id in channel_neighborhood
+                    channel_ids.tolist().index(ch_id)
+                    for ch_id in channel_neighborhood
                 ]
                 num = len(all_subsampled_spike_trains[ii])
                 spike_snippets = spike_snippets_concat[

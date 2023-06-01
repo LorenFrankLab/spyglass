@@ -39,7 +39,9 @@ def get_nwb_file(nwb_file_path):
     if nwbfile is None:
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
-            print(f"NWB file {nwb_file_path} does not exist locally; checking kachery")
+            print(
+                f"NWB file {nwb_file_path} does not exist locally; checking kachery"
+            )
             # first try the analysis files
             from ..sharing.sharing_kachery import AnalysisNwbfileKachery
 
@@ -202,7 +204,9 @@ def estimate_sampling_rate(timestamps, multiplier):
     return np.round(1.0 / np.mean(sample_diff[adjacent]))
 
 
-def get_valid_intervals(timestamps, sampling_rate, gap_proportion, min_valid_len):
+def get_valid_intervals(
+    timestamps, sampling_rate, gap_proportion, min_valid_len
+):
     """Finds the set of all valid intervals in a list of timestamps.
     Valid interval: (start time, stop time) during which there are
     no gaps (i.e. missing samples).
@@ -289,7 +293,9 @@ def get_electrode_indices(nwb_object, electrode_ids):
         # electrodes is a DynamicTable that contains all electrodes
         selected_elect_ids = list(nwb_object.electrodes.id[:])
     else:
-        raise ValueError("nwb_object must be of type ElectricalSeries or NWBFile")
+        raise ValueError(
+            "nwb_object must be of type ElectricalSeries or NWBFile"
+        )
 
     # for each electrode_id, find its index in selected_elect_ids and return that if it's there and invalid_electrode_index if not.
     return [
@@ -322,7 +328,9 @@ def get_all_spatial_series(nwbf, verbose=False):
 
     # for some reason the spatial_series do not necessarily come out in order, so we need to figure out the right order
     epoch_start_time = np.zeros(len(position.spatial_series.values()))
-    for pos_epoch, spatial_series in enumerate(position.spatial_series.values()):
+    for pos_epoch, spatial_series in enumerate(
+        position.spatial_series.values()
+    ):
         epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
 
     sorted_order = np.argsort(epoch_start_time)
@@ -338,7 +346,9 @@ def get_all_spatial_series(nwbf, verbose=False):
         timestamps = np.asarray(spatial_series.timestamps)
         sampling_rate = estimate_sampling_rate(timestamps, 1.75)
         if sampling_rate < 0:
-            raise ValueError(f"Error adding position data for position epoch {index}")
+            raise ValueError(
+                f"Error adding position data for position epoch {index}"
+            )
         if verbose:
             print(
                 "Processing raw position data. Estimated sampling rate: {} Hz".format(
@@ -352,7 +362,9 @@ def get_all_spatial_series(nwbf, verbose=False):
             gap_proportion=2.5,
             min_valid_len=int(sampling_rate),
         )
-        pos_data_dict[index]["raw_position_object_id"] = spatial_series.object_id
+        pos_data_dict[index][
+            "raw_position_object_id"
+        ] = spatial_series.object_id
 
     return pos_data_dict
 

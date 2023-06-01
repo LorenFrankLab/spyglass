@@ -8,8 +8,15 @@ from .dlc_utils import (
     get_dlc_root_data_dir,
     get_video_path,
 )
-from .position_dlc_centroid import DLCCentroid, DLCCentroidParams, DLCCentroidSelection
-from .position_dlc_cohort import DLCSmoothInterpCohort, DLCSmoothInterpCohortSelection
+from .position_dlc_centroid import (
+    DLCCentroid,
+    DLCCentroidParams,
+    DLCCentroidSelection,
+)
+from .position_dlc_cohort import (
+    DLCSmoothInterpCohort,
+    DLCSmoothInterpCohortSelection,
+)
 from .position_dlc_model import (
     DLCModel,
     DLCModelEvaluation,
@@ -23,7 +30,10 @@ from .position_dlc_orient import (
     DLCOrientationParams,
     DLCOrientationSelection,
 )
-from .position_dlc_pose_estimation import DLCPoseEstimation, DLCPoseEstimationSelection
+from .position_dlc_pose_estimation import (
+    DLCPoseEstimation,
+    DLCPoseEstimationSelection,
+)
 from .position_dlc_position import (
     DLCSmoothInterp,
     DLCSmoothInterpParams,

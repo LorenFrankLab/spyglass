@@ -26,8 +26,12 @@ from replay_trajectory_classification.classifier import (
     _DEFAULT_CONTINUOUS_TRANSITIONS,
     _DEFAULT_ENVIRONMENT,
 )
-from replay_trajectory_classification.discrete_state_transitions import DiagonalDiscrete
-from replay_trajectory_classification.initial_conditions import UniformInitialConditions
+from replay_trajectory_classification.discrete_state_transitions import (
+    DiagonalDiscrete,
+)
+from replay_trajectory_classification.initial_conditions import (
+    UniformInitialConditions,
+)
 
 from ripple_detection import (
     get_multiunit_population_firing_rate,
@@ -130,7 +134,9 @@ class UnitMarks(dj.Computed):
 
         # check that the mark type is supported
         if not MarkParameters().supported_mark_type(mark_param["mark_type"]):
-            Warning(f'Mark type {mark_param["mark_type"]} not supported; skipping')
+            Warning(
+                f'Mark type {mark_param["mark_type"]} not supported; skipping'
+            )
             return
 
         # retrieve the units from the NWB file
@@ -145,7 +151,8 @@ class UnitMarks(dj.Computed):
             f'{key["curation_id"]}_clusterless_waveforms'
         )
         waveform_extractor_path = str(
-            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"]) / Path(waveform_extractor_name)
+            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"])
+            / Path(waveform_extractor_name)
         )
         if os.path.exists(waveform_extractor_path):
             shutil.rmtree(waveform_extractor_path)
@@ -199,7 +206,9 @@ class UnitMarks(dj.Computed):
             )
 
         # create a new AnalysisNwbfile and a timeseries for the marks and save
-        key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["nwb_file_name"]
+        )
         nwb_object = pynwb.TimeSeries(
             name="marks",
             data=marks,
@@ -236,7 +245,9 @@ class UnitMarks(dj.Computed):
         )
 
     @staticmethod
-    def _get_peak_amplitude(waveform, peak_sign="neg", estimate_peak_time=False):
+    def _get_peak_amplitude(
+        waveform, peak_sign="neg", estimate_peak_time=False
+    ):
         """Returns the amplitudes of all channels at the time of the peak
         amplitude across channels.
 
@@ -291,7 +302,9 @@ class UnitMarks(dj.Computed):
         elif mark_param_dict["peak_sign"] == "pos":
             include = np.max(marks, axis=1) >= mark_param_dict["threshold"]
         elif mark_param_dict["peak_sign"] == "both":
-            include = np.max(np.abs(marks), axis=1) >= mark_param_dict["threshold"]
+            include = (
+                np.max(np.abs(marks), axis=1) >= mark_param_dict["threshold"]
+            )
         return timestamps[include], marks[include]
 
 
@@ -327,7 +340,9 @@ class UnitMarksIndicator(dj.Computed):
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key).fetch1("valid_times")
 
-        sampling_rate = (UnitMarksIndicatorSelection & key).fetch("sampling_rate")
+        sampling_rate = (UnitMarksIndicatorSelection & key).fetch(
+            "sampling_rate"
+        )
 
         marks_df = (UnitMarks & key).fetch1_dataframe()
 
@@ -344,7 +359,9 @@ class UnitMarksIndicator(dj.Computed):
 
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
-        key["analysis_file_name"] = nwb_analysis_file.create(key["nwb_file_name"])
+        key["analysis_file_name"] = nwb_analysis_file.create(
+            key["nwb_file_name"]
+        )
 
         key["marks_indicator_object_id"] = nwb_analysis_file.add_nwb_object(
             analysis_file_name=key["analysis_file_name"],
@@ -395,11 +412,15 @@ class UnitMarksIndicator(dj.Computed):
                 for ax_ind2, feature2 in enumerate(marks.marks):
                     try:
                         axes[ax_ind1, ax_ind2].scatter(
-                            marks.sel(marks=feature1), marks.sel(marks=feature2), s=s
+                            marks.sel(marks=feature1),
+                            marks.sel(marks=feature2),
+                            s=s,
                         )
                     except TypeError:
                         axes.scatter(
-                            marks.sel(marks=feature1), marks.sel(marks=feature2), s=s
+                            marks.sel(marks=feature1),
+                            marks.sel(marks=feature2),
+                            s=s,
                         )
 
     def fetch_nwb(self, *attrs, **kwargs):
@@ -411,7 +432,10 @@ class UnitMarksIndicator(dj.Computed):
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self):
-        return [data["marks_indicator"].set_index("time") for data in self.fetch_nwb()]
+        return [
+            data["marks_indicator"].set_index("time")
+            for data in self.fetch_nwb()
+        ]
 
     def fetch_xarray(self):
         # sort_group_electrodes = (
@@ -422,7 +446,10 @@ class UnitMarksIndicator(dj.Computed):
 
         marks_indicators = (
             xr.concat(
-                [df.to_xarray().to_array("marks") for df in self.fetch_dataframe()],
+                [
+                    df.to_xarray().to_array("marks")
+                    for df in self.fetch_dataframe()
+                ],
                 dim="electrodes",
             )
             .transpose("time", "marks", "electrodes")
@@ -435,7 +462,9 @@ class UnitMarksIndicator(dj.Computed):
             mark_type, number = name.split("_")
             return f"{mark_type}_{int(number):04d}"
 
-        new_mark_names = [reformat_name(name) for name in marks_indicators.marks.values]
+        new_mark_names = [
+            reformat_name(name) for name in marks_indicators.marks.values
+        ]
 
         return marks_indicators.assign_coords({"marks": new_mark_names}).sortby(
             ["electrodes", "marks"]
@@ -553,7 +582,9 @@ class MultiunitFiringRate(dj.Computed):
 
     def make(self, key):
         marks = (UnitMarksIndicator & key).fetch_xarray()
-        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(float)
+        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(
+            float
+        )
         multiunit_firing_rate = pd.DataFrame(
             get_multiunit_population_firing_rate(
                 multiunit_spikes, key["sampling_rate"]
@@ -564,9 +595,13 @@ class MultiunitFiringRate(dj.Computed):
 
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
-        key["analysis_file_name"] = nwb_analysis_file.create(key["nwb_file_name"])
+        key["analysis_file_name"] = nwb_analysis_file.create(
+            key["nwb_file_name"]
+        )
 
-        key["multiunit_firing_rate_object_id"] = nwb_analysis_file.add_nwb_object(
+        key[
+            "multiunit_firing_rate_object_id"
+        ] = nwb_analysis_file.add_nwb_object(
             analysis_file_name=key["analysis_file_name"],
             nwb_object=multiunit_firing_rate.reset_index(),
         )
@@ -588,7 +623,8 @@ class MultiunitFiringRate(dj.Computed):
 
     def fetch_dataframe(self):
         return [
-            data["multiunit_firing_rate"].set_index("time") for data in self.fetch_nwb()
+            data["multiunit_firing_rate"].set_index("time")
+            for data in self.fetch_nwb()
         ]
 
 
@@ -631,7 +667,9 @@ class MultiunitHighSynchronyEvents(dj.Computed):
 
     def make(self, key):
         marks = (UnitMarksIndicator & key).fetch_xarray()
-        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(float)
+        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(
+            float
+        )
         position_info = (IntervalPositionInfo() & key).fetch1_dataframe()
 
         params = (MultiunitHighSynchronyEventsParameters & key).fetch1()
@@ -646,7 +684,9 @@ class MultiunitHighSynchronyEvents(dj.Computed):
 
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
-        key["analysis_file_name"] = nwb_analysis_file.create(key["nwb_file_name"])
+        key["analysis_file_name"] = nwb_analysis_file.create(
+            key["nwb_file_name"]
+        )
 
         key["multiunit_hse_times_object_id"] = nwb_analysis_file.add_nwb_object(
             analysis_file_name=key["analysis_file_name"],
@@ -684,13 +724,17 @@ def get_decoding_data_for_epoch(
 
     """
 
-    valid_ephys_position_times_by_epoch = get_valid_ephys_position_times_by_epoch(
-        nwb_file_name
+    valid_ephys_position_times_by_epoch = (
+        get_valid_ephys_position_times_by_epoch(nwb_file_name)
     )
-    valid_ephys_position_times = valid_ephys_position_times_by_epoch[interval_list_name]
-    valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
-    position_interval_name = convert_epoch_interval_name_to_position_interval_name(
+    valid_ephys_position_times = valid_ephys_position_times_by_epoch[
         interval_list_name
+    ]
+    valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
+    position_interval_name = (
+        convert_epoch_interval_name_to_position_interval_name(
+            interval_list_name
+        )
     )
 
     position_info = (
@@ -702,7 +746,9 @@ def get_decoding_data_for_epoch(
         }
     ).fetch1_dataframe()
 
-    position_info = pd.concat([position_info.loc[times] for times in valid_slices])
+    position_info = pd.concat(
+        [position_info.loc[times] for times in valid_slices]
+    )
 
     marks = (
         (
@@ -715,7 +761,9 @@ def get_decoding_data_for_epoch(
         )
     ).fetch_xarray()
 
-    marks = xr.concat([marks.sel(time=times) for times in valid_slices], dim="time")
+    marks = xr.concat(
+        [marks.sel(time=times) for times in valid_slices], dim="time"
+    )
 
     return position_info, marks, valid_slices
 
@@ -763,7 +811,8 @@ def get_data_for_multiple_epochs(
     position_info = pd.concat(position_info, axis=0)
     marks = xr.concat(marks, dim="time")
     valid_slices = {
-        epoch: valid_slice for epoch, valid_slice in zip(epoch_names, valid_slices)
+        epoch: valid_slice
+        for epoch, valid_slice in zip(epoch_names, valid_slices)
     }
 
     assert position_info.shape[0] == marks.shape[0]
@@ -839,5 +888,7 @@ def populate_mark_indicators(
             .loc[:, marks_selection.primary_key]
             .to_dict("records")
         )
-        UnitMarksIndicatorSelection.insert(marks_selection, skip_duplicates=True)
+        UnitMarksIndicatorSelection.insert(
+            marks_selection, skip_duplicates=True
+        )
         UnitMarksIndicator.populate(marks_selection)

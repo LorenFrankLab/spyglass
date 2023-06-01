@@ -16,6 +16,8 @@ def generate_config_yaml(filename: str, **kwargs):
     ----------
     filename : str
         The name of the file to generate
+    output : str
+        File type to generate. Either yaml or json
     **kwargs: list of parameters names and values that can include
         database_host : host name of system running mysql (default lmf-db.cin.ucsf.edu)
         database_port : port number for mysql server (default 3306)
@@ -27,7 +29,9 @@ def generate_config_yaml(filename: str, **kwargs):
     print("printing kwargs")
     print(kwargs)
     config["database.host"] = (
-        kwargs["database_host"] if "database_host" in kwargs else "lmf-db.cin.ucsf.edu"
+        kwargs["database_host"]
+        if "database_host" in kwargs
+        else "lmf-db.cin.ucsf.edu"
     )
     config["database.port"] = (
         kwargs["database_port"] if "database_port" in kwargs else 3306
@@ -50,7 +54,11 @@ def generate_config_yaml(filename: str, **kwargs):
     analysis_dir = data_dir / "analysis"
 
     config["stores"] = {
-        "raw": {"protocol": "file", "location": str(raw_dir), "stage": str(raw_dir)},
+        "raw": {
+            "protocol": "file",
+            "location": str(raw_dir),
+            "stage": str(raw_dir),
+        },
         "analysis": {
             "protocol": "file",
             "location": str(analysis_dir),
@@ -58,7 +66,12 @@ def generate_config_yaml(filename: str, **kwargs):
         },
     }
     with open(filename, "w") as outfile:
-        yaml.dump(config, outfile, default_flow_style=False)
+        if filename.endswith("json"):
+            import json  # noqa: F821
+
+            json.dump(config, outfile, indent=2)
+        else:
+            yaml.dump(config, outfile, default_flow_style=False)
 
 
 def set_configuration(user_name: str, file_name: str = None):

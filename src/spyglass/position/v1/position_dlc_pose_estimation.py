@@ -140,7 +140,10 @@ class DLCPoseEstimation(dj.Computed):
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
-                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
             )
 
         def fetch1_dataframe(self):
@@ -224,9 +227,9 @@ class DLCPoseEstimation(dj.Computed):
                     **analyze_video_params,
                 )
             dlc_result = dlc_reader.PoseEstimation(output_dir)
-            creation_time = datetime.fromtimestamp(dlc_result.creation_time).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
+            creation_time = datetime.fromtimestamp(
+                dlc_result.creation_time
+            ).strftime("%Y-%m-%d %H:%M:%S")
 
             logger.logger.info("getting raw position")
             interval_list_name = f"pos {key['epoch']-1} valid times"

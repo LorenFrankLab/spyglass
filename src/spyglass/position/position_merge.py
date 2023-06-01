@@ -10,7 +10,9 @@ from tqdm import tqdm as tqdm
 
 from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
-from ..common.common_position import IntervalPositionInfo as CommonIntervalPositionInfo
+from ..common.common_position import (
+    IntervalPositionInfo as CommonIntervalPositionInfo,
+)
 from ..utils.dj_helper_fn import fetch_nwb
 from .v1.dlc_utils import check_videofile, get_video_path, make_video
 from .v1.position_dlc_pose_estimation import DLCPoseEstimationSelection
@@ -58,7 +60,10 @@ class PositionOutput(dj.Manual):
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
-                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
             )
 
     class TrodesPosV1(dj.Part):
@@ -78,7 +83,10 @@ class PositionOutput(dj.Manual):
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
-                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
             )
 
     class CommonPos(dj.Part):
@@ -98,7 +106,10 @@ class PositionOutput(dj.Manual):
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
-                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
             )
 
     def insert1(self, key, params: Dict = None, **kwargs):
@@ -145,9 +156,13 @@ class PositionOutput(dj.Manual):
             )
         else:
             table_query = (
-                dj.FreeTable(dj.conn(), full_table_name=part_table.parents()[1]) & key
+                dj.FreeTable(dj.conn(), full_table_name=part_table.parents()[1])
+                & key
             )
-        if any("head" in col for col in list(table_query.fetch().dtype.fields.keys())):
+        if any(
+            "head" in col
+            for col in list(table_query.fetch().dtype.fields.keys())
+        ):
             (
                 analysis_file_name,
                 position_object_id,
@@ -196,7 +211,10 @@ class PositionOutput(dj.Manual):
             np.asarray(nwb_data["position"].get_spatial_series().timestamps),
             name="time",
         )
-        if "video_frame_ind" in nwb_data["velocity"].fields["time_series"].keys():
+        if (
+            "video_frame_ind"
+            in nwb_data["velocity"].fields["time_series"].keys()
+        ):
             COLUMNS = [
                 "video_frame_ind",
                 "position_x",
@@ -210,13 +228,17 @@ class PositionOutput(dj.Manual):
                 np.concatenate(
                     (
                         np.asarray(
-                            nwb_data["velocity"].get_timeseries("video_frame_ind").data,
+                            nwb_data["velocity"]
+                            .get_timeseries("video_frame_ind")
+                            .data,
                             dtype=int,
                         )[:, np.newaxis],
-                        np.asarray(nwb_data["position"].get_spatial_series().data),
-                        np.asarray(nwb_data["orientation"].get_spatial_series().data)[
-                            :, np.newaxis
-                        ],
+                        np.asarray(
+                            nwb_data["position"].get_spatial_series().data
+                        ),
+                        np.asarray(
+                            nwb_data["orientation"].get_spatial_series().data
+                        )[:, np.newaxis],
                         np.asarray(
                             nwb_data["velocity"].get_timeseries("velocity").data
                         ),
@@ -238,10 +260,12 @@ class PositionOutput(dj.Manual):
             return pd.DataFrame(
                 np.concatenate(
                     (
-                        np.asarray(nwb_data["position"].get_spatial_series().data),
-                        np.asarray(nwb_data["orientation"].get_spatial_series().data)[
-                            :, np.newaxis
-                        ],
+                        np.asarray(
+                            nwb_data["position"].get_spatial_series().data
+                        ),
+                        np.asarray(
+                            nwb_data["orientation"].get_spatial_series().data
+                        )[:, np.newaxis],
                         np.asarray(nwb_data["velocity"].get_timeseries().data),
                     ),
                     axis=1,
@@ -443,21 +467,30 @@ class PositionVideo(dj.Computed):
             + 1
         )
 
-        video_path, video_filename, meters_per_pixel, video_time = get_video_path(
+        (
+            video_path,
+            video_filename,
+            meters_per_pixel,
+            video_time,
+        ) = get_video_path(
             {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         )
         video_dir = os.path.dirname(video_path) + "/"
         video_frame_col_name = [
             col for col in pos_df.columns if "video_frame_ind" in col
         ]
-        video_frame_inds = pos_df[video_frame_col_name[0]].astype(int).to_numpy()
+        video_frame_inds = (
+            pos_df[video_frame_col_name[0]].astype(int).to_numpy()
+        )
         if key["plot"] in ["DLC", "All"]:
             temp_key = (PositionOutput.DLCPosV1 & key).fetch1("KEY")
-            video_path = (DLCPoseEstimationSelection & temp_key).fetch1("video_path")
+            video_path = (DLCPoseEstimationSelection & temp_key).fetch1(
+                "video_path"
+            )
         else:
-            video_path = check_videofile(video_dir, key["output_dir"], video_filename)[
-                0
-            ]
+            video_path = check_videofile(
+                video_dir, key["output_dir"], video_filename
+            )[0]
 
         nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
         output_video_filename = Path(

@@ -1,4 +1,9 @@
-from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFile
+from .common_behav import (
+    PositionSource,
+    RawPosition,
+    StateScriptFile,
+    VideoFile,
+)
 from .common_dio import DIOEvents
 from .common_ephys import Electrode, ElectrodeGroup, Raw, SampleCount
 from .common_nwbfile import Nwbfile

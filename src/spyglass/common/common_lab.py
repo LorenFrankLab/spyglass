@@ -40,7 +40,9 @@ class LabMember(dj.Manual):
         for experimenter in nwbf.experimenter:
             cls.insert_from_name(experimenter)
             # each person is by default the member of their own LabTeam (same as their name)
-            LabTeam.create_new_team(team_name=experimenter, team_members=[experimenter])
+            LabTeam.create_new_team(
+                team_name=experimenter, team_members=[experimenter]
+            )
 
     @classmethod
     def insert_from_name(cls, full_name):
@@ -133,7 +135,9 @@ class Institution(dj.Manual):
         if nwbf.institution is None:
             print("No institution metadata found.\n")
             return
-        cls.insert1(dict(institution_name=nwbf.institution), skip_duplicates=True)
+        cls.insert1(
+            dict(institution_name=nwbf.institution), skip_duplicates=True
+        )
 
 
 @schema

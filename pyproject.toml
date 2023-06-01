@@ -1,10 +1,8 @@
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+
 
 [project]
 name = "spyglass-neuro"
-version = "0.3.4"
+version = "0.4.0"
 authors = [
     { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
     { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
@@ -61,6 +59,13 @@ dependencies = [
     "ndx_franklab_novela>=0.1.0",
 ]
 
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [project.scripts]
 spyglass_cli = "spyglass.cli:cli"
 
@@ -69,13 +74,10 @@ spyglass_cli = "spyglass.cli:cli"
 "Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
 
 [project.optional-dependencies]
-position = [
-    "ffmpeg",
-    "numba>=0.54",
-    "deeplabcut<2.3.0",
-]
+position = ["ffmpeg", "numba>=0.54", "deeplabcut<2.3.0"]
+
 [tool.black]
-# line-length = 120
+line-length = 80
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb'

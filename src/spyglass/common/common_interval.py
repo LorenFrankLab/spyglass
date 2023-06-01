@@ -50,7 +50,9 @@ class IntervalList(dj.Manual):
             if epoch_data.tags[0]:
                 epoch_dict["interval_list_name"] = epoch_data.tags[0]
             else:
-                epoch_dict["interval_list_name"] = "interval_" + str(epoch_index)
+                epoch_dict["interval_list_name"] = "interval_" + str(
+                    epoch_index
+                )
             epoch_dict["valid_times"] = np.asarray(
                 [[epoch_data.start_time, epoch_data.stop_time]]
             )
@@ -64,7 +66,10 @@ class IntervalList(dj.Manual):
             for interval in row.valid_times:
                 ax.plot(interval, [interval_count, interval_count])
                 ax.scatter(
-                    interval, [interval_count, interval_count], alpha=0.8, zorder=2
+                    interval,
+                    [interval_count, interval_count],
+                    alpha=0.8,
+                    zorder=2,
                 )
             interval_count += 1
         ax.set_yticks(np.arange(interval_list.shape[0]))
@@ -91,10 +96,14 @@ class IntervalList(dj.Manual):
             .valid_times
         )
         interval_y = 2
-        for epoch, valid_times in zip(epoch_valid_times.index, epoch_valid_times):
+        for epoch, valid_times in zip(
+            epoch_valid_times.index, epoch_valid_times
+        ):
             for interval in valid_times:
                 ax.plot(interval, [interval_y, interval_y])
-                ax.scatter(interval, [interval_y, interval_y], alpha=0.8, zorder=2)
+                ax.scatter(
+                    interval, [interval_y, interval_y], alpha=0.8, zorder=2
+                )
                 ax.text(
                     interval[0] + np.diff(interval)[0] / 2,
                     interval_y,
@@ -112,7 +121,9 @@ class IntervalList(dj.Manual):
         for epoch, valid_times in zip(pos_valid_times.index, pos_valid_times):
             for interval in valid_times:
                 ax.plot(interval, [interval_y, interval_y])
-                ax.scatter(interval, [interval_y, interval_y], alpha=0.8, zorder=2)
+                ax.scatter(
+                    interval, [interval_y, interval_y], alpha=0.8, zorder=2
+                )
                 ax.text(
                     interval[0] + np.diff(interval)[0] / 2,
                     interval_y,
@@ -141,7 +152,9 @@ def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
         Maximum interval length in seconds. Defaults to 1e10.
     """
     lengths = np.ravel(np.diff(interval_list))
-    return interval_list[np.logical_and(lengths > min_length, lengths < max_length)]
+    return interval_list[
+        np.logical_and(lengths > min_length, lengths < max_length)
+    ]
 
 
 def interval_list_contains_ind(interval_list, timestamps):
@@ -157,7 +170,9 @@ def interval_list_contains_ind(interval_list, timestamps):
     for interval in interval_list:
         ind += np.ravel(
             np.argwhere(
-                np.logical_and(timestamps >= interval[0], timestamps <= interval[1])
+                np.logical_and(
+                    timestamps >= interval[0], timestamps <= interval[1]
+                )
             )
         ).tolist()
     return np.asarray(ind)
@@ -176,7 +191,9 @@ def interval_list_contains(interval_list, timestamps):
     for interval in interval_list:
         ind += np.ravel(
             np.argwhere(
-                np.logical_and(timestamps >= interval[0], timestamps <= interval[1])
+                np.logical_and(
+                    timestamps >= interval[0], timestamps <= interval[1]
+                )
             )
         ).tolist()
     return timestamps[ind]
@@ -272,7 +289,9 @@ def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     for interval2 in interval_list2:
         for interval1 in interval_list1:
             if _intersection(interval2, interval1) is not None:
-                intersecting_intervals.append(_intersection(interval1, interval2))
+                intersecting_intervals.append(
+                    _intersection(interval1, interval2)
+                )
 
     # if no intersection, then return an empty list
     if not intersecting_intervals:
@@ -283,7 +302,9 @@ def interval_list_intersect(interval_list1, interval_list2, min_length=0):
             np.argsort(intersecting_intervals[:, 0])
         ]
 
-        return intervals_by_length(intersecting_intervals, min_length=min_length)
+        return intervals_by_length(
+            intersecting_intervals, min_length=min_length
+        )
 
 
 def _intersection(interval1, interval2):
@@ -303,7 +324,10 @@ def _union(interval1, interval2):
         return np.array([interval1, interval2])
     else:
         return np.array(
-            [min([interval1[0], interval2[0]]), max([interval1[1], interval2[1]])]
+            [
+                min([interval1[0], interval2[0]]),
+                max([interval1[1], interval2[1]]),
+            ]
         )
 
 
@@ -436,7 +460,9 @@ def interval_from_inds(list_frames):
     """
     list_frames = np.unique(list_frames)
     interval_list = []
-    for key, group in itertools.groupby(enumerate(list_frames), lambda t: t[1] - t[0]):
+    for key, group in itertools.groupby(
+        enumerate(list_frames), lambda t: t[1] - t[0]
+    ):
         group = list(group)
         interval_list.append([group[0][1], group[-1][1]])
     return np.asarray(interval_list)

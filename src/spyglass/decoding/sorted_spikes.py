@@ -18,8 +18,12 @@ from replay_trajectory_classification.classifier import (
     _DEFAULT_ENVIRONMENT,
     _DEFAULT_SORTED_SPIKES_MODEL_KWARGS,
 )
-from replay_trajectory_classification.discrete_state_transitions import DiagonalDiscrete
-from replay_trajectory_classification.initial_conditions import UniformInitialConditions
+from replay_trajectory_classification.discrete_state_transitions import (
+    DiagonalDiscrete,
+)
+from replay_trajectory_classification.initial_conditions import (
+    UniformInitialConditions,
+)
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
@@ -71,7 +75,9 @@ class SortedSpikesIndicator(dj.Computed):
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key).fetch1("valid_times")
 
-        sampling_rate = (SortedSpikesIndicatorSelection & key).fetch("sampling_rate")
+        sampling_rate = (SortedSpikesIndicatorSelection & key).fetch(
+            "sampling_rate"
+        )
 
         time = self.get_time_bins_from_interval(interval_times, sampling_rate)
 
@@ -79,7 +85,8 @@ class SortedSpikesIndicator(dj.Computed):
         # restrict to cases with units
         spikes_nwb = [entry for entry in spikes_nwb if "units" in entry]
         spike_times_list = [
-            np.asarray(n_trode["units"]["spike_times"]) for n_trode in spikes_nwb
+            np.asarray(n_trode["units"]["spike_times"])
+            for n_trode in spikes_nwb
         ]
         if len(spike_times_list) > 0:  # if units
             spikes = np.concatenate(spike_times_list)
@@ -92,7 +99,8 @@ class SortedSpikesIndicator(dj.Computed):
                 ]
                 spike_indicator.append(
                     np.bincount(
-                        np.digitize(spike_times, time[1:-1]), minlength=time.shape[0]
+                        np.digitize(spike_times, time[1:-1]),
+                        minlength=time.shape[0],
                     )
                 )
 
@@ -113,7 +121,9 @@ class SortedSpikesIndicator(dj.Computed):
 
             # Insert into analysis nwb file
             nwb_analysis_file = AnalysisNwbfile()
-            key["analysis_file_name"] = nwb_analysis_file.create(key["nwb_file_name"])
+            key["analysis_file_name"] = nwb_analysis_file.create(
+                key["nwb_file_name"]
+            )
 
             key["spike_indicator_object_id"] = nwb_analysis_file.add_nwb_object(
                 analysis_file_name=key["analysis_file_name"],
@@ -145,7 +155,10 @@ class SortedSpikesIndicator(dj.Computed):
 
     def fetch_dataframe(self):
         return pd.concat(
-            [data["spike_indicator"].set_index("time") for data in self.fetch_nwb()],
+            [
+                data["spike_indicator"].set_index("time")
+                for data in self.fetch_nwb()
+            ],
             axis=1,
         )
 
@@ -271,13 +284,17 @@ def get_spike_indicator(
 
     for n_trode in spikes_nwb_table.fetch_nwb():
         try:
-            for unit_id, unit_spike_times in n_trode["units"]["spike_times"].items():
+            for unit_id, unit_spike_times in n_trode["units"][
+                "spike_times"
+            ].items():
                 unit_spike_times = unit_spike_times[
-                    (unit_spike_times > time[0]) & (unit_spike_times <= time[-1])
+                    (unit_spike_times > time[0])
+                    & (unit_spike_times <= time[-1])
                 ]
                 unit_name = f'{n_trode["sort_group_id"]:04d}_{unit_id:04d}'
                 spike_indicator[unit_name] = np.bincount(
-                    np.digitize(unit_spike_times, time[1:-1]), minlength=time.shape[0]
+                    np.digitize(unit_spike_times, time[1:-1]),
+                    minlength=time.shape[0],
                 )
         except KeyError:
             pass
@@ -311,26 +328,34 @@ def get_decoding_data_for_epoch(
 
     """
     # valid slices
-    valid_ephys_position_times_by_epoch = get_valid_ephys_position_times_by_epoch(
-        nwb_file_name
+    valid_ephys_position_times_by_epoch = (
+        get_valid_ephys_position_times_by_epoch(nwb_file_name)
     )
-    valid_ephys_position_times = valid_ephys_position_times_by_epoch[interval_list_name]
+    valid_ephys_position_times = valid_ephys_position_times_by_epoch[
+        interval_list_name
+    ]
     valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
 
     # position interval
-    position_interval_name = convert_epoch_interval_name_to_position_interval_name(
-        interval_list_name
+    position_interval_name = (
+        convert_epoch_interval_name_to_position_interval_name(
+            interval_list_name
+        )
     )
 
     # spikes
-    valid_times = np.asarray([(times.start, times.stop) for times in valid_slices])
+    valid_times = np.asarray(
+        [(times.start, times.stop) for times in valid_slices]
+    )
 
     curated_spikes_key = {
         "nwb_file_name": nwb_file_name,
         **additional_spike_keys,
     }
     spikes = get_spike_indicator(
-        curated_spikes_key, (valid_times.min(), valid_times.max()), sampling_rate=500
+        curated_spikes_key,
+        (valid_times.min(), valid_times.max()),
+        sampling_rate=500,
     )
     spikes = pd.concat([spikes.loc[times] for times in valid_slices])
 
@@ -402,11 +427,20 @@ def get_data_for_multiple_epochs(
     position_info = pd.concat(position_info, axis=0)
     spikes = pd.concat(spikes, axis=0)
     valid_slices = {
-        epoch: valid_slice for epoch, valid_slice in zip(epoch_names, valid_slices)
+        epoch: valid_slice
+        for epoch, valid_slice in zip(epoch_names, valid_slices)
     }
 
     assert position_info.shape[0] == spikes.shape[0]
 
-    sort_group_ids = np.asarray([int(col.split("_")[0]) for col in spikes.columns])
+    sort_group_ids = np.asarray(
+        [int(col.split("_")[0]) for col in spikes.columns]
+    )
 
-    return position_info, spikes, valid_slices, environment_labels, sort_group_ids
+    return (
+        position_info,
+        spikes,
+        valid_slices,
+        environment_labels,
+        sort_group_ids,
+    )

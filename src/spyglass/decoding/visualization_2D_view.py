@@ -3,7 +3,10 @@ from typing import Callable, Dict, Tuple
 import numpy as np
 import sortingview.views.franklab as vvf
 import xarray as xr
-from replay_trajectory_classification.environments import get_grid, get_track_interior
+from replay_trajectory_classification.environments import (
+    get_grid,
+    get_track_interior,
+)
 
 
 def create_static_track_animation(
@@ -56,10 +59,12 @@ def get_base_track_information(base_probabilities: xr.Dataset):
     x_min = np.min(base_probabilities.x_position).item()
     y_min = np.min(base_probabilities.y_position).item()
     x_width = round(
-        (np.max(base_probabilities.x_position).item() - x_min) / (x_count - 1), 6
+        (np.max(base_probabilities.x_position).item() - x_min) / (x_count - 1),
+        6,
     )
     y_width = round(
-        (np.max(base_probabilities.y_position).item() - y_min) / (y_count - 1), 6
+        (np.max(base_probabilities.y_position).item() - y_min) / (y_count - 1),
+        6,
     )
     return (x_count, x_min, x_width, y_count, y_min, y_width)
 
@@ -77,7 +82,9 @@ def memo_linearize(
     (_, y, x) = t
     my_tuple = (x, y)
     if my_tuple not in location_lookup:
-        lin = x_count * round((y - y_min) / y_width) + round((x - x_min) / x_width)
+        lin = x_count * round((y - y_min) / y_width) + round(
+            (x - x_min) / x_width
+        )
         location_lookup[my_tuple] = lin
     return location_lookup[my_tuple]
 
@@ -123,7 +130,9 @@ def get_observations_per_frame(i_trim: xr.DataArray, base_slice: xr.DataArray):
     (times, time_counts_np) = np.unique(i_trim.time.values, return_counts=True)
     time_counts = xr.DataArray(time_counts_np, coords={"time": times})
     raw_times = base_slice.time
-    (_, good_counts) = xr.align(raw_times, time_counts, join="left", fill_value=0)
+    (_, good_counts) = xr.align(
+        raw_times, time_counts, join="left", fill_value=0
+    )
     observations_per_frame = good_counts.values.astype(np.uint8)
     return observations_per_frame
 
@@ -142,9 +151,14 @@ def process_decoded_data(posterior: xr.DataArray):
     frame_step_size = 100_000
     location_lookup = {}
 
-    (x_count, x_min, x_width, y_count, y_min, y_width) = get_base_track_information(
-        posterior
-    )
+    (
+        x_count,
+        x_min,
+        x_width,
+        y_count,
+        y_min,
+        y_width,
+    ) = get_base_track_information(posterior)
     location_fn = generate_linearization_function(
         location_lookup, x_count, x_min, x_width, y_min, y_width
     )

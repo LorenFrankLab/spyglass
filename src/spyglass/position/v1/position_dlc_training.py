@@ -62,8 +62,12 @@ class DLCModelTrainingParams(dj.Lookup):
         # If the specified param-set already exists
         # Not sure we need this part, as much just a check if the name is the same
         if param_query:
-            existing_paramset_name = param_query.fetch1("dlc_training_params_name")
-            if existing_paramset_name == paramset_name:  # If existing name same:
+            existing_paramset_name = param_query.fetch1(
+                "dlc_training_params_name"
+            )
+            if (
+                existing_paramset_name == paramset_name
+            ):  # If existing name same:
                 return print(
                     f"New param set not added\n"
                     f"A param set with name: {paramset_name} already exists"
@@ -82,7 +86,9 @@ class DLCModelTrainingParams(dj.Lookup):
             set(
                 [
                     *list(inspect.signature(train_network).parameters),
-                    *list(inspect.signature(create_training_dataset).parameters),
+                    *list(
+                        inspect.signature(create_training_dataset).parameters
+                    ),
                 ]
             )
         )
@@ -173,22 +179,32 @@ class DLCModelTraining(dj.Computed):
                 inspect.signature(create_training_dataset).parameters
             )
             training_dataset_kwargs = {
-                k: v for k, v in dlc_config.items() if k in training_dataset_input_args
+                k: v
+                for k, v in dlc_config.items()
+                if k in training_dataset_input_args
             }
             logger.logger.info("creating training dataset")
             create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
             # ---- Trigger DLC model training job ----
-            train_network_input_args = list(inspect.signature(train_network).parameters)
+            train_network_input_args = list(
+                inspect.signature(train_network).parameters
+            )
             train_network_kwargs = {
-                k: v for k, v in dlc_config.items() if k in train_network_input_args
+                k: v
+                for k, v in dlc_config.items()
+                if k in train_network_input_args
             }
             for k in ["shuffle", "trainingsetindex", "maxiters"]:
                 if k in train_network_kwargs:
                     train_network_kwargs[k] = int(train_network_kwargs[k])
             try:
                 train_network(dlc_cfg_filepath, **train_network_kwargs)
-            except KeyboardInterrupt:  # Instructions indicate to train until interrupt
-                logger.logger.info("DLC training stopped via Keyboard Interrupt")
+            except (
+                KeyboardInterrupt
+            ):  # Instructions indicate to train until interrupt
+                logger.logger.info(
+                    "DLC training stopped via Keyboard Interrupt"
+                )
 
             snapshots = list(
                 (

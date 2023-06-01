@@ -136,7 +136,8 @@ class OutputLogger:
                         handler.close()
                         logger.removeHandler(handler)
             if print_console and not any(
-                type(handler) == logging.StreamHandler for handler in logger.handlers
+                type(handler) == logging.StreamHandler
+                for handler in logger.handlers
             ):
                 logger.addHandler(self._get_stream_handler())
 
@@ -234,7 +235,8 @@ def find_full_path(root_directories, relative_path):
             return _to_Path(root_dir) / relative_path
 
     raise FileNotFoundError(
-        f"No valid full-path found (from {root_directories})" f" for {relative_path}"
+        f"No valid full-path found (from {root_directories})"
+        f" for {relative_path}"
     )
 
 
@@ -320,9 +322,12 @@ def get_video_path(key):
     from ...common.common_behav import VideoFile
 
     video_info = (
-        VideoFile() & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
+        VideoFile()
+        & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
     ).fetch1()
-    nwb_path = f"{os.getenv('SPYGLASS_BASE_DIR')}/raw/{video_info['nwb_file_name']}"
+    nwb_path = (
+        f"{os.getenv('SPYGLASS_BASE_DIR')}/raw/{video_info['nwb_file_name']}"
+    )
     with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
         nwb_file = in_out.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
@@ -412,7 +417,9 @@ def _convert_mp4(
     """
 
     orig_filename = filename
-    video_path = pathlib.PurePath(pathlib.Path(video_path), pathlib.Path(filename))
+    video_path = pathlib.PurePath(
+        pathlib.Path(video_path), pathlib.Path(filename)
+    )
     if videotype not in ["mp4"]:
         raise NotImplementedError
     dest_filename = os.path.splitext(filename)[0]
@@ -474,7 +481,9 @@ def _convert_mp4(
         if count_frames:
             try:
                 check_process = subprocess.Popen(
-                    frames_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                    frames_command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                 )
             except subprocess.CalledProcessError as err:
                 raise RuntimeError(
@@ -483,7 +492,9 @@ def _convert_mp4(
         else:
             try:
                 check_process = subprocess.Popen(
-                    packets_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                    packets_command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                 )
             except subprocess.CalledProcessError as err:
                 raise RuntimeError(
@@ -525,7 +536,9 @@ def get_gpu_memory():
         raise RuntimeError(
             f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
         ) from err
-    memory_use_values = {i: int(x.split()[0]) for i, x in enumerate(memory_use_info)}
+    memory_use_values = {
+        i: int(x.split()[0]) for i, x in enumerate(memory_use_info)
+    }
     return memory_use_values
 
 
@@ -583,7 +596,9 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
             ):
                 dlc_df.loc[idx[start_time:stop_time], idx["x"]] = np.nan
                 dlc_df.loc[idx[start_time:stop_time], idx["y"]] = np.nan
-                change = np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
+                change = np.linalg.norm(
+                    np.array([x[0], y[0]]) - np.array([x[1], y[1]])
+                )
                 print(
                     f"inds {span_start} to {span_stop + 1} "
                     f"with change in position: {change:.2f} not interpolated"
@@ -649,6 +664,7 @@ def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
     data : ndarray, shape (n_time, 2)
     frame_size : array_like, shape (2,)
     cm_to_pixels : float
+
     Returns
     -------
     converted_data : ndarray, shape (n_time, 2)
@@ -698,7 +714,9 @@ def make_video(
         else:
             n_frames = int(len(video_frame_inds) * percent_frames)
             frames = np.arange(0, n_frames)
-        print(f"video save path: {output_video_filename}\n{n_frames} frames in total.")
+        print(
+            f"video save path: {output_video_filename}\n{n_frames} frames in total."
+        )
         if crop:
             crop_offset_x = crop[0]
             crop_offset_y = crop[2]
@@ -726,7 +744,9 @@ def make_video(
         print(
             f"frames start: {frames[0]}\nvideo_frames start: {video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
         )
-        for time_ind in tqdm(frames, desc="frames", disable=disable_progressbar):
+        for time_ind in tqdm(
+            frames, desc="frames", disable=disable_progressbar
+        ):
             if time_ind == 0:
                 video.set(1, time_ind + 1)
             elif int(video.get(1)) != time_ind - 1:
@@ -783,7 +803,9 @@ def make_video(
                     #     )
                     # else:
                     #     position = convert_to_pixels(position, frame_size, cm_to_pixels)
-                    position = convert_to_pixels(position, frame_size, cm_to_pixels)
+                    position = convert_to_pixels(
+                        position, frame_size, cm_to_pixels
+                    )
                     orientation = orientation_mean[key][pos_ind]
                     if key == "DLC":
                         color = RGB_BLUE
@@ -793,8 +815,12 @@ def make_video(
                         color = RGB_PINK
                     if np.all(~np.isnan(position)) & np.all(~np.isnan(orientation)):
                         arrow_tip = (
-                            int(position[0] + arrow_radius * np.cos(orientation)),
-                            int(position[1] + arrow_radius * np.sin(orientation)),
+                            int(
+                                position[0] + arrow_radius * np.cos(orientation)
+                            ),
+                            int(
+                                position[1] + arrow_radius * np.sin(orientation)
+                            ),
                         )
                         cv2.arrowedLine(
                             img=frame,
@@ -918,7 +944,9 @@ def make_video(
         else:
             n_frames = int(len(video_frame_inds) * percent_frames)
             frames = np.arange(0, n_frames)
-        print(f"video save path: {output_video_filename}\n{n_frames} frames in total.")
+        print(
+            f"video save path: {output_video_filename}\n{n_frames} frames in total."
+        )
         fps = int(np.round(frame_rate / video_slowdown))
         writer = Writer(fps=fps, bitrate=-1)
         ret, frame = video.read()
@@ -981,7 +1009,9 @@ def make_video(
                 ratio = (crop[3] - crop[2]) / (crop[1] - crop[0])
             x_left, x_right = axes[0].get_xlim()
             y_low, y_high = axes[0].get_ylim()
-            axes[0].set_aspect(abs((x_right - x_left) / (y_low - y_high)) * ratio)
+            axes[0].set_aspect(
+                abs((x_right - x_left) / (y_low - y_high)) * ratio
+            )
             axes[0].spines["top"].set_color("black")
             axes[0].spines["right"].set_color("black")
             time_delta = pd.Timedelta(
@@ -1042,13 +1072,17 @@ def make_video(
                 if ret:
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     if crop:
-                        frame = frame[crop[2] : crop[3], crop[0] : crop[1]].copy()
+                        frame = frame[
+                            crop[2] : crop[3], crop[0] : crop[1]
+                        ].copy()
                     image.set_array(frame)
                 pos_ind = np.where(video_frame_inds == time_ind)[0]
                 if len(pos_ind) == 0:
                     centroid_position_dot.set_offsets((np.NaN, np.NaN))
                     for bodypart in centroid_plot_objs.keys():
-                        centroid_plot_objs[bodypart].set_offsets((np.NaN, np.NaN))
+                        centroid_plot_objs[bodypart].set_offsets(
+                            (np.NaN, np.NaN)
+                        )
                     orientation_line.set_data((np.NaN, np.NaN))
                     title.set_text(f"time = {0:3.4f}s\n frame = {time_ind}")
                 else:
@@ -1076,7 +1110,9 @@ def make_video(
                     for bodypart in centroid_plot_objs.keys():
                         centroid_plot_objs[bodypart].set_offsets(
                             convert_to_pixels(
-                                centroids[bodypart][pos_ind], frame, cm_to_pixels
+                                centroids[bodypart][pos_ind],
+                                frame,
+                                cm_to_pixels,
                             )
                         )
                     centroid_position_dot.set_offsets(dlc_centroid_data)
@@ -1099,12 +1135,15 @@ def make_video(
                         pd.to_datetime(position_time[pos_ind] * 1e9, unit="ns")
                         - pd.to_datetime(position_time[0] * 1e9, unit="ns")
                     ).total_seconds()
-                    title.set_text(f"time = {time_delta:3.4f}s\n frame = {time_ind}")
+                    title.set_text(
+                        f"time = {time_delta:3.4f}s\n frame = {time_ind}"
+                    )
                     likelihood_inds = pos_ind + window_ind
                     neg_inds = np.where(likelihood_inds < 0)[0]
                     over_inds = np.where(
                         likelihood_inds
-                        > (len(likelihoods[list(likelihood_objs.keys())[0]])) - 1
+                        > (len(likelihoods[list(likelihood_objs.keys())[0]]))
+                        - 1
                     )[0]
                     if len(neg_inds) > 0:
                         likelihood_inds[neg_inds] = 0
