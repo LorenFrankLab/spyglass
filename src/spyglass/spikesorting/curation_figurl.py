@@ -52,14 +52,18 @@ class CurationFigurl(dj.Computed):
         """
 
         # get new_curation_uri from selection table
-        new_curation_uri = (CurationFigurlSelection & key).fetch1("new_curation_uri")
+        new_curation_uri = (CurationFigurlSelection & key).fetch1(
+            "new_curation_uri"
+        )
 
         # fetch
         recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
         sorting_path = (SpikeSorting & key).fetch1("sorting_path")
         recording_label = SpikeSortingRecording._get_recording_name(key)
         sorting_label = SpikeSorting._get_sorting_name(key)
-        unit_metrics = _reformat_metrics((Curation & key).fetch1("quality_metrics"))
+        unit_metrics = _reformat_metrics(
+            (Curation & key).fetch1("quality_metrics")
+        )
         initial_labels = (Curation & key).fetch1("curation_labels")
         initial_merge_groups = (Curation & key).fetch1("merge_groups")
 
@@ -144,10 +148,14 @@ def _generate_the_figurl(
     spike_amplitudes_subsample_max_firing_rate = 50
     view = vv.MountainLayout(
         items=[
-            vv.MountainLayoutItem(label="Summary", view=X.sorting_summary_view()),
+            vv.MountainLayoutItem(
+                label="Summary", view=X.sorting_summary_view()
+            ),
             vv.MountainLayoutItem(
                 label="Units table",
-                view=X.units_table_view(unit_ids=X.unit_ids, unit_metrics=unit_metrics),
+                view=X.units_table_view(
+                    unit_ids=X.unit_ids, unit_metrics=unit_metrics
+                ),
             ),
             vv.MountainLayoutItem(
                 label="Raster plot",

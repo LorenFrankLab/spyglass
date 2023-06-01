@@ -1,5 +1,5 @@
-pytest
-pytest-cov
-kachery
+pytest # unit testing 
+pytest-cov # code coverage
+kachery # database access
 kachery-client
 kachery-cloud

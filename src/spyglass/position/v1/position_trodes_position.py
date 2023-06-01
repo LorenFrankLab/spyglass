@@ -107,7 +107,9 @@ class TrodesPosV1(dj.Computed):
 
     def make(self, key):
         print(f"Computing position for: {key}")
-        key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["nwb_file_name"]
+        )
         raw_position = (RawPosition() & key).fetch_nwb()[0]
         position_info_parameters = (TrodesPosParams() & key).fetch1("params")
         position = pynwb.behavior.Position()
@@ -117,7 +119,9 @@ class TrodesPosV1(dj.Computed):
         METERS_PER_CM = 0.01
         raw_pos_df = pd.DataFrame(
             data=raw_position["raw_position"].data,
-            index=pd.Index(raw_position["raw_position"].timestamps, name="time"),
+            index=pd.Index(
+                raw_position["raw_position"].timestamps, name="time"
+            ),
             columns=raw_position["raw_position"].description.split(", "),
         )
         try:
@@ -162,7 +166,10 @@ class TrodesPosV1(dj.Computed):
                 conversion=METERS_PER_CM,
                 unit="m/s",
                 data=np.concatenate(
-                    (position_info["velocity"], position_info["speed"][:, np.newaxis]),
+                    (
+                        position_info["velocity"],
+                        position_info["speed"][:, np.newaxis],
+                    ),
                     axis=1,
                 ),
                 comments=spatial_series.comments,
@@ -214,10 +221,14 @@ class TrodesPosV1(dj.Computed):
         key["version"] = 1
         trodes_key = key.copy()
         valid_fields = PositionOutput().fetch().dtype.fields.keys()
-        entries_to_delete = [entry for entry in key.keys() if entry not in valid_fields]
+        entries_to_delete = [
+            entry for entry in key.keys() if entry not in valid_fields
+        ]
         for entry in entries_to_delete:
             del key[entry]
-        PositionOutput().insert1(key=key, params=trodes_key, skip_duplicates=True)
+        PositionOutput().insert1(
+            key=key, params=trodes_key, skip_duplicates=True
+        )
 
     @staticmethod
     def calculate_position_info_from_spatial_series(
@@ -238,7 +249,8 @@ class TrodesPosV1(dj.Computed):
         time = np.asarray(spatial_series.timestamps)  # seconds
         position = np.asarray(
             pd.DataFrame(
-                spatial_series.data, columns=spatial_series.description.split(", ")
+                spatial_series.data,
+                columns=spatial_series.description.split(", "),
             ).loc[:, ["xloc", "yloc", "xloc2", "yloc2"]]
         )  # meters
 
@@ -331,7 +343,8 @@ class TrodesPosV1(dj.Computed):
                 upsampling_start_time, upsampling_end_time, n_samples
             )
             new_index = pd.Index(
-                np.unique(np.concatenate((position_df.index, new_time))), name="time"
+                np.unique(np.concatenate((position_df.index, new_time))),
+                name="time",
             )
             position_df = (
                 position_df.reindex(index=new_index)
@@ -340,8 +353,12 @@ class TrodesPosV1(dj.Computed):
             )
 
             time = np.asarray(position_df.index)
-            back_LED = np.asarray(position_df.loc[:, ["back_LED_x", "back_LED_y"]])
-            front_LED = np.asarray(position_df.loc[:, ["front_LED_x", "front_LED_y"]])
+            back_LED = np.asarray(
+                position_df.loc[:, ["back_LED_x", "back_LED_y"]]
+            )
+            front_LED = np.asarray(
+                position_df.loc[:, ["front_LED_x", "front_LED_y"]]
+            )
 
             sampling_rate = upsampling_sampling_rate
 
@@ -403,14 +420,18 @@ class TrodesPosV1(dj.Computed):
             np.concatenate(
                 (
                     np.asarray(
-                        nwb_data["velocity"].time_series["video_frame_ind"].data,
+                        nwb_data["velocity"]
+                        .time_series["video_frame_ind"]
+                        .data,
                         dtype=int,
                     )[:, np.newaxis],
                     np.asarray(nwb_data["position"].get_spatial_series().data),
-                    np.asarray(nwb_data["orientation"].get_spatial_series().data)[
-                        :, np.newaxis
-                    ],
-                    np.asarray(nwb_data["velocity"].time_series["velocity"].data),
+                    np.asarray(
+                        nwb_data["orientation"].get_spatial_series().data
+                    )[:, np.newaxis],
+                    np.asarray(
+                        nwb_data["velocity"].time_series["velocity"].data
+                    ),
                 ),
                 axis=1,
             ),
@@ -454,7 +475,12 @@ class TrodesPosVideo(dj.Computed):
             + 1
         )
 
-        video_path, video_filename, meters_per_pixel, video_time = get_video_path(
+        (
+            video_path,
+            video_filename,
+            meters_per_pixel,
+            video_time,
+        ) = get_video_path(
             {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         )
         video_dir = os.path.dirname(video_path) + "/"
@@ -471,7 +497,9 @@ class TrodesPosVideo(dj.Computed):
             "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
             "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
         }
-        position_mean = np.asarray(position_info_df[["position_x", "position_y"]])
+        position_mean = np.asarray(
+            position_info_df[["position_x", "position_y"]]
+        )
         orientation_mean = np.asarray(position_info_df[["orientation"]])
         position_time = np.asarray(position_info_df.index)
         cm_per_pixel = meters_per_pixel * M_TO_CM
@@ -497,6 +525,7 @@ class TrodesPosVideo(dj.Computed):
         data : ndarray, shape (n_time, 2)
         frame_size : array_like, shape (2,)
         cm_to_pixels : float
+
         Returns
         -------
         converted_data : ndarray, shape (n_time, 2)
@@ -550,7 +579,9 @@ class TrodesPosVideo(dj.Computed):
             for color, data in centroids.items()
         }
         position_mean = self.fill_nan(position_mean, video_time, position_time)
-        orientation_mean = self.fill_nan(orientation_mean, video_time, position_time)
+        orientation_mean = self.fill_nan(
+            orientation_mean, video_time, position_time
+        )
 
         for time_ind in tqdm(
             range(n_frames - 1), desc="frames", disable=disable_progressbar
@@ -563,7 +594,9 @@ class TrodesPosVideo(dj.Computed):
                 green_centroid = centroids["green"][time_ind]
 
                 position = position_mean[time_ind]
-                position = self.convert_to_pixels(position, frame_size, cm_to_pixels)
+                position = self.convert_to_pixels(
+                    position, frame_size, cm_to_pixels
+                )
                 orientation = orientation_mean[time_ind]
 
                 if np.all(~np.isnan(red_centroid)):

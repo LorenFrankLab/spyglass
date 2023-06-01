@@ -31,7 +31,9 @@ def _create_spikesortingview_workspace(
     recording = si.load_extractor(recording_path)
     if recording.get_num_segments() > 1:
         recording = si.concatenate_recordings([recording])
-    recording_id = workspace.add_recording(label=recording_label, recording=recording)
+    recording_id = workspace.add_recording(
+        label=recording_label, recording=recording
+    )
 
     sorting = si.load_extractor(sorting_path)
     if len(merge_groups) != 0:
@@ -101,10 +103,14 @@ def _generate_url(
     # You can replace this with other layouts
     view = vv.MountainLayout(
         items=[
-            vv.MountainLayoutItem(label="Summary", view=X.sorting_summary_view()),
+            vv.MountainLayoutItem(
+                label="Summary", view=X.sorting_summary_view()
+            ),
             vv.MountainLayoutItem(
                 label="Units table",
-                view=X.units_table_view(unit_ids=X.unit_ids, unit_metrics=unit_metrics),
+                view=X.units_table_view(
+                    unit_ids=X.unit_ids, unit_metrics=unit_metrics
+                ),
             ),
             vv.MountainLayoutItem(
                 label="Raster plot",

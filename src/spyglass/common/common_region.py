@@ -17,7 +17,9 @@ class BrainRegion(dj.Lookup):
     # subregion_name='' and subsubregion_name='' will be necessary but that seems OK
 
     @classmethod
-    def fetch_add(cls, region_name, subregion_name=None, subsubregion_name=None):
+    def fetch_add(
+        cls, region_name, subregion_name=None, subsubregion_name=None
+    ):
         """Return the region ID for the given names, and if no match exists, first add it to the BrainRegion table.
 
         The combination of (region_name, subregion_name, subsubregion_name) is effectively unique, then.

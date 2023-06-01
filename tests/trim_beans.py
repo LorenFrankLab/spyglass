@@ -29,7 +29,9 @@ with pynwb.NWBHDF5IO(file_in, "r", load_namespaces=True) as io:
     nwbfile.add_acquisition(new_eseries)
 
     # create a new analog TimeSeries with a subset of the data and timestamps
-    orig_analog = nwbfile.processing["analog"]["analog"].time_series.pop("analog")
+    orig_analog = nwbfile.processing["analog"]["analog"].time_series.pop(
+        "analog"
+    )
     data = orig_analog.data[0:n_timestamps_to_keep, :]
     ts = orig_analog.timestamps[0:n_timestamps_to_keep]
     new_analog = pynwb.TimeSeries(
@@ -47,9 +49,9 @@ with pynwb.NWBHDF5IO(file_in, "r", load_namespaces=True) as io:
     for spatial_series_name in list(
         nwbfile.processing["behavior"]["position"].spatial_series
     ):
-        spatial_series = nwbfile.processing["behavior"]["position"].spatial_series.pop(
-            spatial_series_name
-        )
+        spatial_series = nwbfile.processing["behavior"][
+            "position"
+        ].spatial_series.pop(spatial_series_name)
         assert isinstance(spatial_series, pynwb.behavior.SpatialSeries)
         data = spatial_series.data[:, 0:2]
         ts = spatial_series.timestamps[0:n_timestamps_to_keep]
@@ -63,7 +65,9 @@ with pynwb.NWBHDF5IO(file_in, "r", load_namespaces=True) as io:
             )
         )
     for spatial_series in new_spatial_series:
-        nwbfile.processing["behavior"]["position"].add_spatial_series(spatial_series)
+        nwbfile.processing["behavior"]["position"].add_spatial_series(
+            spatial_series
+        )
 
     with pynwb.NWBHDF5IO(file_out, "w") as export_io:
         export_io.export(io, nwbfile)

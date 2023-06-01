@@ -35,7 +35,9 @@ class TestGetElectrodeIndices(unittest.TestCase):
             )
 
         elecs_region = self.nwbfile.electrodes.create_region(
-            name="electrodes", region=[2, 3, 4, 5], description="description"  # indices
+            name="electrodes",
+            region=[2, 3, 4, 5],
+            description="description",  # indices
         )
 
         eseries = pynwb.ecephys.ElectricalSeries(

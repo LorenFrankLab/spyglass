@@ -1,0 +1,122 @@
+site_name: Spyglass
+site_url: https://lorenfranklab.github.io/spyglass
+site_description: Spyglass Documentation
+site_author: CBroz1
+
+repo_url: https://github.com/LorenFrankLab/spyglass
+docs_dir: ./src/
+edit_uri: blob/main/docs/src/
+
+theme:
+    name: material
+    custom_dir: overrides
+    logo: images/FrankLab.png
+    favicon: images/Spyglass.svg
+    features:
+      - toc.integrate
+      - navigation.sections
+      - navigation.expand
+      - navigation.top
+    palette:
+      - media: "(prefers-color-scheme: light)"
+        scheme: auto
+        toggle:
+          icon: material/brightness-7
+          name: Switch to dark mode
+      - media: "(prefers-color-scheme: slate)"
+        scheme: slate
+        toggle:
+          icon: material/brightness-4
+          name: Switch to light mode
+    disable_nav_previous_next: true
+    disable_nav_search: false
+    navigation_depth: 2
+    locale: en
+    features:
+      - navigation.instant   # saves loading time - 1 browser page
+      - navigation.tracking  # even with above, changes URL by section
+      - navigation.top
+      - search.suggest
+      - search.share
+
+nav:
+  - Home:                      index.md
+  - Installation:           
+    - Home:                    installation/index.md
+    - Local:                   installation/local.md
+    - Productions:             installation/production.md
+  - Tutorials: 
+    - Introduction:            notebooks/00_intro.ipynb
+    - Spike Sorting:           notebooks/01_spikesorting.ipynb
+    - Curation:                notebooks/02_curation.ipynb
+    - LFP:                     notebooks/03_lfp.ipynb 
+    - Position:
+      - Information:           notebooks/4_position_info.ipynb
+      - Pipeline:              notebooks/04_Trodes_position.ipynb
+      - From Scratch:          notebooks/05_DLC_from_scratch.ipynb
+      - From Pre-Traine:       notebooks/06_DLC_from_dir.ipynb
+    - Linearization Pipeline:  notebooks/07_linearization.ipynb
+    - Mark Indicators:         notebooks/08_Extract_Mark_indicators.ipynb
+    - GPU:                     notebooks/09_Decoding_with_GPUs_on_the_GPU_cluster.ipynb
+    - 1D Clusterless Decoding: notebooks/10_1D_Clusterless_Decoding.ipynb
+    - 2D Clusterless Decoding: notebooks/11_2D_Clusterless_Decoding.ipynb
+    - Ripple Detection:        notebooks/12_Ripple_Detection.ipynb
+    - Docker:                  notebooks/docker_mysql_tutorial.ipynb
+    - Spyglass Kachery Setup:  notebooks/Spyglass_kachery_setup.ipynb
+  - API Reference:             api/ # defer to gen-files + literate-nav
+  - How to Contribute:         contribute.md
+  - Miscellaneous:
+    - FigURL:                  misc/figurl_views.md
+    - Session Groups:          misc/session_groups.md
+    - Insert Data:             misc/insert_data.md
+  - Change Log:                CHANGELOG.md
+  - Copyright:                 LICENSE.md
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
+  - exclude:
+      glob:
+        - "temp*"
+        - "0*yaml"
+  - mike:
+      canonical_version: latest
+      css_dir: stylesheets
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            members_order: source      
+            group_by_category: false
+            line_length: 80
+            docstring_style: numpy
+          selection:
+            docstring_style: numpy
+      enabled: true # Set to false to reduce build time
+      watch:
+        - src/spyglass/
+  - literate-nav:
+      nav_file: navigation.md
+  - exclude-search:
+      exclude:
+        - "*/navigation.md"
+  - gen-files: 
+      scripts:
+      - ./src/api/make_pages.py
+  - mkdocs-jupyter: # Comment this block during dev to reduce build time
+      ignore_h1_titles: True
+      ignore: ["*make_pages.py", "**checkpoints**"]
+
+markdown_extensions:
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+
+extra:
+  generator: false # Disable watermark
+  version:
+    provider: mike

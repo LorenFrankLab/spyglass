@@ -19,7 +19,9 @@ def add_user(user_name):
         f"GRANT ALL PRIVILEGES ON `{user_name}\_%`.* TO `{user_name}`@'%' IDENTIFIED BY 'temppass';\n"
     )
     for module in shared_modules:
-        file.write(f"GRANT ALL PRIVILEGES ON `{module}`.* TO `{user_name}`@'%';\n")
+        file.write(
+            f"GRANT ALL PRIVILEGES ON `{module}`.* TO `{user_name}`@'%';\n"
+        )
     file.write(f"GRANT SELECT ON `%`.* TO `{user_name}`@'%';\n")
     file.flush()
 

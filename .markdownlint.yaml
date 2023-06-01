@@ -1,0 +1,13 @@
+# https://github.com/DavidAnson/markdownlint
+# https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+MD007: false # permit indenting 4 spaces instead of 2
+MD013:
+    line_length: "80" # Line length limits
+    tables: false # disable for tables
+    code_blocks: false # disable for code blocks
+MD025: false # permit adjacent headings
+MD026: false # permit trailing punctuation in headings
+MD033: # HTML elements allowed
+    allowed_elements:
+        - "img"
+MD034: false # Bare URLs OK
