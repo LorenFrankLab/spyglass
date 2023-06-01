@@ -306,6 +306,8 @@ class DLCPosVideo(dj.Computed):
         from tqdm import tqdm as tqdm
 
         params = (DLCPosVideoParams & key).fetch1("params")
+        if "video_params" not in params:
+            params["video_params"] = {}
         M_TO_CM = 100
         key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
         epoch = (
