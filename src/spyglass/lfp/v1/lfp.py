@@ -1,6 +1,6 @@
+import copy
 import uuid
 
-import copy
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -23,15 +23,29 @@ MIN_LFP_INTERVAL_DURATION = 1.0  # 1 second minimum interval duration
 
 @schema
 class LFPSelection(dj.Manual):
+    """The user's selection of LFP data to be filtered
+
+    This table is used to select the LFP data to be filtered.  The user can select
+    the LFP data by specifying the electrode group and the interval list to be used.
+    The interval list is used to select the times from the raw data that will be
+    filtered.  The user can also specify the filter to be used.
+
+    The LFP data is filtered and downsampled to 1 KHz.  The filtered data is stored
+    in the AnalysisNwbfile table.  The valid times for the filtered data are stored
+    in the IntervalList table.
+    """
+
     definition = """
-     -> LFPElectrodeGroup
+     -> LFPElectrodeGroup                                                  # the group of electrodes to be filtered
      -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
-     -> FirFilterParameters
+     -> FirFilterParameters                                                # the filter to be used
      """
 
 
 @schema
 class LFPV1(dj.Computed):
+    """The filtered LFP data"""
+
     definition = """
     -> LFPSelection
     ---
@@ -42,6 +56,7 @@ class LFPV1(dj.Computed):
     """
 
     def make(self, key):
+        DECIMATION_FACTOR = 1000
         # get the NWB object with the data
         nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
         rawdata = (Raw & nwbf_key).fetch_nwb()[0]["raw"]
@@ -73,7 +88,7 @@ class LFPV1(dj.Computed):
         )
 
         # target 1 KHz sampling rate
-        decimation = sampling_rate // 1000
+        decimation = sampling_rate // DECIMATION_FACTOR
 
         # get the LFP filter that matches the raw data
         filter = (
@@ -167,30 +182,32 @@ class LFPV1(dj.Computed):
 @schema
 class ImportedLFPV1(dj.Imported):
     definition = """
-    -> Session
-    -> LFPElectrodeGroup
-    -> IntervalList
+    -> Session                      # the session to which this LFP belongs
+    -> LFPElectrodeGroup            # the group of electrodes to be filtered
+    -> IntervalList # the original set of times to be filtered
     lfp_object_id: varchar(40)      # the NWB object ID for loading this object from the file
     ---
-    lfp_sampling_rate: float
+    lfp_sampling_rate: float        # the sampling rate, in samples/sec
     """
 
 
 @schema
 class LFPElectrodeGroup(dj.Manual):
     definition = """
-     -> Session
-     lfp_electrode_group_name: varchar(200)
+     -> Session                             # the session to which this LFP belongs
+     lfp_electrode_group_name: varchar(200) # the name of this group of electrodes
      """
 
     class LFPElectrode(dj.Part):
         definition = """
-        -> LFPElectrodeGroup
-        -> Electrode
+        -> LFPElectrodeGroup # the group of electrodes to be filtered
+        -> Electrode        # the electrode to be filtered
         """
 
     @staticmethod
-    def create_lfp_electrode_group(nwb_file_name, group_name, electrode_list):
+    def create_lfp_electrode_group(
+        nwb_file_name: str, group_name: str, electrode_list: list[int]
+    ):
         """Adds an LFPElectrodeGroup and the individual electrodes
 
         Parameters

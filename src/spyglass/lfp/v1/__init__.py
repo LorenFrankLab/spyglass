@@ -6,5 +6,3 @@ from spyglass.lfp.v1.lfp_artifact import (
     LFPArtifactDetectionSelection,
     LFPArtifactRemovedIntervalList,
 )
-
-# from spyglass.lfp.v1.filtered_lfp import LFPBand, LFPBandSelection

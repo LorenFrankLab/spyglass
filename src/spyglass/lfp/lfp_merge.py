@@ -80,8 +80,8 @@ class LFPOutput(dj.Manual):
             The entry or entries in the LFPOutput part table that corresponds to the key
         """
         # first check if this returns anything from the LFP table
-        lfp_object = LFPOutput.LFP & key
-        if lfp_object is not None:
-            return LFPV1 & lfp_object.fetch("KEY")
+        query = LFPOutput.LFP & key
+        if query is not None:
+            return LFPV1 & query.fetch("KEY")
         else:
             return ImportedLFPV1 & (LFPOutput.ImportedLFP & key).fetch("KEY")
