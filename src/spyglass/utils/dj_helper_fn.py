@@ -8,6 +8,32 @@ import numpy as np
 from .nwb_helper_fn import get_nwb_file
 
 
+def _delete(self: dj.Table, **kwargs) -> None:
+    descendants = self.descendants()
+    rows = self.fetch()
+    parents = []
+    parts = []
+    for table in descendants:
+        parent = table.split(".")[-1].split("`__")[-1]
+        if len(parent.split("__")) > 1:
+            parts.append(table)
+        else:
+            parents.append(table)
+    parts_no_parents = [
+        table
+        for table in parts
+        if (table.replace(f'__{table.split("__")[-1]}', "") + "`")
+        not in parents
+    ]
+    for part in parts_no_parents:
+        table = f"{part.split('.')[0]}.{part.split('.')[1].split('__')[0]}`"
+        PartTable = dj.FreeTable(dj.conn(), part)
+        ParentTable = dj.FreeTable(dj.conn(), table)
+        keys = ((ParentTable * PartTable) & rows).fetch("KEY")
+        for entry in keys:
+            (ParentTable & entry).delete(**kwargs)
+
+
 def dj_replace(original_table, new_values, key_column, replace_column):
     """Given the output of a fetch() call from a schema and a 2D array made up of (key_value, replace_value) tuples,
     find each instance of key_value in the key_column of the original table and replace the specified replace_column
