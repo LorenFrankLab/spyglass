@@ -113,9 +113,9 @@ class LFPBandSelection(dj.Manual):
                 "added before this function is called"
             )
         # reference_electrode_list
-        if len(reference_electrode_list) != 1 and len(reference_electrode_list) != len(
-            electrode_list
-        ):
+        if len(reference_electrode_list) != 1 and len(
+            reference_electrode_list
+        ) != len(electrode_list):
             raise ValueError(
                 "reference_electrode_list must contain either 1 or len(electrode_list) elements"
             )
@@ -142,7 +142,9 @@ class LFPBandSelection(dj.Manual):
         # insert an entry into the main LFPBandSelectionTable
         self.insert1(key, skip_duplicates=True)
 
-        key["lfp_electrode_group_name"] = lfp_object.fetch1("lfp_electrode_group_name")
+        key["lfp_electrode_group_name"] = lfp_object.fetch1(
+            "lfp_electrode_group_name"
+        )
         # iterate through all of the new elements and add them
         for e, r in zip(electrode_list, ref_list):
             elect_key = (
@@ -155,7 +157,10 @@ class LFPBandSelection(dj.Manual):
             ).fetch1("KEY")
             for item in elect_key:
                 key[item] = elect_key[item]
-            query = Electrode & {"nwb_file_name": nwb_file_name, "electrode_id": e}
+            query = Electrode & {
+                "nwb_file_name": nwb_file_name,
+                "electrode_id": e,
+            }
             key["reference_elect_id"] = r
             self.LFPBandElectrode().insert1(key, skip_duplicates=True)
 
@@ -193,9 +198,9 @@ class LFPBandV1(dj.Computed):
             .get_lfp_object({"lfp_id": key["lfp_id"]})
             .fetch1("lfp_sampling_rate")
         )
-        interval_list_name, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1(
-            "target_interval_list_name", "lfp_band_sampling_rate"
-        )
+        interval_list_name, lfp_band_sampling_rate = (
+            LFPBandSelection() & key
+        ).fetch1("target_interval_list_name", "lfp_band_sampling_rate")
         valid_times = (
             IntervalList()
             & {
@@ -224,14 +229,18 @@ class LFPBandV1(dj.Computed):
 
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (
             LFPBandSelection() & key
-        ).fetch1("filter_name", "filter_sampling_rate", "lfp_band_sampling_rate")
+        ).fetch1(
+            "filter_name", "filter_sampling_rate", "lfp_band_sampling_rate"
+        )
 
         decimation = int(lfp_sampling_rate) // lfp_band_sampling_rate
 
         # load in the timestamps
         timestamps = np.asarray(lfp_object.timestamps)
         # get the indices of the first timestamp and the last timestamp that are within the valid times
-        included_indices = interval_list_contains_ind(lfp_band_valid_times, timestamps)
+        included_indices = interval_list_contains_ind(
+            lfp_band_valid_times, timestamps
+        )
         # pad the indices by 1 on each side to avoid message in filter_data
         if included_indices[0] > 0:
             included_indices[0] -= 1
@@ -247,14 +256,17 @@ class LFPBandV1(dj.Computed):
         )
 
         # get the indices of the electrodes to be filtered and the references
-        lfp_band_elect_index = get_electrode_indices(lfp_object, lfp_band_elect_id)
+        lfp_band_elect_index = get_electrode_indices(
+            lfp_object, lfp_band_elect_id
+        )
         lfp_band_ref_index = get_electrode_indices(lfp_object, lfp_band_ref_id)
 
         # subtract off the references for the selected channels
         for index, elect_index in enumerate(lfp_band_elect_index):
             if lfp_band_ref_id[index] != -1:
                 lfp_data[:, elect_index] = (
-                    lfp_data[:, elect_index] - lfp_data[:, lfp_band_ref_index[index]]
+                    lfp_data[:, elect_index]
+                    - lfp_data[:, lfp_band_ref_index[index]]
                 )
 
         # get the LFP filter that matches the raw data
@@ -278,7 +290,9 @@ class LFPBandV1(dj.Computed):
 
         # create the analysis nwb file to store the results.
         lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
-        lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
+        lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(
+            lfp_band_file_name
+        )
         # filter the data and write to an the nwb file
         filtered_data, new_timestamps = FirFilterParameters().filter_data(
             timestamps,
@@ -309,7 +323,8 @@ class LFPBandV1(dj.Computed):
             )
             lfp = pynwb.ecephys.LFP(electrical_series=es)
             ecephys_module = nwbf.create_processing_module(
-                name="ecephys", description=f"LFP data processed with {filter_name}"
+                name="ecephys",
+                description=f"LFP data processed with {filter_name}",
             )
             ecephys_module.add(lfp)
             io.write(nwbf)
@@ -323,7 +338,10 @@ class LFPBandV1(dj.Computed):
         # finally, we need to censor the valid times to account for the downsampling if this is the first time we've
         # downsampled these data
         key["interval_list_name"] = (
-            interval_list_name + " lfp band " + str(lfp_band_sampling_rate) + "Hz"
+            interval_list_name
+            + " lfp band "
+            + str(lfp_band_sampling_rate)
+            + "Hz"
         )
         tmp_valid_times = (
             IntervalList
@@ -348,7 +366,9 @@ class LFPBandV1(dj.Computed):
             # check that the valid times are the same
             assert np.isclose(
                 tmp_valid_times[0], lfp_band_valid_times
-            ).all(), "previously saved lfp band times do not match current times"
+            ).all(), (
+                "previously saved lfp band times do not match current times"
+            )
 
         from spyglass.lfp_band.lfp_band_merge import LFPBandOutput
 
@@ -372,7 +392,9 @@ class LFPBandV1(dj.Computed):
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,
-            index=pd.Index(filtered_nwb["filtered_data"].timestamps, name="time"),
+            index=pd.Index(
+                filtered_nwb["filtered_data"].timestamps, name="time"
+            ),
         )
 
     def compute_analytic_signal(self, electrode_list: list[int], **kwargs):
@@ -395,7 +417,9 @@ class LFPBandV1(dj.Computed):
         """
 
         filtered_band = self.fetch_nwb()[0]["filtered_data"]
-        electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
+        electrode_index = np.isin(
+            filtered_band.electrodes.data[:], electrode_list
+        )
         if len(electrode_list) != np.sum(electrode_index):
             raise ValueError(
                 "Some of the electrodes specified in electrode_list are missing in the current LFPBand table."
@@ -425,7 +449,9 @@ class LFPBandV1(dj.Computed):
         if electrode_list is None:
             electrode_list = []
 
-        analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+        analytic_signal_df = self.compute_analytic_signal(
+            electrode_list, **kwargs
+        )
 
         return pd.DataFrame(
             np.angle(analytic_signal_df) + np.pi,
@@ -451,7 +477,9 @@ class LFPBandV1(dj.Computed):
         if electrode_list is None:
             electrode_list = []
 
-        analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+        analytic_signal_df = self.compute_analytic_signal(
+            electrode_list, **kwargs
+        )
 
         return pd.DataFrame(
             np.abs(analytic_signal_df) ** 2,

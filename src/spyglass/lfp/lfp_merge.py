@@ -29,7 +29,10 @@ class LFPOutput(dj.Manual):
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
-                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
             )
 
         def fetch1_dataframe(self, *attrs, **kwargs):
@@ -50,7 +53,10 @@ class LFPOutput(dj.Manual):
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
-                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
             )
 
         def fetch1_dataframe(self, *attrs, **kwargs):
