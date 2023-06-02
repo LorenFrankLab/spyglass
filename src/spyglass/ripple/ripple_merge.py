@@ -26,14 +26,17 @@ class RippleTimesOutput(dj.Manual):
         ripple_times_object_id : varchar(40)
         """
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
+        def fetch_nwb(self, *attrs, **kwargs):
+            return fetch_nwb(
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
+            )
 
-    def fetch1_dataframe(self):
-        """Convenience function for returning the marks in a readable format"""
-        return self.fetch_dataframe()[0]
+        def fetch1_dataframe(self):
+            """Convenience function for returning the marks in a readable format"""
+            return self.fetch_dataframe()[0]
 
-    def fetch_dataframe(self):
-        return [data["ripple_times"] for data in self.fetch_nwb()]
+        def fetch_dataframe(self):
+            return [data["ripple_times"] for data in self.fetch_nwb()]
