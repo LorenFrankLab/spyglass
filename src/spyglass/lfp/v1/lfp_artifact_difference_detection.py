@@ -52,7 +52,7 @@ def difference_artifact_detector(
 
     valid_timestamps = recording.timestamps
 
-    local_window = np.int(local_window_ms / 2)
+    local_window = int(local_window_ms / 2)
 
     # if both thresholds are None, we skip artifact detection
     if amplitude_thresh_1st is None:
