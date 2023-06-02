@@ -10,7 +10,8 @@ from ripple_detection.core import gaussian_smooth, get_envelope
 
 from spyglass.common import IntervalList  # noqa
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.lfp_band.v1.lfp_band import LFPBand, LFPBandSelection
+from spyglass.lfp_band.lfp_band_merge import LFPBandOutput
+from spyglass.lfp_band.v1.lfp_band import LFPBandSelection
 from spyglass.position import PositionOutput
 from spyglass.utils.dj_helper_fn import fetch_nwb
 
@@ -50,7 +51,7 @@ class RippleLFPSelection(dj.Manual):
         """
 
     def insert1(self, key, **kwargs):
-        filter_name = (LFPBand & key).fetch1("filter_name")
+        filter_name = (LFPBandOutput.LFPBandV1 & key).fetch1("filter_name")
         if "ripple" not in filter_name.lower():
             raise UserWarning("Please use a ripple filter")
         super().insert1(key, **kwargs)
@@ -228,7 +229,7 @@ class RippleTimesV1(dj.Computed):
         # warn/validate that there is only one wire per electrode
         lfp_key = copy.deepcopy(key)
         del lfp_key["interval_list_name"]
-        ripple_lfp_nwb = (LFPBand & lfp_key).fetch_nwb()[0]
+        ripple_lfp_nwb = (LFPBandOutput.LFPBandV1 & lfp_key).fetch_nwb()[0]
         ripple_lfp_electrodes = ripple_lfp_nwb["filtered_data"].electrodes.data[
             :
         ]
