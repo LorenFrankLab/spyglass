@@ -1,13 +1,13 @@
 import numpy as np
-from scipy.ndimage import find_objects, label, labeled_comprehension
+from scipy.ndimage import find_objects, label
 from scipy.stats import median_abs_deviation
 
 
 def mad_artifact_detector(
     recording: None,
     mad_thresh: float = 6.0,
-    proportion_above_thresh: float = 1.0,
-    removal_window_ms: float = 1.0,
+    proportion_above_thresh: float = 0.1,
+    removal_window_ms: float = 10.0,
     sampling_frequency: float = 1000.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Detect LFP artifacts using the median absolute deviation method.
@@ -52,11 +52,9 @@ def mad_artifact_detector(
         is_artifact, timestamps
     )
 
-    artifact_removed_valid_times = _get_time_intervals_from_bool_array(
-        ~is_artifact, timestamps
-    )
+    valid_times = _get_time_intervals_from_bool_array(~is_artifact, timestamps)
 
-    return artifact_removed_valid_times, artifact_intervals_s
+    return valid_times, artifact_intervals_s
 
 
 def _mad_scale_lfps(lfps: np.ndarray, mad: np.ndarray) -> np.ndarray:
@@ -124,37 +122,10 @@ def _get_time_intervals_from_bool_array(
     labels, n_labels = label(bool_array)
 
     try:
-        return list(
-            labeled_comprehension(
-                timestamps,
-                labels,
-                range(1, n_labels + 1),
-                _get_range,
-                object,
-                None,
-            ),
-        )
-    except ValueError:
-        return []
-
-
-def _get_range(x: np.ndarray) -> list[float]:
-    """Return the range of an array.
-
-    Assumes the array is sorted.
-
-    Parameters
-    ----------
-    x : np.ndarray, shape (n_samples,)
-        Array to get the range of
-
-    Returns
-    -------
-    range : list[float]
-        Range of the array
-    """
-    try:
-        return [x[0], x[-1]]
+        return [
+            timestamps[labels == label_id][[0, -1]]
+            for label_id in range(1, n_labels + 1)
+        ]
     except IndexError:
         return []
 
