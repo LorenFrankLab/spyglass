@@ -2,10 +2,10 @@ import datajoint as dj
 
 from spyglass.common.common_interval import IntervalList
 from spyglass.lfp.v1.lfp import LFPV1
-from spyglass.lfp.v1.lfp_artifact_difference_method import (
+from spyglass.lfp.v1.lfp_artifact_difference_detection import (
     difference_artifact_detector,
 )
-from spyglass.lfp.v1.lfp_artifact_MAD_method import mad_artifact_detector
+from spyglass.lfp.v1.lfp_artifact_MAD_detection import mad_artifact_detector
 
 schema = dj.schema("lfp_v1")
 

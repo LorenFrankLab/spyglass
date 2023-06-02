@@ -1,6 +1,6 @@
-from scipy.stats import median_abs_deviation
-from scipy.ndimage import labeled_comprehension, label, find_objects
 import numpy as np
+from scipy.ndimage import find_objects, label, labeled_comprehension
+from scipy.stats import median_abs_deviation
 
 
 def mad_artifact_detector(
