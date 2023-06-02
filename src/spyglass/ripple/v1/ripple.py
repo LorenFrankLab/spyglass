@@ -22,9 +22,13 @@ RIPPLE_DETECTION_ALGORITHMS = {
 }
 
 
-def interpolate_to_new_time(df, new_time, upsampling_interpolation_method="linear"):
+def interpolate_to_new_time(
+    df, new_time, upsampling_interpolation_method="linear"
+):
     old_time = df.index
-    new_index = pd.Index(np.unique(np.concatenate((old_time, new_time))), name="time")
+    new_index = pd.Index(
+        np.unique(np.concatenate((old_time, new_time))), name="time"
+    )
     return (
         df.reindex(index=new_index)
         .interpolate(method=upsampling_interpolation_method)
@@ -162,7 +166,9 @@ class RippleTimesV1(dj.Computed):
 
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
-        key["analysis_file_name"] = nwb_analysis_file.create(key["nwb_file_name"])
+        key["analysis_file_name"] = nwb_analysis_file.create(
+            key["nwb_file_name"]
+        )
         key["ripple_times_object_id"] = nwb_analysis_file.add_nwb_object(
             analysis_file_name=key["analysis_file_name"],
             nwb_object=ripple_times,
@@ -223,7 +229,9 @@ class RippleTimesV1(dj.Computed):
         lfp_key = copy.deepcopy(key)
         del lfp_key["interval_list_name"]
         ripple_lfp_nwb = (LFPBand & lfp_key).fetch_nwb()[0]
-        ripple_lfp_electrodes = ripple_lfp_nwb["filtered_data"].electrodes.data[:]
+        ripple_lfp_electrodes = ripple_lfp_nwb["filtered_data"].electrodes.data[
+            :
+        ]
         elec_mask = np.full_like(ripple_lfp_electrodes, 0, dtype=bool)
         elec_mask[
             [
@@ -234,7 +242,9 @@ class RippleTimesV1(dj.Computed):
         ] = True
         ripple_lfp = pd.DataFrame(
             ripple_lfp_nwb["filtered_data"].data,
-            index=pd.Index(ripple_lfp_nwb["filtered_data"].timestamps, name="time"),
+            index=pd.Index(
+                ripple_lfp_nwb["filtered_data"].timestamps, name="time"
+            ),
         )
         sampling_frequency = ripple_lfp_nwb["lfp_band_sampling_rate"]
 
@@ -242,7 +252,10 @@ class RippleTimesV1(dj.Computed):
 
         position_valid_times = (
             IntervalList
-            & {"nwb_file_name": nwb_file_name, "interval_list_name": interval_list_name}
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_list_name,
+            }
         ).fetch1("valid_times")
 
         position_info = (
@@ -291,7 +304,9 @@ class RippleTimesV1(dj.Computed):
         )
         ripple_consensus_trace = np.sum(ripple_consensus_trace**2, axis=1)
         ripple_consensus_trace[not_null] = gaussian_smooth(
-            ripple_consensus_trace[not_null], smoothing_sigma, sampling_frequency
+            ripple_consensus_trace[not_null],
+            smoothing_sigma,
+            sampling_frequency,
         )
         return pd.DataFrame(
             np.sqrt(ripple_consensus_trace), index=ripple_filtered_lfps.index
@@ -325,7 +340,9 @@ class RippleTimesV1(dj.Computed):
             color="lightgrey",
         )
         ax.set_xlabel("Time [s]")
-        ax.set_xlim((time_slice.start - start_offset, time_slice.stop - start_offset))
+        ax.set_xlim(
+            (time_slice.start - start_offset, time_slice.stop - start_offset)
+        )
 
     @staticmethod
     def plot_ripple(
@@ -357,6 +374,8 @@ class RippleTimesV1(dj.Computed):
             color="lightgrey",
         )
         ax.set_ylim((-1, n_lfps))
-        ax.set_xlim((time_slice.start - start_offset, time_slice.stop - start_offset))
+        ax.set_xlim(
+            (time_slice.start - start_offset, time_slice.stop - start_offset)
+        )
         ax.set_ylabel("LFPs")
         ax.set_xlabel("Time [s]")

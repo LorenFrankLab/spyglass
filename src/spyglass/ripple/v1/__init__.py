@@ -1,1 +1,5 @@
-from spyglass.ripple.v1 import RippleLFPSelection, RippleParameters, RippleTimesV1
+from spyglass.ripple.v1 import (
+    RippleLFPSelection,
+    RippleParameters,
+    RippleTimesV1,
+)

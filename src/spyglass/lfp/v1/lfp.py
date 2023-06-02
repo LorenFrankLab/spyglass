@@ -227,7 +227,10 @@ class LFPElectrodeGroup(dj.Manual):
         """
         # remove the session and then recreate the session and Electrode list
         # check to see if the user allowed the deletion
-        key = {"nwb_file_name": nwb_file_name, "lfp_electrode_group_name": group_name}
+        key = {
+            "nwb_file_name": nwb_file_name,
+            "lfp_electrode_group_name": group_name,
+        }
         LFPElectrodeGroup().insert1(key, skip_duplicates=True)
 
         # TODO: do this in a better way
