@@ -122,10 +122,10 @@ class LinearizedPositionV1(dj.Computed):
         position_nwb = (PositionOutput & key).fetch_nwb()[0]
 
         position = np.asarray(
-            position_nwb["head_position"].get_spatial_series().data
+            position_nwb["position"].get_spatial_series().data
         )
         time = np.asarray(
-            position_nwb["head_position"].get_spatial_series().timestamps
+            position_nwb["position"].get_spatial_series().timestamps
         )
 
         linearization_parameters = (
