@@ -1,10 +1,12 @@
 import datajoint as dj
 import pandas as pd
 
+from spyglass.common.common_ephys import LFP as CommonLFP  # noqa: F401
+from spyglass.common.common_filter import FirFilterParameters  # noqa: F401
+from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.v1.lfp import LFPV1, ImportedLFPV1
 from spyglass.utils.dj_helper_fn import fetch_nwb
-from spyglass.common.common_ephys import LFP as CommonLFP
 
 schema = dj.schema("lfp_merge")
 
