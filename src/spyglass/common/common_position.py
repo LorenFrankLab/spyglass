@@ -86,7 +86,9 @@ class IntervalPositionInfo(dj.Computed):
 
     def make(self, key):
         print(f"Computing position for: {key}")
-        key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["nwb_file_name"]
+        )
         raw_position = (
             RawPosition()
             & {
@@ -148,7 +150,10 @@ class IntervalPositionInfo(dj.Computed):
                 conversion=METERS_PER_CM,
                 unit="m/s",
                 data=np.concatenate(
-                    (position_info["velocity"], position_info["speed"][:, np.newaxis]),
+                    (
+                        position_info["velocity"],
+                        position_info["speed"][:, np.newaxis],
+                    ),
                     axis=1,
                 ),
                 comments=spatial_series.comments,
@@ -193,7 +198,8 @@ class IntervalPositionInfo(dj.Computed):
         time = np.asarray(spatial_series.timestamps)  # seconds
         position = np.asarray(
             pd.DataFrame(
-                spatial_series.data, columns=spatial_series.description.split(", ")
+                spatial_series.data,
+                columns=spatial_series.description.split(", "),
             ).loc[:, ["xloc", "yloc", "xloc2", "yloc2"]]
         )  # meters
 
@@ -286,7 +292,8 @@ class IntervalPositionInfo(dj.Computed):
                 upsampling_start_time, upsampling_end_time, n_samples
             )
             new_index = pd.Index(
-                np.unique(np.concatenate((position_df.index, new_time))), name="time"
+                np.unique(np.concatenate((position_df.index, new_time))),
+                name="time",
             )
             position_df = (
                 position_df.reindex(index=new_index)
@@ -295,8 +302,12 @@ class IntervalPositionInfo(dj.Computed):
             )
 
             time = np.asarray(position_df.index)
-            back_LED = np.asarray(position_df.loc[:, ["back_LED_x", "back_LED_y"]])
-            front_LED = np.asarray(position_df.loc[:, ["front_LED_x", "front_LED_y"]])
+            back_LED = np.asarray(
+                position_df.loc[:, ["back_LED_x", "back_LED_y"]]
+            )
+            front_LED = np.asarray(
+                position_df.loc[:, ["front_LED_x", "front_LED_y"]]
+            )
 
             sampling_rate = upsampling_sampling_rate
 
@@ -316,7 +327,9 @@ class IntervalPositionInfo(dj.Computed):
             truncate=8,
         )
         # convert back to between -pi and pi
-        head_orientation[~is_nan] = np.angle(np.exp(1j * head_orientation[~is_nan]))
+        head_orientation[~is_nan] = np.angle(
+            np.exp(1j * head_orientation[~is_nan])
+        )
 
         velocity = get_velocity(
             head_position,
@@ -342,7 +355,9 @@ class IntervalPositionInfo(dj.Computed):
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
-            np.asarray(nwb_data["head_position"].get_spatial_series().timestamps),
+            np.asarray(
+                nwb_data["head_position"].get_spatial_series().timestamps
+            ),
             name="time",
         )
         COLUMNS = [
@@ -356,12 +371,16 @@ class IntervalPositionInfo(dj.Computed):
         return pd.DataFrame(
             np.concatenate(
                 (
-                    np.asarray(nwb_data["head_position"].get_spatial_series().data),
-                    np.asarray(nwb_data["head_orientation"].get_spatial_series().data)[
-                        :, np.newaxis
-                    ],
                     np.asarray(
-                        nwb_data["head_velocity"].time_series["head_velocity"].data
+                        nwb_data["head_position"].get_spatial_series().data
+                    ),
+                    np.asarray(
+                        nwb_data["head_orientation"].get_spatial_series().data
+                    )[:, np.newaxis],
+                    np.asarray(
+                        nwb_data["head_velocity"]
+                        .time_series["head_velocity"]
+                        .data
                     ),
                 ),
                 axis=1,
@@ -415,7 +434,9 @@ class TrackGraph(dj.Manual):
     def plot_track_graph(self, ax=None, draw_edge_labels=False, **kwds):
         """Plot the track graph in 2D position space."""
         track_graph = self.get_networkx_track_graph()
-        plot_track_graph(track_graph, ax=ax, draw_edge_labels=draw_edge_labels, **kwds)
+        plot_track_graph(
+            track_graph, ax=ax, draw_edge_labels=draw_edge_labels, **kwds
+        )
 
     def plot_track_graph_as_1D(
         self,
@@ -468,7 +489,9 @@ class IntervalLinearizedPosition(dj.Computed):
     def make(self, key):
         print(f"Computing linear position for: {key}")
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["nwb_file_name"]
+        )
 
         position_nwb = (
             IntervalPositionInfo
@@ -479,8 +502,12 @@ class IntervalLinearizedPosition(dj.Computed):
             }
         ).fetch_nwb()[0]
 
-        position = np.asarray(position_nwb["head_position"].get_spatial_series().data)
-        time = np.asarray(position_nwb["head_position"].get_spatial_series().timestamps)
+        position = np.asarray(
+            position_nwb["head_position"].get_spatial_series().data
+        )
+        time = np.asarray(
+            position_nwb["head_position"].get_spatial_series().timestamps
+        )
 
         linearization_parameters = (
             LinearizationParameters()
@@ -547,7 +574,9 @@ class NodePicker:
         self.cid = None
         self._nodes = []
         self.node_color = node_color
-        self._nodes_plot = ax.scatter([], [], zorder=5, s=node_size, color=node_color)
+        self._nodes_plot = ax.scatter(
+            [], [], zorder=5, s=node_size, color=node_color
+        )
         self.edges = [[]]
         self.video_filename = video_filename
 
@@ -568,7 +597,9 @@ class NodePicker:
 
     def connect(self):
         if self.cid is None:
-            self.cid = self.canvas.mpl_connect("button_press_event", self.click_event)
+            self.cid = self.canvas.mpl_connect(
+                "button_press_event", self.click_event
+            )
 
     def disconnect(self):
         if self.cid is not None:
@@ -578,15 +609,21 @@ class NodePicker:
     def click_event(self, event):
         if not event.inaxes:
             return
-        if (event.key not in ["control", "shift"]) & (event.button == 1):  # left click
+        if (event.key not in ["control", "shift"]) & (
+            event.button == 1
+        ):  # left click
             self._nodes.append((event.xdata, event.ydata))
-        if (event.key not in ["control", "shift"]) & (event.button == 3):  # right click
+        if (event.key not in ["control", "shift"]) & (
+            event.button == 3
+        ):  # right click
             self.remove_point((event.xdata, event.ydata))
         if (event.key == "shift") & (event.button == 1):
             self.clear()
         if (event.key == "control") & (event.button == 1):
             point = (event.xdata, event.ydata)
-            distance_to_nodes = np.linalg.norm(self.node_positions - point, axis=1)
+            distance_to_nodes = np.linalg.norm(
+                self.node_positions - point, axis=1
+            )
             closest_node_ind = np.argmin(distance_to_nodes)
             if len(self.edges[-1]) < 2:
                 self.edges[-1].append(closest_node_ind)
@@ -623,13 +660,17 @@ class NodePicker:
             if len(edge) > 1:
                 x1, y1 = self.node_positions[edge[0]]
                 x2, y2 = self.node_positions[edge[1]]
-                self.ax.plot([x1, x2], [y1, y2], color=self.node_color, linewidth=2)
+                self.ax.plot(
+                    [x1, x2], [y1, y2], color=self.node_color, linewidth=2
+                )
 
         self.canvas.draw_idle()
 
     def remove_point(self, point):
         if len(self._nodes) > 0:
-            distance_to_nodes = np.linalg.norm(self.node_positions - point, axis=1)
+            distance_to_nodes = np.linalg.norm(
+                self.node_positions - point, axis=1
+            )
             closest_node_ind = np.argmin(distance_to_nodes)
             self._nodes.pop(closest_node_ind)
 
@@ -686,16 +727,20 @@ class PositionVideo(dj.Computed):
             + 1
         )
         video_info = (
-            VideoFile() & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
+            VideoFile()
+            & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         ).fetch1()
-        io = pynwb.NWBHDF5IO("/stelmo/nwb/raw/" + video_info["nwb_file_name"], "r")
+        io = pynwb.NWBHDF5IO(
+            "/stelmo/nwb/raw/" + video_info["nwb_file_name"], "r"
+        )
         nwb_file = io.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
         video_filename = nwb_video.external_file.value[0]
 
         nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
         output_video_filename = (
-            f"{nwb_base_filename}_{epoch:02d}_" f'{key["position_info_param_name"]}.mp4'
+            f"{nwb_base_filename}_{epoch:02d}_"
+            f'{key["position_info_param_name"]}.mp4'
         )
 
         centroids = {
@@ -705,7 +750,9 @@ class PositionVideo(dj.Computed):
         head_position_mean = np.asarray(
             position_info_df[["head_position_x", "head_position_y"]]
         )
-        head_orientation_mean = np.asarray(position_info_df[["head_orientation"]])
+        head_orientation_mean = np.asarray(
+            position_info_df[["head_orientation"]]
+        )
         video_time = np.asarray(nwb_video.timestamps)
         position_time = np.asarray(position_info_df.index)
         cm_per_pixel = nwb_video.device.meters_per_pixel * M_TO_CM
@@ -731,6 +778,7 @@ class PositionVideo(dj.Computed):
         data : ndarray, shape (n_time, 2)
         frame_size : array_like, shape (2,)
         cm_to_pixels : float
+
         Returns
         -------
         converted_data : ndarray, shape (n_time, 2)
@@ -830,8 +878,14 @@ class PositionVideo(dj.Computed):
                     ~np.isnan(head_orientation)
                 ):
                     arrow_tip = (
-                        int(head_position[0] + arrow_radius * np.cos(head_orientation)),
-                        int(head_position[1] + arrow_radius * np.sin(head_orientation)),
+                        int(
+                            head_position[0]
+                            + arrow_radius * np.cos(head_orientation)
+                        ),
+                        int(
+                            head_position[1]
+                            + arrow_radius * np.sin(head_orientation)
+                        ),
                     )
                     cv2.arrowedLine(
                         img=frame,
@@ -876,7 +930,7 @@ class SelectFromCollection:
     Note that this tool selects collection objects based on their *origins*
     (i.e., `offsets`).
 
-    Parameters
+    Attributes
     ----------
     ax : `~matplotlib.axes.Axes`
         Axes to interact with.
@@ -897,7 +951,12 @@ class SelectFromCollection:
                 color="white", linestyle="-", linewidth=2, alpha=0.5, zorder=10
             ),
             markerprops=dict(
-                marker="o", markersize=7, mec="white", mfc="white", alpha=0.5, zorder=10
+                marker="o",
+                markersize=7,
+                mec="white",
+                mfc="white",
+                alpha=0.5,
+                zorder=10,
             ),
         )
         self.ind = []
@@ -958,11 +1017,15 @@ class SelectFromCollection:
         skeleton = skimage.morphology.skeletonize(mask)
         csr_graph, coordinates, _ = skeleton_to_csgraph(skeleton)
         nx_graph = nx.from_scipy_sparse_matrix(csr_graph)
-        node_positions = dict(zip(range(coordinates.shape[0]), coordinates[:, ::-1]))
+        node_positions = dict(
+            zip(range(coordinates.shape[0]), coordinates[:, ::-1])
+        )
         _clean_positions_dict(node_positions, nx_graph)
         node_ind = np.asarray(list(node_positions.keys()))
         temp_node_positions = np.full((node_ind.max() + 1, 2), np.nan)
-        temp_node_positions[node_ind] = np.asarray(list(node_positions.values()))
+        temp_node_positions[node_ind] = np.asarray(
+            list(node_positions.values())
+        )
         node_positions = temp_node_positions
         edges = list(nx_graph.edges)
 

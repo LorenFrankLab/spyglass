@@ -53,7 +53,11 @@ def new_nwbfile_raw_file_name(tmp_path):
     os.mkdir(raw_dir)
 
     dj.config["stores"] = {
-        "raw": {"protocol": "file", "location": str(raw_dir), "stage": str(raw_dir)},
+        "raw": {
+            "protocol": "file",
+            "location": str(raw_dir),
+            "stage": str(raw_dir),
+        },
     }
 
     file_name = "raw.nwb"
@@ -79,11 +83,15 @@ def test_copy_nwb(
     new_nwbfile_no_ephys_file_name,
     moved_nwbfile_no_ephys_file_path,
 ):
-    copy_nwb_link_raw_ephys(new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name)
+    copy_nwb_link_raw_ephys(
+        new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name
+    )
 
     # new file should not have ephys data
     base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
-    new_nwbfile_raw_file_name_abspath = base_dir / "raw" / new_nwbfile_raw_file_name
+    new_nwbfile_raw_file_name_abspath = (
+        base_dir / "raw" / new_nwbfile_raw_file_name
+    )
     out_nwb_file_abspath = base_dir / "raw" / new_nwbfile_no_ephys_file_name
     with pynwb.NWBHDF5IO(path=str(out_nwb_file_abspath), mode="r") as io:
         nwbfile = io.read()
@@ -97,7 +105,9 @@ def test_copy_nwb(
     # test readability after moving the linking raw file (paths are stored as relative paths in NWB)
     # so this should break the link (moving the linked-to file should also break the link)
     shutil.move(out_nwb_file_abspath, moved_nwbfile_no_ephys_file_path)
-    with pynwb.NWBHDF5IO(path=str(moved_nwbfile_no_ephys_file_path), mode="r") as io:
+    with pynwb.NWBHDF5IO(
+        path=str(moved_nwbfile_no_ephys_file_path), mode="r"
+    ) as io:
         with pytest.warns(BrokenLinkWarning):
             nwbfile = io.read()  # should raise BrokenLinkWarning
         assert "test_ts" not in nwbfile.acquisition

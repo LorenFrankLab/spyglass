@@ -80,7 +80,11 @@ class SortingviewWorkspace(dj.Computed):
             google_user_ids.append(google_user_id[0])
 
         # do
-        workspace_uri, recording_id, sorting_id = _create_spikesortingview_workspace(
+        (
+            workspace_uri,
+            recording_id,
+            sorting_id,
+        ) = _create_spikesortingview_workspace(
             recording_path=recording_path,
             sorting_path=sorting_path,
             merge_groups=merge_groups,
@@ -119,12 +123,14 @@ class SortingviewWorkspace(dj.Computed):
     def url_trythis(self, key: dict, sortingview_sorting_id: str = None):
         """Generate a URL for visualizing and curating a sorting on the web.
         Will print instructions on how to do the curation.
+
         Parameters
         ----------
         key : dict
             An entry from SortingviewWorkspace table
         sortingview_sorting_id : str, optional
-            sortingview sorting ID to visualize; if None then chooses the first one
+            sortingview sorting ID to visualize. If None then chooses the first one
+
         Returns
         -------
         url : str
@@ -148,7 +154,9 @@ class SortingviewWorkspace(dj.Computed):
         initial_curation = {"labelsByUnit": initial_labels}
 
         # custom metrics
-        unit_metrics = workspace.get_unit_metrics_for_sorting(sortingview_sorting_id)
+        unit_metrics = workspace.get_unit_metrics_for_sorting(
+            sortingview_sorting_id
+        )
 
         # This will print some instructions on how to do the curation
         # old: sv.trythis_start_sorting_curation

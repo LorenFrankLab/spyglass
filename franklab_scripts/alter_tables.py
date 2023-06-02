@@ -24,7 +24,9 @@ def main():
 
 
 def update_cls(cls):
-    if issubclass(cls, (dj.Manual, dj.Lookup, dj.Imported, dj.Computed, dj.Part)):
+    if issubclass(
+        cls, (dj.Manual, dj.Lookup, dj.Imported, dj.Computed, dj.Part)
+    ):
         print("Updating", cls)
         try:
             # NOTE: datajoint does not allow altering indexes yet

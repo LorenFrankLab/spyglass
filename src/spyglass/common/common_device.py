@@ -266,7 +266,9 @@ class DataAcquisitionDevice(dj.Manual):
             )
             if val.lower() in ["y", "yes"]:
                 key = {"data_acquisition_device_amplifier": amplifier}
-                DataAcquisitionDeviceAmplifier.insert1(key, skip_duplicates=True)
+                DataAcquisitionDeviceAmplifier.insert1(
+                    key, skip_duplicates=True
+                )
             else:
                 raise PopulateException(
                     f"User chose not to add data acquisition device amplifier '{amplifier}' to the database."
@@ -461,7 +463,9 @@ class Probe(dj.Manual):
 
         # make a dict mapping probe type to dict of device metadata from the config YAML if exists
         if "Probe" in config:
-            config_probes = [probe_dict["probe_type"] for probe_dict in config["Probe"]]
+            config_probes = [
+                probe_dict["probe_type"] for probe_dict in config["Probe"]
+            ]
         else:
             config_probes = list()
 
@@ -484,7 +488,9 @@ class Probe(dj.Manual):
             getattr(nwb_probe_obj, "manufacturer") or ""
         )
         new_probe_type_dict["probe_type"] = nwb_probe_obj.probe_type
-        new_probe_type_dict["probe_description"] = nwb_probe_obj.probe_description
+        new_probe_type_dict[
+            "probe_description"
+        ] = nwb_probe_obj.probe_description
         new_probe_type_dict["num_shanks"] = len(nwb_probe_obj.shanks)
 
         cls._add_probe_type(new_probe_type_dict)
@@ -505,12 +511,18 @@ class Probe(dj.Manual):
             for electrode in shank.shanks_electrodes.values():
                 # the next line will need to be fixed if we have different sized contacts on a shank
                 elect_dict[electrode.name] = dict()
-                elect_dict[electrode.name]["probe_id"] = new_probe_dict["probe_type"]
-                elect_dict[electrode.name]["probe_shank"] = shank_dict[shank.name][
-                    "probe_shank"
+                elect_dict[electrode.name]["probe_id"] = new_probe_dict[
+                    "probe_type"
                 ]
-                elect_dict[electrode.name]["contact_size"] = nwb_probe_obj.contact_size
-                elect_dict[electrode.name]["probe_electrode"] = int(electrode.name)
+                elect_dict[electrode.name]["probe_shank"] = shank_dict[
+                    shank.name
+                ]["probe_shank"]
+                elect_dict[electrode.name][
+                    "contact_size"
+                ] = nwb_probe_obj.contact_size
+                elect_dict[electrode.name]["probe_electrode"] = int(
+                    electrode.name
+                )
                 elect_dict[electrode.name]["rel_x"] = electrode.rel_x
                 elect_dict[electrode.name]["rel_y"] = electrode.rel_y
                 elect_dict[electrode.name]["rel_z"] = electrode.rel_z
@@ -616,7 +628,9 @@ class Probe(dj.Manual):
 
         query = ProbeType & {"probe_type": probe_type}
         if len(query) == 0:
-            print(f"No ProbeType found with probe_type '{probe_type}'. Aborting.")
+            print(
+                f"No ProbeType found with probe_type '{probe_type}'. Aborting."
+            )
             return
 
         new_probe_dict = dict()
@@ -649,7 +663,9 @@ class Probe(dj.Manual):
 
                     # build the dictionary of Probe.Shank data
                     shank_dict[shank_index] = dict()
-                    shank_dict[shank_index]["probe_id"] = new_probe_dict["probe_id"]
+                    shank_dict[shank_index]["probe_id"] = new_probe_dict[
+                        "probe_id"
+                    ]
                     shank_dict[shank_index]["probe_shank"] = shank_index
 
                 # get the probe shank index associated with this Electrode

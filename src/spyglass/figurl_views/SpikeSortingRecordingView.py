@@ -102,5 +102,7 @@ def create_mountain_layout(
 def _upload_data_and_return_sha1(data):
     data_uri = kc.store_json(data)
     data_hash = data_uri.split("/")[2]
-    kc.upload_file(data_uri, channel=os.environ["FIGURL_CHANNEL"], single_chunk=True)
+    kc.upload_file(
+        data_uri, channel=os.environ["FIGURL_CHANNEL"], single_chunk=True
+    )
     return data_hash

@@ -61,7 +61,9 @@ def create_1D_decode_view(
         linear_position = np.asarray(linear_position).squeeze()
 
     trimmed_posterior = discretize_and_trim(posterior)
-    observations_per_time = get_observations_per_time(trimmed_posterior, posterior)
+    observations_per_time = get_observations_per_time(
+        trimmed_posterior, posterior
+    )
     sampling_freq = get_sampling_freq(posterior.time)
     start_time_sec = posterior.time.values[0]
     if ref_time_sec is not None:
