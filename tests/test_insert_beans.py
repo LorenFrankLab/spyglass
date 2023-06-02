@@ -15,10 +15,17 @@ def test_insert_sessions():
     raw_dir = pathlib.Path(os.environ["SPYGLASS_BASE_DIR"]) / "raw"
     nwbfile_path = raw_dir / "test.nwb"
 
-    from spyglass.common import Session, DataAcquisitionDevice, CameraDevice, Probe
+    from spyglass.common import (
+        Session,
+        DataAcquisitionDevice,
+        CameraDevice,
+        Probe,
+    )
     from spyglass.data_import import insert_sessions
 
-    test_path = "ipfs://bafybeie4svt3paz5vr7cw7mkgibutbtbzyab4s24hqn5pzim3sgg56m3n4"
+    test_path = (
+        "ipfs://bafybeie4svt3paz5vr7cw7mkgibutbtbzyab4s24hqn5pzim3sgg56m3n4"
+    )
     try:
         local_test_path = kcl.load_file(test_path)
     except Exception as e:
@@ -32,7 +39,9 @@ def test_insert_sessions():
     os.rename(local_test_path, nwbfile_path)
 
     # test that the file can be read. this is not used otherwise
-    with pynwb.NWBHDF5IO(path=str(nwbfile_path), mode="r", load_namespaces=True) as io:
+    with pynwb.NWBHDF5IO(
+        path=str(nwbfile_path), mode="r", load_namespaces=True
+    ) as io:
         nwbfile = io.read()
         assert nwbfile is not None
 

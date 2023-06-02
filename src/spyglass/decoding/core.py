@@ -1,7 +1,10 @@
 import numpy as np
 import pandas as pd
 from spyglass.common.common_behav import RawPosition
-from spyglass.common.common_interval import IntervalList, interval_list_intersect
+from spyglass.common.common_interval import (
+    IntervalList,
+    interval_list_intersect,
+)
 from replay_trajectory_classification.observation_model import ObservationModel
 from replay_trajectory_classification.continuous_state_transitions import (
     RandomWalk,
@@ -28,7 +31,10 @@ def get_valid_ephys_position_times_from_interval(
     """
     interval_valid_times = (
         IntervalList
-        & {"nwb_file_name": nwb_file_name, "interval_list_name": interval_list_name}
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_list_name,
+        }
     ).fetch1("valid_times")
 
     position_interval_names = (
@@ -39,20 +45,29 @@ def get_valid_ephys_position_times_from_interval(
     ).fetch("interval_list_name")
     position_interval_names = position_interval_names[
         np.argsort(
-            [int(name.strip("pos valid time")) for name in position_interval_names]
+            [
+                int(name.strip("pos valid time"))
+                for name in position_interval_names
+            ]
         )
     ]
     valid_pos_times = [
         (
             IntervalList
-            & {"nwb_file_name": nwb_file_name, "interval_list_name": pos_interval_name}
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": pos_interval_name,
+            }
         ).fetch1("valid_times")
         for pos_interval_name in position_interval_names
     ]
 
     valid_ephys_times = (
         IntervalList
-        & {"nwb_file_name": nwb_file_name, "interval_list_name": "raw data valid times"}
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
     ).fetch1("valid_times")
 
     return interval_list_intersect(
@@ -73,7 +88,9 @@ def get_epoch_interval_names(nwb_file_name: str) -> list[str]:
     epoch_names : list[str]
         List of interval names that are epochs.
     """
-    interval_list = pd.DataFrame(IntervalList() & {"nwb_file_name": nwb_file_name})
+    interval_list = pd.DataFrame(
+        IntervalList() & {"nwb_file_name": nwb_file_name}
+    )
 
     interval_list = interval_list.loc[
         interval_list.interval_list_name.str.contains(
@@ -100,7 +117,9 @@ def get_valid_ephys_position_times_by_epoch(
 
     """
     return {
-        epoch: get_valid_ephys_position_times_from_interval(epoch, nwb_file_name)
+        epoch: get_valid_ephys_position_times_from_interval(
+            epoch, nwb_file_name
+        )
         for epoch in get_epoch_interval_names(nwb_file_name)
     }
 

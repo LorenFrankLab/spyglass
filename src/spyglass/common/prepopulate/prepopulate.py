@@ -47,7 +47,9 @@ def populate_from_yaml(yaml_path: str):
                 continue
 
             primary_key_values = {
-                k: v for k, v in entry_dict.items() if k in table_cls.primary_key
+                k: v
+                for k, v in entry_dict.items()
+                if k in table_cls.primary_key
             }
             if not primary_key_values:
                 print(
@@ -72,7 +74,9 @@ def _get_table_cls(table_name):
     if "." in table_name:  # part table
         master_table_name = table_name[0 : table_name.index(".")]
         part_table_name = table_name[table_name.index(".") + 1 :]
-        master_table_cls = getattr(sys.modules["spyglass.common"], master_table_name)
+        master_table_cls = getattr(
+            sys.modules["spyglass.common"], master_table_name
+        )
         part_table_cls = getattr(master_table_cls, part_table_name)
         return part_table_cls
     else:

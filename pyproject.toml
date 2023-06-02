@@ -1,6 +1,4 @@
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+
 
 [project]
 name = "spyglass-neuro"
@@ -61,6 +59,13 @@ dependencies = [
     "ndx_franklab_novela>=0.1.0",
 ]
 
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [project.scripts]
 spyglass_cli = "spyglass.cli:cli"
 
@@ -70,8 +75,9 @@ spyglass_cli = "spyglass.cli:cli"
 
 [project.optional-dependencies]
 position = ["ffmpeg", "numba>=0.54", "deeplabcut<2.3.0"]
+
 [tool.black]
-# line-length = 120
+line-length = 80
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb'

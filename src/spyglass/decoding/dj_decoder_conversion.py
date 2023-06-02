@@ -53,7 +53,9 @@ def _convert_env_dict(env_params: dict) -> Environment:
     environment : Environment
     """
     if env_params["track_graph"] is not None:
-        env_params["track_graph"] = make_track_graph(**env_params["track_graph"])
+        env_params["track_graph"] = make_track_graph(
+            **env_params["track_graph"]
+        )
 
     return Environment(**env_params)
 
@@ -66,7 +68,9 @@ def _to_dict(transition: object) -> dict:
     return parameters
 
 
-def _convert_transitions_to_dict(transitions: list[list[object]]) -> list[list[dict]]:
+def _convert_transitions_to_dict(
+    transitions: list[list[object]],
+) -> list[list[dict]]:
     """Converts a list of lists of transition classes into a list of lists of dictionaries"""
     return [
         [_to_dict(transition) for transition in transition_rows]
@@ -97,19 +101,27 @@ def restore_classes(params: dict) -> dict:
     }
 
     params["classifier_params"]["continuous_transition_types"] = [
-        [_convert_dict_to_class(st, continuous_state_transition_types) for st in sts]
+        [
+            _convert_dict_to_class(st, continuous_state_transition_types)
+            for st in sts
+        ]
         for sts in params["classifier_params"]["continuous_transition_types"]
     ]
     params["classifier_params"]["environments"] = [
         _convert_env_dict(env_params)
         for env_params in params["classifier_params"]["environments"]
     ]
-    params["classifier_params"]["discrete_transition_type"] = _convert_dict_to_class(
+    params["classifier_params"][
+        "discrete_transition_type"
+    ] = _convert_dict_to_class(
         params["classifier_params"]["discrete_transition_type"],
         discrete_state_transition_types,
     )
-    params["classifier_params"]["initial_conditions_type"] = _convert_dict_to_class(
-        params["classifier_params"]["initial_conditions_type"], initial_conditions_types
+    params["classifier_params"][
+        "initial_conditions_type"
+    ] = _convert_dict_to_class(
+        params["classifier_params"]["initial_conditions_type"],
+        initial_conditions_types,
     )
 
     if params["classifier_params"]["observation_models"] is not None:
@@ -137,7 +149,9 @@ def _convert_environment_to_dict(env: Environment) -> dict:
     if env.track_graph is not None:
         track_graph = env.track_graph
         env.track_graph = {
-            "node_positions": [v["pos"] for v in dict(track_graph.nodes).values()],
+            "node_positions": [
+                v["pos"] for v in dict(track_graph.nodes).values()
+            ],
             "edges": list(track_graph.edges),
         }
 
@@ -153,7 +167,9 @@ def convert_classes_to_dict(key: dict) -> dict:
         ]
     except TypeError:
         key["classifier_params"]["environments"] = [
-            _convert_environment_to_dict(key["classifier_params"]["environments"])
+            _convert_environment_to_dict(
+                key["classifier_params"]["environments"]
+            )
         ]
     key["classifier_params"][
         "continuous_transition_types"

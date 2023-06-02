@@ -44,7 +44,9 @@ class MergedSortingExtractor(si.BaseSorting):
                 # sort the concatenated spike train (chronological)
                 spike_train = np.sort(spike_train)
                 # add the unit to the new sorting segment
-                new_sorting_segment.add_unit(representative_unit_id, spike_train)
+                new_sorting_segment.add_unit(
+                    representative_unit_id, spike_train
+                )
             # Now we'll take care of all of the unit_ids that are not part of a merge group
             for unit_id in parent_sorting.get_unit_ids():
                 if unit_id not in used_unit_ids:

@@ -29,7 +29,9 @@ class PoseEstimation:
 
         # meta file: pkl - info about this  DLC run (input video, configuration, etc.)
         if pkl_path is None:
-            pkl_paths = list(self.dlc_dir.rglob(f"{filename_prefix}*meta.pickle"))
+            pkl_paths = list(
+                self.dlc_dir.rglob(f"{filename_prefix}*meta.pickle")
+            )
             assert len(pkl_paths) == 1, (
                 "Unable to find one unique .pickle file in: "
                 + f"{dlc_dir} - Found: {len(pkl_paths)}"
@@ -60,7 +62,9 @@ class PoseEstimation:
             yml_paths = list(self.dlc_dir.glob(f"{filename_prefix}*.y*ml"))
             # If multiple, defer to the one we save.
             if len(yml_paths) > 1:
-                yml_paths = [val for val in yml_paths if val.stem == "dj_dlc_config"]
+                yml_paths = [
+                    val for val in yml_paths if val.stem == "dj_dlc_config"
+                ]
             assert len(yml_paths) == 1, (
                 "Unable to find one unique .yaml file in: "
                 + f"{dlc_dir} - Found: {len(yml_paths)}"
@@ -86,7 +90,9 @@ class PoseEstimation:
             "Task": self.yml["Task"],
             "date": self.yml["date"],
             "iteration": self.pkl["iteration (active-learning)"],
-            "shuffle": int(re.search("shuffle(\d+)", self.pkl["Scorer"]).groups()[0]),
+            "shuffle": int(
+                re.search("shuffle(\d+)", self.pkl["Scorer"]).groups()[0]
+            ),
             "snapshotindex": self.yml["snapshotindex"],
             "trainingsetindex": train_idx,
             "training_iteration": train_iter,
@@ -185,7 +191,10 @@ def save_yaml(output_dir, config_dict, filename="dj_dlc_config", mkdir=True):
               If extension is included, removed and replaced with "yaml".
     mkdir (bool): Optional, True. Make new directory if output_dir not exist
 
-    Returns: path of saved file as string - due to DLC func preference for strings
+    Returns
+    -------
+    str
+        path of saved file as string - due to DLC func preference for strings
     """
     from deeplabcut.utils.auxiliaryfunctions import write_config
 
@@ -216,9 +225,11 @@ def do_pose_estimation(
     robust_nframes=False,
     allow_growth=False,
     use_shelve=False,
-    modelprefix="",  # need from paramset
 ):
     """Launch DLC's analyze_videos within element-deeplabcut
+
+    Other optional parameters may be set other than those described below. See
+    deeplabcut.analyze_videos parameters for descriptions/defaults.
 
     Parameters
     ----------
@@ -226,7 +237,6 @@ def do_pose_estimation(
     dlc_model: element-deeplabcut dlc.Model dict
     project_path: path to project config.yml
     output_dir: where to save output
-    OTHERS: Optional, set with defaults. See deeplabcut.analyze_videos parameters
     """
     from deeplabcut.pose_estimation_tensorflow import analyze_videos
 
