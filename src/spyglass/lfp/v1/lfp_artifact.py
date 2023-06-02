@@ -40,7 +40,9 @@ class LFPArtifactDetectionParameters(dj.Manual):
             },
         }
 
-        self.insert1(["default", artifact_params], skip_duplicates=True)
+        self.insert1(
+            ["default_difference", artifact_params], skip_duplicates=True
+        )
 
         artifact_params_none = {
             "artifact_detection_algorithm": "difference",
@@ -54,6 +56,16 @@ class LFPArtifactDetectionParameters(dj.Manual):
             },
         }
         self.insert1(["none", artifact_params_none], skip_duplicates=True)
+
+        artifact_params_mad = {
+            "artifact_detection_algorithm": "mad",
+            "artifact_detection_algorithm_params": {
+                "mad_thresh": 6.0,  # akin to z-score standard deviations if the distribution is normal
+                "proportion_above_thresh": 0.1,
+                "removal_window_ms": 10.0,  # in milliseconds
+            },
+        }
+        self.insert1(["default_mad", artifact_params_mad], skip_duplicates=True)
 
 
 @schema
