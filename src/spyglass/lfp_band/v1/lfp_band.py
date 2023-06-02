@@ -25,18 +25,20 @@ schema = dj.schema("lfp_band_v1")
 
 @schema
 class LFPBandSelection(dj.Manual):
+    """The user's selection of LFP data to be filtered in a given frequency band."""
+
     definition = """
-    -> LFPOutput
-    -> FirFilterParameters                   # the filter to use for the data
+    -> LFPOutput                                                          # the LFP data to be filtered
+    -> FirFilterParameters                                                # the filter to use for the data
     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
-    lfp_band_sampling_rate: int    # the sampling rate for this band
+    lfp_band_sampling_rate: int                                           # the sampling rate for this band
     ---
     min_interval_len = 1.0: float  # the minimum length of a valid interval to filter
     """
 
     class LFPBandElectrode(dj.Part):
         definition = """
-        -> LFPBandSelection
+        -> LFPBandSelection # the LFP band selection
         -> LFPElectrodeGroup.LFPElectrode  # the LFP electrode to be filtered
         reference_elect_id = -1: int  # the reference electrode to use; -1 for no reference
         ---
@@ -44,28 +46,31 @@ class LFPBandSelection(dj.Manual):
 
     def set_lfp_band_electrodes(
         self,
-        nwb_file_name,
-        lfp_id,
-        electrode_list,
-        filter_name,
-        interval_list_name,
-        reference_electrode_list,
-        lfp_band_sampling_rate,
+        nwb_file_name: str,
+        lfp_id: int,
+        electrode_list: list[int],
+        filter_name: str,
+        interval_list_name: str,
+        reference_electrode_list: list[int],
+        lfp_band_sampling_rate: int,
     ):
-        # TODO: fix docstring to match normal format.
-        """
-        Adds an entry for each electrode in the electrode_list with the specified filter, interval_list, and
-        reference electrode.
-        :param nwb_file_name: string - the name of the nwb file for the desired session
-        :param lfp_id: uuid - the uuid for the LFPOutput to use
-        :param electrode_list: list of LFP electrodes (electrode ids) to be filtered
-        :param filter_name: the name of the filter (from the FirFilterParameters schema)
-        :param interval_name: the name of the interval list (from the IntervalList schema)
-        :param reference_electrode_list: A single electrode id corresponding to the reference to use for all
-        electrodes or a list with one element per entry in the electrode_list
-        :param lfp_band_sampling_rate: The output sampling rate to be used for the filtered data; must be an
-        integer divisor of the LFP sampling rate
-        :return: none
+        """Sets the electrodes to be filtered for a given LFP
+
+        Parameters
+        ----------
+        nwb_file_name: str
+            The name of the NWB file containing the LFP data
+        lfp_id: int
+            The id of the LFP data to be filtered
+        electrode_list: list
+            A list of the electrodes to be filtered
+        filter_name: str
+            The name of the filter to be used
+        interval_list_name: str
+            The name of the interval list to be used
+        reference_electrode_list: list
+            A list of the reference electrodes to be used
+        lfp_band_sampling_rate: int
         """
         # Error checks on parameters
         # electrode_list
@@ -89,28 +94,28 @@ class LFPBandSelection(dj.Manual):
                 f"samping rate {lfp_sampling_rate}"
             )
         # filter
-        query = FirFilterParameters() & {
+        filter_query = FirFilterParameters() & {
             "filter_name": filter_name,
             "filter_sampling_rate": lfp_sampling_rate,
         }
-        if not query:
+        if not filter_query:
             raise ValueError(
                 f"filter {filter_name}, sampling rate {lfp_sampling_rate} is not in the FirFilterParameters table"
             )
         # interval_list
-        query = IntervalList() & {
+        interval_query = IntervalList() & {
             "nwb_file_name": nwb_file_name,
             "interval_name": interval_list_name,
         }
-        if not query:
+        if not interval_query:
             raise ValueError(
                 f"interval list {interval_list_name} is not in the IntervalList table; the list must be "
                 "added before this function is called"
             )
         # reference_electrode_list
-        if len(reference_electrode_list) != 1 and len(reference_electrode_list) != len(
-            electrode_list
-        ):
+        if len(reference_electrode_list) != 1 and len(
+            reference_electrode_list
+        ) != len(electrode_list):
             raise ValueError(
                 "reference_electrode_list must contain either 1 or len(electrode_list) elements"
             )
@@ -126,17 +131,20 @@ class LFPBandSelection(dj.Manual):
         ref_list = np.zeros((len(electrode_list),))
         ref_list[:] = reference_electrode_list
 
-        key = dict()
-        key["nwb_file_name"] = nwb_file_name
-        key["lfp_id"] = lfp_id
-        key["filter_name"] = filter_name
-        key["filter_sampling_rate"] = lfp_sampling_rate
-        key["target_interval_list_name"] = interval_list_name
-        key["lfp_band_sampling_rate"] = lfp_sampling_rate // decimation
+        key = dict(
+            nwb_file_name=nwb_file_name,
+            lfp_id=lfp_id,
+            filter_name=filter_name,
+            filter_sampling_rate=lfp_sampling_rate,
+            target_interval_list_name=interval_list_name,
+            lfp_band_sampling_rate=lfp_sampling_rate // decimation,
+        )
         # insert an entry into the main LFPBandSelectionTable
         self.insert1(key, skip_duplicates=True)
 
-        key["lfp_electrode_group_name"] = lfp_object.fetch1("lfp_electrode_group_name")
+        key["lfp_electrode_group_name"] = lfp_object.fetch1(
+            "lfp_electrode_group_name"
+        )
         # iterate through all of the new elements and add them
         for e, r in zip(electrode_list, ref_list):
             elect_key = (
@@ -149,7 +157,10 @@ class LFPBandSelection(dj.Manual):
             ).fetch1("KEY")
             for item in elect_key:
                 key[item] = elect_key[item]
-            query = Electrode & {"nwb_file_name": nwb_file_name, "electrode_id": e}
+            query = Electrode & {
+                "nwb_file_name": nwb_file_name,
+                "electrode_id": e,
+            }
             key["reference_elect_id"] = r
             self.LFPBandElectrode().insert1(key, skip_duplicates=True)
 
@@ -157,10 +168,10 @@ class LFPBandSelection(dj.Manual):
 @schema
 class LFPBandV1(dj.Computed):
     definition = """
-    -> LFPBandSelection
+    -> LFPBandSelection              # the LFP band selection
     ---
-    -> AnalysisNwbfile
-    -> IntervalList
+    -> AnalysisNwbfile               # the name of the nwb file with the lfp data
+    -> IntervalList                  # the final interval list of valid times for the data
     lfp_band_object_id: varchar(40)  # the NWB object ID for loading this object from the file
     """
 
@@ -187,9 +198,9 @@ class LFPBandV1(dj.Computed):
             .get_lfp_object({"lfp_id": key["lfp_id"]})
             .fetch1("lfp_sampling_rate")
         )
-        interval_list_name, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1(
-            "target_interval_list_name", "lfp_band_sampling_rate"
-        )
+        interval_list_name, lfp_band_sampling_rate = (
+            LFPBandSelection() & key
+        ).fetch1("target_interval_list_name", "lfp_band_sampling_rate")
         valid_times = (
             IntervalList()
             & {
@@ -218,14 +229,18 @@ class LFPBandV1(dj.Computed):
 
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (
             LFPBandSelection() & key
-        ).fetch1("filter_name", "filter_sampling_rate", "lfp_band_sampling_rate")
+        ).fetch1(
+            "filter_name", "filter_sampling_rate", "lfp_band_sampling_rate"
+        )
 
         decimation = int(lfp_sampling_rate) // lfp_band_sampling_rate
 
         # load in the timestamps
         timestamps = np.asarray(lfp_object.timestamps)
         # get the indices of the first timestamp and the last timestamp that are within the valid times
-        included_indices = interval_list_contains_ind(lfp_band_valid_times, timestamps)
+        included_indices = interval_list_contains_ind(
+            lfp_band_valid_times, timestamps
+        )
         # pad the indices by 1 on each side to avoid message in filter_data
         if included_indices[0] > 0:
             included_indices[0] -= 1
@@ -241,14 +256,17 @@ class LFPBandV1(dj.Computed):
         )
 
         # get the indices of the electrodes to be filtered and the references
-        lfp_band_elect_index = get_electrode_indices(lfp_object, lfp_band_elect_id)
+        lfp_band_elect_index = get_electrode_indices(
+            lfp_object, lfp_band_elect_id
+        )
         lfp_band_ref_index = get_electrode_indices(lfp_object, lfp_band_ref_id)
 
         # subtract off the references for the selected channels
         for index, elect_index in enumerate(lfp_band_elect_index):
             if lfp_band_ref_id[index] != -1:
                 lfp_data[:, elect_index] = (
-                    lfp_data[:, elect_index] - lfp_data[:, lfp_band_ref_index[index]]
+                    lfp_data[:, elect_index]
+                    - lfp_data[:, lfp_band_ref_index[index]]
                 )
 
         # get the LFP filter that matches the raw data
@@ -272,7 +290,9 @@ class LFPBandV1(dj.Computed):
 
         # create the analysis nwb file to store the results.
         lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
-        lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
+        lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(
+            lfp_band_file_name
+        )
         # filter the data and write to an the nwb file
         filtered_data, new_timestamps = FirFilterParameters().filter_data(
             timestamps,
@@ -303,7 +323,8 @@ class LFPBandV1(dj.Computed):
             )
             lfp = pynwb.ecephys.LFP(electrical_series=es)
             ecephys_module = nwbf.create_processing_module(
-                name="ecephys", description=f"LFP data processed with {filter_name}"
+                name="ecephys",
+                description=f"LFP data processed with {filter_name}",
             )
             ecephys_module.add(lfp)
             io.write(nwbf)
@@ -317,7 +338,10 @@ class LFPBandV1(dj.Computed):
         # finally, we need to censor the valid times to account for the downsampling if this is the first time we've
         # downsampled these data
         key["interval_list_name"] = (
-            interval_list_name + " lfp band " + str(lfp_band_sampling_rate) + "Hz"
+            interval_list_name
+            + " lfp band "
+            + str(lfp_band_sampling_rate)
+            + "Hz"
         )
         tmp_valid_times = (
             IntervalList
@@ -342,7 +366,9 @@ class LFPBandV1(dj.Computed):
             # check that the valid times are the same
             assert np.isclose(
                 tmp_valid_times[0], lfp_band_valid_times
-            ).all(), "previously saved lfp band times do not match current times"
+            ).all(), (
+                "previously saved lfp band times do not match current times"
+            )
 
         from spyglass.lfp_band.lfp_band_merge import LFPBandOutput
 
@@ -362,18 +388,21 @@ class LFPBandV1(dj.Computed):
         )
 
     def fetch1_dataframe(self, *attrs, **kwargs):
+        """Fetches the filtered data as a dataframe"""
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,
-            index=pd.Index(filtered_nwb["filtered_data"].timestamps, name="time"),
+            index=pd.Index(
+                filtered_nwb["filtered_data"].timestamps, name="time"
+            ),
         )
 
-    def compute_analytic_signal(self, electrode_list, **kwargs):
+    def compute_analytic_signal(self, electrode_list: list[int], **kwargs):
         """Computes the hilbert transform of a given LFPBand signal using scipy.signal.hilbert
 
         Parameters
         ----------
-        electrode_list: list
+        electrode_list: list[int]
             A list of the electrodes to compute the hilbert transform of
 
         Returns
@@ -388,7 +417,9 @@ class LFPBandV1(dj.Computed):
         """
 
         filtered_band = self.fetch_nwb()[0]["filtered_data"]
-        electrode_index = np.isin(filtered_band.electrodes.data[:], electrode_list)
+        electrode_index = np.isin(
+            filtered_band.electrodes.data[:], electrode_list
+        )
         if len(electrode_list) != np.sum(electrode_index):
             raise ValueError(
                 "Some of the electrodes specified in electrode_list are missing in the current LFPBand table."
@@ -400,16 +431,56 @@ class LFPBandV1(dj.Computed):
         )
         return analytic_signal_df
 
-    def compute_signal_phase(self, electrode_list=[], **kwargs):
-        analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+    def compute_signal_phase(
+        self, electrode_list: list[int] = None, **kwargs
+    ) -> pd.DataFrame:
+        """Computes the phase of a given LFPBand signals using the hilbert transform
+
+        Parameters
+        ----------
+        electrode_list : list[int], optional
+            A list of the electrodes to compute the phase of, by default None
+
+        Returns
+        -------
+        signal_phase_df : pd.DataFrame
+            DataFrame containing the phase of the signals
+        """
+        if electrode_list is None:
+            electrode_list = []
+
+        analytic_signal_df = self.compute_analytic_signal(
+            electrode_list, **kwargs
+        )
+
         return pd.DataFrame(
             np.angle(analytic_signal_df) + np.pi,
             columns=analytic_signal_df.columns,
             index=analytic_signal_df.index,
         )
 
-    def compute_signal_power(self, electrode_list=[], **kwargs):
-        analytic_signal_df = self.compute_analytic_signal(electrode_list, **kwargs)
+    def compute_signal_power(
+        self, electrode_list: list[int] = None, **kwargs
+    ) -> pd.DataFrame:
+        """Computes the power of a given LFPBand signals using the hilbert transform
+
+        Parameters
+        ----------
+        electrode_list : list[int], optional
+            A list of the electrodes to compute the power of, by default None
+
+        Returns
+        -------
+        signal_power_df : pd.DataFrame
+            DataFrame containing the power of the signals
+        """
+        if electrode_list is None:
+            electrode_list = []
+
+        analytic_signal_df = self.compute_analytic_signal(
+            electrode_list, **kwargs
+        )
+
         return pd.DataFrame(
             np.abs(analytic_signal_df) ** 2,
             columns=analytic_signal_df.columns,

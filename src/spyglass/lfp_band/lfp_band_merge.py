@@ -29,12 +29,17 @@ class LFPBandOutput(dj.Manual):
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
-                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
             )
 
         def fetch1_dataframe(self, *attrs, **kwargs):
             filtered_nwb = self.fetch_nwb()[0]
             return pd.DataFrame(
                 filtered_nwb["filtered_data"].data,
-                index=pd.Index(filtered_nwb["filtered_data"].timestamps, name="time"),
+                index=pd.Index(
+                    filtered_nwb["filtered_data"].timestamps, name="time"
+                ),
             )
