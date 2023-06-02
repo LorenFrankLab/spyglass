@@ -67,28 +67,11 @@ class LFPOutput(dj.Manual):
                 index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
             )
 
-    @staticmethod
-    def get_lfp_object(key: dict):
-        """Returns the lfp object corresponding to the key
-
-        Parameters
-        ----------
-        key : dict
-            A dictionary containing some combination of
-                                    uuid,
-                                    nwb_file_name,
-                                    lfp_electrode_group_name,
-                                    interval_list_name,
-                                    fir_filter_name
     class CommonLFP(dj.Part):
         """
         Table to pass-through legacy LFP
         """
 
-        Returns
-        -------
-        lfp_object
-            The entry or entries in the LFPOutput part table that corresponds to the key
         definition = """
         -> PositionOutput
         -> CommonLFP
@@ -99,12 +82,6 @@ class LFPOutput(dj.Manual):
         lfp_object_id: varchar(40)  # the NWB object ID for loading this object from the file
         lfp_sampling_rate: float    # the sampling rate, in HZ
         """
-        # first check if this returns anything from the LFP table
-        query = LFPOutput.LFP & key
-        if query is not None:
-            return LFPV1 & query.fetch("KEY")
-        else:
-            return ImportedLFPV1 & (LFPOutput.ImportedLFP & key).fetch("KEY")
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
