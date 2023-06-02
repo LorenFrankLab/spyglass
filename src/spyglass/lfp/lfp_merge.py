@@ -21,7 +21,7 @@ class LFPOutput(dj.Manual):
 
     class LFPV1(dj.Part):
         definition = """
-        -> LFPOutput
+        -> master
         -> LFPV1
         ---
         -> AnalysisNwbfile
@@ -45,7 +45,7 @@ class LFPOutput(dj.Manual):
 
     class ImportedLFPV1(dj.Part):
         definition = """
-        -> LFPOutput
+        -> master
         -> ImportedLFPV1
         ---
         -> AnalysisNwbfile
@@ -73,7 +73,7 @@ class LFPOutput(dj.Manual):
         """
 
         definition = """
-        -> PositionOutput
+        -> master
         -> CommonLFP
         ---
         -> IntervalList             # the valid intervals for the data
@@ -120,6 +120,6 @@ class LFPOutput(dj.Manual):
         # first check if this returns anything from the LFP table
         lfp_object = LFPOutput.LFP & key
         if lfp_object is not None:
-            return LFP & lfp_object.fetch("KEY")
+            return LFPV1 & lfp_object.fetch("KEY")
         else:
-            return ImportedLFP & (LFPOutput.ImportedLFP & key).fetch("KEY")
+            return ImportedLFPV1 & (LFPOutput.ImportedLFP & key).fetch("KEY")
