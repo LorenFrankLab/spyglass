@@ -4,6 +4,7 @@ import pandas as pd
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.v1.lfp import LFPV1, ImportedLFPV1
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.common.common_ephys import LFP as CommonLFP
 
 schema = dj.schema("lfp_merge")
 
@@ -79,11 +80,24 @@ class LFPOutput(dj.Manual):
                                     lfp_electrode_group_name,
                                     interval_list_name,
                                     fir_filter_name
+    class CommonLFP(dj.Part):
+        """
+        Table to pass-through legacy LFP
+        """
 
         Returns
         -------
         lfp_object
             The entry or entries in the LFPOutput part table that corresponds to the key
+        definition = """
+        -> PositionOutput
+        -> CommonLFP
+        ---
+        -> IntervalList             # the valid intervals for the data
+        -> FirFilterParameters                # the filter used for the data
+        -> AnalysisNwbfile          # the name of the nwb file with the lfp data
+        lfp_object_id: varchar(40)  # the NWB object ID for loading this object from the file
+        lfp_sampling_rate: float    # the sampling rate, in HZ
         """
         # first check if this returns anything from the LFP table
         query = LFPOutput.LFP & key
@@ -91,3 +105,18 @@ class LFPOutput(dj.Manual):
             return LFPV1 & query.fetch("KEY")
         else:
             return ImportedLFPV1 & (LFPOutput.ImportedLFP & key).fetch("KEY")
+
+        def fetch_nwb(self, *attrs, **kwargs):
+            return fetch_nwb(
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
+            )
+
+        def fetch1_dataframe(self, *attrs, **kwargs):
+            nwb_lfp = self.fetch_nwb()[0]
+            return pd.DataFrame(
+                nwb_lfp["lfp"].data,
+                index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
+            )
