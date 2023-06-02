@@ -47,7 +47,7 @@ class LFPV1(dj.Computed):
     """The filtered LFP data"""
 
     definition = """
-    -> LFPSelection
+    -> LFPSelection             # the user's selection of LFP data to be filtered
     ---
     -> AnalysisNwbfile          # the name of the nwb file with the lfp data
     -> IntervalList             # the final interval list of valid times for the data
