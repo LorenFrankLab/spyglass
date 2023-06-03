@@ -21,7 +21,7 @@ class LinearizedPositionOutput(dj.Manual):
 
     class LinearizedPositionV1(dj.Part):
         definition = """
-        -> master
+        -> LinearizedPositionOutput
         -> LinearizedPositionV1
         ---
         -> AnalysisNwbfile
