@@ -56,7 +56,7 @@ nav:
           - Information: notebooks/4_position_info.ipynb
           - Pipeline: notebooks/04_Trodes_position.ipynb
           - From Scratch: notebooks/05_DLC_from_scratch.ipynb
-          - From Pre-Traine: notebooks/06_DLC_from_dir.ipynb
+          - From Pre-Trained: notebooks/06_DLC_from_dir.ipynb
       - Linearization Pipeline: notebooks/07_linearization.ipynb
       - Mark Indicators: notebooks/08_Extract_Mark_indicators.ipynb
       - GPU: notebooks/09_Decoding_with_GPUs_on_the_GPU_cluster.ipynb
