@@ -3995,7 +3995,9 @@ i.e. if the source='DLC', then the table is DLCPos</p>
 <span class="normal">271</span>
 <span class="normal">272</span>
 <span class="normal">273</span>
-<span class="normal">274</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">PositionOutput</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Table to identify source of Position Information from upstream options</span>
@@ -4168,7 +4170,7 @@ i.e. if the source='DLC', then the table is DLCPos</p>
             <span class="p">},</span>
         <span class="p">)</span>
 
-    <span class="k">def</span> <span class="nf">fetch1_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
         <span class="n">source</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s2">&quot;source&quot;</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">source</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Common&quot;</span><span class="p">]:</span>
             <span class="n">table_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">Pos&quot;</span>
@@ -4176,8 +4178,10 @@ i.e. if the source='DLC', then the table is DLCPos</p>
             <span class="n">version</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s2">&quot;version&quot;</span><span class="p">)</span>
             <span class="n">table_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">PosV</span><span class="si">{</span><span class="n">version</span><span class="si">}</span><span class="s2">&quot;</span>
         <span class="n">part_table</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">table_name</span><span class="p">)</span> <span class="o">&amp;</span> <span class="bp">self</span>
-        <span class="n">nwb_data</span> <span class="o">=</span> <span class="n">part_table</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">part_table</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()</span>
 
+    <span class="k">def</span> <span class="nf">fetch1_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">nwb_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
         <span class="n">index</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span>
             <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span><span class="o">.</span><span class="n">timestamps</span><span class="p">),</span>
             <span class="n">name</span><span class="o">=</span><span class="s2">&quot;time&quot;</span><span class="p">,</span>
@@ -9809,9 +9813,7 @@ the original LED positions overlaid on the video of the animal.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/position_merge.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">310</span>
-<span class="normal">311</span>
-<span class="normal">312</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">312</span>
 <span class="normal">313</span>
 <span class="normal">314</span>
 <span class="normal">315</span>
@@ -9974,7 +9976,9 @@ the original LED positions overlaid on the video of the animal.</p>
 <span class="normal">472</span>
 <span class="normal">473</span>
 <span class="normal">474</span>
-<span class="normal">475</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">475</span>
+<span class="normal">476</span>
+<span class="normal">477</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">PositionVideo</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Creates a video of the computed head position and orientation as well as</span>
 <span class="sd">    the original LED positions overlaid on the video of the animal.</span>
