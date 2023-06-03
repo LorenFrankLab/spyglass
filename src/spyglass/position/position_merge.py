@@ -196,7 +196,7 @@ class PositionOutput(dj.Manual):
             },
         )
 
-    def fetch1_dataframe(self):
+    def fetch_nwb(self, *attrs, **kwargs):
         source = self.fetch1("source")
         if source in ["Common"]:
             table_name = f"{source}Pos"
@@ -204,8 +204,10 @@ class PositionOutput(dj.Manual):
             version = self.fetch1("version")
             table_name = f"{source}PosV{version}"
         part_table = getattr(self, table_name) & self
-        nwb_data = part_table.fetch_nwb()[0]
+        return part_table.fetch_nwb()
 
+    def fetch1_dataframe(self):
+        nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(nwb_data["position"].get_spatial_series().timestamps),
             name="time",
@@ -464,7 +466,6 @@ class PositionVideo(dj.Computed):
             video_path,
             video_frame_inds,
             position_mean_dict,
-            orientation_mean_dict,
             video_time,
             position_time,
             processor="opencv",
