@@ -466,6 +466,7 @@ class PositionVideo(dj.Computed):
             video_path,
             video_frame_inds,
             position_mean_dict,
+            orientation_mean_dict,
             video_time,
             position_time,
             processor="opencv",
