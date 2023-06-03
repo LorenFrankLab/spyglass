@@ -13,7 +13,7 @@ Documentation can be found at -
 ## Installation
 
 For installation instructions see -
-[https://lorenfranklab.github.io/spyglass/type/html/installation.html](https://lorenfranklab.github.io/spyglass/type/html/installation.html)
+[https://lorenfranklab.github.io/spyglass/latest/installation/](https://lorenfranklab.github.io/spyglass/latest/installation/)
 
 ## Tutorials
 
@@ -24,14 +24,14 @@ directory. We strongly recommend opening them in the context of `jupyterlab`.
 
 ## Contributing
 
-See the [Developer's Note](https://lorenfranklab.github.io/spyglass/type/html/developer_notes.html)
+See the [Developer's Note](https://lorenfranklab.github.io/spyglass/latest/contribute/)
 for contributing instructions found at -
-[https://lorenfranklab.github.io/spyglass/type/html/how_to_contribute.html](https://lorenfranklab.github.io/spyglass/type/html/how_to_contribute.html)
+[https://lorenfranklab.github.io/spyglass/latest/contribute/](https://lorenfranklab.github.io/spyglass/latest/contribute/)
 
 ## License/Copyright
 
 License and Copyright notice can be found at
-[https://lorenfranklab.github.io/spyglass/type/html/copyright.html](https://lorenfranklab.github.io/spyglass/type/html/copyright.html)
+[https://lorenfranklab.github.io/spyglass/latest/LICENSE/](https://lorenfranklab.github.io/spyglass/latest/LICENSE/)
 
 ## Citation
 
