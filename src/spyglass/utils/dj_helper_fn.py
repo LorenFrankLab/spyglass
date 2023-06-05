@@ -8,9 +8,9 @@ import numpy as np
 from .nwb_helper_fn import get_nwb_file
 
 
-def _delete(self: dj.Table, **kwargs) -> None:
-    descendants = self.descendants()
-    rows = self.fetch()
+def _delete(tbl: dj.Table, **kwargs) -> None:
+    descendants = tbl.descendants()
+    rows = tbl.fetch()
     parents = []
     parts = []
     for table in descendants:
@@ -26,9 +26,12 @@ def _delete(self: dj.Table, **kwargs) -> None:
         not in parents
     ]
     for part in parts_no_parents:
-        table = f"{part.split('.')[0]}.{part.split('.')[1].split('__')[0]}`"
-        PartTable = dj.FreeTable(dj.conn(), part)
-        ParentTable = dj.FreeTable(dj.conn(), table)
+        first_part, last_part = part.split(".")
+        last_part = last_part.split("__")[0]
+        table = f"{first_part}.{last_part}`"
+        conn = dj.conn()
+        PartTable = dj.FreeTable(conn, part)
+        ParentTable = dj.FreeTable(conn, table)
         keys = ((ParentTable * PartTable) & rows).fetch("KEY")
         for entry in keys:
             (ParentTable & entry).delete(**kwargs)
