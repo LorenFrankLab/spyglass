@@ -234,7 +234,9 @@ class RippleTimesV1(dj.Computed):
             :
         ]
         elec_mask = np.full_like(ripple_lfp_electrodes, 0, dtype=bool)
-        valid_elecs = [elec for elec in electrode_keys if elec in ripple_lfp_electrodes]
+        valid_elecs = [
+            elec for elec in electrode_keys if elec in ripple_lfp_electrodes
+        ]
         lfp_indexed_elec_ids = get_electrode_indices(
             ripple_lfp_nwb["filtered_data"], valid_elecs
         )
@@ -257,10 +259,12 @@ class RippleTimesV1(dj.Computed):
             }
         ).fetch1("valid_times")
 
-        pos_key = {k: v for k, v in key.items() if k in list(PositionOutput.fetch().dtype.fields.keys())}
-        position_info = (
-            PositionOutput() & pos_key
-        ).fetch1_dataframe()
+        pos_key = {
+            k: v
+            for k, v in key.items()
+            if k in list(PositionOutput.fetch().dtype.fields.keys())
+        }
+        position_info = (PositionOutput() & pos_key).fetch1_dataframe()
 
         position_info = pd.concat(
             [
