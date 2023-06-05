@@ -136,7 +136,7 @@ class RippleTimesV1(dj.Computed):
     definition = """
     -> RippleParameters
     -> RippleLFPSelection
-    -> IntervalPositionInfo
+    -> PositionOutput
     ---
     -> AnalysisNwbfile
     ripple_times_object_id : varchar(40)
