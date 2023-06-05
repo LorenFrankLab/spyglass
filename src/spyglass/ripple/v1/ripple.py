@@ -259,13 +259,9 @@ class RippleTimesV1(dj.Computed):
             }
         ).fetch1("valid_times")
 
+        pos_key = {k: v for k, v in key.items() if k in list(PositionOutput.fetch().dtype.fields.keys())}
         position_info = (
-            PositionOutput()
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": interval_list_name,
-                "position_info_param_name": position_info_param_name,
-            }
+            PositionOutput() & pos_key
         ).fetch1_dataframe()
 
         position_info = pd.concat(
