@@ -234,13 +234,11 @@ class RippleTimesV1(dj.Computed):
             :
         ]
         elec_mask = np.full_like(ripple_lfp_electrodes, 0, dtype=bool)
-        elec_mask[
-            [
-                ind
-                for ind, elec in enumerate(ripple_lfp_electrodes)
-                if elec in electrode_keys
-            ]
-        ] = True
+        valid_elecs = [elec for elec in electrode_keys if elec in ripple_lfp_electrodes]
+        lfp_indexed_elec_ids = get_electrode_indices(
+            ripple_lfp_nwb["filtered_data"], valid_elecs
+        )
+        elec_mask[lfp_indexed_elec_ids] = True
         ripple_lfp = pd.DataFrame(
             ripple_lfp_nwb["filtered_data"].data,
             index=pd.Index(
