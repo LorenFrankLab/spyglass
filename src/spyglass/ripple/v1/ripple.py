@@ -267,7 +267,7 @@ class RippleTimesV1(dj.Computed):
                 position_info.loc[slice(valid_time[0], valid_time[1])]
                 for valid_time in position_valid_times
             ],
-            axis=1,
+            axis=0,
         )
         interval_ripple_lfps = pd.concat(
             [
