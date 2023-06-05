@@ -14,6 +14,7 @@ from spyglass.lfp_band.lfp_band_merge import LFPBandOutput
 from spyglass.lfp_band.v1.lfp_band import LFPBandSelection
 from spyglass.position import PositionOutput
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("ripple_v1")
 
