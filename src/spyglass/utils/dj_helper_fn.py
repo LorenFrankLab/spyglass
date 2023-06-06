@@ -9,6 +9,7 @@ from .nwb_helper_fn import get_nwb_file
 
 
 def _delete(tbl: dj.Table, **kwargs) -> None:
+    conn = dj.conn()
     descendants = tbl.descendants()
     rows = tbl.fetch()
     parents = []
@@ -29,7 +30,6 @@ def _delete(tbl: dj.Table, **kwargs) -> None:
         first_part, last_part = part.split(".")
         last_part = last_part.split("__")[0]
         table = f"{first_part}.{last_part}`"
-        conn = dj.conn()
         PartTable = dj.FreeTable(conn, part)
         ParentTable = dj.FreeTable(conn, table)
         keys = ((ParentTable * PartTable) & rows).fetch("KEY")
