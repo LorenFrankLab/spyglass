@@ -415,7 +415,9 @@ class PositionVideo(dj.Computed):
                             & {
                                 **query,
                                 "source": "Trodes",
-                                "position_id": position_ids["trodes_position_id"],
+                                "position_id": position_ids[
+                                    "trodes_position_id"
+                                ],
                             }
                         )
                         .fetch1_dataframe()
@@ -440,7 +442,9 @@ class PositionVideo(dj.Computed):
                             & {
                                 **query,
                                 "source": "Common",
-                                "position_id": position_ids["common_position_id"],
+                                "position_id": position_ids[
+                                    "common_position_id"
+                                ],
                             }
                         )
                         .fetch1_dataframe()
@@ -514,7 +518,9 @@ class PositionVideo(dj.Computed):
                     "position": np.asarray(
                         pos_df[[f"position_x_{source}", f"position_y_{source}"]]
                     ),
-                    "orientation": np.asarray(pos_df[[f"orientation_{source}"]]),
+                    "orientation": np.asarray(
+                        pos_df[[f"orientation_{source}"]]
+                    ),
                 }
                 for source in merge_dict.keys()
             }
