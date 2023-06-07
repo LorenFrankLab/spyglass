@@ -305,7 +305,9 @@ class DLCProject(dj.Manual):
         )
         for bodypart in bodyparts:
             if not bool(BodyPart() & {"bodypart": bodypart}):
-                raise ValueError(f"bodypart: {bodypart} not found in BodyPart table")
+                raise ValueError(
+                    f"bodypart: {bodypart} not found in BodyPart table"
+                )
         kwargs_copy = kwargs.copy()
         kwargs_copy.update({"numframes2pick": frames_per_video, "dotsize": 3})
         add_to_config(

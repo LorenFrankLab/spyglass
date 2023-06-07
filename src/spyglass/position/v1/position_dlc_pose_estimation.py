@@ -234,7 +234,8 @@ class DLCPoseEstimation(dj.Computed):
             logger.logger.info("getting raw position")
             interval_list_name = f"pos {key['epoch']-1} valid times"
             spatial_series = (
-                RawPosition() & {**key, "interval_list_name": interval_list_name}
+                RawPosition()
+                & {**key, "interval_list_name": interval_list_name}
             ).fetch_nwb()[0]["raw_position"]
             _, _, _, video_time = get_video_path(key)
             pos_time = spatial_series.timestamps
@@ -328,7 +329,9 @@ class DLCPoseEstimation(dj.Computed):
         }
         index = pd.Index(
             np.asarray(
-                nwb_data_dict[entries[0]["bodypart"]]["dlc_pose_estimation_position"]
+                nwb_data_dict[entries[0]["bodypart"]][
+                    "dlc_pose_estimation_position"
+                ]
                 .get_spatial_series()
                 .timestamps
             ),
@@ -410,7 +413,9 @@ def add_timestamps(
     first_video_frame = np.searchsorted(video_time, pos_time[0])
     video_frame_ind = np.arange(first_video_frame, len(video_time))
     time_df = pd.DataFrame(
-        index=video_frame_ind, data=video_time[first_video_frame:], columns=["time"]
+        index=video_frame_ind,
+        data=video_time[first_video_frame:],
+        columns=["time"],
     )
     df = df.join(time_df)
     # Drop indices where time is NaN

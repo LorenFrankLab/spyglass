@@ -254,7 +254,9 @@ class DLCSmoothInterp(dj.Computed):
                 .fetch_nwb()[0]["dlc_pose_estimation_position"]
                 .get_spatial_series()
             )
-            key["analysis_file_name"] = AnalysisNwbfile().create(key["nwb_file_name"])
+            key["analysis_file_name"] = AnalysisNwbfile().create(
+                key["nwb_file_name"]
+            )
             # Add dataframe to AnalysisNwbfile
             nwb_analysis_file = AnalysisNwbfile()
             position = pynwb.behavior.Position()
@@ -283,7 +285,9 @@ class DLCSmoothInterp(dj.Computed):
                 analysis_file_name=key["analysis_file_name"],
                 nwb_object=position,
             )
-            key["dlc_smooth_interp_info_object_id"] = nwb_analysis_file.add_nwb_object(
+            key[
+                "dlc_smooth_interp_info_object_id"
+            ] = nwb_analysis_file.add_nwb_object(
                 analysis_file_name=key["analysis_file_name"],
                 nwb_object=video_frame_ind,
             )
@@ -303,7 +307,9 @@ class DLCSmoothInterp(dj.Computed):
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(
-                nwb_data["dlc_smooth_interp_position"].get_spatial_series().timestamps
+                nwb_data["dlc_smooth_interp_position"]
+                .get_spatial_series()
+                .timestamps
             ),
             name="time",
         )
@@ -322,7 +328,9 @@ class DLCSmoothInterp(dj.Computed):
                         dtype=int,
                     )[:, np.newaxis],
                     np.asarray(
-                        nwb_data["dlc_smooth_interp_position"].get_spatial_series().data
+                        nwb_data["dlc_smooth_interp_position"]
+                        .get_spatial_series()
+                        .data
                     ),
                 ),
                 axis=1,

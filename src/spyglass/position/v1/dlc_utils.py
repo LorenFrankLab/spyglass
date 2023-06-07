@@ -732,7 +732,9 @@ def make_video(
         # }
         if video_time:
             position_mean = {
-                key: fill_nan(position_mean[key]["position"], video_time, position_time)
+                key: fill_nan(
+                    position_mean[key]["position"], video_time, position_time
+                )
                 for key in position_mean.keys()
             }
             orientation_mean = {
@@ -813,7 +815,9 @@ def make_video(
                         color = RGB_ORANGE
                     if key == "Common":
                         color = RGB_PINK
-                    if np.all(~np.isnan(position)) & np.all(~np.isnan(orientation)):
+                    if np.all(~np.isnan(position)) & np.all(
+                        ~np.isnan(orientation)
+                    ):
                         arrow_tip = (
                             int(
                                 position[0] + arrow_radius * np.cos(orientation)
