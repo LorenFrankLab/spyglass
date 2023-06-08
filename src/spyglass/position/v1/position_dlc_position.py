@@ -5,11 +5,7 @@ import pynwb
 
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
-from .dlc_utils import (
-    _key_to_smooth_func_dict,
-    get_span_start_stop,
-    interp_pos,
-)
+from .dlc_utils import _key_to_smooth_func_dict, get_span_start_stop, interp_pos
 from .position_dlc_pose_estimation import DLCPoseEstimation
 
 schema = dj.schema("position_v1_dlc_position")

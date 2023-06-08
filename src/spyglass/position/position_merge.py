@@ -1,5 +1,5 @@
-import os
 import functools as ft
+import os
 from pathlib import Path
 from typing import Dict
 
