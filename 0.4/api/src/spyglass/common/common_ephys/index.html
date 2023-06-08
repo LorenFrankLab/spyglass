@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2837,7 +2837,11 @@
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the brain region.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the brain region.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2847,7 +2851,11 @@
           <td>
                 <code>str, optional</code>
           </td>
-          <td><p>The name of the subregion within the brain region.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the subregion within the brain region.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -2857,7 +2865,11 @@
           <td>
                 <code>str, optional</code>
           </td>
-          <td><p>The name of the subregion within the subregion.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the subregion within the subregion.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -2878,7 +2890,11 @@
 <td><code>region_id</code></td>          <td>
                 <code>int</code>
           </td>
-          <td><p>The index of the region in the BrainRegion table.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The index of the region in the BrainRegion table.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3284,7 +3300,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The source NWB file object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The source NWB file object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3294,7 +3314,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>The file name of the NWB file, used as a primary key to the Session table.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The file name of the NWB file, used as a primary key to the Session table.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3422,7 +3446,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>Path to the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Path to the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3443,7 +3471,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
 <td><code>nwbfile</code></td>          <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>NWB file object for the given path opened in read mode.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>NWB file object for the given path opened in read mode.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5487,7 +5519,11 @@ created and linked to the original NWB file using common_session.AnalysisNwbfile
           <td>
                 <code>str</code>
           </td>
-          <td><p>The relative path to the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The relative path to the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5578,7 +5614,11 @@ created and linked to the original NWB file using common_session.AnalysisNwbfile
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5599,7 +5639,11 @@ created and linked to the original NWB file using common_session.AnalysisNwbfile
 <td><code>nwb_file_abspath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The absolute path for the given file name.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The absolute path for the given file name.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5697,7 +5741,11 @@ created and linked to the original NWB file using common_session.AnalysisNwbfile
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5844,7 +5892,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>query</code>
           </td>
-          <td><p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5854,10 +5906,14 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>tuple</code>
           </td>
-          <td><p>Tuple (table, attr) to get the NWB filepath from.
+          <td>
+            <div class="doc-md-description">
+              <p>Tuple (table, attr) to get the NWB filepath from.
 i.e. absolute path to NWB file can be obtained by looking up attr column of table
 table is usually Nwbfile or AnalysisNwbfile;
-attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
+attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5867,7 +5923,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>list</code>
           </td>
-          <td><p>Attributes from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Attributes from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>()</code>
           </td>
@@ -5877,7 +5937,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Keyword arguments from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Keyword arguments from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>{}</code>
           </td>
@@ -5898,7 +5962,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>nwb_objects</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of dicts containing fetch results and NWB objects.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of dicts containing fetch results and NWB objects.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6092,7 +6160,11 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>Absolute path to the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Absolute path to the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6101,7 +6173,11 @@ If the file does not exist, return an empty dict.</p>
           <td><code>Returns</code></td>
           <td>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6111,7 +6187,11 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of configuration settings loaded from the corresponding YAML file</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of configuration settings loaded from the corresponding YAML file</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6536,7 +6616,11 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6709,7 +6793,11 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The NWB file object to search in.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB file object to search in.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6719,7 +6807,11 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWBDataInterface or DynamicTable to search for.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWBDataInterface or DynamicTable to search for.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6729,8 +6821,12 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>type, optional</code>
           </td>
-          <td><p>The class (or superclass) to search for. This argument helps to prevent accessing an object with the same
-name but the incorrect type. Default: no restriction.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The class (or superclass) to search for. This argument helps to prevent accessing an object with the same
+name but the incorrect type. Default: no restriction.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -6751,7 +6847,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>UserWarning</code>
           </td>
-          <td><p>If multiple NWBDataInterface and DynamicTable objects with the matching name are found.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>If multiple NWBDataInterface and DynamicTable objects with the matching name are found.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6769,7 +6869,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>data_interface</code></td>          <td>
                 <code>NWBDataInterface</code>
           </td>
-          <td><p>The data interface object with the given name, or None if not found.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The data interface object with the given name, or None if not found.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -7924,7 +8028,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file to be copied.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file to be copied.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7945,7 +8053,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>analysis_file_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the new NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the new NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -8089,7 +8201,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file to be copied.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file to be copied.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8110,7 +8226,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>analysis_file_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the new NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the new NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -8231,7 +8351,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the parent NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the parent NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8241,7 +8365,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file that was created.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file that was created.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8332,7 +8460,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWB file that has been inserted into the AnalysisNwbfile() schema</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWB file that has been inserted into the AnalysisNwbfile() schema</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8353,7 +8485,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>analysis_nwb_file_abspath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The absolute path for the given file name.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The absolute path for the given file name.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -8476,7 +8612,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8486,7 +8626,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>pynwb.<span title="pynwb.core">core</span>.<span title="pynwb.core.NWBDataInterface">NWBDataInterface</span></code>
           </td>
-          <td><p>The NWB object created by PyNWB.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object created by PyNWB.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8496,7 +8640,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str (optional, defaults to &#39;pandas_table&#39;)</code>
           </td>
-          <td><p>The name of the DynamicTable made from a dataframe.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the DynamicTable made from a dataframe.</p>
+            </div>
+          </td>
           <td>
                 <code>&#39;pandas_table&#39;</code>
           </td>
@@ -8517,7 +8665,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>nwb_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object ID of the added object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object ID of the added object.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -8640,7 +8792,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8650,7 +8806,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>keys are unit ids, values are spike times</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>keys are unit ids, values are spike times</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8660,7 +8820,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of units and valid times with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of units and valid times with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8670,7 +8834,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of units and sort_interval with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of units and sort_interval with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8680,7 +8848,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Dictionary of unit waveforms with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of unit waveforms with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -8690,7 +8862,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -8700,7 +8876,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Curation labels for clusters</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Curation labels for clusters</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -8721,7 +8901,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>units_object_id, waveforms_object_id</code>
           </td>
-          <td><p>The NWB object id of the Units object and the object id of the waveforms object ('' if None)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object and the object id of the waveforms object ('' if None)</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -8978,7 +9162,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8988,7 +9176,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>si.WaveformExtractor object</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8998,7 +9190,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -9008,7 +9204,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Curation labels for clusters</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Curation labels for clusters</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -9029,7 +9229,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>units_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object id of the Units object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -9256,7 +9460,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9266,7 +9474,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9287,7 +9499,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>units_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object id of the Units object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -9408,7 +9624,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9418,7 +9638,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>numpy array or list</code>
           </td>
-          <td><p>Array or list of electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array or list of electrode IDs.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9439,7 +9663,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>electrode_indices</code></td>          <td>
                 <code>numpy array</code>
           </td>
-          <td><p>Array of indices in the electrodes table for the given electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array of indices in the electrodes table for the given electrode IDs.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -9528,7 +9756,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>bool, optional</code>
           </td>
-          <td><p>Whether the original files should be deleted (default False).</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Whether the original files should be deleted (default False).</p>
+            </div>
+          </td>
           <td>
                 <code>False</code>
           </td>
@@ -9613,7 +9845,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>array_like</code>
           </td>
-          <td><p>Each element is (start time, stop time), i.e. an interval. Unit is seconds.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Each element is (start time, stop time), i.e. an interval. Unit is seconds.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9623,7 +9859,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>array_like</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9713,7 +9953,11 @@ can fail for very high sampling rates and irregular timestamps.</p>
           <td>
                 <code>numpy.<span title="numpy.ndarray">ndarray</span></code>
           </td>
-          <td><p>1D numpy array of timestamp values.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>1D numpy array of timestamp values.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9723,7 +9967,11 @@ can fail for very high sampling rates and irregular timestamps.</p>
           <td>
                 <code>float or int</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9744,7 +9992,11 @@ can fail for very high sampling rates and irregular timestamps.</p>
 <td><code>estimated_rate</code></td>          <td>
                 <code>float</code>
           </td>
-          <td><p>The estimated sampling rate.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The estimated sampling rate.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -9871,7 +10123,11 @@ no gaps (i.e. missing samples).</p>
           <td>
                 <code>numpy.<span title="numpy.ndarray">ndarray</span></code>
           </td>
-          <td><p>1D numpy array of timestamp values.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>1D numpy array of timestamp values.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9881,7 +10137,11 @@ no gaps (i.e. missing samples).</p>
           <td>
                 <code>float</code>
           </td>
-          <td><p>Sampling rate of the data.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Sampling rate of the data.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9891,10 +10151,14 @@ no gaps (i.e. missing samples).</p>
           <td>
                 <code>float, greater than 1</code>
           </td>
-          <td><p>Threshold for detecting a gap;
+          <td>
+            <div class="doc-md-description">
+              <p>Threshold for detecting a gap;
 i.e. if the difference (in samples) between
 consecutive timestamps exceeds gap_proportion,
-it is considered a gap</p></td>
+it is considered a gap</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9904,7 +10168,11 @@ it is considered a gap</p></td>
           <td>
                 <code>float</code>
           </td>
-          <td><p>Length of smallest valid interval.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Length of smallest valid interval.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9925,7 +10193,11 @@ it is considered a gap</p></td>
 <td><code>valid_times</code></td>          <td>
                 <code><span title="numpy">np</span>.<span title="numpy.ndarray">ndarray</span></code>
           </td>
-          <td><p>Array of start and stop times of shape (N, 2) for valid data.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array of start and stop times of shape (N, 2) for valid data.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -10076,7 +10348,11 @@ it is considered a gap</p></td>
           <td>
                 <code>np.array, (N,2) where N </code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -10086,7 +10362,11 @@ it is considered a gap</p></td>
           <td>
                 <code>np.array, (N,2) where N </code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -10096,7 +10376,11 @@ it is considered a gap</p></td>
           <td>
                 <code>float, optional.</code>
           </td>
-          <td><p>Minimum length of intervals to include, default 0</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Minimum length of intervals to include, default 0</p>
+            </div>
+          </td>
           <td>
                 <code>0</code>
           </td>
@@ -10118,7 +10402,11 @@ it is considered a gap</p></td>
 <td><code>interval_list</code></td>          <td>
                 <code><span title="numpy">np</span>.<span title="numpy.array">array</span>, N, 2</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -10285,7 +10573,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>pynwb.NWBFile or pynwb.ecephys.ElectricalSeries</code>
           </td>
-          <td><p>The NWB file object or NWB electrical series object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB file object or NWB electrical series object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -10295,7 +10587,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>np.ndarray or list</code>
           </td>
-          <td><p>Array or list of electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array or list of electrode IDs.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -10316,7 +10612,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
 <td><code>electrode_indices</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>Array of indices of the specified electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array of indices of the specified electrode IDs.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -10578,7 +10878,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the nwb file for the desired session</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the nwb file for the desired session</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -10588,7 +10892,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>list</code>
           </td>
-          <td><p>list of electrodes to be used for LFP</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>list of electrodes to be used for LFP</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -11478,7 +11786,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The source NWB file object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The source NWB file object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -11488,7 +11800,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary read from a user-defined YAML file containing values to replace in the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary read from a user-defined YAML file containing values to replace in the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -11509,7 +11825,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
 <td><code>device_name_list</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of probe device types found in the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of probe device types found in the NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -11690,7 +12010,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The source NWB file object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The source NWB file object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -11700,7 +12024,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary read from a user-defined YAML file containing values to replace in the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary read from a user-defined YAML file containing values to replace in the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -11721,7 +12049,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
 <td><code>device_name_list</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of data acquisition object names found in the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of data acquisition object names found in the NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -11860,7 +12192,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -11870,7 +12206,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the PyNWB Device object that represents the probe to read in the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the PyNWB Device object that represents the probe to read in the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -11880,7 +12220,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>str</code>
           </td>
-          <td><p>A unique ID for the probe and its configuration, to be used as the primary key for the new Probe entry.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A unique ID for the probe and its configuration, to be used as the primary key for the new Probe entry.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -11890,7 +12234,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>str</code>
           </td>
-          <td><p>The existing ProbeType entry that represents the type of probe being created. It must exist.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The existing ProbeType entry that represents the type of probe being created. It must exist.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -11900,7 +12248,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>bool</code>
           </td>
-          <td><p>Whether the electrode contacts are facing you when numbering them. Stored in the new Probe entry.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Whether the electrode contacts are facing you when numbering them. Stored in the new Probe entry.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -12207,7 +12559,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>numpy array of intervals [start, stop]</code>
           </td>
-          <td><p>interval list from IntervalList valid times</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>interval list from IntervalList valid times</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -12217,7 +12573,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>numpy array or list</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -12238,7 +12598,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>interval_list (numpy array of intervals [start, stop])</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>

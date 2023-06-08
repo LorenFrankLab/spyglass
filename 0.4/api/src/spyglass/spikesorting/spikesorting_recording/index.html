@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2557,7 +2557,11 @@ Key values must be unique.</p>
           <td><code>original_table</code></td>
           <td>
           </td>
-          <td><p>Result of a datajoint .fetch() call on a schema query.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Result of a datajoint .fetch() call on a schema query.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2567,7 +2571,11 @@ Key values must be unique.</p>
           <td>
                 <code>list</code>
           </td>
-          <td><p>List of tuples, each containing (key_value, replace_value).</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of tuples, each containing (key_value, replace_value).</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2577,7 +2585,11 @@ Key values must be unique.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the column where to-be-replaced values are located.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the column where to-be-replaced values are located.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2598,7 +2610,11 @@ Key values must be unique.</p>
           <td>
                 <code>original_table</code>
           </td>
-          <td><p>Structured array of new table entries that can be inserted back into the schema</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Structured array of new table entries that can be inserted back into the schema</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2999,7 +3015,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The source NWB file object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The source NWB file object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3009,7 +3029,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>The file name of the NWB file, used as a primary key to the Session table.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The file name of the NWB file, used as a primary key to the Session table.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3738,7 +3762,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>the name of the NWB file whose electrodes should be put into sorting groups</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>the name of the NWB file whose electrodes should be put into sorting groups</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3748,8 +3776,12 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>If passed, used to set references. Otherwise, references set using
-original reference electrodes from config. Keys: electrode groups. Values: reference electrode.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>If passed, used to set references. Otherwise, references set using
+original reference electrodes from config. Keys: electrode groups. Values: reference electrode.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -3759,7 +3791,11 @@ original reference electrodes from config. Keys: electrode groups. Values: refer
           <td>
                 <code>bool</code>
           </td>
-          <td><p>Optional. If True, no sort group is defined for electrode group of reference.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Optional. If True, no sort group is defined for electrode group of reference.</p>
+            </div>
+          </td>
           <td>
                 <code>False</code>
           </td>
@@ -3769,7 +3805,11 @@ original reference electrodes from config. Keys: electrode groups. Values: refer
           <td>
                 <code>bool</code>
           </td>
-          <td><p>Optional. If True, no sort groups are defined for unitrodes.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Optional. If True, no sort groups are defined for unitrodes.</p>
+            </div>
+          </td>
           <td>
                 <code>True</code>
           </td>
@@ -4064,7 +4104,11 @@ and sets the reference for each group to the reference for the first channel of 
           <td>
                 <code>str</code>
           </td>
-          <td><p>the name of the nwb whose electrodes should be put into sorting groups</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>the name of the nwb whose electrodes should be put into sorting groups</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4279,7 +4323,11 @@ for use with the SpikeInterface package.</p>
           <td>
                 <code>int</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4289,7 +4337,11 @@ for use with the SpikeInterface package.</p>
           <td>
                 <code>str</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4310,7 +4362,11 @@ for use with the SpikeInterface package.</p>
 <td><code>geometry</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of coordinate pairs, one per electrode</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of coordinate pairs, one per electrode</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -4717,7 +4773,11 @@ for use with the SpikeInterface package.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The relative path to the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The relative path to the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4808,7 +4868,11 @@ for use with the SpikeInterface package.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4829,7 +4893,11 @@ for use with the SpikeInterface package.</p>
 <td><code>nwb_file_abspath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The absolute path for the given file name.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The absolute path for the given file name.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -4927,7 +4995,11 @@ for use with the SpikeInterface package.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5210,7 +5282,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the team.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the team.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5220,7 +5296,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The full names of the lab members that are part of the team.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The full names of the lab members that are part of the team.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5230,7 +5310,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The description of the team.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The description of the team.</p>
+            </div>
+          </td>
           <td>
                 <code>&#39;&#39;</code>
           </td>
@@ -5682,7 +5766,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5855,7 +5943,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>array_like</code>
           </td>
-          <td><p>Each element is (start time, stop time), i.e. an interval. Unit is seconds.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Each element is (start time, stop time), i.e. an interval. Unit is seconds.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5865,7 +5957,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>float, optional</code>
           </td>
-          <td><p>Minimum interval length in seconds. Defaults to 0.0.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Minimum interval length in seconds. Defaults to 0.0.</p>
+            </div>
+          </td>
           <td>
                 <code>0.0</code>
           </td>
@@ -5875,7 +5971,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>float, optional</code>
           </td>
-          <td><p>Maximum interval length in seconds. Defaults to 1e10.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Maximum interval length in seconds. Defaults to 1e10.</p>
+            </div>
+          </td>
           <td>
                 <code>10000000000.0</code>
           </td>
@@ -5957,7 +6057,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>np.array, (N,2) where N </code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5967,7 +6071,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>np.array, (N,2) where N </code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5977,7 +6085,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>float, optional.</code>
           </td>
-          <td><p>Minimum length of intervals to include, default 0</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Minimum length of intervals to include, default 0</p>
+            </div>
+          </td>
           <td>
                 <code>0</code>
           </td>
@@ -5999,7 +6111,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
 <td><code>interval_list</code></td>          <td>
                 <code><span title="numpy">np</span>.<span title="numpy.array">array</span>, N, 2</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6923,7 +7039,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The source NWB file object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The source NWB file object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6933,7 +7053,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary read from a user-defined YAML file containing values to replace in the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary read from a user-defined YAML file containing values to replace in the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6954,7 +7078,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
 <td><code>device_name_list</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of probe device types found in the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of probe device types found in the NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -7135,7 +7263,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The source NWB file object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The source NWB file object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7145,7 +7277,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary read from a user-defined YAML file containing values to replace in the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary read from a user-defined YAML file containing values to replace in the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7166,7 +7302,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
 <td><code>device_name_list</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of data acquisition object names found in the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of data acquisition object names found in the NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -7305,7 +7445,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7315,7 +7459,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the PyNWB Device object that represents the probe to read in the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the PyNWB Device object that represents the probe to read in the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7325,7 +7473,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>str</code>
           </td>
-          <td><p>A unique ID for the probe and its configuration, to be used as the primary key for the new Probe entry.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A unique ID for the probe and its configuration, to be used as the primary key for the new Probe entry.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7335,7 +7487,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>str</code>
           </td>
-          <td><p>The existing ProbeType entry that represents the type of probe being created. It must exist.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The existing ProbeType entry that represents the type of probe being created. It must exist.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7345,7 +7501,11 @@ the NWB electrode group corresponds to a Shank, and the NWB electrode correspond
           <td>
                 <code>bool</code>
           </td>
-          <td><p>Whether the electrode contacts are facing you when numbering them. Stored in the new Probe entry.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Whether the electrode contacts are facing you when numbering them. Stored in the new Probe entry.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7654,7 +7814,11 @@ if not adjacent, just concatenates interval2 at the end of interval1</p>
           <td>
                 <code><span title="numpy">np</span>.<span title="numpy.array">array</span></code>
           </td>
-          <td><p>[description]</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>[description]</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7664,7 +7828,11 @@ if not adjacent, just concatenates interval2 at the end of interval1</p>
           <td>
                 <code><span title="numpy">np</span>.<span title="numpy.array">array</span></code>
           </td>
-          <td><p>[description]</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>[description]</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>

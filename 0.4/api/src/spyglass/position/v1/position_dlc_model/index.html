@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2512,7 +2512,8 @@ from local disk instead of Spyglass</p>
 <span class="normal">39</span>
 <span class="normal">40</span>
 <span class="normal">41</span>
-<span class="normal">42</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">42</span>
+<span class="normal">43</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">DLCModelInput</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Table to hold model path if model is being input</span>
 <span class="sd">    from local disk instead of Spyglass</span>
@@ -2526,11 +2527,12 @@ from local disk instead of Spyglass</p>
 <span class="s2">    &quot;&quot;&quot;</span>
 
     <span class="k">def</span> <span class="nf">insert1</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-        <span class="n">key</span><span class="p">[</span>
-            <span class="s2">&quot;dlc_model_name&quot;</span>
-        <span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;project_path&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;model&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s1">model&#39;</span>
-        <span class="n">project_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;project_path&quot;</span><span class="p">])</span>
+        <span class="c1"># expects key from DLCProject with config_path</span>
+        <span class="n">project_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;config_path&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">parent</span>
         <span class="k">assert</span> <span class="n">project_path</span><span class="o">.</span><span class="n">exists</span><span class="p">(),</span> <span class="s2">&quot;project path does not exist&quot;</span>
+        <span class="n">key</span><span class="p">[</span><span class="s2">&quot;dlc_model_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">project_path</span><span class="o">.</span><span class="n">name</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;model&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s1">model&#39;</span>
+        <span class="n">key</span><span class="p">[</span><span class="s2">&quot;project_path&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">project_path</span><span class="o">.</span><span class="n">as_posix</span><span class="p">()</span>
+        <span class="k">del</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;config_path&quot;</span><span class="p">]</span>
         <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
         <span class="n">DLCModelSource</span><span class="o">.</span><span class="n">insert_entry</span><span class="p">(</span>
             <span class="n">dlc_model_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;dlc_model_name&quot;</span><span class="p">],</span>
@@ -2582,9 +2584,7 @@ from local disk instead of Spyglass</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">20</span>
-<span class="normal">21</span>
-<span class="normal">22</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">22</span>
 <span class="normal">23</span>
 <span class="normal">24</span>
 <span class="normal">25</span>
@@ -2614,7 +2614,9 @@ from local disk instead of Spyglass</p>
 <span class="normal">49</span>
 <span class="normal">50</span>
 <span class="normal">51</span>
-<span class="normal">52</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">BodyPart</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Holds bodyparts for use in DeepLabCut models&quot;&quot;&quot;</span>
 
@@ -2695,7 +2697,11 @@ an optional list of descriptions, inserts into BodyPart table.</p>
           <td>
                 <code><span title="typing.List">List</span></code>
           </td>
-          <td><p>list of bodyparts from config</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>list of bodyparts from config</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2705,8 +2711,12 @@ an optional list of descriptions, inserts into BodyPart table.</p>
           <td>
                 <code>List, default None</code>
           </td>
-          <td><p>optional list of descriptions for bodyparts.
-If None, description is set to bodypart name</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>optional list of descriptions for bodyparts.
+If None, description is set to bodypart name</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -2716,9 +2726,7 @@ If None, description is set to bodypart name</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">30</span>
-<span class="normal">31</span>
-<span class="normal">32</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">32</span>
 <span class="normal">33</span>
 <span class="normal">34</span>
 <span class="normal">35</span>
@@ -2738,7 +2746,9 @@ If None, description is set to bodypart name</p></td>
 <span class="normal">49</span>
 <span class="normal">50</span>
 <span class="normal">51</span>
-<span class="normal">52</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">add_from_config</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">bodyparts</span><span class="p">:</span> <span class="n">List</span><span class="p">,</span> <span class="n">descriptions</span><span class="p">:</span> <span class="n">List</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Given a list of bodyparts from the config and</span>
 <span class="sd">    an optional list of descriptions, inserts into BodyPart table.</span>
@@ -2803,8 +2813,7 @@ upstream DLCModelTraining table, or from local directory</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_model.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 45</span>
-<span class="normal"> 46</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 46</span>
 <span class="normal"> 47</span>
 <span class="normal"> 48</span>
 <span class="normal"> 49</span>
@@ -2863,7 +2872,8 @@ upstream DLCModelTraining table, or from local directory</p>
 <span class="normal">102</span>
 <span class="normal">103</span>
 <span class="normal">104</span>
-<span class="normal">105</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">105</span>
+<span class="normal">106</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">DLCModelSource</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Table to determine whether model originates from</span>
 <span class="sd">    upstream DLCModelTraining table, or from local directory</span>
@@ -2968,9 +2978,7 @@ With ability to edit config, extract frames, label frames</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 55</span>
-<span class="normal"> 56</span>
-<span class="normal"> 57</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 57</span>
 <span class="normal"> 58</span>
 <span class="normal"> 59</span>
 <span class="normal"> 60</span>
@@ -3405,7 +3413,10 @@ With ability to edit config, extract frames, label frames</p>
 <span class="normal">489</span>
 <span class="normal">490</span>
 <span class="normal">491</span>
-<span class="normal">492</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">492</span>
+<span class="normal">493</span>
+<span class="normal">494</span>
+<span class="normal">495</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">DLCProject</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Table to facilitate creation of a new DeepLabCut model.</span>
 <span class="sd">    With ability to edit config, extract frames, label frames</span>
@@ -3661,9 +3672,10 @@ With ability to edit config, extract frames, label frames</p>
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
                     <span class="sa">f</span><span class="s2">&quot;bodypart: </span><span class="si">{</span><span class="n">bodypart</span><span class="si">}</span><span class="s2"> not found in BodyPart table&quot;</span>
                 <span class="p">)</span>
-        <span class="n">kwargs</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;numframes2pick&quot;</span><span class="p">:</span> <span class="n">frames_per_video</span><span class="p">,</span> <span class="s2">&quot;dotsize&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">})</span>
+        <span class="n">kwargs_copy</span> <span class="o">=</span> <span class="n">copy</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="n">kwargs_copy</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;numframes2pick&quot;</span><span class="p">:</span> <span class="n">frames_per_video</span><span class="p">,</span> <span class="s2">&quot;dotsize&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">})</span>
         <span class="n">add_to_config</span><span class="p">(</span>
-            <span class="n">config_path</span><span class="p">,</span> <span class="n">bodyparts</span><span class="p">,</span> <span class="n">skeleton_node</span><span class="o">=</span><span class="n">skeleton_node</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+            <span class="n">config_path</span><span class="p">,</span> <span class="n">bodyparts</span><span class="p">,</span> <span class="n">skeleton_node</span><span class="o">=</span><span class="n">skeleton_node</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs_copy</span>
         <span class="p">)</span>
         <span class="n">key</span> <span class="o">=</span> <span class="p">{</span>
             <span class="s2">&quot;project_name&quot;</span><span class="p">:</span> <span class="n">project_name</span><span class="p">,</span>
@@ -3877,13 +3889,13 @@ With ability to edit config, extract frames, label frames</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">72</span>
-<span class="normal">73</span>
-<span class="normal">74</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">74</span>
 <span class="normal">75</span>
 <span class="normal">76</span>
 <span class="normal">77</span>
-<span class="normal">78</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">BodyPart</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">BodyPart</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Part table to hold bodyparts used in each project.&quot;&quot;&quot;</span>
 
     <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
@@ -3946,7 +3958,11 @@ With ability to edit config, extract frames, label frames</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>user-friendly name of project</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>user-friendly name of project</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3956,7 +3972,11 @@ With ability to edit config, extract frames, label frames</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>name of lab team. Should match an entry in LabTeam table</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>name of lab team. Should match an entry in LabTeam table</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3966,7 +3986,11 @@ With ability to edit config, extract frames, label frames</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>path to project directory</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>path to project directory</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3976,8 +4000,12 @@ With ability to edit config, extract frames, label frames</p>
           <td>
                 <code>list</code>
           </td>
-          <td><p>optional list of bodyparts to label that
-are not already in existing config</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>optional list of bodyparts to label that
+are not already in existing config</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -3987,9 +4015,7 @@ are not already in existing config</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 99</span>
-<span class="normal">100</span>
-<span class="normal">101</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">101</span>
 <span class="normal">102</span>
 <span class="normal">103</span>
 <span class="normal">104</span>
@@ -4094,7 +4120,9 @@ are not already in existing config</p></td>
 <span class="normal">203</span>
 <span class="normal">204</span>
 <span class="normal">205</span>
-<span class="normal">206</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">insert_existing_project</span><span class="p">(</span>
     <span class="bp">cls</span><span class="p">,</span>
     <span class="n">project_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
@@ -4247,7 +4275,11 @@ are not already in existing config</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>user-friendly name of project</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>user-friendly name of project</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4257,7 +4289,11 @@ are not already in existing config</p></td>
           <td>
                 <code>list</code>
           </td>
-          <td><p>list of bodyparts to label. Should match bodyparts in BodyPart table</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>list of bodyparts to label. Should match bodyparts in BodyPart table</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4267,7 +4303,11 @@ are not already in existing config</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>name of lab team. Should match an entry in LabTeam table</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>name of lab team. Should match an entry in LabTeam table</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4277,8 +4317,12 @@ are not already in existing config</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>directory where to create project.
-(Default is '/cumulus/deeplabcut/')</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>directory where to create project.
+(Default is '/cumulus/deeplabcut/')</p>
+            </div>
+          </td>
           <td>
                 <code>os.getenv(&#39;DLC_PROJECT_PATH&#39;)</code>
           </td>
@@ -4288,7 +4332,11 @@ are not already in existing config</p></td>
           <td>
                 <code>int</code>
           </td>
-          <td><p>number of frames to extract from each video</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>number of frames to extract from each video</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4298,9 +4346,13 @@ are not already in existing config</p></td>
           <td>
                 <code>list</code>
           </td>
-          <td><p>list of dicts of form [{'nwb_file_name': nwb_file_name, 'epoch': epoch #},...]
+          <td>
+            <div class="doc-md-description">
+              <p>list of dicts of form [{'nwb_file_name': nwb_file_name, 'epoch': epoch #},...]
 to query VideoFile table for videos to train on.
-Can also be list of absolute paths to import videos from</p></td>
+Can also be list of absolute paths to import videos from</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4310,8 +4362,12 @@ Can also be list of absolute paths to import videos from</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>target path to output converted videos
-(Default is '/nimbus/deeplabcut/videos/')</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>target path to output converted videos
+(Default is '/nimbus/deeplabcut/videos/')</p>
+            </div>
+          </td>
           <td>
                 <code>os.getenv(&#39;DLC_VIDEO_PATH&#39;)</code>
           </td>
@@ -4321,8 +4377,12 @@ Can also be list of absolute paths to import videos from</p></td>
           <td>
                 <code>bool</code>
           </td>
-          <td><p>if True, will set permissions for user and group to be read+write
-(Default is False)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>if True, will set permissions for user and group to be read+write
+(Default is False)</p>
+            </div>
+          </td>
           <td>
                 <code>False</code>
           </td>
@@ -4332,9 +4392,7 @@ Can also be list of absolute paths to import videos from</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">208</span>
-<span class="normal">209</span>
-<span class="normal">210</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">210</span>
 <span class="normal">211</span>
 <span class="normal">212</span>
 <span class="normal">213</span>
@@ -4481,7 +4539,10 @@ Can also be list of absolute paths to import videos from</p></td>
 <span class="normal">354</span>
 <span class="normal">355</span>
 <span class="normal">356</span>
-<span class="normal">357</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">insert_new_project</span><span class="p">(</span>
     <span class="bp">cls</span><span class="p">,</span>
     <span class="n">project_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
@@ -4584,9 +4645,10 @@ Can also be list of absolute paths to import videos from</p></td>
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
                 <span class="sa">f</span><span class="s2">&quot;bodypart: </span><span class="si">{</span><span class="n">bodypart</span><span class="si">}</span><span class="s2"> not found in BodyPart table&quot;</span>
             <span class="p">)</span>
-    <span class="n">kwargs</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;numframes2pick&quot;</span><span class="p">:</span> <span class="n">frames_per_video</span><span class="p">,</span> <span class="s2">&quot;dotsize&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">})</span>
+    <span class="n">kwargs_copy</span> <span class="o">=</span> <span class="n">copy</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">kwargs_copy</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;numframes2pick&quot;</span><span class="p">:</span> <span class="n">frames_per_video</span><span class="p">,</span> <span class="s2">&quot;dotsize&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">})</span>
     <span class="n">add_to_config</span><span class="p">(</span>
-        <span class="n">config_path</span><span class="p">,</span> <span class="n">bodyparts</span><span class="p">,</span> <span class="n">skeleton_node</span><span class="o">=</span><span class="n">skeleton_node</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+        <span class="n">config_path</span><span class="p">,</span> <span class="n">bodyparts</span><span class="p">,</span> <span class="n">skeleton_node</span><span class="o">=</span><span class="n">skeleton_node</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs_copy</span>
     <span class="p">)</span>
     <span class="n">key</span> <span class="o">=</span> <span class="p">{</span>
         <span class="s2">&quot;project_name&quot;</span><span class="p">:</span> <span class="n">project_name</span><span class="p">,</span>
@@ -4662,10 +4724,7 @@ Can also be list of absolute paths to import videos from</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">359</span>
-<span class="normal">360</span>
-<span class="normal">361</span>
-<span class="normal">362</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">362</span>
 <span class="normal">363</span>
 <span class="normal">364</span>
 <span class="normal">365</span>
@@ -4702,7 +4761,10 @@ Can also be list of absolute paths to import videos from</p></td>
 <span class="normal">396</span>
 <span class="normal">397</span>
 <span class="normal">398</span>
-<span class="normal">399</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span>
+<span class="normal">402</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">add_training_files</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Add training videos and labeled frames .h5 and .csv to DLCProject.File&quot;&quot;&quot;</span>
     <span class="n">config_path</span> <span class="o">=</span> <span class="p">(</span><span class="bp">cls</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s2">&quot;project_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;project_name&quot;</span><span class="p">]})</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span>
@@ -4776,16 +4838,16 @@ cannot be run through ssh tunnel</p>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">401</span>
-<span class="normal">402</span>
-<span class="normal">403</span>
-<span class="normal">404</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">404</span>
 <span class="normal">405</span>
 <span class="normal">406</span>
 <span class="normal">407</span>
 <span class="normal">408</span>
 <span class="normal">409</span>
-<span class="normal">410</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">410</span>
+<span class="normal">411</span>
+<span class="normal">412</span>
+<span class="normal">413</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">run_extract_frames</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Convenience function to launch DLC GUI for extracting frames.</span>
 <span class="sd">    Must be run on local machine to access GUI,</span>
@@ -4828,16 +4890,16 @@ cannot be run through ssh tunnel</p>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">412</span>
-<span class="normal">413</span>
-<span class="normal">414</span>
-<span class="normal">415</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">415</span>
 <span class="normal">416</span>
 <span class="normal">417</span>
 <span class="normal">418</span>
 <span class="normal">419</span>
 <span class="normal">420</span>
-<span class="normal">421</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">421</span>
+<span class="normal">422</span>
+<span class="normal">423</span>
+<span class="normal">424</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">run_label_frames</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Convenience function to launch DLC GUI for labeling frames.</span>
 <span class="sd">    Must be run on local machine to access GUI,</span>
@@ -4879,15 +4941,15 @@ previously extracted and labeled frames</p>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">423</span>
-<span class="normal">424</span>
-<span class="normal">425</span>
-<span class="normal">426</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">426</span>
 <span class="normal">427</span>
 <span class="normal">428</span>
 <span class="normal">429</span>
 <span class="normal">430</span>
-<span class="normal">431</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">431</span>
+<span class="normal">432</span>
+<span class="normal">433</span>
+<span class="normal">434</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">check_labels</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Convenience function to check labels on</span>
 <span class="sd">    previously extracted and labeled frames</span>
@@ -4941,7 +5003,11 @@ previously extracted and labeled frames</p>
           <td>
                 <code><span title="typing.Dict">Dict</span></code>
           </td>
-          <td><p>key to specify entry in DLCProject table to add labeled frames to</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>key to specify entry in DLCProject table to add labeled frames to</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4951,7 +5017,11 @@ previously extracted and labeled frames</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>absolute path to project directory containing labeled frames to import</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>absolute path to project directory containing labeled frames to import</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4961,8 +5031,12 @@ previously extracted and labeled frames</p>
           <td>
                 <code>str or List</code>
           </td>
-          <td><p>filename or list of filenames of video(s) from which to import frames.
-without file extension</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>filename or list of filenames of video(s) from which to import frames.
+without file extension</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4972,10 +5046,7 @@ without file extension</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_project.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">433</span>
-<span class="normal">434</span>
-<span class="normal">435</span>
-<span class="normal">436</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">436</span>
 <span class="normal">437</span>
 <span class="normal">438</span>
 <span class="normal">439</span>
@@ -5031,7 +5102,10 @@ without file extension</p></td>
 <span class="normal">489</span>
 <span class="normal">490</span>
 <span class="normal">491</span>
-<span class="normal">492</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">492</span>
+<span class="normal">493</span>
+<span class="normal">494</span>
+<span class="normal">495</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">import_labeled_frames</span><span class="p">(</span>
     <span class="bp">cls</span><span class="p">,</span>
     <span class="n">key</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
@@ -5698,8 +5772,7 @@ without file extension</p></td>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_model.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">270</span>
-<span class="normal">271</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">271</span>
 <span class="normal">272</span>
 <span class="normal">273</span>
 <span class="normal">274</span>
@@ -5767,7 +5840,8 @@ without file extension</p></td>
 <span class="normal">336</span>
 <span class="normal">337</span>
 <span class="normal">338</span>
-<span class="normal">339</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">339</span>
+<span class="normal">340</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">DLCModelEvaluation</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
     <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
 <span class="s2">    -&gt; DLCModel</span>
@@ -5866,8 +5940,7 @@ without file extension</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_model.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">283</span>
-<span class="normal">284</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">284</span>
 <span class="normal">285</span>
 <span class="normal">286</span>
 <span class="normal">287</span>
@@ -5922,7 +5995,8 @@ without file extension</p></td>
 <span class="normal">336</span>
 <span class="normal">337</span>
 <span class="normal">338</span>
-<span class="normal">339</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+<span class="normal">339</span>
+<span class="normal">340</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;.populate() method will launch evaluation for each unique entry in Model.&quot;&quot;&quot;</span>
     <span class="kn">import</span> <span class="nn">csv</span>
 
@@ -6015,13 +6089,13 @@ without file extension</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_model.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">342</span>
-<span class="normal">343</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">343</span>
 <span class="normal">344</span>
 <span class="normal">345</span>
 <span class="normal">346</span>
 <span class="normal">347</span>
-<span class="normal">348</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">str_to_bool</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="normal">348</span>
+<span class="normal">349</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">str_to_bool</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Return whether the provided string represents true. Otherwise false.&quot;&quot;&quot;</span>
     <span class="c1"># Due to distutils equivalent depreciation in 3.10</span>
     <span class="c1"># Adopted from github.com/PostHog/posthog/blob/master/posthog/utils.py</span>

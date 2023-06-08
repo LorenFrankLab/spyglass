@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2728,7 +2728,11 @@
           <td>
                 <code>query</code>
           </td>
-          <td><p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2738,10 +2742,14 @@
           <td>
                 <code>tuple</code>
           </td>
-          <td><p>Tuple (table, attr) to get the NWB filepath from.
+          <td>
+            <div class="doc-md-description">
+              <p>Tuple (table, attr) to get the NWB filepath from.
 i.e. absolute path to NWB file can be obtained by looking up attr column of table
 table is usually Nwbfile or AnalysisNwbfile;
-attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
+attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2751,7 +2759,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>list</code>
           </td>
-          <td><p>Attributes from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Attributes from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>()</code>
           </td>
@@ -2761,7 +2773,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Keyword arguments from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Keyword arguments from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>{}</code>
           </td>
@@ -2782,7 +2798,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>nwb_objects</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of dicts containing fetch results and NWB objects.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of dicts containing fetch results and NWB objects.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -4937,7 +4957,11 @@ and position determination parameters</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file to be copied.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file to be copied.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4958,7 +4982,11 @@ and position determination parameters</p>
 <td><code>analysis_file_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the new NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the new NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5102,7 +5130,11 @@ and position determination parameters</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file to be copied.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file to be copied.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5123,7 +5155,11 @@ and position determination parameters</p>
 <td><code>analysis_file_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the new NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the new NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5244,7 +5280,11 @@ and position determination parameters</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the parent NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the parent NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5254,7 +5294,11 @@ and position determination parameters</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file that was created.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file that was created.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5345,7 +5389,11 @@ and position determination parameters</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWB file that has been inserted into the AnalysisNwbfile() schema</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWB file that has been inserted into the AnalysisNwbfile() schema</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5366,7 +5414,11 @@ and position determination parameters</p>
 <td><code>analysis_nwb_file_abspath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The absolute path for the given file name.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The absolute path for the given file name.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5489,7 +5541,11 @@ and position determination parameters</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5499,7 +5555,11 @@ and position determination parameters</p>
           <td>
                 <code>pynwb.<span title="pynwb.core">core</span>.<span title="pynwb.core.NWBDataInterface">NWBDataInterface</span></code>
           </td>
-          <td><p>The NWB object created by PyNWB.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object created by PyNWB.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5509,7 +5569,11 @@ and position determination parameters</p>
           <td>
                 <code>str (optional, defaults to &#39;pandas_table&#39;)</code>
           </td>
-          <td><p>The name of the DynamicTable made from a dataframe.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the DynamicTable made from a dataframe.</p>
+            </div>
+          </td>
           <td>
                 <code>&#39;pandas_table&#39;</code>
           </td>
@@ -5530,7 +5594,11 @@ and position determination parameters</p>
 <td><code>nwb_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object ID of the added object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object ID of the added object.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5653,7 +5721,11 @@ and position determination parameters</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5663,7 +5735,11 @@ and position determination parameters</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>keys are unit ids, values are spike times</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>keys are unit ids, values are spike times</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5673,7 +5749,11 @@ and position determination parameters</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of units and valid times with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of units and valid times with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5683,7 +5763,11 @@ and position determination parameters</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of units and sort_interval with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of units and sort_interval with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5693,7 +5777,11 @@ and position determination parameters</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Dictionary of unit waveforms with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of unit waveforms with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -5703,7 +5791,11 @@ and position determination parameters</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -5713,7 +5805,11 @@ and position determination parameters</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Curation labels for clusters</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Curation labels for clusters</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -5734,7 +5830,11 @@ and position determination parameters</p>
           <td>
                 <code>units_object_id, waveforms_object_id</code>
           </td>
-          <td><p>The NWB object id of the Units object and the object id of the waveforms object ('' if None)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object and the object id of the waveforms object ('' if None)</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5991,7 +6091,11 @@ and position determination parameters</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6001,7 +6105,11 @@ and position determination parameters</p>
           <td>
                 <code>si.WaveformExtractor object</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6011,7 +6119,11 @@ and position determination parameters</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -6021,7 +6133,11 @@ and position determination parameters</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Curation labels for clusters</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Curation labels for clusters</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -6042,7 +6158,11 @@ and position determination parameters</p>
 <td><code>units_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object id of the Units object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6269,7 +6389,11 @@ and position determination parameters</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6279,7 +6403,11 @@ and position determination parameters</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6300,7 +6428,11 @@ and position determination parameters</p>
 <td><code>units_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object id of the Units object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6421,7 +6553,11 @@ and position determination parameters</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6431,7 +6567,11 @@ and position determination parameters</p>
           <td>
                 <code>numpy array or list</code>
           </td>
-          <td><p>Array or list of electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array or list of electrode IDs.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6452,7 +6592,11 @@ and position determination parameters</p>
 <td><code>electrode_indices</code></td>          <td>
                 <code>numpy array</code>
           </td>
-          <td><p>Array of indices in the electrodes table for the given electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array of indices in the electrodes table for the given electrode IDs.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6541,7 +6685,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>bool, optional</code>
           </td>
-          <td><p>Whether the original files should be deleted (default False).</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Whether the original files should be deleted (default False).</p>
+            </div>
+          </td>
           <td>
                 <code>False</code>
           </td>
@@ -6627,7 +6775,11 @@ video file filename and path</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary containing nwb_file_name and interval_list_name as keys</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary containing nwb_file_name and interval_list_name as keys</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6648,13 +6800,21 @@ video file filename and path</p>
 <td><code>video_filepath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>path to the video file, including video filename</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>path to the video file, including video filename</p>
+            </div>
+          </td>
         </tr>
         <tr>
 <td><code>video_filename</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>filename of the video</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>filename of the video</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6780,7 +6940,11 @@ DeepLabCut processes. Converts to MP4 if not already.</p>
           <td>
                 <code>str or PosixPath object</code>
           </td>
-          <td><p>path to directory of the existing video file without filename</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>path to directory of the existing video file without filename</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6790,7 +6954,11 @@ DeepLabCut processes. Converts to MP4 if not already.</p>
           <td>
                 <code>str or PosixPath object</code>
           </td>
-          <td><p>path to directory where converted video will be saved</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>path to directory where converted video will be saved</p>
+            </div>
+          </td>
           <td>
                 <code>os.getenv(&#39;DLC_VIDEO_PATH&#39;)</code>
           </td>
@@ -6800,8 +6968,12 @@ DeepLabCut processes. Converts to MP4 if not already.</p>
           <td>
                 <code>str, Optional</code>
           </td>
-          <td><p>filename of the video to convert, if not provided, video_filetype must be
-and all video files of video_filetype in the directory will be converted</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>filename of the video to convert, if not provided, video_filetype must be
+and all video files of video_filetype in the directory will be converted</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -6811,8 +6983,12 @@ and all video files of video_filetype in the directory will be converted</p></td
           <td>
                 <code>str or List, Default &#39;h264&#39;, Optional</code>
           </td>
-          <td><p>If video_filename is not provided,
-all videos of this filetype will be converted to .mp4</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>If video_filename is not provided,
+all videos of this filetype will be converted to .mp4</p>
+            </div>
+          </td>
           <td>
                 <code>&#39;h264&#39;</code>
           </td>
@@ -6833,7 +7009,11 @@ all videos of this filetype will be converted to .mp4</p></td>
 <td><code>output_files</code></td>          <td>
                 <code>List of PosixPath objects</code>
           </td>
-          <td><p>paths to converted video file(s)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>paths to converted video file(s)</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -7441,7 +7621,11 @@ the original LED positions overlaid on the video of the animal.</p>
           <td>
                 <code>ndarray, shape(n_time, 2)</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7451,7 +7635,11 @@ the original LED positions overlaid on the video of the animal.</p>
           <td>
                 <code>array_like, shape(2)</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7461,7 +7649,11 @@ the original LED positions overlaid on the video of the animal.</p>
           <td>
                 <code>float</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
                 <code>1.0</code>
           </td>
@@ -7482,7 +7674,11 @@ the original LED positions overlaid on the video of the animal.</p>
 <td><code>converted_data</code></td>          <td>
                 <code>ndarray, shape(n_time, 2)</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>

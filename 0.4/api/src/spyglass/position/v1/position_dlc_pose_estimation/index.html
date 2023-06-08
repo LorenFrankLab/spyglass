@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -1978,15 +1978,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#src.spyglass.position.v1.position_dlc_pose_estimation.add_timestamps" class="md-nav__link">
-    add_timestamps()
+  <a href="#src.spyglass.position.v1.position_dlc_pose_estimation.infer_output_dir" class="md-nav__link">
+    infer_output_dir()
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#src.spyglass.position.v1.position_dlc_pose_estimation.infer_output_dir" class="md-nav__link">
-    infer_output_dir()
+  <a href="#src.spyglass.position.v1.position_dlc_pose_estimation.add_timestamps" class="md-nav__link">
+    add_timestamps()
   </a>
   
 </li>
@@ -2558,8 +2558,7 @@
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 20</span>
-<span class="normal"> 21</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 21</span>
 <span class="normal"> 22</span>
 <span class="normal"> 23</span>
 <span class="normal"> 24</span>
@@ -2656,7 +2655,8 @@
 <span class="normal">115</span>
 <span class="normal">116</span>
 <span class="normal">117</span>
-<span class="normal">118</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">118</span>
+<span class="normal">119</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">DLCPoseEstimationSelection</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
     <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
 <span class="s2">    -&gt; VideoFile                           # Session -&gt; Recording + File part table</span>
@@ -2802,7 +2802,11 @@
           <td>
                 <code>str</code>
           </td>
-          <td><p>path to the video file</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>path to the video file</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2823,15 +2827,18 @@
 <td><code>crop_ints</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>list of 4 integers [x min, x max, y min, y max]</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>list of 4 integers [x min, x max, y min, y max]</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">32</span>
-<span class="normal">33</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">33</span>
 <span class="normal">34</span>
 <span class="normal">35</span>
 <span class="normal">36</span>
@@ -2864,7 +2871,8 @@
 <span class="normal">63</span>
 <span class="normal">64</span>
 <span class="normal">65</span>
-<span class="normal">66</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">66</span>
+<span class="normal">67</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">get_video_crop</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">video_path</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Queries the user to determine the cropping parameters for a given video</span>
@@ -2944,7 +2952,11 @@ From Datajoint Elements</p>
           <td><code>key</code></td>
           <td>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2953,7 +2965,11 @@ From Datajoint Elements</p>
           <td><code>task_mode</code></td>
           <td>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
                 <code>&#39;trigger&#39;</code>
           </td>
@@ -2963,8 +2979,12 @@ From Datajoint Elements</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>videotype, gputouse, save_as_csv, batchsize, cropping, TFGPUinference,
-dynamic, robust_nframes, allow_growth, use_shelve</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>videotype, gputouse, save_as_csv, batchsize, cropping, TFGPUinference,
+dynamic, robust_nframes, allow_growth, use_shelve</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -2974,8 +2994,7 @@ dynamic, robust_nframes, allow_growth, use_shelve</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 68</span>
-<span class="normal"> 69</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 69</span>
 <span class="normal"> 70</span>
 <span class="normal"> 71</span>
 <span class="normal"> 72</span>
@@ -3024,7 +3043,8 @@ dynamic, robust_nframes, allow_growth, use_shelve</p></td>
 <span class="normal">115</span>
 <span class="normal">116</span>
 <span class="normal">117</span>
-<span class="normal">118</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">118</span>
+<span class="normal">119</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">insert_estimation_task</span><span class="p">(</span>
     <span class="bp">cls</span><span class="p">,</span>
     <span class="n">key</span><span class="p">,</span>
@@ -3125,7 +3145,11 @@ dynamic, robust_nframes, allow_growth, use_shelve</p></td>
           <td>
                 <code>query</code>
           </td>
-          <td><p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3135,10 +3159,14 @@ dynamic, robust_nframes, allow_growth, use_shelve</p></td>
           <td>
                 <code>tuple</code>
           </td>
-          <td><p>Tuple (table, attr) to get the NWB filepath from.
+          <td>
+            <div class="doc-md-description">
+              <p>Tuple (table, attr) to get the NWB filepath from.
 i.e. absolute path to NWB file can be obtained by looking up attr column of table
 table is usually Nwbfile or AnalysisNwbfile;
-attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
+attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3148,7 +3176,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>list</code>
           </td>
-          <td><p>Attributes from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Attributes from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>()</code>
           </td>
@@ -3158,7 +3190,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Keyword arguments from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Keyword arguments from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>{}</code>
           </td>
@@ -3179,7 +3215,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>nwb_objects</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of dicts containing fetch results and NWB objects.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of dicts containing fetch results and NWB objects.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3375,21 +3415,33 @@ print statements to the log file instead of, or as well as the console.</p>
           <td>
                 <code>logging.<span title="logging.Logger">Logger</span></code>
           </td>
-          <td><p>logger object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>logger object</p>
+            </div>
+          </td>
         </tr>
         <tr>
           <td><code>name</code></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>name of logger</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>name of logger</p>
+            </div>
+          </td>
         </tr>
         <tr>
           <td><code>level</code></td>
           <td>
                 <code>int</code>
           </td>
-          <td><p>level of logging that the logger is set to handle</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>level of logging that the logger is set to handle</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3703,7 +3755,11 @@ print statements to the log file instead of, or as well as the console.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>name of the logfile to use</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>name of the logfile to use</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3713,7 +3769,11 @@ print statements to the log file instead of, or as well as the console.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>path to the file that should be used as the file handler</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>path to the file that should be used as the file handler</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3723,7 +3783,11 @@ print statements to the log file instead of, or as well as the console.</p>
           <td>
                 <code>bool, default-False</code>
           </td>
-          <td><p>if True, prints to console as well as log file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>if True, prints to console as well as log file.</p>
+            </div>
+          </td>
           <td>
                 <code>False</code>
           </td>
@@ -3744,7 +3808,11 @@ print statements to the log file instead of, or as well as the console.</p>
 <td><code>logger</code></td>          <td>
                 <code>logging.<span title="logging.Logger">Logger</span></code>
           </td>
-          <td><p>the logger object with specified handlers</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>the logger object with specified handlers</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -4030,8 +4098,7 @@ closest timestamps from the neural recording via the trodes time.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">121</span>
-<span class="normal">122</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">122</span>
 <span class="normal">123</span>
 <span class="normal">124</span>
 <span class="normal">125</span>
@@ -4171,7 +4238,127 @@ closest timestamps from the neural recording via the trodes time.</p>
 <span class="normal">259</span>
 <span class="normal">260</span>
 <span class="normal">261</span>
-<span class="normal">262</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">DLCPoseEstimation</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
     <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
 <span class="s2">    -&gt; DLCPoseEstimationSelection</span>
@@ -4186,7 +4373,8 @@ closest timestamps from the neural recording via the trodes time.</p>
 <span class="s2">        -&gt; DLCModel.BodyPart</span>
 <span class="s2">        ---</span>
 <span class="s2">        -&gt; AnalysisNwbfile</span>
-<span class="s2">        dlc_pose_estimation_object_id : varchar(80)</span>
+<span class="s2">        dlc_pose_estimation_position_object_id : varchar(80)</span>
+<span class="s2">        dlc_pose_estimation_likelihood_object_id : varchar(80)</span>
 <span class="s2">        &quot;&quot;&quot;</span>
 
         <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
@@ -4198,11 +4386,53 @@ closest timestamps from the neural recording via the trodes time.</p>
             <span class="p">)</span>
 
         <span class="k">def</span> <span class="nf">fetch1_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;dlc_pose_estimation&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;time&quot;</span><span class="p">)</span>
+            <span class="n">nwb_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">index</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                    <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_pose_estimation_position&quot;</span><span class="p">]</span>
+                    <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+                    <span class="o">.</span><span class="n">timestamps</span>
+                <span class="p">),</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;time&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">COLUMNS</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;x&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;y&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+            <span class="p">]</span>
+            <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+                    <span class="p">(</span>
+                        <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                            <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_pose_estimation_likelihood&quot;</span><span class="p">]</span>
+                            <span class="o">.</span><span class="n">time_series</span><span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]</span>
+                            <span class="o">.</span><span class="n">data</span><span class="p">,</span>
+                            <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+                        <span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span>
+                        <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                            <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_pose_estimation_position&quot;</span><span class="p">]</span>
+                            <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+                            <span class="o">.</span><span class="n">data</span>
+                        <span class="p">),</span>
+                        <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                            <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_pose_estimation_likelihood&quot;</span><span class="p">]</span>
+                            <span class="o">.</span><span class="n">time_series</span><span class="p">[</span><span class="s2">&quot;likelihood&quot;</span><span class="p">]</span>
+                            <span class="o">.</span><span class="n">data</span>
+                        <span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span>
+                    <span class="p">),</span>
+                    <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="n">columns</span><span class="o">=</span><span class="n">COLUMNS</span><span class="p">,</span>
+                <span class="n">index</span><span class="o">=</span><span class="n">index</span><span class="p">,</span>
+            <span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;.populate() method will launch training for each PoseEstimationTask&quot;&quot;&quot;</span>
         <span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">dlc_reader</span>
+        <span class="kn">from</span> <span class="nn">.dlc_utils</span> <span class="kn">import</span> <span class="n">get_video_path</span>
+
+        <span class="n">METERS_PER_CM</span> <span class="o">=</span> <span class="mf">0.01</span>
 
         <span class="n">output_dir</span> <span class="o">=</span> <span class="n">infer_output_dir</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">makedir</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
         <span class="k">with</span> <span class="n">OutputLogger</span><span class="p">(</span>
@@ -4242,23 +4472,15 @@ closest timestamps from the neural recording via the trodes time.</p>
 
             <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;getting raw position&quot;</span><span class="p">)</span>
             <span class="n">interval_list_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;pos </span><span class="si">{</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;epoch&#39;</span><span class="p">]</span><span class="o">-</span><span class="mi">1</span><span class="si">}</span><span class="s2"> valid times&quot;</span>
-            <span class="n">raw_position</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">spatial_series</span> <span class="o">=</span> <span class="p">(</span>
                 <span class="n">RawPosition</span><span class="p">()</span>
-                <span class="o">&amp;</span> <span class="p">{</span>
-                    <span class="s2">&quot;nwb_file_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
-                    <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">,</span>
-                <span class="p">}</span>
-            <span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
-            <span class="n">raw_pos_df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
-                <span class="n">data</span><span class="o">=</span><span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
-                <span class="n">index</span><span class="o">=</span><span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span>
-                    <span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">timestamps</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;time&quot;</span>
-                <span class="p">),</span>
-                <span class="n">columns</span><span class="o">=</span><span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">description</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;, &quot;</span><span class="p">),</span>
-            <span class="p">)</span>
+                <span class="o">&amp;</span> <span class="p">{</span><span class="o">**</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">}</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span>
+            <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">video_time</span> <span class="o">=</span> <span class="n">get_video_path</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="n">pos_time</span> <span class="o">=</span> <span class="n">spatial_series</span><span class="o">.</span><span class="n">timestamps</span>
             <span class="c1"># TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,</span>
             <span class="c1"># which also has timestamps</span>
-            <span class="n">key</span><span class="p">[</span><span class="s2">&quot;meters_per_pixel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">conversion</span>
+            <span class="n">key</span><span class="p">[</span><span class="s2">&quot;meters_per_pixel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">spatial_series</span><span class="o">.</span><span class="n">conversion</span>
 
             <span class="c1"># Insert entry into DLCPoseEstimation</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
@@ -4280,21 +4502,57 @@ closest timestamps from the neural recording via the trodes time.</p>
                             <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">dlc_result</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">body_part</span><span class="p">)</span><span class="o">.</span><span class="n">columns</span>
                         <span class="p">}</span>
                     <span class="p">)</span>
+            <span class="n">idx</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">IndexSlice</span>
             <span class="k">for</span> <span class="n">body_part</span><span class="p">,</span> <span class="n">part_df</span> <span class="ow">in</span> <span class="n">body_parts_df</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
                 <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;converting to cm&quot;</span><span class="p">)</span>
                 <span class="n">part_df</span> <span class="o">=</span> <span class="n">convert_to_cm</span><span class="p">(</span><span class="n">part_df</span><span class="p">,</span> <span class="n">meters_per_pixel</span><span class="p">)</span>
                 <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;adding timestamps to DataFrame&quot;</span><span class="p">)</span>
-                <span class="n">part_df</span> <span class="o">=</span> <span class="n">add_timestamps</span><span class="p">(</span><span class="n">part_df</span><span class="p">,</span> <span class="n">raw_pos_df</span><span class="o">.</span><span class="n">copy</span><span class="p">())</span>
+                <span class="n">part_df</span> <span class="o">=</span> <span class="n">add_timestamps</span><span class="p">(</span>
+                    <span class="n">part_df</span><span class="p">,</span> <span class="n">pos_time</span><span class="o">=</span><span class="n">pos_time</span><span class="p">,</span> <span class="n">video_time</span><span class="o">=</span><span class="n">video_time</span>
+                <span class="p">)</span>
                 <span class="n">key</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">body_part</span>
                 <span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
                     <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">]</span>
                 <span class="p">)</span>
+                <span class="n">position</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">Position</span><span class="p">()</span>
+                <span class="n">likelihood</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">BehavioralTimeSeries</span><span class="p">()</span>
+                <span class="n">position</span><span class="o">.</span><span class="n">create_spatial_series</span><span class="p">(</span>
+                    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;position&quot;</span><span class="p">,</span>
+                    <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">conversion</span><span class="o">=</span><span class="n">METERS_PER_CM</span><span class="p">,</span>
+                    <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[(</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">)]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">reference_frame</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">reference_frame</span><span class="p">,</span>
+                    <span class="n">comments</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">comments</span><span class="p">,</span>
+                    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;x_position, y_position&quot;</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">likelihood</span><span class="o">.</span><span class="n">create_timeseries</span><span class="p">(</span>
+                    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+                    <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;likelihood&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+                    <span class="n">comments</span><span class="o">=</span><span class="s2">&quot;no comments&quot;</span><span class="p">,</span>
+                    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">likelihood</span><span class="o">.</span><span class="n">create_timeseries</span><span class="p">(</span>
+                    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+                    <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;index&quot;</span><span class="p">,</span>
+                    <span class="n">comments</span><span class="o">=</span><span class="s2">&quot;no comments&quot;</span><span class="p">,</span>
+                    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+                <span class="p">)</span>
                 <span class="n">nwb_analysis_file</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span>
                 <span class="n">key</span><span class="p">[</span>
-                    <span class="s2">&quot;dlc_pose_estimation_object_id&quot;</span>
+                    <span class="s2">&quot;dlc_pose_estimation_position_object_id&quot;</span>
                 <span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
                     <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">],</span>
-                    <span class="n">nwb_object</span><span class="o">=</span><span class="n">part_df</span><span class="p">,</span>
+                    <span class="n">nwb_object</span><span class="o">=</span><span class="n">position</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">key</span><span class="p">[</span>
+                    <span class="s2">&quot;dlc_pose_estimation_likelihood_object_id&quot;</span>
+                <span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
+                    <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">],</span>
+                    <span class="n">nwb_object</span><span class="o">=</span><span class="n">likelihood</span><span class="p">,</span>
                 <span class="p">)</span>
                 <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
                     <span class="n">nwb_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
@@ -4304,11 +4562,59 @@ closest timestamps from the neural recording via the trodes time.</p>
 
     <span class="k">def</span> <span class="nf">fetch_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
         <span class="n">entries</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">BodyPart</span> <span class="o">&amp;</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s2">&quot;KEY&quot;</span><span class="p">)</span>
+        <span class="n">nwb_data_dict</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]:</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">BodyPart</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">entry</span><span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">entries</span>
+        <span class="p">}</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                <span class="n">nwb_data_dict</span><span class="p">[</span><span class="n">entries</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]][</span>
+                    <span class="s2">&quot;dlc_pose_estimation_position&quot;</span>
+                <span class="p">]</span>
+                <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+                <span class="o">.</span><span class="n">timestamps</span>
+            <span class="p">),</span>
+            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;time&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">COLUMNS</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;x&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;y&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
         <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span>
             <span class="p">{</span>
-                <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]:</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">BodyPart</span> <span class="o">&amp;</span> <span class="n">entry</span><span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span>
-                    <span class="s2">&quot;dlc_pose_estimation&quot;</span>
-                <span class="p">]</span>
+                <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+                        <span class="p">(</span>
+                            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                                <span class="n">nwb_data_dict</span><span class="p">[</span><span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]][</span>
+                                    <span class="s2">&quot;dlc_pose_estimation_likelihood&quot;</span>
+                                <span class="p">]</span>
+                                <span class="o">.</span><span class="n">time_series</span><span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]</span>
+                                <span class="o">.</span><span class="n">data</span><span class="p">,</span>
+                                <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+                            <span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span>
+                            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                                <span class="n">nwb_data_dict</span><span class="p">[</span><span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]][</span>
+                                    <span class="s2">&quot;dlc_pose_estimation_position&quot;</span>
+                                <span class="p">]</span>
+                                <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+                                <span class="o">.</span><span class="n">data</span>
+                            <span class="p">),</span>
+                            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                                <span class="n">nwb_data_dict</span><span class="p">[</span><span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]][</span>
+                                    <span class="s2">&quot;dlc_pose_estimation_likelihood&quot;</span>
+                                <span class="p">]</span>
+                                <span class="o">.</span><span class="n">time_series</span><span class="p">[</span><span class="s2">&quot;likelihood&quot;</span><span class="p">]</span>
+                                <span class="o">.</span><span class="n">data</span>
+                            <span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span>
+                        <span class="p">),</span>
+                        <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                    <span class="p">),</span>
+                    <span class="n">columns</span><span class="o">=</span><span class="n">COLUMNS</span><span class="p">,</span>
+                    <span class="n">index</span><span class="o">=</span><span class="n">index</span><span class="p">,</span>
+                <span class="p">)</span>
                 <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">entries</span>
             <span class="p">},</span>
             <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
@@ -4342,48 +4648,7 @@ closest timestamps from the neural recording via the trodes time.</p>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">150</span>
-<span class="normal">151</span>
-<span class="normal">152</span>
-<span class="normal">153</span>
-<span class="normal">154</span>
-<span class="normal">155</span>
-<span class="normal">156</span>
-<span class="normal">157</span>
-<span class="normal">158</span>
-<span class="normal">159</span>
-<span class="normal">160</span>
-<span class="normal">161</span>
-<span class="normal">162</span>
-<span class="normal">163</span>
-<span class="normal">164</span>
-<span class="normal">165</span>
-<span class="normal">166</span>
-<span class="normal">167</span>
-<span class="normal">168</span>
-<span class="normal">169</span>
-<span class="normal">170</span>
-<span class="normal">171</span>
-<span class="normal">172</span>
-<span class="normal">173</span>
-<span class="normal">174</span>
-<span class="normal">175</span>
-<span class="normal">176</span>
-<span class="normal">177</span>
-<span class="normal">178</span>
-<span class="normal">179</span>
-<span class="normal">180</span>
-<span class="normal">181</span>
-<span class="normal">182</span>
-<span class="normal">183</span>
-<span class="normal">184</span>
-<span class="normal">185</span>
-<span class="normal">186</span>
-<span class="normal">187</span>
-<span class="normal">188</span>
-<span class="normal">189</span>
-<span class="normal">190</span>
-<span class="normal">191</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">191</span>
 <span class="normal">192</span>
 <span class="normal">193</span>
 <span class="normal">194</span>
@@ -4442,9 +4707,84 @@ closest timestamps from the neural recording via the trodes time.</p>
 <span class="normal">247</span>
 <span class="normal">248</span>
 <span class="normal">249</span>
-<span class="normal">250</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;.populate() method will launch training for each PoseEstimationTask&quot;&quot;&quot;</span>
     <span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">dlc_reader</span>
+    <span class="kn">from</span> <span class="nn">.dlc_utils</span> <span class="kn">import</span> <span class="n">get_video_path</span>
+
+    <span class="n">METERS_PER_CM</span> <span class="o">=</span> <span class="mf">0.01</span>
 
     <span class="n">output_dir</span> <span class="o">=</span> <span class="n">infer_output_dir</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">makedir</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
     <span class="k">with</span> <span class="n">OutputLogger</span><span class="p">(</span>
@@ -4484,23 +4824,15 @@ closest timestamps from the neural recording via the trodes time.</p>
 
         <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;getting raw position&quot;</span><span class="p">)</span>
         <span class="n">interval_list_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;pos </span><span class="si">{</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;epoch&#39;</span><span class="p">]</span><span class="o">-</span><span class="mi">1</span><span class="si">}</span><span class="s2"> valid times&quot;</span>
-        <span class="n">raw_position</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">spatial_series</span> <span class="o">=</span> <span class="p">(</span>
             <span class="n">RawPosition</span><span class="p">()</span>
-            <span class="o">&amp;</span> <span class="p">{</span>
-                <span class="s2">&quot;nwb_file_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
-                <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">,</span>
-            <span class="p">}</span>
-        <span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
-        <span class="n">raw_pos_df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
-            <span class="n">data</span><span class="o">=</span><span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
-            <span class="n">index</span><span class="o">=</span><span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span>
-                <span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">timestamps</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;time&quot;</span>
-            <span class="p">),</span>
-            <span class="n">columns</span><span class="o">=</span><span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">description</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;, &quot;</span><span class="p">),</span>
-        <span class="p">)</span>
+            <span class="o">&amp;</span> <span class="p">{</span><span class="o">**</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">}</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">video_time</span> <span class="o">=</span> <span class="n">get_video_path</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="n">pos_time</span> <span class="o">=</span> <span class="n">spatial_series</span><span class="o">.</span><span class="n">timestamps</span>
         <span class="c1"># TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,</span>
         <span class="c1"># which also has timestamps</span>
-        <span class="n">key</span><span class="p">[</span><span class="s2">&quot;meters_per_pixel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">conversion</span>
+        <span class="n">key</span><span class="p">[</span><span class="s2">&quot;meters_per_pixel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">spatial_series</span><span class="o">.</span><span class="n">conversion</span>
 
         <span class="c1"># Insert entry into DLCPoseEstimation</span>
         <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
@@ -4522,21 +4854,57 @@ closest timestamps from the neural recording via the trodes time.</p>
                         <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">dlc_result</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">body_part</span><span class="p">)</span><span class="o">.</span><span class="n">columns</span>
                     <span class="p">}</span>
                 <span class="p">)</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">IndexSlice</span>
         <span class="k">for</span> <span class="n">body_part</span><span class="p">,</span> <span class="n">part_df</span> <span class="ow">in</span> <span class="n">body_parts_df</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;converting to cm&quot;</span><span class="p">)</span>
             <span class="n">part_df</span> <span class="o">=</span> <span class="n">convert_to_cm</span><span class="p">(</span><span class="n">part_df</span><span class="p">,</span> <span class="n">meters_per_pixel</span><span class="p">)</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;adding timestamps to DataFrame&quot;</span><span class="p">)</span>
-            <span class="n">part_df</span> <span class="o">=</span> <span class="n">add_timestamps</span><span class="p">(</span><span class="n">part_df</span><span class="p">,</span> <span class="n">raw_pos_df</span><span class="o">.</span><span class="n">copy</span><span class="p">())</span>
+            <span class="n">part_df</span> <span class="o">=</span> <span class="n">add_timestamps</span><span class="p">(</span>
+                <span class="n">part_df</span><span class="p">,</span> <span class="n">pos_time</span><span class="o">=</span><span class="n">pos_time</span><span class="p">,</span> <span class="n">video_time</span><span class="o">=</span><span class="n">video_time</span>
+            <span class="p">)</span>
             <span class="n">key</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">body_part</span>
             <span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
                 <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">]</span>
             <span class="p">)</span>
+            <span class="n">position</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">Position</span><span class="p">()</span>
+            <span class="n">likelihood</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">BehavioralTimeSeries</span><span class="p">()</span>
+            <span class="n">position</span><span class="o">.</span><span class="n">create_spatial_series</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;position&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">conversion</span><span class="o">=</span><span class="n">METERS_PER_CM</span><span class="p">,</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[(</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">)]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">reference_frame</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">reference_frame</span><span class="p">,</span>
+                <span class="n">comments</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">comments</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;x_position, y_position&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">likelihood</span><span class="o">.</span><span class="n">create_timeseries</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;likelihood&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+                <span class="n">comments</span><span class="o">=</span><span class="s2">&quot;no comments&quot;</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">likelihood</span><span class="o">.</span><span class="n">create_timeseries</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;index&quot;</span><span class="p">,</span>
+                <span class="n">comments</span><span class="o">=</span><span class="s2">&quot;no comments&quot;</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
             <span class="n">nwb_analysis_file</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span>
             <span class="n">key</span><span class="p">[</span>
-                <span class="s2">&quot;dlc_pose_estimation_object_id&quot;</span>
+                <span class="s2">&quot;dlc_pose_estimation_position_object_id&quot;</span>
             <span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
                 <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">],</span>
-                <span class="n">nwb_object</span><span class="o">=</span><span class="n">part_df</span><span class="p">,</span>
+                <span class="n">nwb_object</span><span class="o">=</span><span class="n">position</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">key</span><span class="p">[</span>
+                <span class="s2">&quot;dlc_pose_estimation_likelihood_object_id&quot;</span>
+            <span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
+                <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">],</span>
+                <span class="n">nwb_object</span><span class="o">=</span><span class="n">likelihood</span><span class="p">,</span>
             <span class="p">)</span>
             <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
                 <span class="n">nwb_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
@@ -5617,7 +5985,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file to be copied.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file to be copied.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5638,7 +6010,11 @@ closest timestamps from the neural recording via the trodes time.</p>
 <td><code>analysis_file_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the new NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the new NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5782,7 +6158,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file to be copied.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file to be copied.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5803,7 +6183,11 @@ closest timestamps from the neural recording via the trodes time.</p>
 <td><code>analysis_file_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the new NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the new NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5924,7 +6308,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the parent NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the parent NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5934,7 +6322,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file that was created.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file that was created.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6025,7 +6417,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWB file that has been inserted into the AnalysisNwbfile() schema</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWB file that has been inserted into the AnalysisNwbfile() schema</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6046,7 +6442,11 @@ closest timestamps from the neural recording via the trodes time.</p>
 <td><code>analysis_nwb_file_abspath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The absolute path for the given file name.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The absolute path for the given file name.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6169,7 +6569,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6179,7 +6583,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>pynwb.<span title="pynwb.core">core</span>.<span title="pynwb.core.NWBDataInterface">NWBDataInterface</span></code>
           </td>
-          <td><p>The NWB object created by PyNWB.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object created by PyNWB.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6189,7 +6597,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str (optional, defaults to &#39;pandas_table&#39;)</code>
           </td>
-          <td><p>The name of the DynamicTable made from a dataframe.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the DynamicTable made from a dataframe.</p>
+            </div>
+          </td>
           <td>
                 <code>&#39;pandas_table&#39;</code>
           </td>
@@ -6210,7 +6622,11 @@ closest timestamps from the neural recording via the trodes time.</p>
 <td><code>nwb_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object ID of the added object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object ID of the added object.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6333,7 +6749,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6343,7 +6763,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>keys are unit ids, values are spike times</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>keys are unit ids, values are spike times</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6353,7 +6777,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of units and valid times with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of units and valid times with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6363,7 +6791,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of units and sort_interval with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of units and sort_interval with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6373,7 +6805,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Dictionary of unit waveforms with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of unit waveforms with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -6383,7 +6819,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -6393,7 +6833,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Curation labels for clusters</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Curation labels for clusters</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -6414,7 +6858,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>units_object_id, waveforms_object_id</code>
           </td>
-          <td><p>The NWB object id of the Units object and the object id of the waveforms object ('' if None)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object and the object id of the waveforms object ('' if None)</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6671,7 +7119,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6681,7 +7133,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>si.WaveformExtractor object</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6691,7 +7147,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -6701,7 +7161,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Curation labels for clusters</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Curation labels for clusters</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -6722,7 +7186,11 @@ closest timestamps from the neural recording via the trodes time.</p>
 <td><code>units_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object id of the Units object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6949,7 +7417,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6959,7 +7431,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6980,7 +7456,11 @@ closest timestamps from the neural recording via the trodes time.</p>
 <td><code>units_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object id of the Units object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -7101,7 +7581,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7111,7 +7595,11 @@ closest timestamps from the neural recording via the trodes time.</p>
           <td>
                 <code>numpy array or list</code>
           </td>
-          <td><p>Array or list of electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array or list of electrode IDs.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7132,7 +7620,11 @@ closest timestamps from the neural recording via the trodes time.</p>
 <td><code>electrode_indices</code></td>          <td>
                 <code>numpy array</code>
           </td>
-          <td><p>Array of indices in the electrodes table for the given electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array of indices in the electrodes table for the given electrode IDs.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -7221,7 +7713,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>bool, optional</code>
           </td>
-          <td><p>Whether the original files should be deleted (default False).</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Whether the original files should be deleted (default False).</p>
+            </div>
+          </td>
           <td>
                 <code>False</code>
           </td>
@@ -7532,7 +8028,11 @@ If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrame
           <td>
                 <code>dict</code>
           </td>
-          <td><p>dictionary with nwb_file_name and epoch as keys</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>dictionary with nwb_file_name and epoch as keys</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7553,7 +8053,11 @@ If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrame
 <td><code>nwb_video_file_abspath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The absolute path for the given file name.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The absolute path for the given file name.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -7655,154 +8159,6 @@ If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrame
 
 
 
-<h2 id="src.spyglass.position.v1.position_dlc_pose_estimation.add_timestamps" class="doc doc-heading">
-<code class="highlight language-python"><span class="n">add_timestamps</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">raw_pos_df</span><span class="p">)</span></code>
-
-<a href="#src.spyglass.position.v1.position_dlc_pose_estimation.add_timestamps" class="headerlink" title="Permanent link">&para;</a></h2>
-
-
-  <div class="doc doc-contents ">
-  
-      <p>Takes timestamps from raw_pos_df and adds to df,
-which is returned with timestamps and their matching video frame index</p>
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>df</code></td>
-          <td>
-                <code><span title="pandas">pd</span>.<span title="pandas.DataFrame">DataFrame</span></code>
-          </td>
-          <td><p>pose estimation dataframe to add timestamps</p></td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-        <tr>
-          <td><code>raw_pos_df</code></td>
-          <td>
-                <code><span title="pandas">pd</span>.<span title="pandas.DataFrame">DataFrame</span></code>
-          </td>
-          <td><p>dataframe fetched from RawPosition that
-contains timestamps and video frame inds</p></td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-  <p><strong>Returns:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Type</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td>
-                <code><span title="pandas">pd</span>.<span title="pandas.DataFrame">DataFrame</span></code>
-          </td>
-          <td><p>original df with timestamps and video_frame_ind as new columns</p></td>
-        </tr>
-    </tbody>
-  </table>
-
-      <details class="quote">
-        <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">272</span>
-<span class="normal">273</span>
-<span class="normal">274</span>
-<span class="normal">275</span>
-<span class="normal">276</span>
-<span class="normal">277</span>
-<span class="normal">278</span>
-<span class="normal">279</span>
-<span class="normal">280</span>
-<span class="normal">281</span>
-<span class="normal">282</span>
-<span class="normal">283</span>
-<span class="normal">284</span>
-<span class="normal">285</span>
-<span class="normal">286</span>
-<span class="normal">287</span>
-<span class="normal">288</span>
-<span class="normal">289</span>
-<span class="normal">290</span>
-<span class="normal">291</span>
-<span class="normal">292</span>
-<span class="normal">293</span>
-<span class="normal">294</span>
-<span class="normal">295</span>
-<span class="normal">296</span>
-<span class="normal">297</span>
-<span class="normal">298</span>
-<span class="normal">299</span>
-<span class="normal">300</span>
-<span class="normal">301</span>
-<span class="normal">302</span>
-<span class="normal">303</span>
-<span class="normal">304</span>
-<span class="normal">305</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">add_timestamps</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">raw_pos_df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Takes timestamps from raw_pos_df and adds to df,</span>
-<span class="sd">    which is returned with timestamps and their matching video frame index</span>
-
-<span class="sd">    Parameters</span>
-<span class="sd">    ----------</span>
-<span class="sd">    df : pd.DataFrame</span>
-<span class="sd">        pose estimation dataframe to add timestamps</span>
-<span class="sd">    raw_pos_df : pd.DataFrame</span>
-<span class="sd">        dataframe fetched from RawPosition that</span>
-<span class="sd">        contains timestamps and video frame inds</span>
-
-<span class="sd">    Returns</span>
-<span class="sd">    -------</span>
-<span class="sd">    pd.DataFrame</span>
-<span class="sd">        original df with timestamps and video_frame_ind as new columns</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-
-    <span class="n">raw_pos_df</span> <span class="o">=</span> <span class="n">raw_pos_df</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span>
-        <span class="n">columns</span><span class="o">=</span><span class="p">[</span>
-            <span class="n">column</span>
-            <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">raw_pos_df</span><span class="o">.</span><span class="n">columns</span>
-            <span class="k">if</span> <span class="n">column</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]</span>
-        <span class="p">]</span>
-    <span class="p">)</span>
-    <span class="n">raw_pos_df</span><span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw_pos_df</span><span class="o">.</span><span class="n">index</span>
-    <span class="n">raw_pos_df</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span> <span class="n">inplace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">raw_pos_df</span><span class="p">)</span>
-    <span class="c1"># Drop indices where time is NaN</span>
-    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">])</span>
-    <span class="c1"># Add video_frame_ind as column</span>
-    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">rename_axis</span><span class="p">(</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
-    <span class="k">return</span> <span class="n">df</span>
-</code></pre></div></td></tr></table></div>
-      </details>
-  </div>
-
-</div>
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-
 <h2 id="src.spyglass.position.v1.position_dlc_pose_estimation.infer_output_dir" class="doc doc-heading">
 <code class="highlight language-python"><span class="n">infer_output_dir</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">makedir</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
@@ -7828,7 +8184,11 @@ contains timestamps and video frame inds</p></td>
           <td><code>key</code></td>
           <td>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7873,6 +8233,179 @@ contains timestamps and video frame inds</p></td>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">output_dir</span><span class="p">):</span>
             <span class="n">output_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">output_dir</span>
+</code></pre></div></td></tr></table></div>
+      </details>
+  </div>
+
+</div>
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h2 id="src.spyglass.position.v1.position_dlc_pose_estimation.add_timestamps" class="doc doc-heading">
+<code class="highlight language-python"><span class="n">add_timestamps</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">pos_time</span><span class="p">,</span> <span class="n">video_time</span><span class="p">)</span></code>
+
+<a href="#src.spyglass.position.v1.position_dlc_pose_estimation.add_timestamps" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Takes timestamps from raw_pos_df and adds to df,
+which is returned with timestamps and their matching video frame index</p>
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>df</code></td>
+          <td>
+                <code><span title="pandas">pd</span>.<span title="pandas.DataFrame">DataFrame</span></code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>pose estimation dataframe to add timestamps</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+        <tr>
+          <td><code>pos_time</code></td>
+          <td>
+                <code><span title="numpy">np</span>.<span title="numpy.ndarray">ndarray</span></code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>numpy array containing timestamps from the raw position object</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+        <tr>
+          <td><code>video_time</code></td>
+          <td>
+                <code><span title="numpy">np</span>.<span title="numpy.ndarray">ndarray</span></code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>numpy array containing timestamps from the video file</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+  <p><strong>Returns:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td>
+                <code><span title="pandas">pd</span>.<span title="pandas.DataFrame">DataFrame</span></code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>original df with timestamps and video_frame_ind as new columns</p>
+            </div>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+      <details class="quote">
+        <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span>
+<span class="normal">402</span>
+<span class="normal">403</span>
+<span class="normal">404</span>
+<span class="normal">405</span>
+<span class="normal">406</span>
+<span class="normal">407</span>
+<span class="normal">408</span>
+<span class="normal">409</span>
+<span class="normal">410</span>
+<span class="normal">411</span>
+<span class="normal">412</span>
+<span class="normal">413</span>
+<span class="normal">414</span>
+<span class="normal">415</span>
+<span class="normal">416</span>
+<span class="normal">417</span>
+<span class="normal">418</span>
+<span class="normal">419</span>
+<span class="normal">420</span>
+<span class="normal">421</span>
+<span class="normal">422</span>
+<span class="normal">423</span>
+<span class="normal">424</span>
+<span class="normal">425</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">add_timestamps</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">pos_time</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">video_time</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Takes timestamps from raw_pos_df and adds to df,</span>
+<span class="sd">    which is returned with timestamps and their matching video frame index</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df : pd.DataFrame</span>
+<span class="sd">        pose estimation dataframe to add timestamps</span>
+<span class="sd">    pos_time : np.ndarray</span>
+<span class="sd">        numpy array containing timestamps from the raw position object</span>
+<span class="sd">    video_time: np.ndarray</span>
+<span class="sd">        numpy array containing timestamps from the video file</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        original df with timestamps and video_frame_ind as new columns</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">first_video_frame</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">searchsorted</span><span class="p">(</span><span class="n">video_time</span><span class="p">,</span> <span class="n">pos_time</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">video_frame_ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">first_video_frame</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">video_time</span><span class="p">))</span>
+    <span class="n">time_df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+        <span class="n">index</span><span class="o">=</span><span class="n">video_frame_ind</span><span class="p">,</span>
+        <span class="n">data</span><span class="o">=</span><span class="n">video_time</span><span class="p">[</span><span class="n">first_video_frame</span><span class="p">:],</span>
+        <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">],</span>
+    <span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">time_df</span><span class="p">)</span>
+    <span class="c1"># Drop indices where time is NaN</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">])</span>
+    <span class="c1"># Add video_frame_ind as column</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">rename_axis</span><span class="p">(</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">df</span>
 </code></pre></div></td></tr></table></div>
       </details>
   </div>

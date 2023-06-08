@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2387,7 +2387,11 @@ and the valid times for the position data.</p>
           <td>
                 <code>str</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2397,7 +2401,11 @@ and the valid times for the position data.</p>
           <td>
                 <code>str</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2418,7 +2426,11 @@ and the valid times for the position data.</p>
 <td><code>valid_ephys_position_times</code></td>          <td>
                 <code><span title="numpy">np</span>.<span title="numpy.ndarray">ndarray</span>, shape(n_valid_times, 2)</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2587,7 +2599,11 @@ and the valid times for the position data.</p>
           <td>
                 <code>str</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2608,7 +2624,11 @@ and the valid times for the position data.</p>
 <td><code>epoch_names</code></td>          <td>
                 <code>list[str]</code>
           </td>
-          <td><p>List of interval names that are epochs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of interval names that are epochs.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2701,7 +2721,11 @@ and the valid times for the position data.</p>
           <td>
                 <code>str</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2722,7 +2746,11 @@ and the valid times for the position data.</p>
 <td><code>valid_ephys_position_times_by_epoch</code></td>          <td>
                 <code>dict[str, <span title="numpy">np</span>.<span title="numpy.ndarray">ndarray</span>]</code>
           </td>
-          <td><p>Dictionary of epoch names and valid ephys position times.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of epoch names and valid ephys position times.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2811,7 +2839,11 @@ and the valid times for the position data.</p>
           <td>
                 <code>str</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2832,7 +2864,11 @@ and the valid times for the position data.</p>
 <td><code>position_interval_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2911,7 +2947,11 @@ and the valid times for the position data.</p>
           <td>
                 <code><span title="numpy">np</span>.<span title="numpy.ndarray">ndarray</span>, shape(n_valid_times, 2)</code>
           </td>
-          <td><p>Start and end times for each valid time.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Start and end times for each valid time.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2932,7 +2972,11 @@ and the valid times for the position data.</p>
 <td><code>valid_time_slices</code></td>          <td>
                 <code>list[slice]</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3007,7 +3051,11 @@ and the valid times for the position data.</p>
           <td>
                 <code>list[str], length(n_epochs)</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3017,7 +3065,11 @@ and the valid times for the position data.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Environment keyword arguments.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Environment keyword arguments.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3038,19 +3090,31 @@ and the valid times for the position data.</p>
 <td><code>observation_models</code></td>          <td>
                 <code>tuple[list[ObservationModel]</code>
           </td>
-          <td><p>Observation model for each epoch.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Observation model for each epoch.</p>
+            </div>
+          </td>
         </tr>
         <tr>
 <td><code>environments</code></td>          <td>
                 <code>list[<span title="replay_trajectory_classification.environments.Environment">Environment</span>]</code>
           </td>
-          <td><p>Environment for each epoch.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Environment for each epoch.</p>
+            </div>
+          </td>
         </tr>
         <tr>
 <td><code>continuous_transition_types</code></td>          <td>
                 <code>list[list[object]]]</code>
           </td>
-          <td><p>Continuous transition types for each epoch.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Continuous transition types for each epoch.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>

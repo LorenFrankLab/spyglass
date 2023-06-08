@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2852,7 +2852,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The source NWB file object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The source NWB file object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2862,7 +2866,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>The file name of the NWB file, used as a primary key to the Session table.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The file name of the NWB file, used as a primary key to the Session table.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2978,8 +2986,7 @@ The start time and stop time of the epoch are stored in the valid_times field as
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 20</span>
-<span class="normal"> 21</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 21</span>
 <span class="normal"> 22</span>
 <span class="normal"> 23</span>
 <span class="normal"> 24</span>
@@ -3076,7 +3083,8 @@ The start time and stop time of the epoch are stored in the valid_times field as
 <span class="normal">115</span>
 <span class="normal">116</span>
 <span class="normal">117</span>
-<span class="normal">118</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">118</span>
+<span class="normal">119</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">DLCPoseEstimationSelection</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
     <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
 <span class="s2">    -&gt; VideoFile                           # Session -&gt; Recording + File part table</span>
@@ -3222,7 +3230,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>path to the video file</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>path to the video file</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3243,15 +3255,18 @@ The start time and stop time of the epoch are stored in the valid_times field as
 <td><code>crop_ints</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>list of 4 integers [x min, x max, y min, y max]</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>list of 4 integers [x min, x max, y min, y max]</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">32</span>
-<span class="normal">33</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">33</span>
 <span class="normal">34</span>
 <span class="normal">35</span>
 <span class="normal">36</span>
@@ -3284,7 +3299,8 @@ The start time and stop time of the epoch are stored in the valid_times field as
 <span class="normal">63</span>
 <span class="normal">64</span>
 <span class="normal">65</span>
-<span class="normal">66</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">66</span>
+<span class="normal">67</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">get_video_crop</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">video_path</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Queries the user to determine the cropping parameters for a given video</span>
@@ -3364,7 +3380,11 @@ From Datajoint Elements</p>
           <td><code>key</code></td>
           <td>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3373,7 +3393,11 @@ From Datajoint Elements</p>
           <td><code>task_mode</code></td>
           <td>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
                 <code>&#39;trigger&#39;</code>
           </td>
@@ -3383,8 +3407,12 @@ From Datajoint Elements</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>videotype, gputouse, save_as_csv, batchsize, cropping, TFGPUinference,
-dynamic, robust_nframes, allow_growth, use_shelve</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>videotype, gputouse, save_as_csv, batchsize, cropping, TFGPUinference,
+dynamic, robust_nframes, allow_growth, use_shelve</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -3394,8 +3422,7 @@ dynamic, robust_nframes, allow_growth, use_shelve</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 68</span>
-<span class="normal"> 69</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 69</span>
 <span class="normal"> 70</span>
 <span class="normal"> 71</span>
 <span class="normal"> 72</span>
@@ -3444,7 +3471,8 @@ dynamic, robust_nframes, allow_growth, use_shelve</p></td>
 <span class="normal">115</span>
 <span class="normal">116</span>
 <span class="normal">117</span>
-<span class="normal">118</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">118</span>
+<span class="normal">119</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">insert_estimation_task</span><span class="p">(</span>
     <span class="bp">cls</span><span class="p">,</span>
     <span class="n">key</span><span class="p">,</span>
@@ -3540,8 +3568,7 @@ i.e. if the source='DLC', then the table is DLCPos</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/position_merge.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 26</span>
-<span class="normal"> 27</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 27</span>
 <span class="normal"> 28</span>
 <span class="normal"> 29</span>
 <span class="normal"> 30</span>
@@ -3790,7 +3817,8 @@ i.e. if the source='DLC', then the table is DLCPos</p>
 <span class="normal">273</span>
 <span class="normal">274</span>
 <span class="normal">275</span>
-<span class="normal">276</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">276</span>
+<span class="normal">277</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">PositionOutput</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Table to identify source of Position Information from upstream options</span>
@@ -4075,8 +4103,7 @@ i.e. if the source='DLC', then the table is DLCPos</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/position_merge.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">45</span>
-<span class="normal">46</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">46</span>
 <span class="normal">47</span>
 <span class="normal">48</span>
 <span class="normal">49</span>
@@ -4096,7 +4123,8 @@ i.e. if the source='DLC', then the table is DLCPos</p>
 <span class="normal">63</span>
 <span class="normal">64</span>
 <span class="normal">65</span>
-<span class="normal">66</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">DLCPosV1</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
+<span class="normal">66</span>
+<span class="normal">67</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">DLCPosV1</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Table to pass-through upstream DLC Pose Estimation information</span>
 <span class="sd">    &quot;&quot;&quot;</span>
@@ -4161,8 +4189,7 @@ i.e. if the source='DLC', then the table is DLCPos</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/position_merge.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">68</span>
-<span class="normal">69</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">69</span>
 <span class="normal">70</span>
 <span class="normal">71</span>
 <span class="normal">72</span>
@@ -4182,7 +4209,8 @@ i.e. if the source='DLC', then the table is DLCPos</p>
 <span class="normal">86</span>
 <span class="normal">87</span>
 <span class="normal">88</span>
-<span class="normal">89</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">TrodesPosV1</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
+<span class="normal">89</span>
+<span class="normal">90</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">TrodesPosV1</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Table to pass-through upstream Trodes Position Tracking information</span>
 <span class="sd">    &quot;&quot;&quot;</span>
@@ -4247,8 +4275,7 @@ i.e. if the source='DLC', then the table is DLCPos</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/position_merge.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 91</span>
-<span class="normal"> 92</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 92</span>
 <span class="normal"> 93</span>
 <span class="normal"> 94</span>
 <span class="normal"> 95</span>
@@ -4268,7 +4295,8 @@ i.e. if the source='DLC', then the table is DLCPos</p>
 <span class="normal">109</span>
 <span class="normal">110</span>
 <span class="normal">111</span>
-<span class="normal">112</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">CommonPos</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
+<span class="normal">112</span>
+<span class="normal">113</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">CommonPos</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Part</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Table to pass-through upstream Trodes Position Tracking information</span>
 <span class="sd">    &quot;&quot;&quot;</span>
@@ -4342,7 +4370,11 @@ i.e. if the source='DLC', then the table is DLCPos</p>
           <td>
                 <code><span title="typing.Dict">Dict</span></code>
           </td>
-          <td><p>key specifying the entry to insert</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>key specifying the entry to insert</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4352,8 +4384,12 @@ i.e. if the source='DLC', then the table is DLCPos</p>
           <td>
                 <code><span title="typing.Dict">Dict</span>, optional</code>
           </td>
-          <td><p>A dictionary containing all table entries
-not specified by the parent table (PosMerge)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A dictionary containing all table entries
+not specified by the parent table (PosMerge)</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -4363,8 +4399,7 @@ not specified by the parent table (PosMerge)</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/position_merge.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">114</span>
-<span class="normal">115</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">115</span>
 <span class="normal">116</span>
 <span class="normal">117</span>
 <span class="normal">118</span>
@@ -4446,7 +4481,8 @@ not specified by the parent table (PosMerge)</p></td>
 <span class="normal">194</span>
 <span class="normal">195</span>
 <span class="normal">196</span>
-<span class="normal">197</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">insert1</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="normal">197</span>
+<span class="normal">198</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">insert1</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Overrides insert1 to also insert into specific part table.</span>
 
 <span class="sd">    Parameters</span>
@@ -5083,7 +5119,11 @@ entries into a single entry with a single Analysis NWB file</p>
           <td>
                 <code>query</code>
           </td>
-          <td><p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5093,10 +5133,14 @@ entries into a single entry with a single Analysis NWB file</p>
           <td>
                 <code>tuple</code>
           </td>
-          <td><p>Tuple (table, attr) to get the NWB filepath from.
+          <td>
+            <div class="doc-md-description">
+              <p>Tuple (table, attr) to get the NWB filepath from.
 i.e. absolute path to NWB file can be obtained by looking up attr column of table
 table is usually Nwbfile or AnalysisNwbfile;
-attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
+attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5106,7 +5150,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>list</code>
           </td>
-          <td><p>Attributes from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Attributes from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>()</code>
           </td>
@@ -5116,7 +5164,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Keyword arguments from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Keyword arguments from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>{}</code>
           </td>
@@ -5137,7 +5189,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>nwb_objects</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of dicts containing fetch results and NWB objects.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of dicts containing fetch results and NWB objects.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -7771,7 +7827,11 @@ interval.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file to be copied.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file to be copied.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7792,7 +7852,11 @@ interval.</p>
 <td><code>analysis_file_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the new NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the new NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -7936,7 +8000,11 @@ interval.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file to be copied.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file to be copied.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -7957,7 +8025,11 @@ interval.</p>
 <td><code>analysis_file_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the new NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the new NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -8078,7 +8150,11 @@ interval.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the parent NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the parent NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8088,7 +8164,11 @@ interval.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file that was created.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file that was created.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8179,7 +8259,11 @@ interval.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWB file that has been inserted into the AnalysisNwbfile() schema</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWB file that has been inserted into the AnalysisNwbfile() schema</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8200,7 +8284,11 @@ interval.</p>
 <td><code>analysis_nwb_file_abspath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The absolute path for the given file name.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The absolute path for the given file name.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -8323,7 +8411,11 @@ interval.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8333,7 +8425,11 @@ interval.</p>
           <td>
                 <code>pynwb.<span title="pynwb.core">core</span>.<span title="pynwb.core.NWBDataInterface">NWBDataInterface</span></code>
           </td>
-          <td><p>The NWB object created by PyNWB.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object created by PyNWB.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8343,7 +8439,11 @@ interval.</p>
           <td>
                 <code>str (optional, defaults to &#39;pandas_table&#39;)</code>
           </td>
-          <td><p>The name of the DynamicTable made from a dataframe.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the DynamicTable made from a dataframe.</p>
+            </div>
+          </td>
           <td>
                 <code>&#39;pandas_table&#39;</code>
           </td>
@@ -8364,7 +8464,11 @@ interval.</p>
 <td><code>nwb_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object ID of the added object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object ID of the added object.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -8487,7 +8591,11 @@ interval.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8497,7 +8605,11 @@ interval.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>keys are unit ids, values are spike times</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>keys are unit ids, values are spike times</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8507,7 +8619,11 @@ interval.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of units and valid times with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of units and valid times with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8517,7 +8633,11 @@ interval.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of units and sort_interval with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of units and sort_interval with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8527,7 +8647,11 @@ interval.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Dictionary of unit waveforms with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of unit waveforms with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -8537,7 +8661,11 @@ interval.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -8547,7 +8675,11 @@ interval.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Curation labels for clusters</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Curation labels for clusters</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -8568,7 +8700,11 @@ interval.</p>
           <td>
                 <code>units_object_id, waveforms_object_id</code>
           </td>
-          <td><p>The NWB object id of the Units object and the object id of the waveforms object ('' if None)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object and the object id of the waveforms object ('' if None)</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -8825,7 +8961,11 @@ interval.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8835,7 +8975,11 @@ interval.</p>
           <td>
                 <code>si.WaveformExtractor object</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -8845,7 +8989,11 @@ interval.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -8855,7 +9003,11 @@ interval.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Curation labels for clusters</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Curation labels for clusters</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -8876,7 +9028,11 @@ interval.</p>
 <td><code>units_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object id of the Units object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -9103,7 +9259,11 @@ interval.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9113,7 +9273,11 @@ interval.</p>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9134,7 +9298,11 @@ interval.</p>
 <td><code>units_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object id of the Units object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -9255,7 +9423,11 @@ interval.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9265,7 +9437,11 @@ interval.</p>
           <td>
                 <code>numpy array or list</code>
           </td>
-          <td><p>Array or list of electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array or list of electrode IDs.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9286,7 +9462,11 @@ interval.</p>
 <td><code>electrode_indices</code></td>          <td>
                 <code>numpy array</code>
           </td>
-          <td><p>Array of indices in the electrodes table for the given electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array of indices in the electrodes table for the given electrode IDs.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -9375,7 +9555,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>bool, optional</code>
           </td>
-          <td><p>Whether the original files should be deleted (default False).</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Whether the original files should be deleted (default False).</p>
+            </div>
+          </td>
           <td>
                 <code>False</code>
           </td>
@@ -9461,7 +9645,11 @@ video file filename and path</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary containing nwb_file_name and interval_list_name as keys</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary containing nwb_file_name and interval_list_name as keys</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -9482,13 +9670,21 @@ video file filename and path</p>
 <td><code>video_filepath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>path to the video file, including video filename</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>path to the video file, including video filename</p>
+            </div>
+          </td>
         </tr>
         <tr>
 <td><code>video_filename</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>filename of the video</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>filename of the video</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -9606,8 +9802,7 @@ the original LED positions overlaid on the video of the animal.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/position_merge.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">312</span>
-<span class="normal">313</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">313</span>
 <span class="normal">314</span>
 <span class="normal">315</span>
 <span class="normal">316</span>
@@ -9771,7 +9966,74 @@ the original LED positions overlaid on the video of the animal.</p>
 <span class="normal">474</span>
 <span class="normal">475</span>
 <span class="normal">476</span>
-<span class="normal">477</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">477</span>
+<span class="normal">478</span>
+<span class="normal">479</span>
+<span class="normal">480</span>
+<span class="normal">481</span>
+<span class="normal">482</span>
+<span class="normal">483</span>
+<span class="normal">484</span>
+<span class="normal">485</span>
+<span class="normal">486</span>
+<span class="normal">487</span>
+<span class="normal">488</span>
+<span class="normal">489</span>
+<span class="normal">490</span>
+<span class="normal">491</span>
+<span class="normal">492</span>
+<span class="normal">493</span>
+<span class="normal">494</span>
+<span class="normal">495</span>
+<span class="normal">496</span>
+<span class="normal">497</span>
+<span class="normal">498</span>
+<span class="normal">499</span>
+<span class="normal">500</span>
+<span class="normal">501</span>
+<span class="normal">502</span>
+<span class="normal">503</span>
+<span class="normal">504</span>
+<span class="normal">505</span>
+<span class="normal">506</span>
+<span class="normal">507</span>
+<span class="normal">508</span>
+<span class="normal">509</span>
+<span class="normal">510</span>
+<span class="normal">511</span>
+<span class="normal">512</span>
+<span class="normal">513</span>
+<span class="normal">514</span>
+<span class="normal">515</span>
+<span class="normal">516</span>
+<span class="normal">517</span>
+<span class="normal">518</span>
+<span class="normal">519</span>
+<span class="normal">520</span>
+<span class="normal">521</span>
+<span class="normal">522</span>
+<span class="normal">523</span>
+<span class="normal">524</span>
+<span class="normal">525</span>
+<span class="normal">526</span>
+<span class="normal">527</span>
+<span class="normal">528</span>
+<span class="normal">529</span>
+<span class="normal">530</span>
+<span class="normal">531</span>
+<span class="normal">532</span>
+<span class="normal">533</span>
+<span class="normal">534</span>
+<span class="normal">535</span>
+<span class="normal">536</span>
+<span class="normal">537</span>
+<span class="normal">538</span>
+<span class="normal">539</span>
+<span class="normal">540</span>
+<span class="normal">541</span>
+<span class="normal">542</span>
+<span class="normal">543</span>
+<span class="normal">544</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">PositionVideo</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Creates a video of the computed head position and orientation as well as</span>
 <span class="sd">    the original LED positions overlaid on the video of the animal.</span>
@@ -9798,13 +10060,16 @@ the original LED positions overlaid on the video of the animal.</p>
         <span class="c1">#         &quot;interval_list_name&quot;: key[&quot;interval_list_name&quot;],</span>
         <span class="c1">#     }</span>
         <span class="c1"># ).fetch1_dataframe()</span>
+        <span class="n">query</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;nwb_file_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;interval_list_name&quot;</span><span class="p">],</span>
+        <span class="p">}</span>
         <span class="k">if</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;plot&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;DLC&quot;</span><span class="p">:</span>
             <span class="k">assert</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;dlc_position_id&quot;</span><span class="p">]</span>
             <span class="n">pos_df</span> <span class="o">=</span> <span class="p">(</span>
                 <span class="n">PositionOutput</span><span class="p">()</span>
                 <span class="o">&amp;</span> <span class="p">{</span>
-                    <span class="s2">&quot;nwb_file_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
-                    <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;interval_list_name&quot;</span><span class="p">],</span>
+                    <span class="o">**</span><span class="n">query</span><span class="p">,</span>
                     <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;DLC&quot;</span><span class="p">,</span>
                     <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;dlc_position_id&quot;</span><span class="p">],</span>
                 <span class="p">}</span>
@@ -9814,46 +10079,112 @@ the original LED positions overlaid on the video of the animal.</p>
             <span class="n">pos_df</span> <span class="o">=</span> <span class="p">(</span>
                 <span class="n">PositionOutput</span><span class="p">()</span>
                 <span class="o">&amp;</span> <span class="p">{</span>
-                    <span class="s2">&quot;nwb_file_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
-                    <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;interval_list_name&quot;</span><span class="p">],</span>
+                    <span class="o">**</span><span class="n">query</span><span class="p">,</span>
                     <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;Trodes&quot;</span><span class="p">,</span>
                     <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;trodes_position_id&quot;</span><span class="p">],</span>
                 <span class="p">}</span>
             <span class="p">)</span><span class="o">.</span><span class="n">fetch1_dataframe</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;plot&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Common&quot;</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;common_position_id&quot;</span><span class="p">]</span>
+            <span class="n">pos_df</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">PositionOutput</span><span class="p">()</span>
+                <span class="o">&amp;</span> <span class="p">{</span>
+                    <span class="o">**</span><span class="n">query</span><span class="p">,</span>
+                    <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;Common&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;common_position_id&quot;</span><span class="p">],</span>
+                <span class="p">}</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">fetch1_dataframe</span><span class="p">()</span>
         <span class="k">elif</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;plot&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;All&quot;</span><span class="p">:</span>
-            <span class="k">assert</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;trodes_position_id&quot;</span><span class="p">]</span>
-            <span class="k">assert</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;dlc_position_id&quot;</span><span class="p">]</span>
-            <span class="n">dlc_df</span> <span class="o">=</span> <span class="p">(</span>
-                <span class="p">(</span>
-                    <span class="n">PositionOutput</span><span class="p">()</span>
-                    <span class="o">&amp;</span> <span class="p">{</span>
-                        <span class="s2">&quot;nwb_file_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
-                        <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;interval_list_name&quot;</span><span class="p">],</span>
-                        <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;DLC&quot;</span><span class="p">,</span>
-                        <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;dlc_position_id&quot;</span><span class="p">],</span>
-                    <span class="p">}</span>
-                <span class="p">)</span>
-                <span class="o">.</span><span class="n">fetch1_dataframe</span><span class="p">()</span>
-                <span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;velocity_x&quot;</span><span class="p">,</span> <span class="s2">&quot;velocity_y&quot;</span><span class="p">,</span> <span class="s2">&quot;speed&quot;</span><span class="p">])</span>
-            <span class="p">)</span>
-            <span class="n">trodes_df</span> <span class="o">=</span> <span class="p">(</span>
-                <span class="p">(</span>
-                    <span class="n">PositionOutput</span><span class="p">()</span>
-                    <span class="o">&amp;</span> <span class="p">{</span>
-                        <span class="s2">&quot;nwb_file_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
-                        <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;interval_list_name&quot;</span><span class="p">],</span>
-                        <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;Trodes&quot;</span><span class="p">,</span>
-                        <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;trodes_position_id&quot;</span><span class="p">],</span>
-                    <span class="p">}</span>
-                <span class="p">)</span>
-                <span class="o">.</span><span class="n">fetch1_dataframe</span><span class="p">()</span>
-                <span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;velocity_x&quot;</span><span class="p">,</span> <span class="s2">&quot;velocity_y&quot;</span><span class="p">,</span> <span class="s2">&quot;speed&quot;</span><span class="p">])</span>
-            <span class="p">)</span>
-            <span class="n">pos_df</span> <span class="o">=</span> <span class="n">dlc_df</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span>
-                <span class="n">trodes_df</span><span class="p">,</span>
-                <span class="n">left_index</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-                <span class="n">right_index</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-                <span class="n">suffixes</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;_DLC&quot;</span><span class="p">,</span> <span class="s2">&quot;_Trodes&quot;</span><span class="p">],</span>
+            <span class="c1"># Check which entries exist in PositionOutput</span>
+            <span class="n">merge_dict</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">if</span> <span class="s2">&quot;dlc_position_id&quot;</span> <span class="ow">in</span> <span class="n">position_ids</span><span class="p">:</span>
+                <span class="k">if</span> <span class="p">(</span>
+                    <span class="nb">len</span><span class="p">(</span>
+                        <span class="n">PositionOutput</span><span class="p">()</span>
+                        <span class="o">&amp;</span> <span class="p">{</span>
+                            <span class="o">**</span><span class="n">query</span><span class="p">,</span>
+                            <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;DLC&quot;</span><span class="p">,</span>
+                            <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;dlc_position_id&quot;</span><span class="p">],</span>
+                        <span class="p">}</span>
+                    <span class="p">)</span>
+                    <span class="o">&gt;</span> <span class="mi">0</span>
+                <span class="p">):</span>
+                    <span class="n">dlc_df</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="p">(</span>
+                            <span class="n">PositionOutput</span><span class="p">()</span>
+                            <span class="o">&amp;</span> <span class="p">{</span>
+                                <span class="o">**</span><span class="n">query</span><span class="p">,</span>
+                                <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;DLC&quot;</span><span class="p">,</span>
+                                <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;dlc_position_id&quot;</span><span class="p">],</span>
+                            <span class="p">}</span>
+                        <span class="p">)</span>
+                        <span class="o">.</span><span class="n">fetch1_dataframe</span><span class="p">()</span>
+                        <span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;velocity_x&quot;</span><span class="p">,</span> <span class="s2">&quot;velocity_y&quot;</span><span class="p">,</span> <span class="s2">&quot;speed&quot;</span><span class="p">])</span>
+                    <span class="p">)</span>
+                    <span class="n">merge_dict</span><span class="p">[</span><span class="s2">&quot;DLC&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">dlc_df</span>
+            <span class="k">if</span> <span class="s2">&quot;trodes_position_id&quot;</span> <span class="ow">in</span> <span class="n">position_ids</span><span class="p">:</span>
+                <span class="k">if</span> <span class="p">(</span>
+                    <span class="nb">len</span><span class="p">(</span>
+                        <span class="n">PositionOutput</span><span class="p">()</span>
+                        <span class="o">&amp;</span> <span class="p">{</span>
+                            <span class="o">**</span><span class="n">query</span><span class="p">,</span>
+                            <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;Trodes&quot;</span><span class="p">,</span>
+                            <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;trodes_position_id&quot;</span><span class="p">],</span>
+                        <span class="p">}</span>
+                    <span class="p">)</span>
+                    <span class="o">&gt;</span> <span class="mi">0</span>
+                <span class="p">):</span>
+                    <span class="n">trodes_df</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="p">(</span>
+                            <span class="n">PositionOutput</span><span class="p">()</span>
+                            <span class="o">&amp;</span> <span class="p">{</span>
+                                <span class="o">**</span><span class="n">query</span><span class="p">,</span>
+                                <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;Trodes&quot;</span><span class="p">,</span>
+                                <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span>
+                                    <span class="s2">&quot;trodes_position_id&quot;</span>
+                                <span class="p">],</span>
+                            <span class="p">}</span>
+                        <span class="p">)</span>
+                        <span class="o">.</span><span class="n">fetch1_dataframe</span><span class="p">()</span>
+                        <span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;velocity_x&quot;</span><span class="p">,</span> <span class="s2">&quot;velocity_y&quot;</span><span class="p">,</span> <span class="s2">&quot;speed&quot;</span><span class="p">])</span>
+                    <span class="p">)</span>
+                    <span class="n">merge_dict</span><span class="p">[</span><span class="s2">&quot;Trodes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">trodes_df</span>
+            <span class="k">if</span> <span class="s2">&quot;common_position_id&quot;</span> <span class="ow">in</span> <span class="n">position_ids</span><span class="p">:</span>
+                <span class="k">if</span> <span class="p">(</span>
+                    <span class="nb">len</span><span class="p">(</span>
+                        <span class="n">PositionOutput</span><span class="p">()</span>
+                        <span class="o">&amp;</span> <span class="p">{</span>
+                            <span class="o">**</span><span class="n">query</span><span class="p">,</span>
+                            <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;Common&quot;</span><span class="p">,</span>
+                            <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span><span class="s2">&quot;common_position_id&quot;</span><span class="p">],</span>
+                        <span class="p">}</span>
+                    <span class="p">)</span>
+                    <span class="o">&gt;</span> <span class="mi">0</span>
+                <span class="p">):</span>
+                    <span class="n">common_df</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="p">(</span>
+                            <span class="n">PositionOutput</span><span class="p">()</span>
+                            <span class="o">&amp;</span> <span class="p">{</span>
+                                <span class="o">**</span><span class="n">query</span><span class="p">,</span>
+                                <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;Common&quot;</span><span class="p">,</span>
+                                <span class="s2">&quot;position_id&quot;</span><span class="p">:</span> <span class="n">position_ids</span><span class="p">[</span>
+                                    <span class="s2">&quot;common_position_id&quot;</span>
+                                <span class="p">],</span>
+                            <span class="p">}</span>
+                        <span class="p">)</span>
+                        <span class="o">.</span><span class="n">fetch1_dataframe</span><span class="p">()</span>
+                        <span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;velocity_x&quot;</span><span class="p">,</span> <span class="s2">&quot;velocity_y&quot;</span><span class="p">,</span> <span class="s2">&quot;speed&quot;</span><span class="p">])</span>
+                    <span class="p">)</span>
+                    <span class="n">merge_dict</span><span class="p">[</span><span class="s2">&quot;Common&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">common_df</span>
+            <span class="n">pos_df</span> <span class="o">=</span> <span class="n">ft</span><span class="o">.</span><span class="n">reduce</span><span class="p">(</span>
+                <span class="k">lambda</span> <span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">,:</span> <span class="n">pd</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span>
+                    <span class="n">left</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+                    <span class="n">right</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+                    <span class="n">left_index</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                    <span class="n">right_index</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                    <span class="n">suffixes</span><span class="o">=</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="n">left</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="n">right</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">],</span>
+                <span class="p">),</span>
+                <span class="n">merge_dict</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span>
             <span class="p">)</span>
         <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Loading video data...&quot;</span><span class="p">)</span>
         <span class="n">epoch</span> <span class="o">=</span> <span class="p">(</span>
@@ -9899,27 +10230,25 @@ the original LED positions overlaid on the video of the animal.</p>
         <span class="c1"># centroids = {&#39;red&#39;: np.asarray(raw_position_df[[&#39;xloc&#39;, &#39;yloc&#39;]]),</span>
         <span class="c1">#              &#39;green&#39;:  np.asarray(raw_position_df[[&#39;xloc2&#39;, &#39;yloc2&#39;]])}</span>
         <span class="n">position_mean_dict</span> <span class="o">=</span> <span class="p">{}</span>
-        <span class="n">orientation_mean_dict</span> <span class="o">=</span> <span class="p">{}</span>
-        <span class="k">if</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;plot&quot;</span><span class="p">]</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;DLC&quot;</span><span class="p">,</span> <span class="s2">&quot;Trodes&quot;</span><span class="p">]:</span>
-            <span class="n">position_mean_dict</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;plot&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+        <span class="k">if</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;plot&quot;</span><span class="p">]</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;DLC&quot;</span><span class="p">,</span> <span class="s2">&quot;Trodes&quot;</span><span class="p">,</span> <span class="s2">&quot;Common&quot;</span><span class="p">]:</span>
+            <span class="n">position_mean_dict</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;plot&quot;</span><span class="p">]][</span><span class="s2">&quot;position&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
                 <span class="n">pos_df</span><span class="p">[[</span><span class="s2">&quot;position_x&quot;</span><span class="p">,</span> <span class="s2">&quot;position_y&quot;</span><span class="p">]]</span>
             <span class="p">)</span>
-            <span class="n">orientation_mean_dict</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;plot&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+            <span class="n">position_mean_dict</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;plot&quot;</span><span class="p">]][</span><span class="s2">&quot;orientation&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
                 <span class="n">pos_df</span><span class="p">[[</span><span class="s2">&quot;orientation&quot;</span><span class="p">]]</span>
             <span class="p">)</span>
         <span class="k">elif</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;plot&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;All&quot;</span><span class="p">:</span>
-            <span class="n">position_mean_dict</span><span class="p">[</span><span class="s2">&quot;DLC&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
-                <span class="n">pos_df</span><span class="p">[[</span><span class="s2">&quot;position_x_DLC&quot;</span><span class="p">,</span> <span class="s2">&quot;position_y_DLC&quot;</span><span class="p">]]</span>
-            <span class="p">)</span>
-            <span class="n">orientation_mean_dict</span><span class="p">[</span><span class="s2">&quot;DLC&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
-                <span class="n">pos_df</span><span class="p">[[</span><span class="s2">&quot;orientation_DLC&quot;</span><span class="p">]]</span>
-            <span class="p">)</span>
-            <span class="n">position_mean_dict</span><span class="p">[</span><span class="s2">&quot;Trodes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
-                <span class="n">pos_df</span><span class="p">[[</span><span class="s2">&quot;position_x_Trodes&quot;</span><span class="p">,</span> <span class="s2">&quot;position_y_Trodes&quot;</span><span class="p">]]</span>
-            <span class="p">)</span>
-            <span class="n">orientation_mean_dict</span><span class="p">[</span><span class="s2">&quot;Trodes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
-                <span class="n">pos_df</span><span class="p">[[</span><span class="s2">&quot;orientation_Trodes&quot;</span><span class="p">]]</span>
-            <span class="p">)</span>
+            <span class="n">position_mean_dict</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="n">source</span><span class="p">:</span> <span class="p">{</span>
+                    <span class="s2">&quot;position&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                        <span class="n">pos_df</span><span class="p">[[</span><span class="sa">f</span><span class="s2">&quot;position_x_</span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;position_y_</span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]]</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;orientation&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                        <span class="n">pos_df</span><span class="p">[[</span><span class="sa">f</span><span class="s2">&quot;orientation_</span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]]</span>
+                    <span class="p">),</span>
+                <span class="p">}</span>
+                <span class="k">for</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">merge_dict</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+            <span class="p">}</span>
         <span class="n">position_time</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">pos_df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
         <span class="n">cm_per_pixel</span> <span class="o">=</span> <span class="n">meters_per_pixel</span> <span class="o">*</span> <span class="n">M_TO_CM</span>
         <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Making video...&quot;</span><span class="p">)</span>
@@ -9928,7 +10257,6 @@ the original LED positions overlaid on the video of the animal.</p>
             <span class="n">video_path</span><span class="p">,</span>
             <span class="n">video_frame_inds</span><span class="p">,</span>
             <span class="n">position_mean_dict</span><span class="p">,</span>
-            <span class="n">orientation_mean_dict</span><span class="p">,</span>
             <span class="n">video_time</span><span class="p">,</span>
             <span class="n">position_time</span><span class="p">,</span>
             <span class="n">processor</span><span class="o">=</span><span class="s2">&quot;opencv&quot;</span><span class="p">,</span>
@@ -9990,7 +10318,11 @@ DeepLabCut processes. Converts to MP4 if not already.</p>
           <td>
                 <code>str or PosixPath object</code>
           </td>
-          <td><p>path to directory of the existing video file without filename</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>path to directory of the existing video file without filename</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -10000,7 +10332,11 @@ DeepLabCut processes. Converts to MP4 if not already.</p>
           <td>
                 <code>str or PosixPath object</code>
           </td>
-          <td><p>path to directory where converted video will be saved</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>path to directory where converted video will be saved</p>
+            </div>
+          </td>
           <td>
                 <code>os.getenv(&#39;DLC_VIDEO_PATH&#39;)</code>
           </td>
@@ -10010,8 +10346,12 @@ DeepLabCut processes. Converts to MP4 if not already.</p>
           <td>
                 <code>str, Optional</code>
           </td>
-          <td><p>filename of the video to convert, if not provided, video_filetype must be
-and all video files of video_filetype in the directory will be converted</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>filename of the video to convert, if not provided, video_filetype must be
+and all video files of video_filetype in the directory will be converted</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -10021,8 +10361,12 @@ and all video files of video_filetype in the directory will be converted</p></td
           <td>
                 <code>str or List, Default &#39;h264&#39;, Optional</code>
           </td>
-          <td><p>If video_filename is not provided,
-all videos of this filetype will be converted to .mp4</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>If video_filename is not provided,
+all videos of this filetype will be converted to .mp4</p>
+            </div>
+          </td>
           <td>
                 <code>&#39;h264&#39;</code>
           </td>
@@ -10043,7 +10387,11 @@ all videos of this filetype will be converted to .mp4</p></td>
 <td><code>output_files</code></td>          <td>
                 <code>List of PosixPath objects</code>
           </td>
-          <td><p>paths to converted video file(s)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>paths to converted video file(s)</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>

@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2485,38 +2485,58 @@
           <td>
                 <code>bool, default True</code>
           </td>
-          <td><p>whether to interpolate over NaN spans</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>whether to interpolate over NaN spans</p>
+            </div>
+          </td>
         </tr>
         <tr>
           <td><code>smooth</code></td>
           <td>
                 <code>bool, default True</code>
           </td>
-          <td><p>whether to smooth the dataset</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>whether to smooth the dataset</p>
+            </div>
+          </td>
         </tr>
         <tr>
           <td><code>smoothing_params</code></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>smoothing_duration : float, default 0.05
-number of frames to smooth over: sampling_rate*smoothing_duration = num_frames</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>smoothing_duration : float, default 0.05
+number of frames to smooth over: sampling_rate*smoothing_duration = num_frames</p>
+            </div>
+          </td>
         </tr>
         <tr>
           <td><code>interp_params</code></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>max_cm_to_interp : int, default 20
+          <td>
+            <div class="doc-md-description">
+              <p>max_cm_to_interp : int, default 20
 maximum distance between high likelihood points on either side of a NaN span
-to interpolate over</p></td>
+to interpolate over</p>
+            </div>
+          </td>
         </tr>
         <tr>
           <td><code>likelihood_thresh</code></td>
           <td>
                 <code>float, default 0.95</code>
           </td>
-          <td><p>likelihood below which to NaN and interpolate over</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>likelihood below which to NaN and interpolate over</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2524,7 +2544,10 @@ to interpolate over</p></td>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_position.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 17</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
 <span class="normal"> 18</span>
 <span class="normal"> 19</span>
 <span class="normal"> 20</span>
@@ -2661,10 +2684,7 @@ to interpolate over</p></td>
 <span class="normal">151</span>
 <span class="normal">152</span>
 <span class="normal">153</span>
-<span class="normal">154</span>
-<span class="normal">155</span>
-<span class="normal">156</span>
-<span class="normal">157</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">154</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">DLCSmoothInterpParams</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Parameters for extracting the smoothed head position.</span>
@@ -2857,7 +2877,11 @@ to interpolate over</p></td>
           <td>
                 <code>query</code>
           </td>
-          <td><p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2867,10 +2891,14 @@ to interpolate over</p></td>
           <td>
                 <code>tuple</code>
           </td>
-          <td><p>Tuple (table, attr) to get the NWB filepath from.
+          <td>
+            <div class="doc-md-description">
+              <p>Tuple (table, attr) to get the NWB filepath from.
 i.e. absolute path to NWB file can be obtained by looking up attr column of table
 table is usually Nwbfile or AnalysisNwbfile;
-attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
+attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2880,7 +2908,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>list</code>
           </td>
-          <td><p>Attributes from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Attributes from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>()</code>
           </td>
@@ -2890,7 +2922,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Keyword arguments from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Keyword arguments from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>{}</code>
           </td>
@@ -2911,7 +2947,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>nwb_objects</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of dicts containing fetch results and NWB objects.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of dicts containing fetch results and NWB objects.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3093,8 +3133,7 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">121</span>
-<span class="normal">122</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">122</span>
 <span class="normal">123</span>
 <span class="normal">124</span>
 <span class="normal">125</span>
@@ -3234,7 +3273,127 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <span class="normal">259</span>
 <span class="normal">260</span>
 <span class="normal">261</span>
-<span class="normal">262</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">DLCPoseEstimation</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
     <span class="n">definition</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
 <span class="s2">    -&gt; DLCPoseEstimationSelection</span>
@@ -3249,7 +3408,8 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <span class="s2">        -&gt; DLCModel.BodyPart</span>
 <span class="s2">        ---</span>
 <span class="s2">        -&gt; AnalysisNwbfile</span>
-<span class="s2">        dlc_pose_estimation_object_id : varchar(80)</span>
+<span class="s2">        dlc_pose_estimation_position_object_id : varchar(80)</span>
+<span class="s2">        dlc_pose_estimation_likelihood_object_id : varchar(80)</span>
 <span class="s2">        &quot;&quot;&quot;</span>
 
         <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
@@ -3261,11 +3421,53 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
             <span class="p">)</span>
 
         <span class="k">def</span> <span class="nf">fetch1_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;dlc_pose_estimation&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;time&quot;</span><span class="p">)</span>
+            <span class="n">nwb_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">index</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                    <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_pose_estimation_position&quot;</span><span class="p">]</span>
+                    <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+                    <span class="o">.</span><span class="n">timestamps</span>
+                <span class="p">),</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;time&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">COLUMNS</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;x&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;y&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+            <span class="p">]</span>
+            <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+                <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+                    <span class="p">(</span>
+                        <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                            <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_pose_estimation_likelihood&quot;</span><span class="p">]</span>
+                            <span class="o">.</span><span class="n">time_series</span><span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]</span>
+                            <span class="o">.</span><span class="n">data</span><span class="p">,</span>
+                            <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+                        <span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span>
+                        <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                            <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_pose_estimation_position&quot;</span><span class="p">]</span>
+                            <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+                            <span class="o">.</span><span class="n">data</span>
+                        <span class="p">),</span>
+                        <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                            <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_pose_estimation_likelihood&quot;</span><span class="p">]</span>
+                            <span class="o">.</span><span class="n">time_series</span><span class="p">[</span><span class="s2">&quot;likelihood&quot;</span><span class="p">]</span>
+                            <span class="o">.</span><span class="n">data</span>
+                        <span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span>
+                    <span class="p">),</span>
+                    <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="n">columns</span><span class="o">=</span><span class="n">COLUMNS</span><span class="p">,</span>
+                <span class="n">index</span><span class="o">=</span><span class="n">index</span><span class="p">,</span>
+            <span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;.populate() method will launch training for each PoseEstimationTask&quot;&quot;&quot;</span>
         <span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">dlc_reader</span>
+        <span class="kn">from</span> <span class="nn">.dlc_utils</span> <span class="kn">import</span> <span class="n">get_video_path</span>
+
+        <span class="n">METERS_PER_CM</span> <span class="o">=</span> <span class="mf">0.01</span>
 
         <span class="n">output_dir</span> <span class="o">=</span> <span class="n">infer_output_dir</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">makedir</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
         <span class="k">with</span> <span class="n">OutputLogger</span><span class="p">(</span>
@@ -3305,23 +3507,15 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 
             <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;getting raw position&quot;</span><span class="p">)</span>
             <span class="n">interval_list_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;pos </span><span class="si">{</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;epoch&#39;</span><span class="p">]</span><span class="o">-</span><span class="mi">1</span><span class="si">}</span><span class="s2"> valid times&quot;</span>
-            <span class="n">raw_position</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">spatial_series</span> <span class="o">=</span> <span class="p">(</span>
                 <span class="n">RawPosition</span><span class="p">()</span>
-                <span class="o">&amp;</span> <span class="p">{</span>
-                    <span class="s2">&quot;nwb_file_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
-                    <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">,</span>
-                <span class="p">}</span>
-            <span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
-            <span class="n">raw_pos_df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
-                <span class="n">data</span><span class="o">=</span><span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
-                <span class="n">index</span><span class="o">=</span><span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span>
-                    <span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">timestamps</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;time&quot;</span>
-                <span class="p">),</span>
-                <span class="n">columns</span><span class="o">=</span><span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">description</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;, &quot;</span><span class="p">),</span>
-            <span class="p">)</span>
+                <span class="o">&amp;</span> <span class="p">{</span><span class="o">**</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">}</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span>
+            <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">video_time</span> <span class="o">=</span> <span class="n">get_video_path</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="n">pos_time</span> <span class="o">=</span> <span class="n">spatial_series</span><span class="o">.</span><span class="n">timestamps</span>
             <span class="c1"># TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,</span>
             <span class="c1"># which also has timestamps</span>
-            <span class="n">key</span><span class="p">[</span><span class="s2">&quot;meters_per_pixel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">conversion</span>
+            <span class="n">key</span><span class="p">[</span><span class="s2">&quot;meters_per_pixel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">spatial_series</span><span class="o">.</span><span class="n">conversion</span>
 
             <span class="c1"># Insert entry into DLCPoseEstimation</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
@@ -3343,21 +3537,57 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
                             <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">dlc_result</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">body_part</span><span class="p">)</span><span class="o">.</span><span class="n">columns</span>
                         <span class="p">}</span>
                     <span class="p">)</span>
+            <span class="n">idx</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">IndexSlice</span>
             <span class="k">for</span> <span class="n">body_part</span><span class="p">,</span> <span class="n">part_df</span> <span class="ow">in</span> <span class="n">body_parts_df</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
                 <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;converting to cm&quot;</span><span class="p">)</span>
                 <span class="n">part_df</span> <span class="o">=</span> <span class="n">convert_to_cm</span><span class="p">(</span><span class="n">part_df</span><span class="p">,</span> <span class="n">meters_per_pixel</span><span class="p">)</span>
                 <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;adding timestamps to DataFrame&quot;</span><span class="p">)</span>
-                <span class="n">part_df</span> <span class="o">=</span> <span class="n">add_timestamps</span><span class="p">(</span><span class="n">part_df</span><span class="p">,</span> <span class="n">raw_pos_df</span><span class="o">.</span><span class="n">copy</span><span class="p">())</span>
+                <span class="n">part_df</span> <span class="o">=</span> <span class="n">add_timestamps</span><span class="p">(</span>
+                    <span class="n">part_df</span><span class="p">,</span> <span class="n">pos_time</span><span class="o">=</span><span class="n">pos_time</span><span class="p">,</span> <span class="n">video_time</span><span class="o">=</span><span class="n">video_time</span>
+                <span class="p">)</span>
                 <span class="n">key</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">body_part</span>
                 <span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
                     <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">]</span>
                 <span class="p">)</span>
+                <span class="n">position</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">Position</span><span class="p">()</span>
+                <span class="n">likelihood</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">BehavioralTimeSeries</span><span class="p">()</span>
+                <span class="n">position</span><span class="o">.</span><span class="n">create_spatial_series</span><span class="p">(</span>
+                    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;position&quot;</span><span class="p">,</span>
+                    <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">conversion</span><span class="o">=</span><span class="n">METERS_PER_CM</span><span class="p">,</span>
+                    <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[(</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">)]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">reference_frame</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">reference_frame</span><span class="p">,</span>
+                    <span class="n">comments</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">comments</span><span class="p">,</span>
+                    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;x_position, y_position&quot;</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">likelihood</span><span class="o">.</span><span class="n">create_timeseries</span><span class="p">(</span>
+                    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+                    <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;likelihood&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+                    <span class="n">comments</span><span class="o">=</span><span class="s2">&quot;no comments&quot;</span><span class="p">,</span>
+                    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">likelihood</span><span class="o">.</span><span class="n">create_timeseries</span><span class="p">(</span>
+                    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+                    <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                    <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;index&quot;</span><span class="p">,</span>
+                    <span class="n">comments</span><span class="o">=</span><span class="s2">&quot;no comments&quot;</span><span class="p">,</span>
+                    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+                <span class="p">)</span>
                 <span class="n">nwb_analysis_file</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span>
                 <span class="n">key</span><span class="p">[</span>
-                    <span class="s2">&quot;dlc_pose_estimation_object_id&quot;</span>
+                    <span class="s2">&quot;dlc_pose_estimation_position_object_id&quot;</span>
                 <span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
                     <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">],</span>
-                    <span class="n">nwb_object</span><span class="o">=</span><span class="n">part_df</span><span class="p">,</span>
+                    <span class="n">nwb_object</span><span class="o">=</span><span class="n">position</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">key</span><span class="p">[</span>
+                    <span class="s2">&quot;dlc_pose_estimation_likelihood_object_id&quot;</span>
+                <span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
+                    <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">],</span>
+                    <span class="n">nwb_object</span><span class="o">=</span><span class="n">likelihood</span><span class="p">,</span>
                 <span class="p">)</span>
                 <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
                     <span class="n">nwb_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
@@ -3367,11 +3597,59 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 
     <span class="k">def</span> <span class="nf">fetch_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
         <span class="n">entries</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">BodyPart</span> <span class="o">&amp;</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s2">&quot;KEY&quot;</span><span class="p">)</span>
+        <span class="n">nwb_data_dict</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]:</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">BodyPart</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">entry</span><span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">entries</span>
+        <span class="p">}</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                <span class="n">nwb_data_dict</span><span class="p">[</span><span class="n">entries</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]][</span>
+                    <span class="s2">&quot;dlc_pose_estimation_position&quot;</span>
+                <span class="p">]</span>
+                <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+                <span class="o">.</span><span class="n">timestamps</span>
+            <span class="p">),</span>
+            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;time&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">COLUMNS</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;x&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;y&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
         <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span>
             <span class="p">{</span>
-                <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]:</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">BodyPart</span> <span class="o">&amp;</span> <span class="n">entry</span><span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span>
-                    <span class="s2">&quot;dlc_pose_estimation&quot;</span>
-                <span class="p">]</span>
+                <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+                        <span class="p">(</span>
+                            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                                <span class="n">nwb_data_dict</span><span class="p">[</span><span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]][</span>
+                                    <span class="s2">&quot;dlc_pose_estimation_likelihood&quot;</span>
+                                <span class="p">]</span>
+                                <span class="o">.</span><span class="n">time_series</span><span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]</span>
+                                <span class="o">.</span><span class="n">data</span><span class="p">,</span>
+                                <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+                            <span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span>
+                            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                                <span class="n">nwb_data_dict</span><span class="p">[</span><span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]][</span>
+                                    <span class="s2">&quot;dlc_pose_estimation_position&quot;</span>
+                                <span class="p">]</span>
+                                <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+                                <span class="o">.</span><span class="n">data</span>
+                            <span class="p">),</span>
+                            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                                <span class="n">nwb_data_dict</span><span class="p">[</span><span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]][</span>
+                                    <span class="s2">&quot;dlc_pose_estimation_likelihood&quot;</span>
+                                <span class="p">]</span>
+                                <span class="o">.</span><span class="n">time_series</span><span class="p">[</span><span class="s2">&quot;likelihood&quot;</span><span class="p">]</span>
+                                <span class="o">.</span><span class="n">data</span>
+                            <span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span>
+                        <span class="p">),</span>
+                        <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                    <span class="p">),</span>
+                    <span class="n">columns</span><span class="o">=</span><span class="n">COLUMNS</span><span class="p">,</span>
+                    <span class="n">index</span><span class="o">=</span><span class="n">index</span><span class="p">,</span>
+                <span class="p">)</span>
                 <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">entries</span>
             <span class="p">},</span>
             <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
@@ -3405,48 +3683,7 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_pose_estimation.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">150</span>
-<span class="normal">151</span>
-<span class="normal">152</span>
-<span class="normal">153</span>
-<span class="normal">154</span>
-<span class="normal">155</span>
-<span class="normal">156</span>
-<span class="normal">157</span>
-<span class="normal">158</span>
-<span class="normal">159</span>
-<span class="normal">160</span>
-<span class="normal">161</span>
-<span class="normal">162</span>
-<span class="normal">163</span>
-<span class="normal">164</span>
-<span class="normal">165</span>
-<span class="normal">166</span>
-<span class="normal">167</span>
-<span class="normal">168</span>
-<span class="normal">169</span>
-<span class="normal">170</span>
-<span class="normal">171</span>
-<span class="normal">172</span>
-<span class="normal">173</span>
-<span class="normal">174</span>
-<span class="normal">175</span>
-<span class="normal">176</span>
-<span class="normal">177</span>
-<span class="normal">178</span>
-<span class="normal">179</span>
-<span class="normal">180</span>
-<span class="normal">181</span>
-<span class="normal">182</span>
-<span class="normal">183</span>
-<span class="normal">184</span>
-<span class="normal">185</span>
-<span class="normal">186</span>
-<span class="normal">187</span>
-<span class="normal">188</span>
-<span class="normal">189</span>
-<span class="normal">190</span>
-<span class="normal">191</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">191</span>
 <span class="normal">192</span>
 <span class="normal">193</span>
 <span class="normal">194</span>
@@ -3505,9 +3742,84 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <span class="normal">247</span>
 <span class="normal">248</span>
 <span class="normal">249</span>
-<span class="normal">250</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;.populate() method will launch training for each PoseEstimationTask&quot;&quot;&quot;</span>
     <span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">dlc_reader</span>
+    <span class="kn">from</span> <span class="nn">.dlc_utils</span> <span class="kn">import</span> <span class="n">get_video_path</span>
+
+    <span class="n">METERS_PER_CM</span> <span class="o">=</span> <span class="mf">0.01</span>
 
     <span class="n">output_dir</span> <span class="o">=</span> <span class="n">infer_output_dir</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">makedir</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
     <span class="k">with</span> <span class="n">OutputLogger</span><span class="p">(</span>
@@ -3547,23 +3859,15 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 
         <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;getting raw position&quot;</span><span class="p">)</span>
         <span class="n">interval_list_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;pos </span><span class="si">{</span><span class="n">key</span><span class="p">[</span><span class="s1">&#39;epoch&#39;</span><span class="p">]</span><span class="o">-</span><span class="mi">1</span><span class="si">}</span><span class="s2"> valid times&quot;</span>
-        <span class="n">raw_position</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">spatial_series</span> <span class="o">=</span> <span class="p">(</span>
             <span class="n">RawPosition</span><span class="p">()</span>
-            <span class="o">&amp;</span> <span class="p">{</span>
-                <span class="s2">&quot;nwb_file_name&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
-                <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">,</span>
-            <span class="p">}</span>
-        <span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
-        <span class="n">raw_pos_df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
-            <span class="n">data</span><span class="o">=</span><span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
-            <span class="n">index</span><span class="o">=</span><span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span>
-                <span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">timestamps</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;time&quot;</span>
-            <span class="p">),</span>
-            <span class="n">columns</span><span class="o">=</span><span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">description</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;, &quot;</span><span class="p">),</span>
-        <span class="p">)</span>
+            <span class="o">&amp;</span> <span class="p">{</span><span class="o">**</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;interval_list_name&quot;</span><span class="p">:</span> <span class="n">interval_list_name</span><span class="p">}</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">video_time</span> <span class="o">=</span> <span class="n">get_video_path</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="n">pos_time</span> <span class="o">=</span> <span class="n">spatial_series</span><span class="o">.</span><span class="n">timestamps</span>
         <span class="c1"># TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,</span>
         <span class="c1"># which also has timestamps</span>
-        <span class="n">key</span><span class="p">[</span><span class="s2">&quot;meters_per_pixel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw_position</span><span class="p">[</span><span class="s2">&quot;raw_position&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">conversion</span>
+        <span class="n">key</span><span class="p">[</span><span class="s2">&quot;meters_per_pixel&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">spatial_series</span><span class="o">.</span><span class="n">conversion</span>
 
         <span class="c1"># Insert entry into DLCPoseEstimation</span>
         <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
@@ -3585,21 +3889,57 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
                         <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">dlc_result</span><span class="o">.</span><span class="n">df</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">body_part</span><span class="p">)</span><span class="o">.</span><span class="n">columns</span>
                     <span class="p">}</span>
                 <span class="p">)</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">IndexSlice</span>
         <span class="k">for</span> <span class="n">body_part</span><span class="p">,</span> <span class="n">part_df</span> <span class="ow">in</span> <span class="n">body_parts_df</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;converting to cm&quot;</span><span class="p">)</span>
             <span class="n">part_df</span> <span class="o">=</span> <span class="n">convert_to_cm</span><span class="p">(</span><span class="n">part_df</span><span class="p">,</span> <span class="n">meters_per_pixel</span><span class="p">)</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;adding timestamps to DataFrame&quot;</span><span class="p">)</span>
-            <span class="n">part_df</span> <span class="o">=</span> <span class="n">add_timestamps</span><span class="p">(</span><span class="n">part_df</span><span class="p">,</span> <span class="n">raw_pos_df</span><span class="o">.</span><span class="n">copy</span><span class="p">())</span>
+            <span class="n">part_df</span> <span class="o">=</span> <span class="n">add_timestamps</span><span class="p">(</span>
+                <span class="n">part_df</span><span class="p">,</span> <span class="n">pos_time</span><span class="o">=</span><span class="n">pos_time</span><span class="p">,</span> <span class="n">video_time</span><span class="o">=</span><span class="n">video_time</span>
+            <span class="p">)</span>
             <span class="n">key</span><span class="p">[</span><span class="s2">&quot;bodypart&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">body_part</span>
             <span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
                 <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">]</span>
             <span class="p">)</span>
+            <span class="n">position</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">Position</span><span class="p">()</span>
+            <span class="n">likelihood</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">BehavioralTimeSeries</span><span class="p">()</span>
+            <span class="n">position</span><span class="o">.</span><span class="n">create_spatial_series</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;position&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">conversion</span><span class="o">=</span><span class="n">METERS_PER_CM</span><span class="p">,</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[(</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">)]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">reference_frame</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">reference_frame</span><span class="p">,</span>
+                <span class="n">comments</span><span class="o">=</span><span class="n">spatial_series</span><span class="o">.</span><span class="n">comments</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;x_position, y_position&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">likelihood</span><span class="o">.</span><span class="n">create_timeseries</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;likelihood&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+                <span class="n">comments</span><span class="o">=</span><span class="s2">&quot;no comments&quot;</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;likelihood&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">likelihood</span><span class="o">.</span><span class="n">create_timeseries</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">part_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;index&quot;</span><span class="p">,</span>
+                <span class="n">comments</span><span class="o">=</span><span class="s2">&quot;no comments&quot;</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
             <span class="n">nwb_analysis_file</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span>
             <span class="n">key</span><span class="p">[</span>
-                <span class="s2">&quot;dlc_pose_estimation_object_id&quot;</span>
+                <span class="s2">&quot;dlc_pose_estimation_position_object_id&quot;</span>
             <span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
                 <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">],</span>
-                <span class="n">nwb_object</span><span class="o">=</span><span class="n">part_df</span><span class="p">,</span>
+                <span class="n">nwb_object</span><span class="o">=</span><span class="n">position</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">key</span><span class="p">[</span>
+                <span class="s2">&quot;dlc_pose_estimation_likelihood_object_id&quot;</span>
+            <span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
+                <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">],</span>
+                <span class="n">nwb_object</span><span class="o">=</span><span class="n">likelihood</span><span class="p">,</span>
             <span class="p">)</span>
             <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
                 <span class="n">nwb_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
@@ -4680,7 +5020,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file to be copied.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file to be copied.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4701,7 +5045,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>analysis_file_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the new NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the new NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -4845,7 +5193,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file to be copied.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file to be copied.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4866,7 +5218,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>analysis_file_name</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the new NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the new NWB file.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -4987,7 +5343,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the parent NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the parent NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4997,7 +5357,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file that was created.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file that was created.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5088,7 +5452,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWB file that has been inserted into the AnalysisNwbfile() schema</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWB file that has been inserted into the AnalysisNwbfile() schema</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5109,7 +5477,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>analysis_nwb_file_abspath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The absolute path for the given file name.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The absolute path for the given file name.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5232,7 +5604,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5242,7 +5618,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>pynwb.<span title="pynwb.core">core</span>.<span title="pynwb.core.NWBDataInterface">NWBDataInterface</span></code>
           </td>
-          <td><p>The NWB object created by PyNWB.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object created by PyNWB.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5252,7 +5632,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str (optional, defaults to &#39;pandas_table&#39;)</code>
           </td>
-          <td><p>The name of the DynamicTable made from a dataframe.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the DynamicTable made from a dataframe.</p>
+            </div>
+          </td>
           <td>
                 <code>&#39;pandas_table&#39;</code>
           </td>
@@ -5273,7 +5657,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>nwb_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object ID of the added object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object ID of the added object.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5396,7 +5784,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5406,7 +5798,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>keys are unit ids, values are spike times</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>keys are unit ids, values are spike times</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5416,7 +5812,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of units and valid times with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of units and valid times with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5426,7 +5826,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of units and sort_interval with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of units and sort_interval with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5436,7 +5840,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Dictionary of unit waveforms with unit ids as keys.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of unit waveforms with unit ids as keys.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -5446,7 +5854,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -5456,7 +5868,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Curation labels for clusters</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Curation labels for clusters</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -5477,7 +5893,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>units_object_id, waveforms_object_id</code>
           </td>
-          <td><p>The NWB object id of the Units object and the object id of the waveforms object ('' if None)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object and the object id of the waveforms object ('' if None)</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -5734,7 +6154,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5744,7 +6168,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>si.WaveformExtractor object</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -5754,7 +6182,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -5764,7 +6196,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Curation labels for clusters</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Curation labels for clusters</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -5785,7 +6221,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>units_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object id of the Units object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6012,7 +6452,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6022,7 +6466,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict, optional</code>
           </td>
-          <td><p>Cluster metrics.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Cluster metrics.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6043,7 +6491,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>units_object_id</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The NWB object id of the Units object</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB object id of the Units object</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6164,7 +6616,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the analysis NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the analysis NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6174,7 +6630,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>numpy array or list</code>
           </td>
-          <td><p>Array or list of electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array or list of electrode IDs.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6195,7 +6655,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>electrode_indices</code></td>          <td>
                 <code>numpy array</code>
           </td>
-          <td><p>Array of indices in the electrodes table for the given electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array of indices in the electrodes table for the given electrode IDs.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -6284,7 +6748,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>bool, optional</code>
           </td>
-          <td><p>Whether the original files should be deleted (default False).</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Whether the original files should be deleted (default False).</p>
+            </div>
+          </td>
           <td>
                 <code>False</code>
           </td>
@@ -6361,7 +6829,10 @@ Can take a few minutes.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/position/v1/position_dlc_position.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">173</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
 <span class="normal">174</span>
 <span class="normal">175</span>
 <span class="normal">176</span>
@@ -6457,7 +6928,74 @@ Can take a few minutes.</p>
 <span class="normal">266</span>
 <span class="normal">267</span>
 <span class="normal">268</span>
-<span class="normal">269</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">DLCSmoothInterp</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Computed</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Interpolates across low likelihood periods and smooths the position</span>
@@ -6468,11 +7006,14 @@ Can take a few minutes.</p>
 <span class="s2">    -&gt; DLCSmoothInterpSelection</span>
 <span class="s2">    ---</span>
 <span class="s2">    -&gt; AnalysisNwbfile</span>
-<span class="s2">    dlc_smooth_interp_object_id : varchar(80)</span>
+<span class="s2">    dlc_smooth_interp_position_object_id : varchar(80)</span>
+<span class="s2">    dlc_smooth_interp_info_object_id : varchar(80)</span>
 <span class="s2">    &quot;&quot;&quot;</span>
 
     <span class="k">def</span> <span class="nf">make</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
         <span class="kn">from</span> <span class="nn">.dlc_utils</span> <span class="kn">import</span> <span class="n">OutputLogger</span><span class="p">,</span> <span class="n">infer_output_dir</span>
+
+        <span class="n">METERS_PER_CM</span> <span class="o">=</span> <span class="mf">0.01</span>
 
         <span class="n">output_dir</span> <span class="o">=</span> <span class="n">infer_output_dir</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">makedir</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
         <span class="k">with</span> <span class="n">OutputLogger</span><span class="p">(</span>
@@ -6481,7 +7022,7 @@ Can take a few minutes.</p>
             <span class="n">print_console</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
         <span class="p">)</span> <span class="k">as</span> <span class="n">logger</span><span class="p">:</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;-----------------------&quot;</span><span class="p">)</span>
-            <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Determining Indices to NaN&quot;</span><span class="p">)</span>
+            <span class="n">idx</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">IndexSlice</span>
             <span class="c1"># Get labels to smooth from Parameters table</span>
             <span class="n">params</span> <span class="o">=</span> <span class="p">(</span><span class="n">DLCSmoothInterpParams</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s2">&quot;params&quot;</span><span class="p">)</span>
             <span class="c1"># Get DLC output dataframe</span>
@@ -6489,6 +7030,7 @@ Can take a few minutes.</p>
             <span class="n">dlc_df</span> <span class="o">=</span> <span class="p">(</span><span class="n">DLCPoseEstimation</span><span class="o">.</span><span class="n">BodyPart</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1_dataframe</span><span class="p">()</span>
             <span class="n">dt</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">diff</span><span class="p">(</span><span class="n">dlc_df</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()))</span>
             <span class="n">sampling_rate</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">/</span> <span class="n">dt</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Identifying indices to NaN&quot;</span><span class="p">)</span>
             <span class="n">df_w_nans</span><span class="p">,</span> <span class="n">bad_inds</span> <span class="o">=</span> <span class="n">nan_inds</span><span class="p">(</span>
                 <span class="n">dlc_df</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span>
                 <span class="n">params</span><span class="p">[</span><span class="s2">&quot;max_cm_between_pts&quot;</span><span class="p">],</span>
@@ -6504,6 +7046,7 @@ Can take a few minutes.</p>
                 <span class="p">)</span>
             <span class="k">else</span><span class="p">:</span>
                 <span class="n">interp_df</span> <span class="o">=</span> <span class="n">df_w_nans</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;skipping interpolation&quot;</span><span class="p">)</span>
             <span class="k">if</span> <span class="n">params</span><span class="p">[</span><span class="s2">&quot;smooth&quot;</span><span class="p">]:</span>
                 <span class="k">if</span> <span class="s2">&quot;smoothing_duration&quot;</span> <span class="ow">in</span> <span class="n">params</span><span class="p">[</span><span class="s2">&quot;smoothing_params&quot;</span><span class="p">]:</span>
                     <span class="n">smoothing_duration</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s2">&quot;smoothing_params&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span>
@@ -6527,18 +7070,50 @@ Can take a few minutes.</p>
                 <span class="p">)</span>
             <span class="k">else</span><span class="p">:</span>
                 <span class="n">smooth_df</span> <span class="o">=</span> <span class="n">interp_df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;skipping smoothing&quot;</span><span class="p">)</span>
             <span class="n">final_df</span> <span class="o">=</span> <span class="n">smooth_df</span><span class="o">.</span><span class="n">drop</span><span class="p">([</span><span class="s2">&quot;likelihood&quot;</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
             <span class="n">final_df</span> <span class="o">=</span> <span class="n">final_df</span><span class="o">.</span><span class="n">rename_axis</span><span class="p">(</span><span class="s2">&quot;time&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+            <span class="n">position_nwb_data</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="p">(</span><span class="n">DLCPoseEstimation</span><span class="o">.</span><span class="n">BodyPart</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;dlc_pose_estimation_position&quot;</span><span class="p">]</span>
+                <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+            <span class="p">)</span>
             <span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
                 <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">]</span>
             <span class="p">)</span>
             <span class="c1"># Add dataframe to AnalysisNwbfile</span>
             <span class="n">nwb_analysis_file</span> <span class="o">=</span> <span class="n">AnalysisNwbfile</span><span class="p">()</span>
+            <span class="n">position</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">Position</span><span class="p">()</span>
+            <span class="n">video_frame_ind</span> <span class="o">=</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">BehavioralTimeSeries</span><span class="p">()</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Creating NWB objects&quot;</span><span class="p">)</span>
+            <span class="n">position</span><span class="o">.</span><span class="n">create_spatial_series</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;position&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">final_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">conversion</span><span class="o">=</span><span class="n">METERS_PER_CM</span><span class="p">,</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">final_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[(</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">)]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">reference_frame</span><span class="o">=</span><span class="n">position_nwb_data</span><span class="o">.</span><span class="n">reference_frame</span><span class="p">,</span>
+                <span class="n">comments</span><span class="o">=</span><span class="n">position_nwb_data</span><span class="o">.</span><span class="n">comments</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;x_position, y_position&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">video_frame_ind</span><span class="o">.</span><span class="n">create_timeseries</span><span class="p">(</span>
+                <span class="n">name</span><span class="o">=</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+                <span class="n">timestamps</span><span class="o">=</span><span class="n">final_df</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">final_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+                <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;index&quot;</span><span class="p">,</span>
+                <span class="n">comments</span><span class="o">=</span><span class="s2">&quot;no comments&quot;</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
             <span class="n">key</span><span class="p">[</span>
-                <span class="s2">&quot;dlc_smooth_interp_object_id&quot;</span>
+                <span class="s2">&quot;dlc_smooth_interp_position_object_id&quot;</span>
             <span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
                 <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">],</span>
-                <span class="n">nwb_object</span><span class="o">=</span><span class="n">final_df</span><span class="p">,</span>
+                <span class="n">nwb_object</span><span class="o">=</span><span class="n">position</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">key</span><span class="p">[</span>
+                <span class="s2">&quot;dlc_smooth_interp_info_object_id&quot;</span>
+            <span class="p">]</span> <span class="o">=</span> <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add_nwb_object</span><span class="p">(</span>
+                <span class="n">analysis_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;analysis_file_name&quot;</span><span class="p">],</span>
+                <span class="n">nwb_object</span><span class="o">=</span><span class="n">video_frame_ind</span><span class="p">,</span>
             <span class="p">)</span>
             <span class="n">nwb_analysis_file</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
                 <span class="n">nwb_file_name</span><span class="o">=</span><span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">],</span>
@@ -6553,7 +7128,40 @@ Can take a few minutes.</p>
         <span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">fetch1_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;dlc_smooth_interp&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;time&quot;</span><span class="p">)</span>
+        <span class="n">nwb_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_smooth_interp_position&quot;</span><span class="p">]</span>
+                <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+                <span class="o">.</span><span class="n">timestamps</span>
+            <span class="p">),</span>
+            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;time&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">COLUMNS</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="s2">&quot;video_frame_ind&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;x&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;y&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+                <span class="p">(</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                        <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_smooth_interp_info&quot;</span><span class="p">]</span>
+                        <span class="o">.</span><span class="n">time_series</span><span class="p">[</span><span class="s2">&quot;video_frame_ind&quot;</span><span class="p">]</span>
+                        <span class="o">.</span><span class="n">data</span><span class="p">,</span>
+                        <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+                    <span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+                        <span class="n">nwb_data</span><span class="p">[</span><span class="s2">&quot;dlc_smooth_interp_position&quot;</span><span class="p">]</span>
+                        <span class="o">.</span><span class="n">get_spatial_series</span><span class="p">()</span>
+                        <span class="o">.</span><span class="n">data</span>
+                    <span class="p">),</span>
+                <span class="p">),</span>
+                <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="n">columns</span><span class="o">=</span><span class="n">COLUMNS</span><span class="p">,</span>
+            <span class="n">index</span><span class="o">=</span><span class="n">index</span><span class="p">,</span>
+        <span class="p">)</span>
 </code></pre></div></td></tr></table></div>
         </details>
 
@@ -6608,7 +7216,11 @@ with a separation of less than inds_to_span and treats them as a single good spa
           <td>
                 <code>boolean mask</code>
           </td>
-          <td><p>A boolean mask where True is a bad index and False is a good index.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A boolean mask where True is a bad index and False is a good index.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6618,11 +7230,15 @@ with a separation of less than inds_to_span and treats them as a single good spa
           <td>
                 <code>int, default 50</code>
           </td>
-          <td><p>This indicates how many indices between two good spans should
+          <td>
+            <div class="doc-md-description">
+              <p>This indicates how many indices between two good spans should
 be bridged to form a single good span.
 For instance if span A is (1500, 2350) and span B is (2370, 3700),
 then span A and span B would be combined into span A (1500, 3700)
-since one would want to identify potential jumps in the space in between the original A and B.</p></td>
+since one would want to identify potential jumps in the space in between the original A and B.</p>
+            </div>
+          </td>
           <td>
                 <code>50</code>
           </td>
@@ -6643,73 +7259,81 @@ since one would want to identify potential jumps in the space in between the ori
 <td><code>good_spans</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of spans of good indices, unmodified.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of spans of good indices, unmodified.</p>
+            </div>
+          </td>
         </tr>
         <tr>
 <td><code>modified_spans</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>spans that are amended to bridge up to inds_to_span consecutive bad indices</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>spans that are amended to bridge up to inds_to_span consecutive bad indices</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/position/v1/position_dlc_position.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">358</span>
-<span class="normal">359</span>
-<span class="normal">360</span>
-<span class="normal">361</span>
-<span class="normal">362</span>
-<span class="normal">363</span>
-<span class="normal">364</span>
-<span class="normal">365</span>
-<span class="normal">366</span>
-<span class="normal">367</span>
-<span class="normal">368</span>
-<span class="normal">369</span>
-<span class="normal">370</span>
-<span class="normal">371</span>
-<span class="normal">372</span>
-<span class="normal">373</span>
-<span class="normal">374</span>
-<span class="normal">375</span>
-<span class="normal">376</span>
-<span class="normal">377</span>
-<span class="normal">378</span>
-<span class="normal">379</span>
-<span class="normal">380</span>
-<span class="normal">381</span>
-<span class="normal">382</span>
-<span class="normal">383</span>
-<span class="normal">384</span>
-<span class="normal">385</span>
-<span class="normal">386</span>
-<span class="normal">387</span>
-<span class="normal">388</span>
-<span class="normal">389</span>
-<span class="normal">390</span>
-<span class="normal">391</span>
-<span class="normal">392</span>
-<span class="normal">393</span>
-<span class="normal">394</span>
-<span class="normal">395</span>
-<span class="normal">396</span>
-<span class="normal">397</span>
-<span class="normal">398</span>
-<span class="normal">399</span>
-<span class="normal">400</span>
-<span class="normal">401</span>
-<span class="normal">402</span>
-<span class="normal">403</span>
-<span class="normal">404</span>
-<span class="normal">405</span>
-<span class="normal">406</span>
-<span class="normal">407</span>
-<span class="normal">408</span>
-<span class="normal">409</span>
-<span class="normal">410</span>
-<span class="normal">411</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">get_good_spans</span><span class="p">(</span><span class="n">bad_inds_mask</span><span class="p">,</span> <span class="n">inds_to_span</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">50</span><span class="p">):</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">425</span>
+<span class="normal">426</span>
+<span class="normal">427</span>
+<span class="normal">428</span>
+<span class="normal">429</span>
+<span class="normal">430</span>
+<span class="normal">431</span>
+<span class="normal">432</span>
+<span class="normal">433</span>
+<span class="normal">434</span>
+<span class="normal">435</span>
+<span class="normal">436</span>
+<span class="normal">437</span>
+<span class="normal">438</span>
+<span class="normal">439</span>
+<span class="normal">440</span>
+<span class="normal">441</span>
+<span class="normal">442</span>
+<span class="normal">443</span>
+<span class="normal">444</span>
+<span class="normal">445</span>
+<span class="normal">446</span>
+<span class="normal">447</span>
+<span class="normal">448</span>
+<span class="normal">449</span>
+<span class="normal">450</span>
+<span class="normal">451</span>
+<span class="normal">452</span>
+<span class="normal">453</span>
+<span class="normal">454</span>
+<span class="normal">455</span>
+<span class="normal">456</span>
+<span class="normal">457</span>
+<span class="normal">458</span>
+<span class="normal">459</span>
+<span class="normal">460</span>
+<span class="normal">461</span>
+<span class="normal">462</span>
+<span class="normal">463</span>
+<span class="normal">464</span>
+<span class="normal">465</span>
+<span class="normal">466</span>
+<span class="normal">467</span>
+<span class="normal">468</span>
+<span class="normal">469</span>
+<span class="normal">470</span>
+<span class="normal">471</span>
+<span class="normal">472</span>
+<span class="normal">473</span>
+<span class="normal">474</span>
+<span class="normal">475</span>
+<span class="normal">476</span>
+<span class="normal">477</span>
+<span class="normal">478</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">get_good_spans</span><span class="p">(</span><span class="n">bad_inds_mask</span><span class="p">,</span> <span class="n">inds_to_span</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">50</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    This function takes in a boolean mask of good and bad indices and</span>
 <span class="sd">    determines spans of consecutive good indices. It combines two neighboring spans</span>
@@ -6804,7 +7428,11 @@ since one would want to identify potential jumps in the space in between the ori
           <td>
                 <code>_type_</code>
           </td>
-          <td><p><em>description</em></p></td>
+          <td>
+            <div class="doc-md-description">
+              <p><em>description</em></p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -6825,7 +7453,11 @@ since one would want to identify potential jumps in the space in between the ori
           <td>
                 <code>_type_</code>
           </td>
-          <td><p><em>description</em></p></td>
+          <td>
+            <div class="doc-md-description">
+              <p><em>description</em></p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>

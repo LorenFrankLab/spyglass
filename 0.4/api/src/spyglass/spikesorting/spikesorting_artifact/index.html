@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2700,7 +2700,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The source NWB file object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The source NWB file object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2710,7 +2714,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>The file name of the NWB file, used as a primary key to the Session table.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The file name of the NWB file, used as a primary key to the Session table.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2979,7 +2987,11 @@ no gaps (i.e. missing samples).</p>
           <td>
                 <code>numpy.<span title="numpy.ndarray">ndarray</span></code>
           </td>
-          <td><p>1D numpy array of timestamp values.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>1D numpy array of timestamp values.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2989,7 +3001,11 @@ no gaps (i.e. missing samples).</p>
           <td>
                 <code>float</code>
           </td>
-          <td><p>Sampling rate of the data.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Sampling rate of the data.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2999,10 +3015,14 @@ no gaps (i.e. missing samples).</p>
           <td>
                 <code>float, greater than 1</code>
           </td>
-          <td><p>Threshold for detecting a gap;
+          <td>
+            <div class="doc-md-description">
+              <p>Threshold for detecting a gap;
 i.e. if the difference (in samples) between
 consecutive timestamps exceeds gap_proportion,
-it is considered a gap</p></td>
+it is considered a gap</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3012,7 +3032,11 @@ it is considered a gap</p></td>
           <td>
                 <code>float</code>
           </td>
-          <td><p>Length of smallest valid interval.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Length of smallest valid interval.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3033,7 +3057,11 @@ it is considered a gap</p></td>
 <td><code>valid_times</code></td>          <td>
                 <code><span title="numpy">np</span>.<span title="numpy.ndarray">ndarray</span></code>
           </td>
-          <td><p>Array of start and stop times of shape (N, 2) for valid data.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array of start and stop times of shape (N, 2) for valid data.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3721,7 +3749,11 @@ e.g. [2,3,4,6,7,8,9,10] -&gt; [[2,4],[6,10]]</p>
           <td>
                 <code>array_like of int</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3806,7 +3838,11 @@ intervals2 = [(1, 2), (3, 4), (6, 9)]</p>
           <td>
                 <code>_type_</code>
           </td>
-          <td><p><em>description</em></p></td>
+          <td>
+            <div class="doc-md-description">
+              <p><em>description</em></p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3816,7 +3852,11 @@ intervals2 = [(1, 2), (3, 4), (6, 9)]</p>
           <td>
                 <code>_type_</code>
           </td>
-          <td><p><em>description</em></p></td>
+          <td>
+            <div class="doc-md-description">
+              <p><em>description</em></p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3837,7 +3877,11 @@ intervals2 = [(1, 2), (3, 4), (6, 9)]</p>
           <td>
                 <code>_type_</code>
           </td>
-          <td><p><em>description</em></p></td>
+          <td>
+            <div class="doc-md-description">
+              <p><em>description</em></p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>

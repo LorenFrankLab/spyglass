@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2734,7 +2734,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The source NWB file object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The source NWB file object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2744,7 +2748,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>The file name of the NWB file, used as a primary key to the Session table.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The file name of the NWB file, used as a primary key to the Session table.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3276,7 +3284,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>Path to the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Path to the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3297,7 +3309,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
 <td><code>nwbfile</code></td>          <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>NWB file object for the given path opened in read mode.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>NWB file object for the given path opened in read mode.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3625,7 +3641,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>The relative path to the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The relative path to the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3716,7 +3736,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3737,7 +3761,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
 <td><code>nwb_file_abspath</code></td>          <td>
                 <code>str</code>
           </td>
-          <td><p>The absolute path for the given file name.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The absolute path for the given file name.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3835,7 +3863,11 @@ The start time and stop time of the epoch are stored in the valid_times field as
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of an NWB file that has been inserted into the Nwbfile() schema.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3982,7 +4014,11 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>query</code>
           </td>
-          <td><p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3992,10 +4028,14 @@ Run this after deleting the Nwbfile() entries themselves.</p>
           <td>
                 <code>tuple</code>
           </td>
-          <td><p>Tuple (table, attr) to get the NWB filepath from.
+          <td>
+            <div class="doc-md-description">
+              <p>Tuple (table, attr) to get the NWB filepath from.
 i.e. absolute path to NWB file can be obtained by looking up attr column of table
 table is usually Nwbfile or AnalysisNwbfile;
-attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
+attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4005,7 +4045,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>list</code>
           </td>
-          <td><p>Attributes from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Attributes from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>()</code>
           </td>
@@ -4015,7 +4059,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Keyword arguments from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Keyword arguments from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>{}</code>
           </td>
@@ -4036,7 +4084,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>nwb_objects</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of dicts containing fetch results and NWB objects.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of dicts containing fetch results and NWB objects.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -4229,7 +4281,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The NWB file object to search in.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB file object to search in.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4239,7 +4295,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWBDataInterface or DynamicTable to search for.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWBDataInterface or DynamicTable to search for.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4249,8 +4309,12 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>type, optional</code>
           </td>
-          <td><p>The class (or superclass) to search for. This argument helps to prevent accessing an object with the same
-name but the incorrect type. Default: no restriction.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The class (or superclass) to search for. This argument helps to prevent accessing an object with the same
+name but the incorrect type. Default: no restriction.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -4271,7 +4335,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>UserWarning</code>
           </td>
-          <td><p>If multiple NWBDataInterface and DynamicTable objects with the matching name are found.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>If multiple NWBDataInterface and DynamicTable objects with the matching name are found.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -4289,7 +4357,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>data_interface</code></td>          <td>
                 <code>NWBDataInterface</code>
           </td>
-          <td><p>The data interface object with the given name, or None if not found.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The data interface object with the given name, or None if not found.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>

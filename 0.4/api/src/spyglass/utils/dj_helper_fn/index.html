@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2369,7 +2369,11 @@ Key values must be unique.</p>
           <td><code>original_table</code></td>
           <td>
           </td>
-          <td><p>Result of a datajoint .fetch() call on a schema query.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Result of a datajoint .fetch() call on a schema query.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2379,7 +2383,11 @@ Key values must be unique.</p>
           <td>
                 <code>list</code>
           </td>
-          <td><p>List of tuples, each containing (key_value, replace_value).</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of tuples, each containing (key_value, replace_value).</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2389,7 +2397,11 @@ Key values must be unique.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the column where to-be-replaced values are located.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the column where to-be-replaced values are located.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2410,7 +2422,11 @@ Key values must be unique.</p>
           <td>
                 <code>original_table</code>
           </td>
-          <td><p>Structured array of new table entries that can be inserted back into the schema</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Structured array of new table entries that can be inserted back into the schema</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2524,7 +2540,11 @@ Key values must be unique.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>Path to the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Path to the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2545,7 +2565,11 @@ Key values must be unique.</p>
 <td><code>nwbfile</code></td>          <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>NWB file object for the given path opened in read mode.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>NWB file object for the given path opened in read mode.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2670,7 +2694,11 @@ Key values must be unique.</p>
           <td>
                 <code>query</code>
           </td>
-          <td><p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2680,10 +2708,14 @@ Key values must be unique.</p>
           <td>
                 <code>tuple</code>
           </td>
-          <td><p>Tuple (table, attr) to get the NWB filepath from.
+          <td>
+            <div class="doc-md-description">
+              <p>Tuple (table, attr) to get the NWB filepath from.
 i.e. absolute path to NWB file can be obtained by looking up attr column of table
 table is usually Nwbfile or AnalysisNwbfile;
-attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
+attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2693,7 +2725,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>list</code>
           </td>
-          <td><p>Attributes from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Attributes from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>()</code>
           </td>
@@ -2703,7 +2739,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Keyword arguments from normal DataJoint fetch call.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Keyword arguments from normal DataJoint fetch call.</p>
+            </div>
+          </td>
           <td>
                 <code>{}</code>
           </td>
@@ -2724,7 +2764,11 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p></td>
 <td><code>nwb_objects</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>List of dicts containing fetch results and NWB objects.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of dicts containing fetch results and NWB objects.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>

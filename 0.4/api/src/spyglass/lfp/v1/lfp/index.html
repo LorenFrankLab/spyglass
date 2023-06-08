@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2573,7 +2573,11 @@
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the nwb file (e.g. the session)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the nwb file (e.g. the session)</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2583,7 +2587,11 @@
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of this group (&lt; 200 char)</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of this group (&lt; 200 char)</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2593,7 +2601,11 @@
           <td>
                 <code>list</code>
           </td>
-          <td><p>A list of the electrode ids to include in this group.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A list of the electrode ids to include in this group.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2841,12 +2853,16 @@
           <td>
                 <code>dict</code>
           </td>
-          <td><p>A dictionary containing some combination of
+          <td>
+            <div class="doc-md-description">
+              <p>A dictionary containing some combination of
 uuid,
 nwb_file_name,
 lfp_electrode_group_name,
 interval_list_name,
-fir_filter_name</p></td>
+fir_filter_name</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2867,7 +2883,11 @@ fir_filter_name</p></td>
           <td>
                 <code>lfp_object</code>
           </td>
-          <td><p>The entry or entries in the LFPOutput part table that corresponds to the key</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The entry or entries in the LFPOutput part table that corresponds to the key</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -4286,7 +4306,11 @@ integer divisor of the LFP sampling rate
           <td><code>electrode_list</code></td>
           <td>
           </td>
-          <td><p>A list of the electrodes to compute the hilbert transform of</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A list of the electrodes to compute the hilbert transform of</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -4307,7 +4331,11 @@ integer divisor of the LFP sampling rate
 <td><code>analytic_signal_df</code></td>          <td>
                 <code><span title="pandas">pd</span>.<span title="pandas.DataFrame">DataFrame</span></code>
           </td>
-          <td><p>DataFrame containing hilbert transform of signal</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>DataFrame containing hilbert transform of signal</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -4325,7 +4353,11 @@ integer divisor of the LFP sampling rate
           <td>
                 <code>ValueError</code>
           </td>
-          <td><p>If any electrodes passed to electrode_list are invalid for the dataset</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>If any electrodes passed to electrode_list are invalid for the dataset</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>

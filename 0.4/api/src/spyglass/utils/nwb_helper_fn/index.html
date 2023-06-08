@@ -517,7 +517,7 @@
   
     <li class="md-nav__item">
       <a href="../../../../../notebooks/06_DLC_from_dir/" class="md-nav__link">
-        From Pre-Traine
+        From Pre-Trained
       </a>
     </li>
   
@@ -2410,7 +2410,11 @@
           <td>
                 <code>str</code>
           </td>
-          <td><p>Path to the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Path to the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2431,7 +2435,11 @@
 <td><code>nwbfile</code></td>          <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>NWB file object for the given path opened in read mode.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>NWB file object for the given path opened in read mode.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2557,7 +2565,11 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>Absolute path to the NWB file.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Absolute path to the NWB file.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2566,7 +2578,11 @@ If the file does not exist, return an empty dict.</p>
           <td><code>Returns</code></td>
           <td>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2576,7 +2592,11 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>dict</code>
           </td>
-          <td><p>Dictionary of configuration settings loaded from the corresponding YAML file</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dictionary of configuration settings loaded from the corresponding YAML file</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2680,7 +2700,11 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The NWB file object to search in.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB file object to search in.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2690,7 +2714,11 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>str</code>
           </td>
-          <td><p>The name of the NWBDataInterface or DynamicTable to search for.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the NWBDataInterface or DynamicTable to search for.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2700,8 +2728,12 @@ If the file does not exist, return an empty dict.</p>
           <td>
                 <code>type, optional</code>
           </td>
-          <td><p>The class (or superclass) to search for. This argument helps to prevent accessing an object with the same
-name but the incorrect type. Default: no restriction.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The class (or superclass) to search for. This argument helps to prevent accessing an object with the same
+name but the incorrect type. Default: no restriction.</p>
+            </div>
+          </td>
           <td>
                 <code>None</code>
           </td>
@@ -2722,7 +2754,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>UserWarning</code>
           </td>
-          <td><p>If multiple NWBDataInterface and DynamicTable objects with the matching name are found.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>If multiple NWBDataInterface and DynamicTable objects with the matching name are found.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2740,7 +2776,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>data_interface</code></td>          <td>
                 <code>NWBDataInterface</code>
           </td>
-          <td><p>The data interface object with the given name, or None if not found.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The data interface object with the given name, or None if not found.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2872,7 +2912,11 @@ name but the incorrect type. Default: no restriction.</p></td>
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The NWB file object to search in.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB file object to search in.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2893,7 +2937,11 @@ name but the incorrect type. Default: no restriction.</p></td>
 <td><code>ret</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>A list of all ElectricalSeries in the acquisition group of an NWB file</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>A list of all ElectricalSeries in the acquisition group of an NWB file</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -2986,7 +3034,11 @@ can fail for very high sampling rates and irregular timestamps.</p>
           <td>
                 <code>numpy.<span title="numpy.ndarray">ndarray</span></code>
           </td>
-          <td><p>1D numpy array of timestamp values.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>1D numpy array of timestamp values.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -2996,7 +3048,11 @@ can fail for very high sampling rates and irregular timestamps.</p>
           <td>
                 <code>float or int</code>
           </td>
-          <td></td>
+          <td>
+            <div class="doc-md-description">
+              
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3017,7 +3073,11 @@ can fail for very high sampling rates and irregular timestamps.</p>
 <td><code>estimated_rate</code></td>          <td>
                 <code>float</code>
           </td>
-          <td><p>The estimated sampling rate.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The estimated sampling rate.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3144,7 +3204,11 @@ no gaps (i.e. missing samples).</p>
           <td>
                 <code>numpy.<span title="numpy.ndarray">ndarray</span></code>
           </td>
-          <td><p>1D numpy array of timestamp values.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>1D numpy array of timestamp values.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3154,7 +3218,11 @@ no gaps (i.e. missing samples).</p>
           <td>
                 <code>float</code>
           </td>
-          <td><p>Sampling rate of the data.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Sampling rate of the data.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3164,10 +3232,14 @@ no gaps (i.e. missing samples).</p>
           <td>
                 <code>float, greater than 1</code>
           </td>
-          <td><p>Threshold for detecting a gap;
+          <td>
+            <div class="doc-md-description">
+              <p>Threshold for detecting a gap;
 i.e. if the difference (in samples) between
 consecutive timestamps exceeds gap_proportion,
-it is considered a gap</p></td>
+it is considered a gap</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3177,7 +3249,11 @@ it is considered a gap</p></td>
           <td>
                 <code>float</code>
           </td>
-          <td><p>Length of smallest valid interval.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Length of smallest valid interval.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3198,7 +3274,11 @@ it is considered a gap</p></td>
 <td><code>valid_times</code></td>          <td>
                 <code><span title="numpy">np</span>.<span title="numpy.ndarray">ndarray</span></code>
           </td>
-          <td><p>Array of start and stop times of shape (N, 2) for valid data.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array of start and stop times of shape (N, 2) for valid data.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3355,7 +3435,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>pynwb.NWBFile or pynwb.ecephys.ElectricalSeries</code>
           </td>
-          <td><p>The NWB file object or NWB electrical series object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The NWB file object or NWB electrical series object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3365,7 +3449,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>np.ndarray or list</code>
           </td>
-          <td><p>Array or list of electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array or list of electrode IDs.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3386,7 +3474,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
 <td><code>electrode_indices</code></td>          <td>
                 <code>list</code>
           </td>
-          <td><p>Array of indices of the specified electrode IDs.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Array of indices of the specified electrode IDs.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
@@ -3525,7 +3617,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>pynwb.<span title="pynwb.NWBFile">NWBFile</span></code>
           </td>
-          <td><p>The source NWB file object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>The source NWB file object.</p>
+            </div>
+          </td>
           <td>
               <em>required</em>
           </td>
@@ -3535,7 +3631,11 @@ index of the matching electrode in electricalseries.electrodes.</p>
           <td>
                 <code>bool</code>
           </td>
-          <td><p>Flag representing whether to print the sampling rate.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Flag representing whether to print the sampling rate.</p>
+            </div>
+          </td>
           <td>
                 <code>False</code>
           </td>
@@ -3556,8 +3656,12 @@ index of the matching electrode in electricalseries.electrodes.</p>
 <td><code>pos_data_dict</code></td>          <td>
                 <code>dict</code>
           </td>
-          <td><p>Dict mapping indices to a dict with keys 'valid_times' and 'raw_position_object_id'. Returns None if there
-is no position data in the file. The 'raw_position_object_id' is the object ID of the SpatialSeries object.</p></td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dict mapping indices to a dict with keys 'valid_times' and 'raw_position_object_id'. Returns None if there
+is no position data in the file. The 'raw_position_object_id' is the object ID of the SpatialSeries object.</p>
+            </div>
+          </td>
         </tr>
     </tbody>
   </table>
