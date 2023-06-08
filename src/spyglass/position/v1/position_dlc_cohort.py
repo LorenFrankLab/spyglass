@@ -1,3 +1,5 @@
+import numpy as np
+import pandas as pd
 import datajoint as dj
 
 from ...common.common_nwbfile import AnalysisNwbfile
@@ -42,7 +44,8 @@ class DLCSmoothInterpCohort(dj.Computed):
         -> DLCSmoothInterp
         ---
         -> AnalysisNwbfile
-        dlc_smooth_interp_object_id : varchar(80)
+        dlc_smooth_interp_position_object_id : varchar(80)
+        dlc_smooth_interp_info_object_id : varchar(80)
         """
 
         def fetch_nwb(self, *attrs, **kwargs):
@@ -54,7 +57,40 @@ class DLCSmoothInterpCohort(dj.Computed):
             )
 
         def fetch1_dataframe(self):
-            return self.fetch_nwb()[0]["dlc_smooth_interp"].set_index("time")
+            nwb_data = self.fetch_nwb()[0]
+            index = pd.Index(
+                np.asarray(
+                    nwb_data["dlc_smooth_interp_position"]
+                    .get_spatial_series()
+                    .timestamps
+                ),
+                name="time",
+            )
+            COLUMNS = [
+                "video_frame_ind",
+                "x",
+                "y",
+            ]
+            return pd.DataFrame(
+                np.concatenate(
+                    (
+                        np.asarray(
+                            nwb_data["dlc_smooth_interp_info"]
+                            .time_series["video_frame_ind"]
+                            .data,
+                            dtype=int,
+                        )[:, np.newaxis],
+                        np.asarray(
+                            nwb_data["dlc_smooth_interp_position"]
+                            .get_spatial_series()
+                            .data
+                        ),
+                    ),
+                    axis=1,
+                ),
+                columns=COLUMNS,
+                index=index,
+            )
 
     def make(self, key):
         from .dlc_utils import OutputLogger, infer_output_dir

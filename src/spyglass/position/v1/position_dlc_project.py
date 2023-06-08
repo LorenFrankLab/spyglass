@@ -1,18 +1,20 @@
-import stat
-import glob
-import shutil
-import os
-from itertools import combinations
-from typing import List, Dict, Union
-from pathlib import Path, PosixPath
+import copy
 import getpass
-import ruamel.yaml
+import glob
+import os
+import shutil
+import stat
+from itertools import combinations
+from pathlib import Path, PosixPath
+from typing import Dict, List, Union
+
+import datajoint as dj
 import numpy as np
 import pandas as pd
-import datajoint as dj
-from ...common.common_lab import LabTeam
-from .dlc_utils import check_videofile, _set_permissions, get_video_path
+import ruamel.yaml
 
+from ...common.common_lab import LabTeam
+from .dlc_utils import _set_permissions, check_videofile, get_video_path
 
 schema = dj.schema("position_v1_dlc_project")
 
@@ -308,9 +310,10 @@ class DLCProject(dj.Manual):
                 raise ValueError(
                     f"bodypart: {bodypart} not found in BodyPart table"
                 )
-        kwargs.update({"numframes2pick": frames_per_video, "dotsize": 3})
+        kwargs_copy = copy.deepcopy(kwargs)
+        kwargs_copy.update({"numframes2pick": frames_per_video, "dotsize": 3})
         add_to_config(
-            config_path, bodyparts, skeleton_node=skeleton_node, **kwargs
+            config_path, bodyparts, skeleton_node=skeleton_node, **kwargs_copy
         )
         key = {
             "project_name": project_name,
