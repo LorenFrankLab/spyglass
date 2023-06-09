@@ -1,13 +1,13 @@
 on:
   push:
     branches:
-      - main
+      - master
       - maint/*
     tags:
       - "*"
   pull_request:
     branches:
-      - main
+      - master
       - maint/*
 defaults:
   run:
