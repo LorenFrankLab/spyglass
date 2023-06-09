@@ -1,3 +1,5 @@
+name: Test package building
+
 on:
   push:
     branches:
@@ -21,7 +23,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v4
         with:
-          python-version: 3
+          python-version: 3.9
       - run: pip install --upgrade build twine
       - name: Build sdist and wheel
         run: python -m build
@@ -59,7 +61,7 @@ jobs:
           path: archive/
       - uses: actions/setup-python@v4
         with:
-          python-version: 3
+          python-version: 3.9
       - name: Display Python version
         run: python -c "import sys; print(sys.version)"
       - name: Update pip
