@@ -21,6 +21,11 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
+         <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/_version/</loc>
+         <lastmod>2023-06-12</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/settings/</loc>
          <lastmod>2023-06-12</lastmod>
          <changefreq>daily</changefreq>
