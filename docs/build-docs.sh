@@ -10,7 +10,7 @@ cp ./LICENSE ./docs/src/LICENSE.md
 cp -r ./notebooks/ ./docs/src/
 
 # Get major version
-FULL_VERSION=$(grep -m 1 version pyproject.toml | tr -s ' ' | tr -d '"' | tr -d "'" | cut -d' ' -f3)
+FULL_VERSION=$(python -c "from spyglass import __version__; print(__version__)")
 export MAJOR_VERSION="${FULL_VERSION%.*}"
 echo "$MAJOR_VERSION"
 
