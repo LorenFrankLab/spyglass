@@ -8,9 +8,11 @@ import numpy as np
 import pandas as pd
 import pynwb
 import scipy.stats as stats
+from scipy.signal import hilbert
+import math
 
 from spyglass.common.common_ephys import Electrode, Raw
-from spyglass.common.common_filter import FirFilter
+from spyglass.common.common_filter import FirFilterParameters
 from spyglass.common.common_interval import interval_list_censor  # noqa: F401
 from spyglass.common.common_interval import (
     IntervalList,
@@ -22,7 +24,10 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
-from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_valid_intervals
+from spyglass.utils.nwb_helper_fn import (
+    get_electrode_indices,
+    get_valid_intervals,
+)
 
 schema = dj.schema("lfp_v1")
 
@@ -57,7 +62,10 @@ class LFPElectrodeGroup(dj.Manual):
         """
         # remove the session and then recreate the session and Electrode list
         # check to see if the user allowed the deletion
-        key = {"nwb_file_name": nwb_file_name, "lfp_electrode_group_name": group_name}
+        key = {
+            "nwb_file_name": nwb_file_name,
+            "lfp_electrode_group_name": group_name,
+        }
         LFPElectrodeGroup().insert1(key, skip_duplicates=True)
 
         # TODO: do this in a better way
@@ -80,7 +88,7 @@ class LFPSelection(dj.Manual):
     definition = """
      -> LFPElectrodeGroup
      -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
-     -> FirFilter
+     -> FirFilterParameters
      """
 
 
@@ -120,7 +128,9 @@ class LFP(dj.Computed):
             }
         ).fetch1("valid_times")
         valid_times = interval_list_intersect(
-            user_valid_times, raw_valid_times, min_length=min_lfp_interval_length
+            user_valid_times,
+            raw_valid_times,
+            min_length=min_lfp_interval_length,
         )
         print(
             f"LFP: found {len(valid_times)} intervals > {min_lfp_interval_length} sec long."
@@ -131,8 +141,8 @@ class LFP(dj.Computed):
 
         # get the LFP filter that matches the raw data
         filter = (
-            FirFilter()
-            & {"filter_name": "LFP 0-400 Hz"}
+            FirFilterParameters()
+            & {"filter_name": key["filter_name"]}
             & {"filter_sampling_rate": sampling_rate}
         ).fetch(as_dict=True)
 
@@ -154,7 +164,10 @@ class LFP(dj.Computed):
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
-        lfp_object_id, timestamp_interval = FirFilter().filter_data_nwb(
+        (
+            lfp_object_id,
+            timestamp_interval,
+        ) = FirFilterParameters().filter_data_nwb(
             lfp_file_abspath,
             rawdata,
             filter_coeff,
@@ -205,7 +218,8 @@ class LFP(dj.Computed):
     def fetch1_dataframe(self, *attrs, **kwargs):
         nwb_lfp = self.fetch_nwb()[0]
         return pd.DataFrame(
-            nwb_lfp["lfp"].data, index=pd.Index(nwb_lfp["lfp"].timestamps, name="time")
+            nwb_lfp["lfp"].data,
+            index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
         )
 
 
@@ -357,7 +371,9 @@ class LFPArtifactDetection(dj.Computed):
             # also insert into IntervalList
             tmp_key = {}
             tmp_key["nwb_file_name"] = key["nwb_file_name"]
-            tmp_key["interval_list_name"] = key["artifact_removed_interval_list_name"]
+            tmp_key["interval_list_name"] = key[
+                "artifact_removed_interval_list_name"
+            ]
             tmp_key["valid_times"] = key["artifact_removed_valid_times"]
             IntervalList.insert1(tmp_key, replace=True)
 
@@ -423,7 +439,9 @@ def _get_artifact_times(
 
     # if both thresholds are None, we skip artifact detection
     if amplitude_thresh_1st is None:
-        recording_interval = np.asarray([valid_timestamps[0], valid_timestamps[-1]])
+        recording_interval = np.asarray(
+            [valid_timestamps[0], valid_timestamps[-1]]
+        )
         artifact_times_empty = np.asarray([])
         print("Amplitude threshold is None, skipping artifact detection")
         return recording_interval, artifact_times_empty
@@ -443,8 +461,12 @@ def _get_artifact_times(
 
     # want to detect frames without parallel processing
     # compute the number of electrodes that have to be above threshold
-    nelect_above_1st = np.ceil(proportion_above_thresh_1st * recording.data.shape[1])
-    nelect_above_2nd = np.ceil(proportion_above_thresh_2nd * recording.data.shape[1])
+    nelect_above_1st = np.ceil(
+        proportion_above_thresh_1st * recording.data.shape[1]
+    )
+    nelect_above_2nd = np.ceil(
+        proportion_above_thresh_2nd * recording.data.shape[1]
+    )
 
     # find the artifact occurrences using one or both thresholds, across channels
     # replace with LFP artifact code
@@ -452,31 +474,37 @@ def _get_artifact_times(
     if amplitude_thresh_1st is not None:
         # first find times with large amp change
         artifact_boolean = np.sum(
-            (np.abs(np.diff(recording.data, axis=0)) > amplitude_thresh_1st), axis=1
+            (np.abs(np.diff(recording.data, axis=0)) > amplitude_thresh_1st),
+            axis=1,
         )
         above_thresh_1st = np.where(artifact_boolean >= nelect_above_1st)[0]
 
         # second, find artifacts with large baseline change
-        big_artifacts = np.zeros((recording.data.shape[1], above_thresh_1st.shape[0]))
+        big_artifacts = np.zeros(
+            (recording.data.shape[1], above_thresh_1st.shape[0])
+        )
         for art_count in np.arange(above_thresh_1st.shape[0]):
-            local_max = np.max(
-                recording.data[
-                    above_thresh_1st[art_count]
-                    - local_window : above_thresh_1st[art_count]
-                    + local_window,
-                    :,
-                ],
-                axis=0,
-            )
-            local_min = np.min(
-                recording.data[
-                    above_thresh_1st[art_count]
-                    - local_window : above_thresh_1st[art_count]
-                    + local_window,
-                    :,
-                ],
-                axis=0,
-            )
+            if above_thresh_1st[art_count] <= local_window:
+                local_min = local_max = above_thresh_1st[art_count]
+            else:
+                local_max = np.max(
+                    recording.data[
+                        above_thresh_1st[art_count]
+                        - local_window : above_thresh_1st[art_count]
+                        + local_window,
+                        :,
+                    ],
+                    axis=0,
+                )
+                local_min = np.min(
+                    recording.data[
+                        above_thresh_1st[art_count]
+                        - local_window : above_thresh_1st[art_count]
+                        + local_window,
+                        :,
+                    ],
+                    axis=0,
+                )
             big_artifacts[:, art_count] = (
                 np.abs(local_max - local_min) > amplitude_thresh_2nd
             )
@@ -494,14 +522,18 @@ def _get_artifact_times(
     half_removal_window_s = removal_window_ms / 1000 * 0.5
 
     if len(artifact_frames) == 0:
-        recording_interval = np.asarray([[valid_timestamps[0], valid_timestamps[-1]]])
+        recording_interval = np.asarray(
+            [[valid_timestamps[0], valid_timestamps[-1]]]
+        )
         artifact_times_empty = np.asarray([])
         print("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
     artifact_intervals = interval_from_inds(artifact_frames)
 
-    artifact_intervals_s = np.zeros((len(artifact_intervals), 2), dtype=np.float64)
+    artifact_intervals_s = np.zeros(
+        (len(artifact_intervals), 2), dtype=np.float64
+    )
     for interval_idx, interval in enumerate(artifact_intervals):
         artifact_intervals_s[interval_idx] = [
             valid_timestamps[interval[0]] - half_removal_window_s,
@@ -615,7 +647,7 @@ def _check_artifact_thresholds(
 class LFPBandSelection(dj.Manual):
     definition = """
     -> LFPOutput
-    -> FirFilter                   # the filter to use for the data
+    -> FirFilterParameters                   # the filter to use for the data
     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
     lfp_band_sampling_rate: int    # the sampling rate for this band
     ---
@@ -647,7 +679,7 @@ class LFPBandSelection(dj.Manual):
         :param nwb_file_name: string - the name of the nwb file for the desired session
         :param lfp_id: uuid - the uuid for the LFPOutput to use
         :param electrode_list: list of LFP electrodes (electrode ids) to be filtered
-        :param filter_name: the name of the filter (from the FirFilter schema)
+        :param filter_name: the name of the filter (from the FirFilterParameters schema)
         :param interval_name: the name of the interval list (from the IntervalList schema)
         :param reference_electrode_list: A single electrode id corresponding to the reference to use for all
         electrodes or a list with one element per entry in the electrode_list
@@ -676,13 +708,13 @@ class LFPBandSelection(dj.Manual):
                 f"samping rate {lfp_sampling_rate}"
             )
         # filter
-        query = FirFilter() & {
+        query = FirFilterParameters() & {
             "filter_name": filter_name,
             "filter_sampling_rate": lfp_sampling_rate,
         }
         if not query:
             raise ValueError(
-                f"filter {filter_name}, sampling rate {lfp_sampling_rate} is not in the FirFilter table"
+                f"filter {filter_name}, sampling rate {lfp_sampling_rate} is not in the FirFilterParameters table"
             )
         # interval_list
         query = IntervalList() & {
@@ -695,9 +727,9 @@ class LFPBandSelection(dj.Manual):
                 "added before this function is called"
             )
         # reference_electrode_list
-        if len(reference_electrode_list) != 1 and len(reference_electrode_list) != len(
-            electrode_list
-        ):
+        if len(reference_electrode_list) != 1 and len(
+            reference_electrode_list
+        ) != len(electrode_list):
             raise ValueError(
                 "reference_electrode_list must contain either 1 or len(electrode_list) elements"
             )
@@ -723,7 +755,9 @@ class LFPBandSelection(dj.Manual):
         # insert an entry into the main LFPBandSelectionTable
         self.insert1(key, skip_duplicates=True)
 
-        key["lfp_electrode_group_name"] = lfp_object.fetch1("lfp_electrode_group_name")
+        key["lfp_electrode_group_name"] = lfp_object.fetch1(
+            "lfp_electrode_group_name"
+        )
         # iterate through all of the new elements and add them
         for e, r in zip(electrode_list, ref_list):
             elect_key = (
@@ -736,7 +770,10 @@ class LFPBandSelection(dj.Manual):
             ).fetch1("KEY")
             for item in elect_key:
                 key[item] = elect_key[item]
-            query = Electrode & {"nwb_file_name": nwb_file_name, "electrode_id": e}
+            query = Electrode & {
+                "nwb_file_name": nwb_file_name,
+                "electrode_id": e,
+            }
             key["reference_elect_id"] = r
             self.LFPBandElectrode().insert1(key, skip_duplicates=True)
 
@@ -753,9 +790,9 @@ class LFPBand(dj.Computed):
 
     def make(self, key):
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
-        lfp_object = (LFP() & {"nwb_file_name": key["nwb_file_name"]}).fetch_nwb()[0][
-            "lfp"
-        ]
+        lfp_object = (
+            LFP() & {"nwb_file_name": key["nwb_file_name"]}
+        ).fetch_nwb()[0]["lfp"]
 
         # get the electrodes to be filtered and their references
         lfp_band_elect_id, lfp_band_ref_id = (
@@ -769,12 +806,14 @@ class LFPBand(dj.Computed):
         lfp_band_elect_id = lfp_band_elect_id[lfp_sort_order]
         lfp_band_ref_id = lfp_band_ref_id[lfp_sort_order]
 
-        lfp_sampling_rate = (LFP() & {"nwb_file_name": key["nwb_file_name"]}).fetch1(
-            "lfp_sampling_rate"
+        lfp_sampling_rate = (
+            LFPOutput()
+            .get_lfp_object({"lfp_id": key["lfp_id"]})
+            .fetch1("lfp_sampling_rate")
         )
-        interval_list_name, lfp_band_sampling_rate = (LFPBandSelection() & key).fetch1(
-            "target_interval_list_name", "lfp_band_sampling_rate"
-        )
+        interval_list_name, lfp_band_sampling_rate = (
+            LFPBandSelection() & key
+        ).fetch1("target_interval_list_name", "lfp_band_sampling_rate")
         valid_times = (
             IntervalList()
             & {
@@ -784,8 +823,10 @@ class LFPBand(dj.Computed):
         ).fetch1("valid_times")
         # the valid_times for this interval may be slightly beyond the valid times for the lfp itself,
         # so we have to intersect the two
-        lfp_interval_list = (LFP() & {"nwb_file_name": key["nwb_file_name"]}).fetch1(
-            "interval_list_name"
+        lfp_interval_list = (
+            LFPOutput()
+            .get_lfp_object({"lfp_id": key["lfp_id"]})
+            .fetch1("interval_list_name")
         )
         lfp_valid_times = (
             IntervalList()
@@ -801,14 +842,18 @@ class LFPBand(dj.Computed):
 
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (
             LFPBandSelection() & key
-        ).fetch1("filter_name", "filter_sampling_rate", "lfp_band_sampling_rate")
+        ).fetch1(
+            "filter_name", "filter_sampling_rate", "lfp_band_sampling_rate"
+        )
 
         decimation = int(lfp_sampling_rate) // lfp_band_sampling_rate
 
         # load in the timestamps
         timestamps = np.asarray(lfp_object.timestamps)
         # get the indices of the first timestamp and the last timestamp that are within the valid times
-        included_indices = interval_list_contains_ind(lfp_band_valid_times, timestamps)
+        included_indices = interval_list_contains_ind(
+            lfp_band_valid_times, timestamps
+        )
         # pad the indices by 1 on each side to avoid message in filter_data
         if included_indices[0] > 0:
             included_indices[0] -= 1
@@ -824,26 +869,29 @@ class LFPBand(dj.Computed):
         )
 
         # get the indices of the electrodes to be filtered and the references
-        lfp_band_elect_index = get_electrode_indices(lfp_object, lfp_band_elect_id)
+        lfp_band_elect_index = get_electrode_indices(
+            lfp_object, lfp_band_elect_id
+        )
         lfp_band_ref_index = get_electrode_indices(lfp_object, lfp_band_ref_id)
 
         # subtract off the references for the selected channels
         for index, elect_index in enumerate(lfp_band_elect_index):
             if lfp_band_ref_id[index] != -1:
                 lfp_data[:, elect_index] = (
-                    lfp_data[:, elect_index] - lfp_data[:, lfp_band_ref_index[index]]
+                    lfp_data[:, elect_index]
+                    - lfp_data[:, lfp_band_ref_index[index]]
                 )
 
         # get the LFP filter that matches the raw data
         filter = (
-            FirFilter()
+            FirFilterParameters()
             & {"filter_name": filter_name}
             & {"filter_sampling_rate": filter_sampling_rate}
         ).fetch(as_dict=True)
         if len(filter) == 0:
             raise ValueError(
                 f"Filter {filter_name} and sampling_rate {lfp_band_sampling_rate} does not exit in the "
-                "FirFilter table"
+                "FirFilterParameters table"
             )
 
         filter_coeff = filter[0]["filter_coeff"]
@@ -855,9 +903,11 @@ class LFPBand(dj.Computed):
 
         # create the analysis nwb file to store the results.
         lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
-        lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(lfp_band_file_name)
+        lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(
+            lfp_band_file_name
+        )
         # filter the data and write to an the nwb file
-        filtered_data, new_timestamps = FirFilter().filter_data(
+        filtered_data, new_timestamps = FirFilterParameters().filter_data(
             timestamps,
             lfp_data,
             filter_coeff,
@@ -886,7 +936,8 @@ class LFPBand(dj.Computed):
             )
             lfp = pynwb.ecephys.LFP(electrical_series=es)
             ecephys_module = nwbf.create_processing_module(
-                name="ecephys", description=f"LFP data processed with {filter_name}"
+                name="ecephys",
+                description=f"LFP data processed with {filter_name}",
             )
             ecephys_module.add(lfp)
             io.write(nwbf)
@@ -900,7 +951,10 @@ class LFPBand(dj.Computed):
         # finally, we need to censor the valid times to account for the downsampling if this is the first time we've
         # downsampled these data
         key["interval_list_name"] = (
-            interval_list_name + " lfp band " + str(lfp_band_sampling_rate) + "Hz"
+            interval_list_name
+            + " lfp band "
+            + str(lfp_band_sampling_rate)
+            + "Hz"
         )
         tmp_valid_times = (
             IntervalList
@@ -925,7 +979,9 @@ class LFPBand(dj.Computed):
             # check that the valid times are the same
             assert np.isclose(
                 tmp_valid_times[0], lfp_band_valid_times
-            ).all(), "previously saved lfp band times do not match current times"
+            ).all(), (
+                "previously saved lfp band times do not match current times"
+            )
 
         self.insert1(key)
 
@@ -938,5 +994,61 @@ class LFPBand(dj.Computed):
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,
-            index=pd.Index(filtered_nwb["filtered_data"].timestamps, name="time"),
+            index=pd.Index(
+                filtered_nwb["filtered_data"].timestamps, name="time"
+            ),
+        )
+
+    def compute_analytic_signal(self, electrode_list, **kwargs):
+        """Computes the hilbert transform of a given LFPBand signal using scipy.signal.hilbert
+
+        Parameters
+        ----------
+        electrode_list: list
+            A list of the electrodes to compute the hilbert transform of
+
+        Returns
+        -------
+        analytic_signal_df: pd.DataFrame
+            DataFrame containing hilbert transform of signal
+
+        Raises
+        ------
+        ValueError
+            If any electrodes passed to electrode_list are invalid for the dataset
+        """
+
+        filtered_band = self.fetch_nwb()[0]["filtered_data"]
+        electrode_index = np.isin(
+            filtered_band.electrodes.data[:], electrode_list
+        )
+        if len(electrode_list) != np.sum(electrode_index):
+            raise ValueError(
+                "Some of the electrodes specified in electrode_list are missing in the current LFPBand table."
+            )
+        analytic_signal_df = pd.DataFrame(
+            hilbert(filtered_band.data[:, electrode_index], axis=0),
+            index=pd.Index(filtered_band.timestamps, name="time"),
+            columns=[f"electrode {e}" for e in electrode_list],
+        )
+        return analytic_signal_df
+
+    def compute_signal_phase(self, electrode_list=[], **kwargs):
+        analytic_signal_df = self.compute_analytic_signal(
+            electrode_list, **kwargs
+        )
+        return pd.DataFrame(
+            np.angle(analytic_signal_df) + math.pi,
+            columns=analytic_signal_df.columns,
+            index=analytic_signal_df.index,
+        )
+
+    def compute_signal_power(self, electrode_list=[], **kwargs):
+        analytic_signal_df = self.compute_analytic_signal(
+            electrode_list, **kwargs
+        )
+        return pd.DataFrame(
+            np.abs(analytic_signal_df) ** 2,
+            columns=analytic_signal_df.columns,
+            index=analytic_signal_df.index,
         )

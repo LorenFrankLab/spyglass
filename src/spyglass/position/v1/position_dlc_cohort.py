@@ -1,3 +1,5 @@
+import numpy as np
+import pandas as pd
 import datajoint as dj
 
 from ...common.common_nwbfile import AnalysisNwbfile
@@ -42,16 +44,53 @@ class DLCSmoothInterpCohort(dj.Computed):
         -> DLCSmoothInterp
         ---
         -> AnalysisNwbfile
-        dlc_smooth_interp_object_id : varchar(80)
+        dlc_smooth_interp_position_object_id : varchar(80)
+        dlc_smooth_interp_info_object_id : varchar(80)
         """
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
-                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
             )
 
         def fetch1_dataframe(self):
-            return self.fetch_nwb()[0]["dlc_smooth_interp"].set_index("time")
+            nwb_data = self.fetch_nwb()[0]
+            index = pd.Index(
+                np.asarray(
+                    nwb_data["dlc_smooth_interp_position"]
+                    .get_spatial_series()
+                    .timestamps
+                ),
+                name="time",
+            )
+            COLUMNS = [
+                "video_frame_ind",
+                "x",
+                "y",
+            ]
+            return pd.DataFrame(
+                np.concatenate(
+                    (
+                        np.asarray(
+                            nwb_data["dlc_smooth_interp_info"]
+                            .time_series["video_frame_ind"]
+                            .data,
+                            dtype=int,
+                        )[:, np.newaxis],
+                        np.asarray(
+                            nwb_data["dlc_smooth_interp_position"]
+                            .get_spatial_series()
+                            .data
+                        ),
+                    ),
+                    axis=1,
+                ),
+                columns=COLUMNS,
+                index=index,
+            )
 
     def make(self, key):
         from .dlc_utils import OutputLogger, infer_output_dir
@@ -68,7 +107,9 @@ class DLCSmoothInterpCohort(dj.Computed):
             self.insert1(key)
             cohort_selection = (DLCSmoothInterpCohortSelection & key).fetch1()
             table_entries = []
-            bodyparts_params_dict = cohort_selection.pop("bodyparts_params_dict")
+            bodyparts_params_dict = cohort_selection.pop(
+                "bodyparts_params_dict"
+            )
             temp_key = cohort_selection.copy()
             for bodypart, params in bodyparts_params_dict.items():
                 temp_key["bodypart"] = bodypart
@@ -80,8 +121,12 @@ class DLCSmoothInterpCohort(dj.Computed):
             table_column_names = list(table_entries[0].dtype.fields.keys())
             for table_entry in table_entries:
                 entry_key = {
-                    **{k: v for k, v in zip(table_column_names, table_entry[0])},
+                    **{
+                        k: v for k, v in zip(table_column_names, table_entry[0])
+                    },
                     **key,
                 }
-                DLCSmoothInterpCohort.BodyPart.insert1(entry_key, skip_duplicates=True)
+                DLCSmoothInterpCohort.BodyPart.insert1(
+                    entry_key, skip_duplicates=True
+                )
         logger.logger.info("Inserted entry into DLCSmoothInterpCohort")

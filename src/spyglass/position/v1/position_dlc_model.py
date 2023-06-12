@@ -27,11 +27,12 @@ class DLCModelInput(dj.Manual):
     """
 
     def insert1(self, key, **kwargs):
-        key[
-            "dlc_model_name"
-        ] = f'{os.path.basename(key["project_path"]).split("model")[0]}model'
-        project_path = Path(key["project_path"])
+        # expects key from DLCProject with config_path
+        project_path = Path(key["config_path"]).parent
         assert project_path.exists(), "project path does not exist"
+        key["dlc_model_name"] = f'{project_path.name.split("model")[0]}model'
+        key["project_path"] = project_path.as_posix()
+        del key["config_path"]
         super().insert1(key, **kwargs)
         DLCModelSource.insert_entry(
             dlc_model_name=key["dlc_model_name"],
@@ -121,7 +122,9 @@ class DLCModelParams(dj.Manual):
             "trainingsetindex": 0,
             "model_prefix": "",
         }
-        cls.insert1({"dlc_model_params_name": "default", "params": params}, **kwargs)
+        cls.insert1(
+            {"dlc_model_params_name": "default", "params": params}, **kwargs
+        )
 
     @classmethod
     def get_default(cls):
@@ -218,14 +221,18 @@ class DLCModel(dj.Computed):
                 "TrainingFraction",
             ]
             for attribute in needed_attributes:
-                assert attribute in dlc_config, f"Couldn't find {attribute} in config"
+                assert (
+                    attribute in dlc_config
+                ), f"Couldn't find {attribute} in config"
 
             scorer_legacy = str_to_bool(dlc_config.get("scorer_legacy", "f"))
 
             dlc_scorer = GetScorerName(
                 cfg=dlc_config,
                 shuffle=shuffle,
-                trainFraction=dlc_config["TrainingFraction"][int(trainingsetindex)],
+                trainFraction=dlc_config["TrainingFraction"][
+                    int(trainingsetindex)
+                ],
                 modelprefix=model_prefix,
             )[scorer_legacy]
             if dlc_config["snapshotindex"] == -1:
@@ -307,7 +314,9 @@ class DLCModelEvaluation(dj.Computed):
             modelprefix=model_prefix,
         )
         eval_path = project_path / eval_folder
-        assert eval_path.exists(), f"Couldn't find evaluation folder:\n{eval_path}"
+        assert (
+            eval_path.exists()
+        ), f"Couldn't find evaluation folder:\n{eval_path}"
 
         eval_csvs = list(eval_path.glob("*csv"))
         max_modified_time = 0

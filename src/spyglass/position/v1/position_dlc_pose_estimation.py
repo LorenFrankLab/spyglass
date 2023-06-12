@@ -6,6 +6,7 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pynwb
 from IPython.display import display
 
 from ...common.common_behav import RawPosition, VideoFile  # noqa: F401
@@ -133,20 +134,66 @@ class DLCPoseEstimation(dj.Computed):
         -> DLCModel.BodyPart
         ---
         -> AnalysisNwbfile
-        dlc_pose_estimation_object_id : varchar(80)
+        dlc_pose_estimation_position_object_id : varchar(80)
+        dlc_pose_estimation_likelihood_object_id : varchar(80)
         """
 
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
-                self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
+                self,
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
             )
 
         def fetch1_dataframe(self):
-            return self.fetch_nwb()[0]["dlc_pose_estimation"].set_index("time")
+            nwb_data = self.fetch_nwb()[0]
+            index = pd.Index(
+                np.asarray(
+                    nwb_data["dlc_pose_estimation_position"]
+                    .get_spatial_series()
+                    .timestamps
+                ),
+                name="time",
+            )
+            COLUMNS = [
+                "video_frame_ind",
+                "x",
+                "y",
+                "likelihood",
+            ]
+            return pd.DataFrame(
+                np.concatenate(
+                    (
+                        np.asarray(
+                            nwb_data["dlc_pose_estimation_likelihood"]
+                            .time_series["video_frame_ind"]
+                            .data,
+                            dtype=int,
+                        )[:, np.newaxis],
+                        np.asarray(
+                            nwb_data["dlc_pose_estimation_position"]
+                            .get_spatial_series()
+                            .data
+                        ),
+                        np.asarray(
+                            nwb_data["dlc_pose_estimation_likelihood"]
+                            .time_series["likelihood"]
+                            .data
+                        )[:, np.newaxis],
+                    ),
+                    axis=1,
+                ),
+                columns=COLUMNS,
+                index=index,
+            )
 
     def make(self, key):
         """.populate() method will launch training for each PoseEstimationTask"""
         from . import dlc_reader
+        from .dlc_utils import get_video_path
+
+        METERS_PER_CM = 0.01
 
         output_dir = infer_output_dir(key=key, makedir=False)
         with OutputLogger(
@@ -180,27 +227,21 @@ class DLCPoseEstimation(dj.Computed):
                     **analyze_video_params,
                 )
             dlc_result = dlc_reader.PoseEstimation(output_dir)
-            creation_time = datetime.fromtimestamp(dlc_result.creation_time).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
+            creation_time = datetime.fromtimestamp(
+                dlc_result.creation_time
+            ).strftime("%Y-%m-%d %H:%M:%S")
 
             logger.logger.info("getting raw position")
             interval_list_name = f"pos {key['epoch']-1} valid times"
-            raw_position = (
+            spatial_series = (
                 RawPosition()
-                & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "interval_list_name": interval_list_name,
-                }
-            ).fetch_nwb()[0]
-            raw_pos_df = pd.DataFrame(
-                data=raw_position["raw_position"].data,
-                index=pd.Index(raw_position["raw_position"].timestamps, name="time"),
-                columns=raw_position["raw_position"].description.split(", "),
-            )
+                & {**key, "interval_list_name": interval_list_name}
+            ).fetch_nwb()[0]["raw_position"]
+            _, _, _, video_time = get_video_path(key)
+            pos_time = spatial_series.timestamps
             # TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,
             # which also has timestamps
-            key["meters_per_pixel"] = raw_position["raw_position"].conversion
+            key["meters_per_pixel"] = spatial_series.conversion
 
             # Insert entry into DLCPoseEstimation
             logger.logger.info(
@@ -222,19 +263,57 @@ class DLCPoseEstimation(dj.Computed):
                             for c in dlc_result.df.get(body_part).columns
                         }
                     )
+            idx = pd.IndexSlice
             for body_part, part_df in body_parts_df.items():
                 logger.logger.info("converting to cm")
                 part_df = convert_to_cm(part_df, meters_per_pixel)
                 logger.logger.info("adding timestamps to DataFrame")
-                part_df = add_timestamps(part_df, raw_pos_df.copy())
+                part_df = add_timestamps(
+                    part_df, pos_time=pos_time, video_time=video_time
+                )
                 key["bodypart"] = body_part
                 key["analysis_file_name"] = AnalysisNwbfile().create(
                     key["nwb_file_name"]
                 )
+                position = pynwb.behavior.Position()
+                likelihood = pynwb.behavior.BehavioralTimeSeries()
+                position.create_spatial_series(
+                    name="position",
+                    timestamps=part_df.time.to_numpy(),
+                    conversion=METERS_PER_CM,
+                    data=part_df.loc[:, idx[("x", "y")]].to_numpy(),
+                    reference_frame=spatial_series.reference_frame,
+                    comments=spatial_series.comments,
+                    description="x_position, y_position",
+                )
+                likelihood.create_timeseries(
+                    name="likelihood",
+                    timestamps=part_df.time.to_numpy(),
+                    data=part_df.loc[:, idx["likelihood"]].to_numpy(),
+                    unit="likelihood",
+                    comments="no comments",
+                    description="likelihood",
+                )
+                likelihood.create_timeseries(
+                    name="video_frame_ind",
+                    timestamps=part_df.time.to_numpy(),
+                    data=part_df.loc[:, idx["video_frame_ind"]].to_numpy(),
+                    unit="index",
+                    comments="no comments",
+                    description="video_frame_ind",
+                )
                 nwb_analysis_file = AnalysisNwbfile()
-                key["dlc_pose_estimation_object_id"] = nwb_analysis_file.add_nwb_object(
+                key[
+                    "dlc_pose_estimation_position_object_id"
+                ] = nwb_analysis_file.add_nwb_object(
                     analysis_file_name=key["analysis_file_name"],
-                    nwb_object=part_df,
+                    nwb_object=position,
+                )
+                key[
+                    "dlc_pose_estimation_likelihood_object_id"
+                ] = nwb_analysis_file.add_nwb_object(
+                    analysis_file_name=key["analysis_file_name"],
+                    nwb_object=likelihood,
                 )
                 nwb_analysis_file.add(
                     nwb_file_name=key["nwb_file_name"],
@@ -244,11 +323,59 @@ class DLCPoseEstimation(dj.Computed):
 
     def fetch_dataframe(self, *attrs, **kwargs):
         entries = (self.BodyPart & self).fetch("KEY")
+        nwb_data_dict = {
+            entry["bodypart"]: (self.BodyPart() & entry).fetch_nwb()[0]
+            for entry in entries
+        }
+        index = pd.Index(
+            np.asarray(
+                nwb_data_dict[entries[0]["bodypart"]][
+                    "dlc_pose_estimation_position"
+                ]
+                .get_spatial_series()
+                .timestamps
+            ),
+            name="time",
+        )
+        COLUMNS = [
+            "video_frame_ind",
+            "x",
+            "y",
+            "likelihood",
+        ]
         return pd.concat(
             {
-                entry["bodypart"]: (self.BodyPart & entry).fetch_nwb()[0][
-                    "dlc_pose_estimation"
-                ]
+                entry["bodypart"]: pd.DataFrame(
+                    np.concatenate(
+                        (
+                            np.asarray(
+                                nwb_data_dict[entry["bodypart"]][
+                                    "dlc_pose_estimation_likelihood"
+                                ]
+                                .time_series["video_frame_ind"]
+                                .data,
+                                dtype=int,
+                            )[:, np.newaxis],
+                            np.asarray(
+                                nwb_data_dict[entry["bodypart"]][
+                                    "dlc_pose_estimation_position"
+                                ]
+                                .get_spatial_series()
+                                .data
+                            ),
+                            np.asarray(
+                                nwb_data_dict[entry["bodypart"]][
+                                    "dlc_pose_estimation_likelihood"
+                                ]
+                                .time_series["likelihood"]
+                                .data
+                            )[:, np.newaxis],
+                        ),
+                        axis=1,
+                    ),
+                    columns=COLUMNS,
+                    index=index,
+                )
                 for entry in entries
             },
             axis=1,
@@ -262,7 +389,9 @@ def convert_to_cm(df, meters_to_pixels):
     return df
 
 
-def add_timestamps(df: pd.DataFrame, raw_pos_df: pd.DataFrame) -> pd.DataFrame:
+def add_timestamps(
+    df: pd.DataFrame, pos_time: np.ndarray, video_time: np.ndarray
+) -> pd.DataFrame:
     """
     Takes timestamps from raw_pos_df and adds to df,
     which is returned with timestamps and their matching video frame index
@@ -271,24 +400,24 @@ def add_timestamps(df: pd.DataFrame, raw_pos_df: pd.DataFrame) -> pd.DataFrame:
     ----------
     df : pd.DataFrame
         pose estimation dataframe to add timestamps
-    raw_pos_df : pd.DataFrame
-        dataframe fetched from RawPosition that
-        contains timestamps and video frame inds
+    pos_time : np.ndarray
+        numpy array containing timestamps from the raw position object
+    video_time: np.ndarray
+        numpy array containing timestamps from the video file
 
     Returns
     -------
     pd.DataFrame
         original df with timestamps and video_frame_ind as new columns
     """
-
-    raw_pos_df = raw_pos_df.drop(
-        columns=[
-            column for column in raw_pos_df.columns if column not in ["video_frame_ind"]
-        ]
+    first_video_frame = np.searchsorted(video_time, pos_time[0])
+    video_frame_ind = np.arange(first_video_frame, len(video_time))
+    time_df = pd.DataFrame(
+        index=video_frame_ind,
+        data=video_time[first_video_frame:],
+        columns=["time"],
     )
-    raw_pos_df["time"] = raw_pos_df.index
-    raw_pos_df.set_index("video_frame_ind", inplace=True)
-    df = df.join(raw_pos_df)
+    df = df.join(time_df)
     # Drop indices where time is NaN
     df = df.dropna(subset=["time"])
     # Add video_frame_ind as column

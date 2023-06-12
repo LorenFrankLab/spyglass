@@ -27,16 +27,18 @@ class SensorData(dj.Imported):
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        sensor = get_data_interface(nwbf, "analog", pynwb.behavior.BehavioralEvents)
+        sensor = get_data_interface(
+            nwbf, "analog", pynwb.behavior.BehavioralEvents
+        )
         if sensor is None:
             print(f"No conforming sensor data found in {nwb_file_name}\n")
             return
 
         key["sensor_data_object_id"] = sensor.time_series["analog"].object_id
         # the valid times for these data are the same as the valid times for the raw ephys data
-        key["interval_list_name"] = (Raw & {"nwb_file_name": nwb_file_name}).fetch1(
-            "interval_list_name"
-        )
+        key["interval_list_name"] = (
+            Raw & {"nwb_file_name": nwb_file_name}
+        ).fetch1("interval_list_name")
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):

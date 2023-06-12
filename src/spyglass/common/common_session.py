@@ -128,7 +128,9 @@ class Session(dj.Imported):
 
     def _add_data_acquisition_device_part(self, nwb_file_name, nwbf, config):
         # get device names from both the NWB file and the associated config file
-        device_names, _, _ = DataAcquisitionDevice.get_all_device_names(nwbf, config)
+        device_names, _, _ = DataAcquisitionDevice.get_all_device_names(
+            nwbf, config
+        )
 
         for device_name in device_names:
             # ensure that the foreign key exists and do nothing if not
@@ -202,10 +204,16 @@ class SessionGroup(dj.Manual):
 
     @staticmethod
     def add_session_to_group(
-        nwb_file_name: str, session_group_name: str, *, skip_duplicates: bool = False
+        nwb_file_name: str,
+        session_group_name: str,
+        *,
+        skip_duplicates: bool = False,
     ):
         SessionGroupSession.insert1(
-            {"session_group_name": session_group_name, "nwb_file_name": nwb_file_name},
+            {
+                "session_group_name": session_group_name,
+                "nwb_file_name": nwb_file_name,
+            },
             skip_duplicates=skip_duplicates,
         )
 
@@ -227,7 +235,9 @@ class SessionGroup(dj.Manual):
         results = (
             SessionGroupSession & {"session_group_name": session_group_name}
         ).fetch(as_dict=True)
-        return [{"nwb_file_name": result["nwb_file_name"]} for result in results]
+        return [
+            {"nwb_file_name": result["nwb_file_name"]} for result in results
+        ]
 
     @staticmethod
     def create_spyglass_view(session_group_name: str):

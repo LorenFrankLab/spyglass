@@ -1,7 +1,9 @@
 import datajoint as dj
 import kachery_client as kc
 import spikeinterface as si
-from sortingview.SpikeSortingView import SpikeSortingView as SortingViewSpikeSortingView
+from sortingview.SpikeSortingView import (
+    SpikeSortingView as SortingViewSpikeSortingView,
+)
 
 from ..common.common_spikesorting import SpikeSorting, SpikeSortingRecording
 from .prepare_spikesortingview_data import prepare_spikesortingview_data
@@ -22,7 +24,9 @@ class SpikeSortingView(dj.Computed):
         recording_record = (
             SpikeSortingRecording & {"recording_id": key["recording_id"]}
         ).fetch1()
-        sorting_record = (SpikeSorting & {"sorting_id": key["sorting_id"]}).fetch1()
+        sorting_record = (
+            SpikeSorting & {"sorting_id": key["sorting_id"]}
+        ).fetch1()
 
         recording_path = recording_record["recording_path"]
         sorting_path = sorting_record["sorting_path"]

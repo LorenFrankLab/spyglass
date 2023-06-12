@@ -39,9 +39,9 @@ class DIOEvents(dj.Imported):
             return
 
         # the times for these events correspond to the valid times for the raw data
-        key["interval_list_name"] = (Raw() & {"nwb_file_name": nwb_file_name}).fetch1(
-            "interval_list_name"
-        )
+        key["interval_list_name"] = (
+            Raw() & {"nwb_file_name": nwb_file_name}
+        ).fetch1("interval_list_name")
         for event_series in behav_events.time_series.values():
             key["dio_event_name"] = event_series.name
             key["dio_object_id"] = event_series.object_id
@@ -66,7 +66,10 @@ class DIOEvents(dj.Imported):
         epoch_valid_times = (
             pd.DataFrame(
                 IntervalList()
-                & [{"nwb_file_name": nwb_file_name} for nwb_file_name in nwb_file_names]
+                & [
+                    {"nwb_file_name": nwb_file_name}
+                    for nwb_file_name in nwb_file_names
+                ]
             )
             .set_index("interval_list_name")
             .filter(regex=r"^[0-9]", axis=0)
@@ -102,7 +105,9 @@ class DIOEvents(dj.Imported):
                 where="post",
                 color="black",
             )
-            ax.set_ylabel(event["dio_event_name"], rotation=0, ha="right", va="center")
+            ax.set_ylabel(
+                event["dio_event_name"], rotation=0, ha="right", va="center"
+            )
             ax.set_yticks([])
         ax.set_xlabel("Time")
 

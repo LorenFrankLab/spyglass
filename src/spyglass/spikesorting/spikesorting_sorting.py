@@ -38,7 +38,9 @@ class SpikeSorterParameters(dj.Manual):
         sorters = sis.available_sorters()
         for sorter in sorters:
             sorter_params = sis.get_default_sorter_params(sorter)
-            self.insert1([sorter, "default", sorter_params], skip_duplicates=True)
+            self.insert1(
+                [sorter, "default", sorter_params], skip_duplicates=True
+            )
 
         # Insert Frank lab defaults
         # Hippocampus tetrode default
@@ -56,7 +58,9 @@ class SpikeSorterParameters(dj.Manual):
             "detect_threshold": 3,
             "detect_interval": 10,
         }
-        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+        self.insert1(
+            [sorter, sorter_params_name, sorter_params], skip_duplicates=True
+        )
 
         # Cortical probe default
         sorter = "mountainsort4"
@@ -73,7 +77,9 @@ class SpikeSorterParameters(dj.Manual):
             "detect_threshold": 3,
             "detect_interval": 10,
         }
-        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+        self.insert1(
+            [sorter, sorter_params_name, sorter_params], skip_duplicates=True
+        )
 
         # clusterless defaults
         sorter = "clusterless_thresholder"
@@ -91,7 +97,9 @@ class SpikeSorterParameters(dj.Manual):
             # output needs to be set to sorting for the rest of the pipeline
             outputs="sorting",
         )
-        self.insert1([sorter, sorter_params_name, sorter_params], skip_duplicates=True)
+        self.insert1(
+            [sorter, sorter_params_name, sorter_params], skip_duplicates=True
+        )
 
 
 @schema
@@ -234,7 +242,9 @@ class SpikeSorting(dj.Computed):
         current_user_name = dj.config["database.user"]
         entries = self.fetch()
         permission_bool = np.zeros((len(entries),))
-        print(f"Attempting to delete {len(entries)} entries, checking permission...")
+        print(
+            f"Attempting to delete {len(entries)} entries, checking permission..."
+        )
 
         for entry_idx in range(len(entries)):
             # check the team name for the entry, then look up the members in that team,
@@ -250,10 +260,13 @@ class SpikeSorting(dj.Computed):
             for lab_member_name in lab_member_name_list:
                 datajoint_user_names.append(
                     (
-                        LabMember.LabMemberInfo & {"lab_member_name": lab_member_name}
+                        LabMember.LabMemberInfo
+                        & {"lab_member_name": lab_member_name}
                     ).fetch1("datajoint_user_name")
                 )
-            permission_bool[entry_idx] = current_user_name in datajoint_user_names
+            permission_bool[entry_idx] = (
+                current_user_name in datajoint_user_names
+            )
         if np.sum(permission_bool) == len(entries):
             print("Permission to delete all specified entries granted.")
             super().delete()
@@ -280,12 +293,16 @@ class SpikeSorting(dj.Computed):
             if dir not in analysis_file_names:
                 full_path = str(Path(os.environ["SPYGLASS_SORTING_DIR"]) / dir)
                 print(f"removing {full_path}")
-                shutil.rmtree(str(Path(os.environ["SPYGLASS_SORTING_DIR"]) / dir))
+                shutil.rmtree(
+                    str(Path(os.environ["SPYGLASS_SORTING_DIR"]) / dir)
+                )
 
     @staticmethod
     def _get_sorting_name(key):
         recording_name = SpikeSortingRecording._get_recording_name(key)
-        sorting_name = recording_name + "_" + str(uuid.uuid4())[0:8] + "_spikesorting"
+        sorting_name = (
+            recording_name + "_" + str(uuid.uuid4())[0:8] + "_spikesorting"
+        )
         return sorting_name
 
     # TODO: write a function to import sorting done outside of dj
