@@ -93,6 +93,8 @@ docs = [
 source = "vcs"
 
 [tool.hatch.build.hooks.vcs]
+# this file is created/updated when the package is installed and used in
+# src/spyglass/__init__.py to set `spyglass.__version__`
 version-file = "src/spyglass/_version.py"
 
 [tool.hatch.build.targets.sdist]
