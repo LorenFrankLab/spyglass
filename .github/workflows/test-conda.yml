@@ -1,4 +1,4 @@
-name: Run tests
+name: Test conda env and run tests
 
 on:
   push:
