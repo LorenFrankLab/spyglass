@@ -8,6 +8,7 @@
 cp ./CHANGELOG.md ./docs/src/
 cp ./LICENSE ./docs/src/LICENSE.md
 cp -r ./notebooks/ ./docs/src/
+cp -r ./notebook-images ./docs/src/notebooks
 
 # Get major version
 FULL_VERSION=$(grep -m 1 version pyproject.toml | tr -s ' ' | tr -d '"' | tr -d "'" | cut -d' ' -f3)
