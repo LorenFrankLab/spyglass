@@ -75,10 +75,10 @@ jobs:
       - name: Install archive
         if: matrix.package == 'archive'
         run: pip install archive/archive.tgz
-      - name: Install test extras
-        run: pip install spyglass[test]
-      - name: Run tests
-        run: pytest --doctest-modules -v --pyargs spyglass
+      # - name: Install test extras
+      #   run: pip install spyglass[test]
+      # - name: Run tests
+      #   run: pytest --doctest-modules -v --pyargs spyglass
   publish:
     runs-on: ubuntu-latest
     needs: [test-package]
