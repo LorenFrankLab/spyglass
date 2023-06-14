@@ -9,10 +9,11 @@ from .nwb_helper_fn import get_nwb_file
 
 
 def dj_replace(original_table, new_values, key_column, replace_column):
-    """Given the output of a fetch() call from a schema and a 2D array made up of (key_value, replace_value) tuples,
-    find each instance of key_value in the key_column of the original table and replace the specified replace_column
-    with the associated replace_value.
-    Key values must be unique.
+    """Given the output of a fetch() call from a schema and a 2D array made up
+    of (key_value, replace_value) tuples, find each instance of key_value in
+    the key_column of the original table and replace the specified
+    replace_column with the associated replace_value. Key values must be
+    unique.
 
     Parameters
     ----------

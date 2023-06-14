@@ -194,7 +194,9 @@ class ImportedLFPV1(dj.Imported):
     lfp_object_id: varchar(40)      # the NWB object ID for loading this object from the file
     ---
     lfp_sampling_rate: float        # the sampling rate, in samples/sec
+    -> AnalysisNwbfile
     """
+    # TODO: add make func
 
 
 @schema

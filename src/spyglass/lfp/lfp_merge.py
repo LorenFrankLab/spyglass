@@ -7,29 +7,25 @@ from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.v1.lfp import LFPV1, ImportedLFPV1
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_merge_tables import Merge
 
 schema = dj.schema("lfp_merge")
 
 
 @schema
-class LFPOutput(dj.Manual):
+class LFPOutput(Merge):
     definition = """
-    lfp_id: uuid
-    ---
-    source: varchar(40)
-    version: int
-
+    merge_id: uuid
     """
 
     class LFPV1(dj.Part):
         definition = """
         -> master
-        -> LFPV1
         ---
-        -> AnalysisNwbfile
-        lfp_object_id: varchar(40)
+        -> LFPV1
         """
 
+        # TODO: modify to look upstream, make method of master
         def fetch_nwb(self, *attrs, **kwargs):
             return fetch_nwb(
                 self,
