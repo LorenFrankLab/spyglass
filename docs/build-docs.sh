@@ -8,6 +8,7 @@
 cp ./CHANGELOG.md ./docs/src/
 cp ./LICENSE ./docs/src/LICENSE.md
 cp -r ./notebooks/ ./docs/src/
+cp -r ./notebook-images ./docs/src/notebooks
 
 # Get major version
 FULL_VERSION=$(python -c "from spyglass import __version__; print(__version__)")
