@@ -6,13 +6,15 @@ A pipeline may diverge when we want to process the same data in different ways.
 Merge Tables allow us to join divergent pipelines together, and unify
 downstream processing steps. For a more in depth discussion, please refer to
 [this notebook](https://github.com/ttngu207/db-programming-with-datajoint/blob/master/notebooks/pipelines_merging_design_master_part.ipynb)
-and related discussion [here](https://github.com/datajoint/datajoint-python/issues/151).
+and related discussions [here](https://github.com/datajoint/datajoint-python/issues/151)
+and [here](https://github.com/LorenFrankLab/spyglass/issues/469).
 
 **Note:** Deleting entries upstream of Merge Tables will throw errors related to
-deleteing a part entry before the master. To circumvent this, add
+deleteing a part entry before the master. To circumvent this, you can add
 `force_parts=True` to the
 [`delete` function](https://datajoint.com/docs/core/datajoint-python/0.14/api/datajoint/__init__/#datajoint.table.Table.delete)
-call.
+call, but this will leave and orphaned primary key in the master. Instead, use
+`spyglass.utils.dj_merge_tables.delete_downstream_merge` to delete master/part pairs.
 
 ## What
 

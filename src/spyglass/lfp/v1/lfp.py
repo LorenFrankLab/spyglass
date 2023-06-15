@@ -196,7 +196,11 @@ class ImportedLFPV1(dj.Imported):
     lfp_sampling_rate: float        # the sampling rate, in samples/sec
     -> AnalysisNwbfile
     """
-    # TODO: add make func
+
+    def make(self, key):
+        raise NotImplementedError(
+            "For `insert`, use `allow_direct_insert=True`"
+        )
 
 
 @schema

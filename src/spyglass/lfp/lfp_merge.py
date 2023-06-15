@@ -25,22 +25,6 @@ class LFPOutput(Merge):
         -> LFPV1
         """
 
-        # TODO: modify to look upstream, make method of master
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
-
-        def fetch1_dataframe(self, *attrs, **kwargs):
-            nwb_lfp = self.fetch_nwb()[0]
-            return pd.DataFrame(
-                nwb_lfp["lfp"].data,
-                index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
-            )
-
     class ImportedLFPV1(dj.Part):
         definition = """
         -> master
@@ -50,21 +34,6 @@ class LFPOutput(Merge):
         lfp_object_id: varchar(40)
         """
 
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
-
-        def fetch1_dataframe(self, *attrs, **kwargs):
-            nwb_lfp = self.fetch_nwb()[0]
-            return pd.DataFrame(
-                nwb_lfp["lfp"].data,
-                index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
-            )
-
     class CommonLFP(dj.Part):
         """
         Table to pass-through legacy LFP
@@ -72,29 +41,9 @@ class LFPOutput(Merge):
 
         definition = """
         -> master
-        -> CommonLFP
         ---
-        -> IntervalList             # the valid intervals for the data
-        -> FirFilterParameters                # the filter used for the data
-        -> AnalysisNwbfile          # the name of the nwb file with the lfp data
-        lfp_object_id: varchar(40)  # the NWB object ID for loading this object from the file
-        lfp_sampling_rate: float    # the sampling rate, in HZ
+        -> CommonLFP
         """
-
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
-
-        def fetch1_dataframe(self, *attrs, **kwargs):
-            nwb_lfp = self.fetch_nwb()[0]
-            return pd.DataFrame(
-                nwb_lfp["lfp"].data,
-                index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
-            )
 
     @staticmethod
     def get_lfp_object(key: dict):
@@ -121,3 +70,22 @@ class LFPOutput(Merge):
             return LFPV1 & lfp_object.fetch("KEY")
         else:
             return ImportedLFPV1 & (LFPOutput.ImportedLFP & key).fetch("KEY")
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        parts = self._merge_restrict_parts()
+        if len(parts) == 1:
+            return fetch_nwb(
+                parts[0],
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
+            )
+        else:  # TODO: needs more testing!
+            raise ValueError("Multiple sources found in Merge Table")
+
+    def fetch1_dataframe(self, *attrs, **kwargs):
+        nwb_lfp = self.fetch_nwb()[0]
+        return pd.DataFrame(
+            nwb_lfp["lfp"].data,
+            index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
+        )
