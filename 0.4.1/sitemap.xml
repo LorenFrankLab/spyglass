@@ -2,447 +2,447 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/CHANGELOG/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/LICENSE/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/contribute/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/_version/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/settings/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/cli/cli/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_backup/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_behav/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_device/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_dio/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_ephys/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_filter/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_interval/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_lab/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_nwbfile/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_position/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_region/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_ripple/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_sensors/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_session/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_subject/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/common_task/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/errors/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/populate_all_common/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/signal_processing/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/common/prepopulate/prepopulate/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/data_import/insert_sessions/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/data_import/storage_dirs/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/decoding/clusterless/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/decoding/core/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/decoding/dj_decoder_conversion/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/decoding/sorted_spikes/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/decoding/visualization/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/decoding/visualization_1D_view/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/decoding/visualization_2D_view/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/figurl_views/SpikeSortingRecordingView/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/figurl_views/SpikeSortingView/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/figurl_views/prepare_spikesortingview_data/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/lfp/v1/lfp/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/lock/file_lock/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/position_merge/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/dlc_decorators/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/dlc_reader/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/dlc_utils/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/position_dlc_centroid/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/position_dlc_cohort/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/position_dlc_model/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/position_dlc_orient/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/position_dlc_pose_estimation/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/position_dlc_position/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/position_dlc_project/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/position_dlc_selection/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/position_dlc_training/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/position/v1/position_trodes_position/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/sharing/sharing_kachery/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/spikesorting/curation_figurl/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/spikesorting/merged_sorting_extractor/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/spikesorting/sortingview/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/spikesorting/sortingview_helper_fn/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/spikesorting/spikesorting_artifact/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/spikesorting/spikesorting_curation/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/spikesorting/spikesorting_recording/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/spikesorting/spikesorting_sorting/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/utils/dj_helper_fn/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/src/spyglass/utils/nwb_helper_fn/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/installation/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/installation/local/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/installation/production/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/misc/figurl_views/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/misc/insert_data/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/misc/session_groups/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/00_intro/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/01_spikesorting/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/02_curation/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/03_lfp/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/04_Trodes_position/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/05_DLC_from_scratch/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/06_DLC_from_dir/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/07_linearization/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/08_Extract_Mark_indicators/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/09_Decoding_with_GPUs_on_the_GPU_cluster/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/10_1D_Clusterless_Decoding/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/11_2D_Clusterless_Decoding/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/12_Ripple_Detection/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/13_Theta_phase_and_power/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/4_position_info/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/Spyglass_kachery_setup/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/docker_mysql_tutorial/</loc>
-         <lastmod>2023-06-12</lastmod>
+         <lastmod>2023-06-15</lastmod>
          <changefreq>daily</changefreq>
     </url>
 </urlset>
