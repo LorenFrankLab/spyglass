@@ -28,16 +28,12 @@ class LFPOutput(Merge):
     class ImportedLFPV1(dj.Part):
         definition = """
         -> master
-        -> ImportedLFPV1
         ---
-        -> AnalysisNwbfile
-        lfp_object_id: varchar(40)
+        -> ImportedLFPV1
         """
 
-    class CommonLFP(dj.Part):
-        """
-        Table to pass-through legacy LFP
-        """
+    class CommonLFP(dj.Part):  # CB: Remove import above to reduce ambiguity?
+        """Table to pass-through legacy LFP"""
 
         definition = """
         -> master
