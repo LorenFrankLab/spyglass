@@ -21,7 +21,7 @@
         <link rel="next" href="../nwb_helper_fn/">
       
       <link rel="icon" href="../../../../../images/Spyglass.svg">
-      <meta name="generator" content="mkdocs-1.4.3, mkdocs-material-9.1.15">
+      <meta name="generator" content="mkdocs-1.4.3, mkdocs-material-9.1.16">
     
     
       
@@ -2120,15 +2120,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#src.spyglass.utils.dj_helper_fn.dj_replace" class="md-nav__link">
-    dj_replace()
+  <a href="#src.spyglass.utils.dj_helper_fn.get_nwb_file" class="md-nav__link">
+    get_nwb_file()
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#src.spyglass.utils.dj_helper_fn.get_nwb_file" class="md-nav__link">
-    get_nwb_file()
+  <a href="#src.spyglass.utils.dj_helper_fn.dj_replace" class="md-nav__link">
+    dj_replace()
   </a>
   
 </li>
@@ -2355,178 +2355,6 @@
 
 
 
-<h2 id="src.spyglass.utils.dj_helper_fn.dj_replace" class="doc doc-heading">
-<code class="highlight language-python"><span class="n">dj_replace</span><span class="p">(</span><span class="n">original_table</span><span class="p">,</span> <span class="n">new_values</span><span class="p">,</span> <span class="n">key_column</span><span class="p">,</span> <span class="n">replace_column</span><span class="p">)</span></code>
-
-<a href="#src.spyglass.utils.dj_helper_fn.dj_replace" class="headerlink" title="Permanent link">&para;</a></h2>
-
-
-  <div class="doc doc-contents ">
-  
-      <p>Given the output of a fetch() call from a schema and a 2D array made up of (key_value, replace_value) tuples,
-find each instance of key_value in the key_column of the original table and replace the specified replace_column
-with the associated replace_value.
-Key values must be unique.</p>
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>original_table</code></td>
-          <td>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>Result of a datajoint .fetch() call on a schema query.</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-        <tr>
-          <td><code>new_values</code></td>
-          <td>
-                <code>list</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>List of tuples, each containing (key_value, replace_value).</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-        <tr>
-          <td><code>replace_column</code></td>
-          <td>
-                <code>str</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The name of the column where to-be-replaced values are located.</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-  <p><strong>Returns:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Type</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td>
-                <code>original_table</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>Structured array of new table entries that can be inserted back into the schema</p>
-            </div>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-      <details class="quote">
-        <summary>Source code in <code>src/spyglass/utils/dj_helper_fn.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">11</span>
-<span class="normal">12</span>
-<span class="normal">13</span>
-<span class="normal">14</span>
-<span class="normal">15</span>
-<span class="normal">16</span>
-<span class="normal">17</span>
-<span class="normal">18</span>
-<span class="normal">19</span>
-<span class="normal">20</span>
-<span class="normal">21</span>
-<span class="normal">22</span>
-<span class="normal">23</span>
-<span class="normal">24</span>
-<span class="normal">25</span>
-<span class="normal">26</span>
-<span class="normal">27</span>
-<span class="normal">28</span>
-<span class="normal">29</span>
-<span class="normal">30</span>
-<span class="normal">31</span>
-<span class="normal">32</span>
-<span class="normal">33</span>
-<span class="normal">34</span>
-<span class="normal">35</span>
-<span class="normal">36</span>
-<span class="normal">37</span>
-<span class="normal">38</span>
-<span class="normal">39</span>
-<span class="normal">40</span>
-<span class="normal">41</span>
-<span class="normal">42</span>
-<span class="normal">43</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">dj_replace</span><span class="p">(</span><span class="n">original_table</span><span class="p">,</span> <span class="n">new_values</span><span class="p">,</span> <span class="n">key_column</span><span class="p">,</span> <span class="n">replace_column</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Given the output of a fetch() call from a schema and a 2D array made up of (key_value, replace_value) tuples,</span>
-<span class="sd">    find each instance of key_value in the key_column of the original table and replace the specified replace_column</span>
-<span class="sd">    with the associated replace_value.</span>
-<span class="sd">    Key values must be unique.</span>
-
-<span class="sd">    Parameters</span>
-<span class="sd">    ----------</span>
-<span class="sd">    original_table</span>
-<span class="sd">        Result of a datajoint .fetch() call on a schema query.</span>
-<span class="sd">    new_values : list</span>
-<span class="sd">        List of tuples, each containing (key_value, replace_value).</span>
-<span class="sd">    replace_column : str</span>
-<span class="sd">        The name of the column where to-be-replaced values are located.</span>
-
-<span class="sd">    Returns</span>
-<span class="sd">    -------</span>
-<span class="sd">    original_table</span>
-<span class="sd">        Structured array of new table entries that can be inserted back into the schema</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-
-    <span class="c1"># check to make sure the new_values are a list or array of tuples and fix if not</span>
-    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">new_values</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
-        <span class="n">tmp</span> <span class="o">=</span> <span class="nb">list</span><span class="p">()</span>
-        <span class="n">tmp</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_values</span><span class="p">)</span>
-        <span class="n">new_values</span> <span class="o">=</span> <span class="n">tmp</span>
-
-    <span class="n">new_val_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">new_values</span><span class="p">)</span>
-    <span class="n">replace_ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
-        <span class="n">np</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">original_table</span><span class="p">[</span><span class="n">key_column</span><span class="p">],</span> <span class="n">new_val_array</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">])</span>
-    <span class="p">)</span>
-    <span class="n">original_table</span><span class="p">[</span><span class="n">replace_column</span><span class="p">][</span><span class="n">replace_ind</span><span class="p">]</span> <span class="o">=</span> <span class="n">new_val_array</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span>
-    <span class="k">return</span> <span class="n">original_table</span>
-</code></pre></div></td></tr></table></div>
-      </details>
-  </div>
-
-</div>
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-
 <h2 id="src.spyglass.utils.dj_helper_fn.get_nwb_file" class="doc doc-heading">
 <code class="highlight language-python"><span class="n">get_nwb_file</span><span class="p">(</span><span class="n">nwb_file_path</span><span class="p">)</span></code>
 
@@ -2682,6 +2510,178 @@ Key values must be unique.</p>
 
 
 
+<h2 id="src.spyglass.utils.dj_helper_fn.dj_replace" class="doc doc-heading">
+<code class="highlight language-python"><span class="n">dj_replace</span><span class="p">(</span><span class="n">original_table</span><span class="p">,</span> <span class="n">new_values</span><span class="p">,</span> <span class="n">key_column</span><span class="p">,</span> <span class="n">replace_column</span><span class="p">)</span></code>
+
+<a href="#src.spyglass.utils.dj_helper_fn.dj_replace" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Given the output of a fetch() call from a schema and a 2D array made up of (key_value, replace_value) tuples,
+find each instance of key_value in the key_column of the original table and replace the specified replace_column
+with the associated replace_value.
+Key values must be unique.</p>
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>original_table</code></td>
+          <td>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>Result of a datajoint .fetch() call on a schema query.</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+        <tr>
+          <td><code>new_values</code></td>
+          <td>
+                <code>list</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of tuples, each containing (key_value, replace_value).</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+        <tr>
+          <td><code>replace_column</code></td>
+          <td>
+                <code>str</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the column where to-be-replaced values are located.</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+  <p><strong>Returns:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td>
+                <code>original_table</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>Structured array of new table entries that can be inserted back into the schema</p>
+            </div>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+      <details class="quote">
+        <summary>Source code in <code>src/spyglass/utils/dj_helper_fn.py</code></summary>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">40</span>
+<span class="normal">41</span>
+<span class="normal">42</span>
+<span class="normal">43</span>
+<span class="normal">44</span>
+<span class="normal">45</span>
+<span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">dj_replace</span><span class="p">(</span><span class="n">original_table</span><span class="p">,</span> <span class="n">new_values</span><span class="p">,</span> <span class="n">key_column</span><span class="p">,</span> <span class="n">replace_column</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Given the output of a fetch() call from a schema and a 2D array made up of (key_value, replace_value) tuples,</span>
+<span class="sd">    find each instance of key_value in the key_column of the original table and replace the specified replace_column</span>
+<span class="sd">    with the associated replace_value.</span>
+<span class="sd">    Key values must be unique.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    original_table</span>
+<span class="sd">        Result of a datajoint .fetch() call on a schema query.</span>
+<span class="sd">    new_values : list</span>
+<span class="sd">        List of tuples, each containing (key_value, replace_value).</span>
+<span class="sd">    replace_column : str</span>
+<span class="sd">        The name of the column where to-be-replaced values are located.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    original_table</span>
+<span class="sd">        Structured array of new table entries that can be inserted back into the schema</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># check to make sure the new_values are a list or array of tuples and fix if not</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">new_values</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+        <span class="n">tmp</span> <span class="o">=</span> <span class="nb">list</span><span class="p">()</span>
+        <span class="n">tmp</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_values</span><span class="p">)</span>
+        <span class="n">new_values</span> <span class="o">=</span> <span class="n">tmp</span>
+
+    <span class="n">new_val_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">new_values</span><span class="p">)</span>
+    <span class="n">replace_ind</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">original_table</span><span class="p">[</span><span class="n">key_column</span><span class="p">],</span> <span class="n">new_val_array</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">])</span>
+    <span class="p">)</span>
+    <span class="n">original_table</span><span class="p">[</span><span class="n">replace_column</span><span class="p">][</span><span class="n">replace_ind</span><span class="p">]</span> <span class="o">=</span> <span class="n">new_val_array</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">original_table</span>
+</code></pre></div></td></tr></table></div>
+      </details>
+  </div>
+
+</div>
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
 <h2 id="src.spyglass.utils.dj_helper_fn.fetch_nwb" class="doc doc-heading">
 <code class="highlight language-python"><span class="n">fetch_nwb</span><span class="p">(</span><span class="n">query_expression</span><span class="p">,</span> <span class="n">nwb_master</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></code>
 
@@ -2789,36 +2789,7 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p>
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/utils/dj_helper_fn.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 46</span>
-<span class="normal"> 47</span>
-<span class="normal"> 48</span>
-<span class="normal"> 49</span>
-<span class="normal"> 50</span>
-<span class="normal"> 51</span>
-<span class="normal"> 52</span>
-<span class="normal"> 53</span>
-<span class="normal"> 54</span>
-<span class="normal"> 55</span>
-<span class="normal"> 56</span>
-<span class="normal"> 57</span>
-<span class="normal"> 58</span>
-<span class="normal"> 59</span>
-<span class="normal"> 60</span>
-<span class="normal"> 61</span>
-<span class="normal"> 62</span>
-<span class="normal"> 63</span>
-<span class="normal"> 64</span>
-<span class="normal"> 65</span>
-<span class="normal"> 66</span>
-<span class="normal"> 67</span>
-<span class="normal"> 68</span>
-<span class="normal"> 69</span>
-<span class="normal"> 70</span>
-<span class="normal"> 71</span>
-<span class="normal"> 72</span>
-<span class="normal"> 73</span>
-<span class="normal"> 74</span>
-<span class="normal"> 75</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 75</span>
 <span class="normal"> 76</span>
 <span class="normal"> 77</span>
 <span class="normal"> 78</span>
@@ -2861,7 +2832,36 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p>
 <span class="normal">115</span>
 <span class="normal">116</span>
 <span class="normal">117</span>
-<span class="normal">118</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="n">query_expression</span><span class="p">,</span> <span class="n">nwb_master</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="n">query_expression</span><span class="p">,</span> <span class="n">nwb_master</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Get an NWB object from the given DataJoint query.</span>
 
 <span class="sd">    Parameters</span>
@@ -3056,7 +3056,7 @@ attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'</p>
     <script id="__config" type="application/json">{"base": "../../../../..", "features": ["toc.integrate", "navigation.sections", "navigation.expand", "navigation.top", "navigation.instant", "navigation.tracking", "navigation.top", "search.suggest", "search.share", "navigation.footer"], "search": "../../../../../assets/javascripts/workers/search.208ed371.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../../../../assets/javascripts/bundle.b4d07000.min.js"></script>
+      <script src="../../../../../assets/javascripts/bundle.a51614de.min.js"></script>
       
     
   </body>
