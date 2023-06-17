@@ -162,6 +162,17 @@ class TaskEpoch(dj.Imported):
                     self.insert1(key)
 
     @classmethod
+    def update_entries(cls, restrict={}):
+        existing_entries = (cls & restrict).fetch("KEY")
+        for row in existing_entries:
+            if (cls & row).fetch1("camera_names"):
+                continue
+            row["camera_names"] = [
+                {"camera_name": (cls & row).fetch1("camera_name")}
+            ]
+            cls.update1(row=row)
+
+    @classmethod
     def check_task_table(cls, task_table):
         """Check whether the pynwb DynamicTable containing task metadata conforms to the expected format.
 

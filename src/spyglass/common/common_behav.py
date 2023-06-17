@@ -247,6 +247,20 @@ class VideoFile(dj.Imported):
         return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
 
     @classmethod
+    def update_entries(cls, restrict={}):
+        existing_entries = (cls & restrict).fetch("KEY")
+        for row in existing_entries:
+            if (cls & row).fetch1("camera_name"):
+                continue
+            video_nwb = (cls & row).fetch_nwb()[0]
+            if len(video_nwb) != 1:
+                raise ValueError(
+                    f"expecting 1 video file per entry, but {len(video_nwb)} files found"
+                )
+            row["camera_name"] = video_nwb[0]["video_file"].device.camera_name
+            cls.update1(row=row)
+
+    @classmethod
     def get_abs_path(cls, key: Dict):
         """Return the absolute path for a stored video file given a key with the nwb_file_name and epoch number
 
