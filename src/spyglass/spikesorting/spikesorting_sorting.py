@@ -207,8 +207,8 @@ class SpikeSorting(dj.Computed):
                 if sorter_params["whiten"]:
                     sorter_params["whiten"] = False  # set whiten to False
             # whiten recording separately; make sure dtype is float32
-            # to avoid downstream error with svm
-            recording = sip.whiten(recording, dtype="float32")
+            # to avoid downstream error with svd
+            recording = sip.whiten(recording, dtype=np.float32)
             sorting = sis.run_sorter(
                 sorter,
                 recording,
