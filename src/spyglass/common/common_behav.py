@@ -219,10 +219,10 @@ class VideoFile(dj.Imported):
         ).fetch1("valid_times")
 
         is_found = False
-        for video in videos.values():
+        for ind, video in enumerate(videos.values()):
             if isinstance(video, pynwb.image.ImageSeries):
                 video = [video]
-            for ind, video_obj in enumerate(video):
+            for video_obj in video:
                 # check to see if the times for this video_object are largely overlapping with the task epoch times
                 if len(
                     interval_list_contains(valid_times, video_obj.timestamps)
