@@ -190,7 +190,7 @@ class VideoFile(dj.Imported):
     -> TaskEpoch
     video_file_num = 0: int
     ---
-    -> CameraDevice
+    camera_name: varchar(80)
     video_file_object_id: varchar(40)  # the object id of the file object
     """
 
