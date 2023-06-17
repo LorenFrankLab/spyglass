@@ -6,9 +6,15 @@
 
 # Important to do this so that we add the franklab namespace for pynwb
 # Note: This is franklab-specific
-import ndx_franklab_novela
+try:
+    import ndx_franklab_novela
+except ImportError:
+    pass
 
-import importlib.metadata
+
 from .settings import config
 
-__version__ = importlib.metadata.version("spyglass-neuro")
+try:
+    from ._version import __version__
+except ImportError:
+    pass

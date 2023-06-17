@@ -27,11 +27,12 @@ class DLCModelInput(dj.Manual):
     """
 
     def insert1(self, key, **kwargs):
-        key[
-            "dlc_model_name"
-        ] = f'{os.path.basename(key["project_path"]).split("model")[0]}model'
-        project_path = Path(key["project_path"])
+        # expects key from DLCProject with config_path
+        project_path = Path(key["config_path"]).parent
         assert project_path.exists(), "project path does not exist"
+        key["dlc_model_name"] = f'{project_path.name.split("model")[0]}model'
+        key["project_path"] = project_path.as_posix()
+        del key["config_path"]
         super().insert1(key, **kwargs)
         DLCModelSource.insert_entry(
             dlc_model_name=key["dlc_model_name"],

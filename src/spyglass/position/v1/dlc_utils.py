@@ -627,10 +627,10 @@ def smooth_moving_avg(
     import bottleneck as bn
 
     idx = pd.IndexSlice
-    moving_avg_window = int(smoothing_duration * sampling_rate)
+    moving_avg_window = int(np.round(smoothing_duration * sampling_rate))
     xy_arr = interp_df.loc[:, idx[("x", "y")]].values
     smoothed_xy_arr = bn.move_mean(
-        xy_arr, window=moving_avg_window, axis=0, min_count=2
+        xy_arr, window=moving_avg_window, axis=0, min_count=1
     )
     interp_df.loc[:, idx["x"]], interp_df.loc[:, idx["y"]] = [
         *zip(*smoothed_xy_arr.tolist())
@@ -676,7 +676,6 @@ def make_video(
     video_filename,
     video_frame_inds,
     position_mean,
-    orientation_mean,
     centroids,
     likelihoods,
     position_time,
@@ -733,11 +732,15 @@ def make_video(
         # }
         if video_time:
             position_mean = {
-                key: fill_nan(position_mean[key], video_time, position_time)
+                key: fill_nan(
+                    position_mean[key]["position"], video_time, position_time
+                )
                 for key in position_mean.keys()
             }
             orientation_mean = {
-                key: fill_nan(orientation_mean[key], video_time, position_time)
+                key: fill_nan(
+                    position_mean[key]["orientation"], video_time, position_time
+                )
                 for key in orientation_mean.keys()
             }
         print(
@@ -810,6 +813,8 @@ def make_video(
                         color = RGB_BLUE
                     if key == "Trodes":
                         color = RGB_ORANGE
+                    if key == "Common":
+                        color = RGB_PINK
                     if np.all(~np.isnan(position)) & np.all(
                         ~np.isnan(orientation)
                     ):
