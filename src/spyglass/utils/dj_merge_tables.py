@@ -1,4 +1,5 @@
 from itertools import chain as iter_chain
+from contextlib import nullcontext
 from pprint import pprint
 
 import datajoint as dj
@@ -136,7 +137,8 @@ class Merge(dj.Manual):
                     f"Non-existing entry in any of the parent tables - Entry: {row}"
                 )
 
-        with cls.connection.transaction:
+        # with cls.connection.transaction:
+        with nullcontext():  # This allows use within `make` but decreases reliability
             super().insert(cls(), master_entries, **kwargs)
             for part, part_entries in parts_entries.items():
                 part.insert(part_entries, **kwargs)
