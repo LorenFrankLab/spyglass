@@ -171,8 +171,8 @@ dj_local_conf.json
 
 !/.vscode/extensions.json
 !/.vscode/settings.json
-!/notebooks/dlc_scratch.png
-!/notebooks/dlc_existing.png
+!/notebooks/notebook-images/dlc_scratch.png
+!/notebooks/notebook-images/dlc_existing.png
 
 # Documentation
 docs/site/
@@ -181,3 +181,6 @@ docs/src/LICENSE.md
 docs/src/notebooks/
 !docs/src/images/*png
 temp*
+
+# Version
+_version.py

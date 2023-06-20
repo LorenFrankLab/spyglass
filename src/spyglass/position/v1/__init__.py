@@ -65,14 +65,14 @@ def schemas():
 
 
 _schemas = [
-    "position_dlc_project",
-    "position_dlc_training",
-    "position_dlc_model",
-    "position_dlc_pose_estimation",
-    "position_dlc_position",
-    "position_dlc_cohort",
-    "position_dlc_centroid",
-    "position_dlc_orient",
-    "position_dlc_selection",
-    "position_trodes_position",
+    "position_v1_dlc_project",
+    "position_v1_dlc_training",
+    "position_v1_dlc_model",
+    "position_v1_dlc_pose_estimation",
+    "position_v1_dlc_position",
+    "position_v1_dlc_cohort",
+    "position_v1_dlc_centroid",
+    "position_v1_dlc_orient",
+    "position_v1_dlc_selection",
+    "position_v1_trodes_position",
 ]
