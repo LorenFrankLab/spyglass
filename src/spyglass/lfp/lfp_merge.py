@@ -32,7 +32,7 @@ class LFPOutput(Merge):
         -> ImportedLFPV1
         """
 
-    class CommonLFP(dj.Part):  # CB: Remove import above to reduce ambiguity?
+    class CommonLFP(dj.Part):
         """Table to pass-through legacy LFP"""
 
         definition = """
@@ -68,7 +68,10 @@ class LFPOutput(Merge):
             return ImportedLFPV1 & (LFPOutput.ImportedLFP & key).fetch("KEY")
 
     def fetch_nwb(self, *attrs, **kwargs):
-        parts = self._merge_restrict_parts()
+        parts = self._merge_restrict_parts(
+            restriction=self.restriction, return_empties=False
+        )
+
         if len(parts) == 1:
             return fetch_nwb(
                 parts[0],

@@ -1,5 +1,5 @@
-from itertools import chain as iter_chain
 from contextlib import nullcontext
+from itertools import chain as iter_chain
 from pprint import pprint
 
 import datajoint as dj
@@ -32,16 +32,44 @@ class Merge(dj.Manual):
 
     @classmethod
     def _merge_restrict_parts(
-        cls, restriction: str = True, as_objects: bool = True
+        cls,
+        restriction: str = None,
+        as_objects: bool = True,
+        return_empties: bool = True,
     ) -> list:
-        """Returns a list of parts with restrictions applied."""
+        """Returns a list of parts with restrictions applied.
+
+        Parameters
+        ---------
+        restriction: str, optional
+            Restriction to apply to the merged view. Default True, no restrictions.
+        as_objects: bool, optional
+            Default True. Return part tables as objects
+        return_empties: bool, optional
+            Default True. Return empty part tables
+
+        Returns
+        ------
+        list
+            list of datajoint tables, parts of Merge Table
+        """
+        if not dj.conn.connection.dependencies._loaded:
+            dj.conn.connection.dependencies.load()  # Otherwise parts returns none
+        if not restriction:
+            restriction = True
+
         parts = []
 
-        for part in cls.parts(as_objects=as_objects):
+        for part in cls.parts(as_objects=True):
             try:
                 parts.append(part.restrict(restriction))
             except DataJointError:  # If restriction not valid on given part
                 parts.append(part)
+
+        if not return_empties:
+            parts = [p for p in parts if len(p)]
+        if not as_objects:
+            parts = [p.full_table_name for p in parts]
 
         return parts
 
@@ -113,7 +141,7 @@ class Merge(dj.Manual):
         except TypeError:
             raise TypeError('Input "rows" must be a list of dictionaries')
 
-        parts = cls.parts(as_objects=True)
+        parts = cls._merge_restrict_parts(as_objects=True)
         master_entries = []
         parts_entries = {p: [] for p in parts}
         for row in rows:
