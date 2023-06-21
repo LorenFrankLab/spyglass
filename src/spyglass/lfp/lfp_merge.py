@@ -68,18 +68,18 @@ class LFPOutput(Merge):
             return ImportedLFPV1 & (LFPOutput.ImportedLFP & key).fetch("KEY")
 
     def fetch_nwb(self, *attrs, **kwargs):
-        parts = self._merge_restrict_parts(
+        part_parents = self._merge_restrict_parents(
             restriction=self.restriction, return_empties=False
         )
 
-        if len(parts) == 1:
+        if len(part_parents) == 1:
             return fetch_nwb(
-                parts[0],
+                part_parents[0],
                 (AnalysisNwbfile, "analysis_file_abs_path"),
                 *attrs,
                 **kwargs,
             )
-        else:  # TODO: needs more testing!
+        else:
             raise ValueError("Multiple sources found in Merge Table")
 
     def fetch1_dataframe(self, *attrs, **kwargs):

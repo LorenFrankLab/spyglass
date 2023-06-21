@@ -14,7 +14,7 @@ class Merge(dj.Manual):
         super().__init__()
         self._reserved_pk = "merge_id"  # reserved primary key
         merge_def = f"\n    {self._reserved_pk}: uuid\n    "
-        # TODO: Change warnings to logger. Throw error?
+        # TODO: Change warnings to logger. Throw error? - CBroz1
         if not self.is_declared:
             if self.definition != merge_def:
                 print(
@@ -33,7 +33,7 @@ class Merge(dj.Manual):
     @classmethod
     def _merge_restrict_parts(
         cls,
-        restriction: str = None,
+        restriction: str = True,
         as_objects: bool = True,
         return_empties: bool = True,
     ) -> list:
@@ -72,6 +72,43 @@ class Merge(dj.Manual):
             parts = [p.full_table_name for p in parts]
 
         return parts
+
+    @classmethod
+    def _merge_restrict_parents(
+        cls,
+        restriction: str = True,
+        as_objects: bool = True,
+        return_empties: bool = True,
+    ) -> list:
+        """Returns a list of part parents with restrictions applied.
+
+        Parameters
+        ---------
+        restriction: str, optional
+            Restriction to apply to the merged view. Default True, no restrictions.
+        as_objects: bool, optional
+            Default True. Return part tables as objects
+        return_empties: bool, optional
+            Default True. Return empty part tables
+
+        Returns
+        ------
+        list
+            list of datajoint tables, parents of parts of Merge Table
+        """
+        part_parents = [
+            parent
+            & part.fetch(*part.heading.secondary_attributes, as_dict=True)
+            for part in cls()._merge_restrict_parts(
+                restriction=restriction, return_empties=return_empties
+            )
+            for parent in part.parents(as_objects=True)  # ID respective parents
+            if cls().table_name not in parent.full_table_name  # Not merge table
+        ]
+        if not as_objects:
+            part_parents = [p.full_table_name for p in part_parents]
+
+        return part_parents
 
     @classmethod
     def _merge_repr(
@@ -255,13 +292,10 @@ class Merge(dj.Manual):
         kwargs: dict
             Additional keyword arguments for DataJoint delete.
         """
-        part_parents = [
-            parent.restrict(restriction)
-            for part in cls()._merge_restrict_parts(restriction=restriction)
-            for parent in part.parents(as_objects=True)  # ID respective parents
-            if cls().table_name not in parent.full_table_name  # Not merge table
-            and len(part)
-        ]
+
+        part_parents = cls._merge_restrict_parents(
+            restriction=restriction, as_objects=True, return_empties=False
+        )
 
         if dry_run:
             return part_parents
@@ -269,8 +303,6 @@ class Merge(dj.Manual):
         super().delete(cls(), **kwargs)
         for part_parent in part_parents:
             super().delete(part_parent, **kwargs)
-
-    # TODO: test fetch nwb
 
 
 def delete_downstream_merge(table: dj.Table, dry_run=True, **kwargs) -> list:

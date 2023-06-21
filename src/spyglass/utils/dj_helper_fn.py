@@ -85,6 +85,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
         else Nwbfile.get_abs_path
     )
 
+    # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
         query_expression * tbl.proj(nwb2load_filepath=attr_name)
     ).fetch(file_name_str)
