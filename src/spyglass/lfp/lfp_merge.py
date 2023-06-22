@@ -16,6 +16,8 @@ schema = dj.schema("lfp_merge")
 class LFPOutput(Merge):
     definition = """
     merge_id: uuid
+    ---
+    source: varchar(32)
     """
 
     class LFPV1(dj.Part):
@@ -80,7 +82,10 @@ class LFPOutput(Merge):
                 **kwargs,
             )
         else:
-            raise ValueError("Multiple sources found in Merge Table")
+            raise ValueError(
+                f"{len(part_parents)} possible sources found in Merge Table"
+                + part_parents
+            )
 
     def fetch1_dataframe(self, *attrs, **kwargs):
         nwb_lfp = self.fetch_nwb()[0]

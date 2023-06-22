@@ -3,8 +3,14 @@ from itertools import chain as iter_chain
 from pprint import pprint
 
 import datajoint as dj
+from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
+from datajoint.utils import from_camel_case, to_camel_case
+
+RESERVED_PRIMARY_KEY = "merge_id"
+RESERVED_SECONDARY_KEY = "source"
+RESERVED_SK_LENGTH = 32
 
 
 class Merge(dj.Manual):
@@ -12,8 +18,12 @@ class Merge(dj.Manual):
 
     def __init__(self):
         super().__init__()
-        self._reserved_pk = "merge_id"  # reserved primary key
-        merge_def = f"\n    {self._reserved_pk}: uuid\n    "
+        self._reserved_pk = RESERVED_PRIMARY_KEY
+        self._reserved_sk = RESERVED_SECONDARY_KEY
+        merge_def = (
+            f"\n    {self._reserved_pk}: uuid\n    ---\n"
+            + f"    {self._reserved_sk}: varchar({RESERVED_SK_LENGTH})\n    "
+        )
         # TODO: Change warnings to logger. Throw error? - CBroz1
         if not self.is_declared:
             if self.definition != merge_def:
@@ -55,12 +65,28 @@ class Merge(dj.Manual):
         """
         if not dj.conn.connection.dependencies._loaded:
             dj.conn.connection.dependencies.load()  # Otherwise parts returns none
+
         if not restriction:
             restriction = True
 
-        parts = []
+        restriction = make_condition(cls(), restriction, set())
 
-        for part in cls.parts(as_objects=True):
+        # If the restriction makes ref to a source, we ony want that part
+        parts_all = cls.parts(as_objects=True)
+        if isinstance(restriction, str) and cls()._reserved_sk in restriction:
+            parts_all = [
+                part
+                for part in parts_all
+                if from_camel_case(
+                    restriction.split(f'`{cls()._reserved_sk}`="')[-1].split(
+                        '"'
+                    )[0]
+                )  # Only look at source part table
+                in part.full_table_name
+            ]
+
+        parts = []
+        for part in parts_all:
             try:
                 parts.append(part.restrict(restriction))
             except DataJointError:  # If restriction not valid on given part
@@ -82,6 +108,9 @@ class Merge(dj.Manual):
     ) -> list:
         """Returns a list of part parents with restrictions applied.
 
+        Rather than part tables, we look at parents of those parts, the source
+        of the data.
+
         Parameters
         ---------
         restriction: str, optional
@@ -97,7 +126,7 @@ class Merge(dj.Manual):
             list of datajoint tables, parents of parts of Merge Table
         """
         part_parents = [
-            parent
+            parent  # Below, restricting parent to info from restricted part
             & part.fetch(*part.heading.secondary_attributes, as_dict=True)
             for part in cls()._merge_restrict_parts(
                 restriction=restriction, return_empties=return_empties
@@ -185,52 +214,84 @@ class Merge(dj.Manual):
             key = {}
             for part in parts:
                 master = part.parents(as_objects=True)[-1]
+                part_name = to_camel_case(part.table_name.split("__")[-1])
                 if master & row:
                     if not key:
                         key = (master & row).fetch1("KEY")
-                        master_key = {cls.primary_key[0]: dj.hash.key_hash(key)}
-                        parts_entries[part].append({**master_key, **key})
-                        master_entries.append(master_key)
+                        master_pk = {
+                            cls()._reserved_pk: dj.hash.key_hash(key),
+                        }
+                        parts_entries[part].append({**master_pk, **key})
+                        master_entries.append(
+                            {**master_pk, cls()._reserved_sk: part_name}
+                        )
                     else:
                         raise ValueError(
-                            "Mutual Exclusivity Error! Entry exists in more than one "
-                            + f"table - Entry: {row}"
+                            "Mutual Exclusivity Error! Entry exists in more "
+                            + f"than one table - Entry: {row}"
                         )
 
             if not key:
                 raise ValueError(
-                    f"Non-existing entry in any of the parent tables - Entry: {row}"
+                    "Non-existing entry in any of the parent tables - Entry: "
+                    + f"{row}"
                 )
 
-        # with cls.connection.transaction:
-        with nullcontext():  # This allows use within `make` but decreases reliability
+        # 1. nullcontext() allows use within `make` but decreases reliability
+        # 2. cls.connection.transaction is more relaiable but throws errors if
+        # used within another transaction, i.e. in `make`
+
+        with nullcontext():  # TODO: ensure this block within transaction
             super().insert(cls(), master_entries, **kwargs)
             for part, part_entries in parts_entries.items():
                 part.insert(part_entries, **kwargs)
 
     @classmethod
-    def insert(cls, rows, **kwargs):
-        """Insert rows into merge table, ensuring db integrity and mutual exclusivity"""
+    def insert(cls, rows: list, **kwargs):
+        """Insert rows into merge table
+
+        Ensuring db integrity and mutual exclusivity
+
+        Parameters
+        ---------
+        rows: List[dict]
+            An iterable where an element is a dictionary.
+
+        Raises
+        ------
+        TypeError
+            If rows is not a list of dicts
+        ValueError
+            If entry already exists, mutual exclusivity errors
+            If data doesn't exist in part parents, integrity error
+        """
         cls._merge_insert(rows, **kwargs)
 
     @classmethod
-    def merge_view(cls, limit=None, width=None):
-        """Merged view, including null entries for columns unique to one part table."""
+    def merge_view(cls, restriction: str = True):
+        """Prints merged view, including null entries for unique columns.
+
+        Parameters
+        ---------
+        restriction: str, optional
+            Restriction to apply to the merged view
+        """
 
         # If we overwrite `preview`, we then encounter issues with operators
         # getting passed a `Union`, which doesn't have a method we can
         # intercept to manage master/parts
 
-        return pprint(cls._merge_repr())
+        return pprint(cls._merge_repr(restriction=restriction))
 
     @classmethod
-    def merge_html(cls):
-        """Returns HTML to display table in Jupyter notebook."""
-        print("WARNING: This method is untested")
-        return repr_html(cls._merge_repr())
+    def merge_html(cls, restriction: str = True):
+        """Displays HTML in notebooks."""
+        from IPython.core.display import HTML
+
+        HTML(repr_html(cls._merge_repr(restriction=restriction)))
 
     @classmethod
-    def merge_restrict(cls, restriction: str) -> dj.U:
+    def merge_restrict(cls, restriction: str = True) -> dj.U:
         """Given a restriction string, return a merged view with restriction applied.
 
         Example
@@ -269,7 +330,7 @@ class Merge(dj.Manual):
             {k: v}
             for entry in cls.merge_restrict(restriction).fetch("KEY")
             for k, v in entry.items()
-            if k == cls._reserved_pk
+            if k == cls()._reserved_pk
         ]
         (cls() & uuids).delete(**kwargs)
 
@@ -305,16 +366,21 @@ class Merge(dj.Manual):
             super().delete(part_parent, **kwargs)
 
 
-def delete_downstream_merge(table: dj.Table, dry_run=True, **kwargs) -> list:
-    """Given a table (or restriction), id or delete relevant downstream merge entries
+def delete_downstream_merge(
+    table: dj.Table, restriction: str = True, dry_run=True, **kwargs
+) -> list:
+    """Given a table/restriction, id or delete relevant downstream merge entries
 
     Parameters
     ----------
     table: dj.Table
         DataJoint table or restriction thereof
+    restriction: str
+        Optional restriction to apply before deletion from merge/part
+        tables. If not provided, delete all downstream entries.
     dry_run: bool
-        Default True. If true, return list of tuples, merge/part tables downstream of
-        table input. Otherwise, delete merge/part table entries.
+        Default True. If true, return list of tuples, merge/part tables
+        downstream of table input. Otherwise, delete merge/part table entries.
     kwargs: dict
         Additional keyword arguments for DataJoint delete.
 
@@ -323,22 +389,32 @@ def delete_downstream_merge(table: dj.Table, dry_run=True, **kwargs) -> list:
     List[Tuple[dj.Table, dj.Table]]
         Entries in merge/part tables downstream of table input.
     """
+    if not restriction:
+        restriction = True
 
     # Adapted from Spyglass PR 535
-    merge_pairs = [
-        (master, descendant)  # get each merge/part table
+    # dj.utils.get_master could maybe help here, but it uses names, not objs
+    merge_pairs = [  # get each merge/part table
+        (master, descendant.restrict(restriction))
         for descendant in table.descendants(as_objects=True)  # given tbl desc
         for master in descendant.parents(as_objects=True)  # and those parents
-        # if it is a part table (using a dunder not immediately after schema name)
+        # if is a part table (using a dunder not immediately after schema name)
         if "__" in descendant.full_table_name.replace("`.`__", "")
         # and it is not in not in direct descendants
         and master.full_table_name not in table.descendants(as_objects=False)
+        # and it uses our reserved primary key in attributes
+        and RESERVED_PRIMARY_KEY in master.heading.attributes.keys()
+    ]
+
+    # restrict the merge table based on uuids in part
+    merge_pairs = [
+        (merge & uuids, part)  # don't need part for del, but show on dry_run
+        for merge, part in merge_pairs
+        for uuids in part.fetch(RESERVED_PRIMARY_KEY, as_dict=True)
     ]
 
     if dry_run:
         return merge_pairs
 
-    for merge_table, part_table in merge_pairs:
-        keys = ((merge_table * part_table) & table.fetch()).fetch("KEY")
-        for entry in keys:
-            (merge_table & entry).delete(**kwargs)
+    for merge_table, _ in merge_pairs:
+        merge_table.delete(**kwargs)

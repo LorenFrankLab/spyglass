@@ -140,16 +140,8 @@ class LFPV1(dj.Computed):
         # finally, we insert this into the LFP output table.
         from spyglass.lfp.lfp_merge import LFPOutput
 
-        # lfp_id = uuid.uuid1()
-        # lfp_o_key = {"lfp_id": lfp_id, "source": "LFP", "version": 1}
-        # LFPOutput.insert1(lfp_o_key)
-        #
-        # orig_key.update(lfp_o_key)
-        # del orig_key["source"]
-        # del orig_key["version"]
         orig_key["analysis_file_name"] = lfp_file_name
         orig_key["lfp_object_id"] = lfp_object_id
-        # LFPOutput.LFPV1.insert1(orig_key)
         LFPOutput.insert1(orig_key)
 
     def fetch_nwb(self, *attrs, **kwargs):
