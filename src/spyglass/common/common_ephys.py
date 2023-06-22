@@ -241,7 +241,8 @@ class Raw(dj.Imported):
             assert isinstance(rawdata, pynwb.ecephys.ElectricalSeries)
         except (ValueError, AssertionError):
             warnings.warn(
-                f"Unable to get acquisition object in: {nwb_file_abspath}"
+                f"Unable to get acquisition object in: {nwb_file_abspath}\n\t"
+                + f"Skipping entry in {self.full_table_name}"
             )
             return
         if rawdata.rate is not None:
