@@ -1,5 +1,4 @@
 import copy
-import uuid
 
 import datajoint as dj
 import numpy as np
@@ -19,27 +18,6 @@ from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
 schema = dj.schema("lfp_v1")
 
 MIN_LFP_INTERVAL_DURATION = 1.0  # 1 second minimum interval duration
-
-
-@schema
-class LFPSelection(dj.Manual):
-    """The user's selection of LFP data to be filtered
-
-    This table is used to select the LFP data to be filtered.  The user can select
-    the LFP data by specifying the electrode group and the interval list to be used.
-    The interval list is used to select the times from the raw data that will be
-    filtered.  The user can also specify the filter to be used.
-
-    The LFP data is filtered and downsampled to 1 KHz.  The filtered data is stored
-    in the AnalysisNwbfile table.  The valid times for the filtered data are stored
-    in the IntervalList table.
-    """
-
-    definition = """
-     -> LFPElectrodeGroup                                                  # the group of electrodes to be filtered
-     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
-     -> FirFilterParameters                                                # the filter to be used
-     """
 
 
 @schema
@@ -161,16 +139,9 @@ class LFPV1(dj.Computed):
         # finally, we insert this into the LFP output table.
         from spyglass.lfp.lfp_merge import LFPOutput
 
-        lfp_id = uuid.uuid1()
-        lfp_o_key = {"lfp_id": lfp_id, "source": "LFP", "version": 1}
-        LFPOutput.insert1(lfp_o_key)
-
-        orig_key.update(lfp_o_key)
-        del orig_key["source"]
-        del orig_key["version"]
         orig_key["analysis_file_name"] = lfp_file_name
         orig_key["lfp_object_id"] = lfp_object_id
-        LFPOutput.LFPV1.insert1(orig_key)
+        LFPOutput.insert1(orig_key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
@@ -183,18 +154,6 @@ class LFPV1(dj.Computed):
             nwb_lfp["lfp"].data,
             index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
         )
-
-
-@schema
-class ImportedLFPV1(dj.Imported):
-    definition = """
-    -> Session                      # the session to which this LFP belongs
-    -> LFPElectrodeGroup            # the group of electrodes to be filtered
-    -> IntervalList # the original set of times to be filtered
-    lfp_object_id: varchar(40)      # the NWB object ID for loading this object from the file
-    ---
-    lfp_sampling_rate: float        # the sampling rate, in samples/sec
-    """
 
 
 @schema
@@ -246,3 +205,42 @@ class LFPElectrodeGroup(dj.Manual):
                 LFPElectrodeGroup().LFPElectrode.insert1(
                     lfpelectdict, skip_duplicates=True
                 )
+
+
+@schema
+class LFPSelection(dj.Manual):
+    """The user's selection of LFP data to be filtered
+
+    This table is used to select the LFP data to be filtered.  The user can select
+    the LFP data by specifying the electrode group and the interval list to be used.
+    The interval list is used to select the times from the raw data that will be
+    filtered.  The user can also specify the filter to be used.
+
+    The LFP data is filtered and downsampled to 1 KHz.  The filtered data is stored
+    in the AnalysisNwbfile table.  The valid times for the filtered data are stored
+    in the IntervalList table.
+    """
+
+    definition = """
+     -> LFPElectrodeGroup                                                  # the group of electrodes to be filtered
+     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
+     -> FirFilterParameters                                                # the filter to be used
+     """
+
+
+@schema
+class ImportedLFPV1(dj.Imported):
+    definition = """
+    -> Session                      # the session to which this LFP belongs
+    -> LFPElectrodeGroup            # the group of electrodes to be filtered
+    -> IntervalList # the original set of times to be filtered
+    lfp_object_id: varchar(40)      # the NWB object ID for loading this object from the file
+    ---
+    lfp_sampling_rate: float        # the sampling rate, in samples/sec
+    -> AnalysisNwbfile
+    """
+
+    def make(self, key):
+        raise NotImplementedError(
+            "For `insert`, use `allow_direct_insert=True`"
+        )
