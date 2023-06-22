@@ -1,45 +1,30 @@
 import datajoint as dj
 import pandas as pd
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp_band.v1.lfp_band import LFPBandV1  # noqa F401
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_merge_tables import Merge
 
 schema = dj.schema("lfp_band_merge")
 
 
 @schema
-class LFPBandOutput(dj.Manual):
+class LFPBandOutput(Merge):
     definition = """
-    lfp_band_id: uuid
+    merge_id: uuid
     ---
-    source: varchar(40)
-    version: int
-
+    source: varchar(32)
     """
 
     class LFPBandV1(dj.Part):
         definition = """
-        -> LFPBandOutput
-        -> LFPBandV1
+        -> master
         ---
-        -> AnalysisNwbfile
-        lfp_band_object_id: varchar(40)
+        -> LFPBandV1
         """
 
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
-
-        def fetch1_dataframe(self, *attrs, **kwargs):
-            filtered_nwb = self.fetch_nwb()[0]
-            return pd.DataFrame(
-                filtered_nwb["filtered_data"].data,
-                index=pd.Index(
-                    filtered_nwb["filtered_data"].timestamps, name="time"
-                ),
-            )
+    def fetch1_dataframe(self, *attrs, **kwargs):
+        filtered_nwb = self.fetch_nwb()[0]
+        return pd.DataFrame(
+            filtered_nwb["lfp_band"].data,
+            index=pd.Index(filtered_nwb["lfp_band"].timestamps, name="time"),
+        )
