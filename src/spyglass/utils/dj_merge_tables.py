@@ -7,6 +7,7 @@ from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, to_camel_case
+from IPython.core.display import HTML
 
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
@@ -69,10 +70,11 @@ class Merge(dj.Manual):
         if not restriction:
             restriction = True
 
+        # Normalize restriction to sql string
         restriction = make_condition(cls(), restriction, set())
 
-        # If the restriction makes ref to a source, we ony want that part
         parts_all = cls.parts(as_objects=True)
+        # If the restriction makes ref to a source, we only want that part
         if isinstance(restriction, str) and cls()._reserved_sk in restriction:
             parts_all = [
                 part
@@ -155,13 +157,17 @@ class Merge(dj.Manual):
         datajoint.expression.Union
         """
 
-        parts = cls._merge_restrict_parts(restriction=restriction)
+        parts = [
+            cls() * p  # join with master to include sec key (i.e., 'source')
+            for p in cls._merge_restrict_parts(restriction=restriction)
+        ]
 
         primary_attrs = list(
             dict.fromkeys(  # get all columns from parts
                 iter_chain.from_iterable([p.heading.names for p in parts])
             )
         )
+        # primary_attrs.append(cls()._reserved_sk)
         query = dj.U(*primary_attrs) * parts[0].proj(  # declare query
             ...,  # include all attributes from part 0
             **{
@@ -286,9 +292,8 @@ class Merge(dj.Manual):
     @classmethod
     def merge_html(cls, restriction: str = True):
         """Displays HTML in notebooks."""
-        from IPython.core.display import HTML
 
-        HTML(repr_html(cls._merge_repr(restriction=restriction)))
+        return HTML(repr_html(cls._merge_repr(restriction=restriction)))
 
     @classmethod
     def merge_restrict(cls, restriction: str = True) -> dj.U:
