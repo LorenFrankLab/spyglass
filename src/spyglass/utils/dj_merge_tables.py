@@ -9,6 +9,9 @@ from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, to_camel_case
 from IPython.core.display import HTML
 
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.utils.dj_helper_fn import fetch_nwb
+
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
 RESERVED_SK_LENGTH = 32
@@ -369,6 +372,24 @@ class Merge(dj.Manual):
         super().delete(cls(), **kwargs)
         for part_parent in part_parents:
             super().delete(part_parent, **kwargs)
+
+    def fetch_nwb(self, *attrs, **kwargs):
+        part_parents = self._merge_restrict_parents(
+            restriction=self.restriction, return_empties=False
+        )
+
+        if len(part_parents) == 1:
+            return fetch_nwb(
+                part_parents[0],
+                (AnalysisNwbfile, "analysis_file_abs_path"),
+                *attrs,
+                **kwargs,
+            )
+        else:
+            raise ValueError(
+                f"{len(part_parents)} possible sources found in Merge Table"
+                + part_parents
+            )
 
 
 def delete_downstream_merge(
