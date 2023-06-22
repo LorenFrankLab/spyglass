@@ -185,20 +185,12 @@ class RippleTimesV1(dj.Computed):
         # finally, we insert this into the LFP output table.
         from spyglass.ripple.ripple_merge import RippleTimesOutput
 
-        ripple_times_object_id = uuid.uuid1()
         ripple_times_output_key = {
-            "lfp_id": ripple_times_object_id,
-            "source": "LFP",
-            "version": 1,
+            "merge_id": uuid.uuid1(),
+            "analysis_file_name": key["analysis_file_name"],
+            "ripple_times_object_id": key["ripple_times_object_id"],
         }
         RippleTimesOutput.insert1(ripple_times_output_key)
-
-        key.update(ripple_times_output_key)
-        del key["source"]
-        del key["version"]
-
-        key["ripple_time_object_id"] = ripple_times_object_id
-        RippleTimesOutput.RippleTimesV1.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
@@ -216,7 +208,7 @@ class RippleTimesV1(dj.Computed):
     def get_ripple_lfps_and_position_info(key):
         nwb_file_name = key["nwb_file_name"]
         interval_list_name = key["target_interval_list_name"]
-        position_info_param_name = key["position_info_param_name"]
+
         ripple_params = (
             RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
         ).fetch1("ripple_param_dict")
@@ -230,7 +222,7 @@ class RippleTimesV1(dj.Computed):
         # warn/validate that there is only one wire per electrode
         lfp_key = copy.deepcopy(key)
         del lfp_key["interval_list_name"]
-        ripple_lfp_nwb = (LFPBandOutput.LFPBandV1 & lfp_key).fetch_nwb()[0]
+        ripple_lfp_nwb = (LFPBandOutput & lfp_key).fetch_nwb()[0]
         ripple_lfp_electrodes = ripple_lfp_nwb["filtered_data"].electrodes.data[
             :
         ]
