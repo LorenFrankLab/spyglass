@@ -306,7 +306,7 @@ class Merge(dj.Manual):
         Parameters
         ----------
         restriction: str
-            Restriction one would appy if `merge_view` was a real table.
+            Restriction one would apply if `merge_view` was a real table.
 
         Returns
         -------

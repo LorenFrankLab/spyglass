@@ -1,5 +1,4 @@
 import copy
-import uuid
 
 import datajoint as dj
 import numpy as np

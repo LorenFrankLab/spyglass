@@ -10,7 +10,7 @@ and related discussions [here](https://github.com/datajoint/datajoint-python/iss
 and [here](https://github.com/LorenFrankLab/spyglass/issues/469).
 
 **Note:** Deleting entries upstream of Merge Tables will throw errors related to
-deleteing a part entry before the master. To circumvent this, you can add
+deleting a part entry before the master. To circumvent this, you can add
 `force_parts=True` to the
 [`delete` function](https://datajoint.com/docs/core/datajoint-python/0.14/api/datajoint/__init__/#datajoint.table.Table.delete)
 call, but this will leave and orphaned primary key in the master. Instead, use
@@ -21,10 +21,10 @@ call, but this will leave and orphaned primary key in the master. Instead, use
 A Merge Table is fundametally a master table with one part for each divergent
 pipeline. By convention...
 
-1. The master table has one primary key, `merge_id`, a 
+1. The master table has one primary key, `merge_id`, a
    [UUID](https://en.wikipedia.org/wiki/Universally_unique_identifier), and one
-   secondary attribute, `source`, which gives the part table name. Both are 
-   managed with the custom `insert` function of this class. 
+   secondary attribute, `source`, which gives the part table name. Both are
+   managed with the custom `insert` function of this class.
 
 2. Each part table has inherits the final table in its respective pipeline, and
    shares the same name as this table.
@@ -62,12 +62,12 @@ The Merge class in Spyglass's utils is a subclass of DataJoint's
 and adds functions to make the awkwardness of part tables more manageable. These
 functions are described in the API section, under `utils.dj_merge_tables`.
 
-One quirk of these utilites is that they take restrictions as agruments, rather
-than with operators. So `Table & "field='value'"` becomes 
-`MergeTable.merge_view(restriction="field='value'"`)`. This is because 
+One quirk of these utilities is that they take restrictions as arguments, rather
+than with operators. So `Table & "field='value'"` becomes
+`MergeTable.merge_view(restriction="field='value'"`)`. This is because
 `merge_view` is a `Union` rather than a true Table.
 
-## Example 
+## Example
 
 First, we'll import various items related to the LFP Merge Table...
 
@@ -78,7 +78,7 @@ from spyglass.lfp.lfp_merge import LFPOutput  # Merge Table
 from spyglass.lfp.v1.lfp import LFPV1  # Upstream 2
 ```
 
-Merge Tables have multiple custom methods that begin with `merge`. `help` can 
+Merge Tables have multiple custom methods that begin with `merge`. `help` can
 show us the docstring of each
 
 ```python
@@ -130,18 +130,18 @@ nwb_key = LFPOutput.merge_restrict(nwb_file_dict).fetch(as_dict=True)[0]
 result2 = (LFPOutput & nwb_key).fetch_nwb()
 ```
 
-When deleting from Merge Tables, we can either... 
+When deleting from Merge Tables, we can either...
 
 1. delete from the Merge Table itself with `merge_delete`_parent, deleting both
-   the master and part. 
+   the master and part.
 2. use `merge_delete_parent` to delete from the parent sources, getting rid of
    the entries in the source table they came from.
-3. use `delete_downstream_merge` to find Merge Tables downstream and get rid 
-   full entries, avoiding orphaned master table entries. 
+3. use `delete_downstream_merge` to find Merge Tables downstream and get rid
+   full entries, avoiding orphaned master table entries.
 
 The two latter cases can be destructive, so we include an extra layer of
-protection with `dry_run`. When true (by default), these functions return 
-a list of tables with the entries that would otherwise be deleted. 
+protection with `dry_run`. When true (by default), these functions return
+a list of tables with the entries that would otherwise be deleted.
 
 ```python
 LFPOutput.merge_delete(common_keys[0])  # Delete from merge table
