@@ -7,7 +7,7 @@
     "python.formatting.provider": "none",
     "remote.SSH.remoteServerListenOnSocket": true,
     "git.confirmSync": false,
-    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.typeCheckingMode": "off",
     "[python]": {
         "editor.defaultFormatter": "ms-python.black-formatter"
     },
