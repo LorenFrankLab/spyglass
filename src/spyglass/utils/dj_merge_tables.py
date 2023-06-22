@@ -391,6 +391,10 @@ class Merge(dj.Manual):
                 + part_parents
             )
 
+    def get_part_table(self) -> dj.Table:
+        """Hacky way to retrieve the part table from a merge table with a single entry"""
+        return getattr(self, self.fetch1("source")) & self
+
 
 def delete_downstream_merge(
     table: dj.Table, restriction: str = True, dry_run=True, **kwargs
