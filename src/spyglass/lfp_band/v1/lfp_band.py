@@ -77,7 +77,7 @@ class LFPBandSelection(dj.Manual):
 
         lfp_key = {"merge_id": lfp_merge_id}
         lfp_output_table = LFPOutput & lfp_key
-        lfp_part_table = lfp_output_table.get_part_table()
+        lfp_part_table = lfp_output_table.merge_get_part()
         print(lfp_part_table)
 
         query = LFPElectrodeGroup().LFPElectrode() & lfp_key
@@ -180,7 +180,7 @@ class LFPBandV1(dj.Computed):
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
         lfp_key = {"merge_id": key["lfp_merge_id"]}
         lfp_output_table = LFPOutput & lfp_key
-        lfp_part_table = lfp_output_table.get_part_table()
+        lfp_part_table = lfp_output_table.merge_get_part()
         lfp_object = lfp_output_table.fetch_nwb()[0]["lfp"]
 
         # get the electrodes to be filtered and their references
