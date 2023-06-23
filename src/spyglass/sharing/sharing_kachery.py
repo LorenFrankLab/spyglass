@@ -198,8 +198,8 @@ class AnalysisNwbfileKachery(dj.Computed):
                         dest=linked_file_path,
                         kachery_zone_name=kachery_zone_name,
                     ):
-                    raise Exception(
-                        f"Linked file {linked_file_path} cannot be downloaded"
+                        raise Exception(
+                            f"Linked file {linked_file_path} cannot be downloaded"
                     )
         if not downloaded:
             raise Exception(f"{analysis_file_name} cannot be downloaded")
