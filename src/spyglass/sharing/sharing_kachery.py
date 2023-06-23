@@ -172,7 +172,7 @@ class AnalysisNwbfileKachery(dj.Computed):
             AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}
         ).fetch("analysis_file_uri", "kachery_zone_name")
 
-        for uri, zone in fetched_list:
+        for uri, kachery_zone_name in fetched_list:
             if len(uri) == 0:
                 return False
             print("uri:", uri)
