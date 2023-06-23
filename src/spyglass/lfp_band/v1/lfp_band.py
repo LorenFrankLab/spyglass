@@ -60,7 +60,7 @@ class LFPBandSelection(dj.Manual):
         ----------
         nwb_file_name: str
             The name of the NWB file containing the LFP data
-        merge_id: int
+        lfp_merge_id: int
             The uuid of the LFP data to be filtered
         electrode_list: list
             A list of the electrodes to be filtered
