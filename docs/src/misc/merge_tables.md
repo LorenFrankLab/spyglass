@@ -18,7 +18,7 @@ call, but this will leave and orphaned primary key in the master. Instead, use
 
 ## What
 
-A Merge Table is fundametally a master table with one part for each divergent
+A Merge Table is fundamentally a master table with one part for each divergent
 pipeline. By convention...
 
 1. The master table has one primary key, `merge_id`, a

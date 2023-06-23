@@ -18,7 +18,7 @@ RESERVED_SK_LENGTH = 32
 
 
 class Merge(dj.Manual):
-    """Adds funcs to support standart Merge table operations."""
+    """Adds funcs to support standard Merge table operations."""
 
     def __init__(self):
         super().__init__()
@@ -247,7 +247,7 @@ class Merge(dj.Manual):
                 )
 
         # 1. nullcontext() allows use within `make` but decreases reliability
-        # 2. cls.connection.transaction is more relaiable but throws errors if
+        # 2. cls.connection.transaction is more reliable but throws errors if
         # used within another transaction, i.e. in `make`
 
         with nullcontext():  # TODO: ensure this block within transaction
@@ -346,7 +346,7 @@ class Merge(dj.Manual):
     def merge_delete_parent(
         cls, restriction: str = True, dry_run=True, **kwargs
     ) -> list:
-        """Delete enties from merge master, part, and respective part parents
+        """Delete entries from merge master, part, and respective part parents
 
         Note: Clears merge entries from their respective parents.
 
@@ -443,7 +443,7 @@ class Merge(dj.Manual):
         Returns
         -------
         Union[ List[np.array], List[dict], List[pd.DataFrame] ]
-            Table contents, with type detrermined by kwargs
+            Table contents, with type determined by kwargs
         """
         results = []
         parts = cls()._merge_restrict_parts(
