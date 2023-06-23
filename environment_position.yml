@@ -31,7 +31,6 @@ dependencies:
   - ipython
   - matplotlib>=3.3
   - seaborn
-  - skan
   - bottleneck
   - ipympl
   - tqdm
