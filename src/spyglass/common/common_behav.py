@@ -1,22 +1,24 @@
 import os
+import pathlib
+from typing import Dict
+
 import datajoint as dj
 import ndx_franklab_novela
 import pandas as pd
 import pynwb
-import pathlib
-from typing import Dict
 
-from .common_ephys import Raw  # noqa: F401
-from .common_interval import IntervalList, interval_list_contains
-from .common_nwbfile import Nwbfile
-from .common_session import Session  # noqa: F401
-from .common_task import TaskEpoch
 from ..utils.dj_helper_fn import fetch_nwb
 from ..utils.nwb_helper_fn import (
     get_all_spatial_series,
     get_data_interface,
     get_nwb_file,
 )
+from .common_device import CameraDevice
+from .common_ephys import Raw  # noqa: F401
+from .common_interval import IntervalList, interval_list_contains
+from .common_nwbfile import Nwbfile
+from .common_session import Session  # noqa: F401
+from .common_task import TaskEpoch
 
 schema = dj.schema("common_behav")
 
@@ -188,6 +190,7 @@ class VideoFile(dj.Imported):
     -> TaskEpoch
     video_file_num = 0: int
     ---
+    camera_name: varchar(80)
     video_file_object_id: varchar(40)  # the object id of the file object
     """
 
@@ -195,13 +198,15 @@ class VideoFile(dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        video = get_data_interface(
+        videos = get_data_interface(
             nwbf, "video", pynwb.behavior.BehavioralEvents
         )
 
-        if video is None:
+        if videos is None:
             print(f"No video data interface found in {nwb_file_name}\n")
             return
+        else:
+            videos = videos.time_series
 
         # get the interval for the current TaskEpoch
         interval_list_name = (TaskEpoch() & key).fetch1("interval_list_name")
@@ -214,21 +219,46 @@ class VideoFile(dj.Imported):
         ).fetch1("valid_times")
 
         is_found = False
-        for video_obj in video.time_series.values():
-            # check to see if the times for this video_object are largely overlapping with the task epoch times
-            if len(
-                interval_list_contains(valid_times, video_obj.timestamps)
-                > 0.9 * len(video_obj.timestamps)
-            ):
-                key["video_file_object_id"] = video_obj.object_id
-                self.insert1(key)
-                is_found = True
+        for ind, video in enumerate(videos.values()):
+            if isinstance(video, pynwb.image.ImageSeries):
+                video = [video]
+            for video_obj in video:
+                # check to see if the times for this video_object are largely overlapping with the task epoch times
+                if len(
+                    interval_list_contains(valid_times, video_obj.timestamps)
+                    > 0.9 * len(video_obj.timestamps)
+                ):
+                    key["video_file_num"] = ind
+                    camera_name = video_obj.device.camera_name
+                    if CameraDevice & {"camera_name": camera_name}:
+                        key["camera_name"] = video_obj.device.camera_name
+                    else:
+                        raise KeyError(
+                            f"No camera with camera_name: {camera_name} found in CameraDevice table."
+                        )
+                    key["video_file_object_id"] = video_obj.object_id
+                    self.insert1(key)
+                    is_found = True
 
         if not is_found:
             print(f"No video found corresponding to epoch {interval_list_name}")
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
+
+    @classmethod
+    def update_entries(cls, restrict={}):
+        existing_entries = (cls & restrict).fetch("KEY")
+        for row in existing_entries:
+            if (cls & row).fetch1("camera_name"):
+                continue
+            video_nwb = (cls & row).fetch_nwb()[0]
+            if len(video_nwb) != 1:
+                raise ValueError(
+                    f"expecting 1 video file per entry, but {len(video_nwb)} files found"
+                )
+            row["camera_name"] = video_nwb[0]["video_file"].device.camera_name
+            cls.update1(row=row)
 
     @classmethod
     def get_abs_path(cls, key: Dict):

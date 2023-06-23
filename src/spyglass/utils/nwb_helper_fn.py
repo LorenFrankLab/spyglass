@@ -2,12 +2,12 @@
 
 import os
 import os.path
-from pathlib import Path
 import warnings
-import yaml
+from pathlib import Path
 
 import numpy as np
 import pynwb
+import yaml
 
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()

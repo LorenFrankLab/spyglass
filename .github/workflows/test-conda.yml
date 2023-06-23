@@ -1,4 +1,4 @@
-name: Run tests
+name: Test conda env and run tests
 
 on:
   push:
@@ -46,12 +46,9 @@ jobs:
         environment-file: environment.yml
         miniforge-variant: Mambaforge
         miniforge-version: latest
-    - name: Install test requirements
-      run: |
-        pip install -r requirements-dev.txt
     - name: Install spyglass
       run: |
-        pip install -e .
+        pip install -e .[test]
     - name: Run tests
       run: |
         pytest -rP  # env vars are set within certain tests
