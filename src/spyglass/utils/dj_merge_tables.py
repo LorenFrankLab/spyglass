@@ -18,7 +18,7 @@ RESERVED_SK_LENGTH = 32
 
 
 class Merge(dj.Manual):
-    """Adds funcs to support insert/delete/view of Merge tables."""
+    """Adds funcs to support standart Merge table operations."""
 
     def __init__(self):
         super().__init__()
@@ -257,7 +257,7 @@ class Merge(dj.Manual):
 
     @classmethod
     def insert(cls, rows: list, **kwargs):
-        """Insert rows into merge table
+        """Merges table specific insert
 
         Ensuring db integrity and mutual exclusivity
 
@@ -391,9 +391,79 @@ class Merge(dj.Manual):
                 + part_parents
             )
 
-    def get_part_table(self) -> dj.Table:
-        """Hacky way to retrieve the part table from a merge table with a single entry"""
-        return getattr(self, self.fetch1("source")) & self
+    def merge_get_part(
+        self, restriction: str = True, join_master: bool = False
+    ) -> dj.Table:
+        """Retrieve part table from a restricted Merge table
+
+        Parameters
+        ----------
+        restriction: str
+            Optional restriction to apply before determining part to return.
+            Default True.
+        join_master: bool
+            Default False. Joint part with Merge master to show uuid and source
+
+        Example
+        -------
+            >>> (MergeTable & restriction).get_part_table()
+            >>> MergeTable().merge_get_part(restriction, join_master=True)
+
+        Raises
+        ------
+        ValueError
+            If multiple sources are found, lists and suggests restricting
+        """
+        # Note: `get_part_table`->`merge_get_part` to keep prefix on methods
+        sources = self.restrict(restriction).fetch(self._reserved_sk)
+
+        if len(sources) != 1:
+            raise ValueError(
+                f"Found multiple potential parts: {sources}\n\t"
+                + "Try adding a restriction before invoking `get_part`."
+            )
+
+        if False:  # Original: & here does nothing bc no unique pk on master
+            return getattr(self, sources[0]) & self
+
+        if join_master:  # Alt: Master * Part shows source
+            return self * getattr(self, sources[0])
+        else:  # Current default aligns with func name
+            return getattr(self, sources[0])()
+
+    @classmethod
+    def merge_fetch(cls, *attrs, **kwargs) -> list:
+        """Perform a fetch across all parts. If >1 result, return as a list.
+
+        Parameters
+        ----------
+        attrs, kwargs
+            arguments passed to DataJoint `fetch` call
+
+        Returns
+        -------
+        Union[ List[np.array], List[dict], List[pd.DataFrame] ]
+            Table contents, with type detrermined by kwargs
+        """
+        results = []
+        parts = cls()._merge_restrict_parts(
+            restriction=cls._restriction, return_empties=False
+        )
+
+        for part in parts:
+            try:
+                results.extend(part.fetch(*attrs, **kwargs))
+            except DataJointError as e:
+                print(
+                    f"WARNING: {e.args[0]} Skipping "
+                    + to_camel_case(part.table_name.split("__")[-1])
+                )
+
+        # Note: this could collapse results like merge_view, but user may call
+        # for recarray, pd.DataFrame, or dict, and fetched contents differ if
+        # attrs or "KEY" called. Intercept format, merge, and then transform?
+
+        return results[0] if len(results) == 1 else results
 
 
 def delete_downstream_merge(
