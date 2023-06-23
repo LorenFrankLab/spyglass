@@ -21,7 +21,7 @@
         <link rel="next" href="../position_dlc_position/">
       
       <link rel="icon" href="../../../../../../images/Spyglass.svg">
-      <meta name="generator" content="mkdocs-1.4.3, mkdocs-material-9.1.16">
+      <meta name="generator" content="mkdocs-1.4.3, mkdocs-material-9.1.17">
     
     
       
@@ -4156,9 +4156,7 @@ closest timestamps from the neural recording via the trodes time.</p>
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/common/common_behav.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 73</span>
-<span class="normal"> 74</span>
-<span class="normal"> 75</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 75</span>
 <span class="normal"> 76</span>
 <span class="normal"> 77</span>
 <span class="normal"> 78</span>
@@ -4199,7 +4197,9 @@ closest timestamps from the neural recording via the trodes time.</p>
 <span class="normal">113</span>
 <span class="normal">114</span>
 <span class="normal">115</span>
-<span class="normal">116</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">RawPosition</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Imported</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 
@@ -7981,9 +7981,7 @@ If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrame
 
         <details class="quote">
           <summary>Source code in <code>src/spyglass/common/common_behav.py</code></summary>
-          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">176</span>
-<span class="normal">177</span>
-<span class="normal">178</span>
+          <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">178</span>
 <span class="normal">179</span>
 <span class="normal">180</span>
 <span class="normal">181</span>
@@ -8073,7 +8071,37 @@ If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrame
 <span class="normal">265</span>
 <span class="normal">266</span>
 <span class="normal">267</span>
-<span class="normal">268</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@schema</span>
 <span class="k">class</span> <span class="nc">VideoFile</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Imported</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 
@@ -8088,6 +8116,7 @@ If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrame
 <span class="s2">    -&gt; TaskEpoch</span>
 <span class="s2">    video_file_num = 0: int</span>
 <span class="s2">    ---</span>
+<span class="s2">    camera_name: varchar(80)</span>
 <span class="s2">    video_file_object_id: varchar(40)  # the object id of the file object</span>
 <span class="s2">    &quot;&quot;&quot;</span>
 
@@ -8095,13 +8124,15 @@ If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrame
         <span class="n">nwb_file_name</span> <span class="o">=</span> <span class="n">key</span><span class="p">[</span><span class="s2">&quot;nwb_file_name&quot;</span><span class="p">]</span>
         <span class="n">nwb_file_abspath</span> <span class="o">=</span> <span class="n">Nwbfile</span><span class="o">.</span><span class="n">get_abs_path</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
         <span class="n">nwbf</span> <span class="o">=</span> <span class="n">get_nwb_file</span><span class="p">(</span><span class="n">nwb_file_abspath</span><span class="p">)</span>
-        <span class="n">video</span> <span class="o">=</span> <span class="n">get_data_interface</span><span class="p">(</span>
+        <span class="n">videos</span> <span class="o">=</span> <span class="n">get_data_interface</span><span class="p">(</span>
             <span class="n">nwbf</span><span class="p">,</span> <span class="s2">&quot;video&quot;</span><span class="p">,</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">behavior</span><span class="o">.</span><span class="n">BehavioralEvents</span>
         <span class="p">)</span>
 
-        <span class="k">if</span> <span class="n">video</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">videos</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No video data interface found in </span><span class="si">{</span><span class="n">nwb_file_name</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="k">return</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">videos</span> <span class="o">=</span> <span class="n">videos</span><span class="o">.</span><span class="n">time_series</span>
 
         <span class="c1"># get the interval for the current TaskEpoch</span>
         <span class="n">interval_list_name</span> <span class="o">=</span> <span class="p">(</span><span class="n">TaskEpoch</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s2">&quot;interval_list_name&quot;</span><span class="p">)</span>
@@ -8114,21 +8145,46 @@ If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrame
         <span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s2">&quot;valid_times&quot;</span><span class="p">)</span>
 
         <span class="n">is_found</span> <span class="o">=</span> <span class="kc">False</span>
-        <span class="k">for</span> <span class="n">video_obj</span> <span class="ow">in</span> <span class="n">video</span><span class="o">.</span><span class="n">time_series</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
-            <span class="c1"># check to see if the times for this video_object are largely overlapping with the task epoch times</span>
-            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span>
-                <span class="n">interval_list_contains</span><span class="p">(</span><span class="n">valid_times</span><span class="p">,</span> <span class="n">video_obj</span><span class="o">.</span><span class="n">timestamps</span><span class="p">)</span>
-                <span class="o">&gt;</span> <span class="mf">0.9</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">video_obj</span><span class="o">.</span><span class="n">timestamps</span><span class="p">)</span>
-            <span class="p">):</span>
-                <span class="n">key</span><span class="p">[</span><span class="s2">&quot;video_file_object_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">video_obj</span><span class="o">.</span><span class="n">object_id</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
-                <span class="n">is_found</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">for</span> <span class="n">ind</span><span class="p">,</span> <span class="n">video</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">videos</span><span class="o">.</span><span class="n">values</span><span class="p">()):</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">video</span><span class="p">,</span> <span class="n">pynwb</span><span class="o">.</span><span class="n">image</span><span class="o">.</span><span class="n">ImageSeries</span><span class="p">):</span>
+                <span class="n">video</span> <span class="o">=</span> <span class="p">[</span><span class="n">video</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">video_obj</span> <span class="ow">in</span> <span class="n">video</span><span class="p">:</span>
+                <span class="c1"># check to see if the times for this video_object are largely overlapping with the task epoch times</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span>
+                    <span class="n">interval_list_contains</span><span class="p">(</span><span class="n">valid_times</span><span class="p">,</span> <span class="n">video_obj</span><span class="o">.</span><span class="n">timestamps</span><span class="p">)</span>
+                    <span class="o">&gt;</span> <span class="mf">0.9</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">video_obj</span><span class="o">.</span><span class="n">timestamps</span><span class="p">)</span>
+                <span class="p">):</span>
+                    <span class="n">key</span><span class="p">[</span><span class="s2">&quot;video_file_num&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ind</span>
+                    <span class="n">camera_name</span> <span class="o">=</span> <span class="n">video_obj</span><span class="o">.</span><span class="n">device</span><span class="o">.</span><span class="n">camera_name</span>
+                    <span class="k">if</span> <span class="n">CameraDevice</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s2">&quot;camera_name&quot;</span><span class="p">:</span> <span class="n">camera_name</span><span class="p">}:</span>
+                        <span class="n">key</span><span class="p">[</span><span class="s2">&quot;camera_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">video_obj</span><span class="o">.</span><span class="n">device</span><span class="o">.</span><span class="n">camera_name</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">&quot;No camera with camera_name: </span><span class="si">{</span><span class="n">camera_name</span><span class="si">}</span><span class="s2"> found in CameraDevice table.&quot;</span>
+                        <span class="p">)</span>
+                    <span class="n">key</span><span class="p">[</span><span class="s2">&quot;video_file_object_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">video_obj</span><span class="o">.</span><span class="n">object_id</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">insert1</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+                    <span class="n">is_found</span> <span class="o">=</span> <span class="kc">True</span>
 
         <span class="k">if</span> <span class="ow">not</span> <span class="n">is_found</span><span class="p">:</span>
             <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No video found corresponding to epoch </span><span class="si">{</span><span class="n">interval_list_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
         <span class="k">return</span> <span class="n">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="p">(</span><span class="n">Nwbfile</span><span class="p">,</span> <span class="s2">&quot;nwb_file_abs_path&quot;</span><span class="p">),</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">update_entries</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">restrict</span><span class="o">=</span><span class="p">{}):</span>
+        <span class="n">existing_entries</span> <span class="o">=</span> <span class="p">(</span><span class="bp">cls</span> <span class="o">&amp;</span> <span class="n">restrict</span><span class="p">)</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s2">&quot;KEY&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">existing_entries</span><span class="p">:</span>
+            <span class="k">if</span> <span class="p">(</span><span class="bp">cls</span> <span class="o">&amp;</span> <span class="n">row</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s2">&quot;camera_name&quot;</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">video_nwb</span> <span class="o">=</span> <span class="p">(</span><span class="bp">cls</span> <span class="o">&amp;</span> <span class="n">row</span><span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">video_nwb</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;expecting 1 video file per entry, but </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">video_nwb</span><span class="p">)</span><span class="si">}</span><span class="s2"> files found&quot;</span>
+                <span class="p">)</span>
+            <span class="n">row</span><span class="p">[</span><span class="s2">&quot;camera_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">video_nwb</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;video_file&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">device</span><span class="o">.</span><span class="n">camera_name</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">update1</span><span class="p">(</span><span class="n">row</span><span class="o">=</span><span class="n">row</span><span class="p">)</span>
 
     <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">get_abs_path</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="n">Dict</span><span class="p">):</span>
@@ -8250,42 +8306,42 @@ If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrame
 
       <details class="quote">
         <summary>Source code in <code>src/spyglass/common/common_behav.py</code></summary>
-        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">233</span>
-<span class="normal">234</span>
-<span class="normal">235</span>
-<span class="normal">236</span>
-<span class="normal">237</span>
-<span class="normal">238</span>
-<span class="normal">239</span>
-<span class="normal">240</span>
-<span class="normal">241</span>
-<span class="normal">242</span>
-<span class="normal">243</span>
-<span class="normal">244</span>
-<span class="normal">245</span>
-<span class="normal">246</span>
-<span class="normal">247</span>
-<span class="normal">248</span>
-<span class="normal">249</span>
-<span class="normal">250</span>
-<span class="normal">251</span>
-<span class="normal">252</span>
-<span class="normal">253</span>
-<span class="normal">254</span>
-<span class="normal">255</span>
-<span class="normal">256</span>
-<span class="normal">257</span>
-<span class="normal">258</span>
-<span class="normal">259</span>
-<span class="normal">260</span>
-<span class="normal">261</span>
-<span class="normal">262</span>
-<span class="normal">263</span>
+        <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">263</span>
 <span class="normal">264</span>
 <span class="normal">265</span>
 <span class="normal">266</span>
 <span class="normal">267</span>
-<span class="normal">268</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@classmethod</span>
 <span class="k">def</span> <span class="nf">get_abs_path</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="n">Dict</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the absolute path for a stored video file given a key with the nwb_file_name and epoch number</span>
 
@@ -8714,7 +8770,7 @@ which is returned with timestamps and their matching video frame index</p>
     <script id="__config" type="application/json">{"base": "../../../../../..", "features": ["toc.integrate", "navigation.sections", "navigation.expand", "navigation.top", "navigation.instant", "navigation.tracking", "navigation.top", "search.suggest", "search.share", "navigation.footer"], "search": "../../../../../../assets/javascripts/workers/search.208ed371.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../../../../../assets/javascripts/bundle.a51614de.min.js"></script>
+      <script src="../../../../../../assets/javascripts/bundle.b425cdc4.min.js"></script>
       
     
   </body>
