@@ -18,7 +18,7 @@ call, but this will leave and orphaned primary key in the master. Instead, use
 
 ## What
 
-A Merge Table is fundametally a master table with one part for each divergent
+A Merge Table is fundamentally a master table with one part for each divergent
 pipeline. By convention...
 
 1. The master table has one primary key, `merge_id`, a
@@ -128,6 +128,17 @@ result1 = restrict.fetch_nwb()
 
 nwb_key = LFPOutput.merge_restrict(nwb_file_dict).fetch(as_dict=True)[0]
 result2 = (LFPOutput & nwb_key).fetch_nwb()
+```
+
+There are also functions for retrieving part table(s) and fetching data. This
+`fetch` will collect all relevant entries and return them as a list in the
+format specified by keyword arguments and one's DataJoint config.
+
+```python
+result3 = (LFPOutput & common_keys[0]).merge_get_part(join_master=True)
+result4 = LFPOutput().merge_get_part(restriction=common_keys[0])
+result5 = LFPOutput.merge_fetch("filter_name", "nwb_file_name")
+result6 = LFPOutput.merge_fetch(as_dict=True)
 ```
 
 When deleting from Merge Tables, we can either...
