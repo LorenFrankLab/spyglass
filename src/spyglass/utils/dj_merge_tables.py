@@ -419,11 +419,11 @@ class Merge(dj.Manual):
             Optional restriction to apply before determining part to return.
             Default True.
         join_master: bool
-            Join part with Merge master to show source field. Default False. 
-        restrict_part: bool 
-            Apply restriction to part. Default True. If False, return the 
+            Join part with Merge master to show source field. Default False.
+        restrict_part: bool
+            Apply restriction to part. Default True. If False, return the
             native part table.
-            
+
 
         Example
         -------
