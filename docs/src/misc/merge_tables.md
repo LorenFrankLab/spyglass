@@ -181,7 +181,7 @@ result8 = LFPOutput.merge_fetch(as_dict=True)
 
 When deleting from Merge Tables, we can either...
 
-1. delete from the Merge Table itself with `merge_delete_part`, deleting both
+1. delete from the Merge Table itself with `merge_delete`, deleting both
    the master and part.
 
 2. use `merge_delete_parent` to delete from the parent sources, getting rid of
