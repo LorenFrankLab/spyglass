@@ -402,9 +402,16 @@ class Merge(dj.Manual):
             )
 
     def merge_get_part(
-        self, restriction: dict = True, join_master: bool = False
+        self,
+        restriction: dict = True,
+        join_master: bool = False,
+        restrict_part=True,
     ) -> dj.Table:
-        """Retrieve part table from a restricted Merge table
+        """Retrieve part table from a restricted Merge table.
+
+        Note: This returns the whole unrestricted part table. The provided
+        restriction is only used to identify the relevant part as a native
+        table.
 
         Parameters
         ----------
@@ -412,7 +419,11 @@ class Merge(dj.Manual):
             Optional restriction to apply before determining part to return.
             Default True.
         join_master: bool
-            Default False. Join part with Merge master to show uuid and source
+            Join part with Merge master to show source field. Default False. 
+        restrict_part: bool 
+            Apply restriction to part. Default True. If False, return the 
+            native part table.
+            
 
         Example
         -------
@@ -424,8 +435,13 @@ class Merge(dj.Manual):
         ValueError
             If multiple sources are found, lists and suggests restricting
         """
-        # Note: `get_part_table`->`merge_get_part` to keep prefix on methods
-        sources = self.restrict(restriction).fetch(self._reserved_sk)
+
+        sources = [
+            to_camel_case(n.split("__")[-1].strip("`"))  # friendly part name
+            for n in self._merge_restrict_parts(
+                restriction=restriction, as_objects=False, return_empties=False
+            )
+        ]
 
         if len(sources) != 1:
             raise ValueError(
@@ -433,10 +449,13 @@ class Merge(dj.Manual):
                 + "Try adding a restriction before invoking `get_part`."
             )
 
-        if join_master:  # Alt: Master * Part shows source
-            return self * getattr(self, sources[0])
-        else:  # Current default aligns with func name
-            return getattr(self, sources[0])()
+        part = (
+            getattr(self, sources[0])().restrict(restriction)
+            if restrict_part  # Re-apply restriction or don't
+            else getattr(self, sources[0])()
+        )
+
+        return self * part if join_master else part
 
     @classmethod
     def merge_get_parent(

@@ -136,11 +136,11 @@ LFPV1.populate(lfpv1_key)  # Also populates LFPOutput
 The Merge Table can also be populated with keys from `common_ephys.LFP`.
 
 ```python
-common_keys = CommonLFP.fetch(limit=3, as_dict=True) # CH61
-LFPOutput.insert1(common_keys[0], skip_duplicates=True)
-LFPOutput.insert(common_keys[1:], skip_duplicates=True)
-common_keys = CommonLFP.fetch(limit=3, offset=80, as_dict=True) # J16
-LFPOutput.insert(common_keys, skip_duplicates=True)
+common_keys_CH = CommonLFP.fetch(limit=3, as_dict=True) # CH61
+LFPOutput.insert1(common_keys_CH[0], skip_duplicates=True)
+LFPOutput.insert(common_keys_CH[1:], skip_duplicates=True)
+common_keys_J1 = CommonLFP.fetch(limit=3, offset=80, as_dict=True) # J16
+LFPOutput.insert(common_keys_J1, skip_duplicates=True)
 ```
 
 `merge_view` shows a union of the master and all part tables.
@@ -171,8 +171,8 @@ There are also functions for retrieving part/parent table(s) and fetching data.
    the format specified by keyword arguments and one's DataJoint config.
 
 ```python
-result3 = (LFPOutput & common_keys[0]).merge_get_part(join_master=True)
-result4 = LFPOutput().merge_get_part(restriction=common_keys[0])
+result3 = (LFPOutput & common_keys_CH[0]).merge_get_part(join_master=True)
+result4 = LFPOutput().merge_get_part(restriction=common_keys_CH[0])
 result5 = LFPOutput.merge_get_parent(restriction='nwb_file_name LIKE "CH%"')
 result6 = result5.fetch('lfp_sampling_rate') # Sample rate for all CH* files
 result7 = LFPOutput.merge_fetch("filter_name", "nwb_file_name")
@@ -195,9 +195,9 @@ protection with `dry_run`. When true (by default), these functions return
 a list of tables with the entries that would otherwise be deleted.
 
 ```python
-LFPOutput.merge_delete(common_keys[0])  # Delete from merge table
+LFPOutput.merge_delete(common_keys_CH[0])  # Delete from merge table
 LFPOutput.merge_delete_parent(restriction=nwb_file_dict, dry_run=True)
 delete_downstream_merge(
-    table=CommonLFP, restriction=common_keys[0], dry_run=True
+    table=CommonLFP, restriction=common_keys_CH[0], dry_run=True
 )
 ```
