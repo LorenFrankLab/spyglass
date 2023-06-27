@@ -310,7 +310,7 @@ class Merge(dj.Manual):
 
     @classmethod
     def merge_restrict(cls, restriction: dict = True) -> dj.U:
-        """Given a restriction string, return a merged view with restriction applied.
+        """Given a restriction, return a merged view with restriction applied.
 
         Example
         -------
@@ -508,6 +508,12 @@ class Merge(dj.Manual):
         # attrs or "KEY" called. Intercept format, merge, and then transform?
 
         return results[0] if len(results) == 1 else results
+
+
+_Merge = Merge
+
+# Underscore as class name avoids errors when this included in a Diagram
+# Aliased because underscore otherwise excludes from API docs.
 
 
 def delete_downstream_merge(

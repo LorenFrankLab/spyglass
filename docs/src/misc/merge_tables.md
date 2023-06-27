@@ -30,10 +30,10 @@ pipeline. By convention...
    shares the same name as this table.
 
 ```python
-from spyglass.utils.dj_merge_tables import Merge
+from spyglass.utils.dj_merge_tables import _Merge
 
 @schema
-class MergeTable(Merge):
+class MergeTable(_Merge):
     definition = """
     merge_id: uuid
     ---
@@ -55,14 +55,18 @@ class MergeTable(Merge):
         """
 ```
 
+![Merge diagram](../images/merge_diagram.png)
+
 ## How
 
 ### Merging
 
-The Merge class in Spyglass's utils is a subclass of DataJoint's
-[Manual Table](https://datajoint.com/docs/core/design/tables/tiers/#data-entry-lookup-and-manual)
-and adds functions to make the awkwardness of part tables more manageable. These
-functions are described in the API section, under `utils.dj_merge_tables`.
+The Merge class in Spyglass's utils is a subclass of DataJoint's [Manual
+Table](https://datajoint.com/docs/core/design/tables/tiers/#data-entry-lookup-and-manual)
+and adds functions to make the awkwardness of part tables more manageable.
+These functions are described in the
+[API section](../../api/src/spyglass/utils/dj_merge_tables/), under
+`utils.dj_merge_tables`.
 
 ### Restricting
 
@@ -70,8 +74,8 @@ One quirk of these utilities is that they take restrictions as arguments,
 rather than with operators. So `Table & "field='value'"` becomes
 `MergeTable.merge_view(restriction={'field':'value}`). This is because
 `merge_view` is a `Union` rather than a true Table. While `merge_view` can
-accept all valid restrictions, `merge_get_part` and `merge_get_parent` have 
-additional restriction logic when supplied with `dicts`. 
+accept all valid restrictions, `merge_get_part` and `merge_get_parent` have
+additional restriction logic when supplied with `dicts`.
 
 ### Building Downstream
 
@@ -79,13 +83,13 @@ A downstream analysis will ideally be able to use all diverget piplelines
 interchangeably. If there are parameters that may be required for downstream
 processing, they should be included in the final table of the pipeline. In the
 example above, both `One` and `Two` might have a secondary key `params`. A
-downstream Computed table could do the following: 
+downstream Computed table could do the following:
 
-```python 
+```python
 def make(self, key):
     try:
         params = MergeTable.merge_get_parent(restriction=key).fetch('params')
-    except DataJointError: 
+    except DataJointError:
         params = default_params
     processed_data = self.processing_func(key, params)
 ```
@@ -136,6 +140,7 @@ common_keys = CommonLFP.fetch(limit=3, as_dict=True) # CH61
 LFPOutput.insert1(common_keys[0], skip_duplicates=True)
 LFPOutput.insert(common_keys[1:], skip_duplicates=True)
 common_keys = CommonLFP.fetch(limit=3, offset=80, as_dict=True) # J16
+LFPOutput.insert(common_keys, skip_duplicates=True)
 ```
 
 `merge_view` shows a union of the master and all part tables.
@@ -160,7 +165,7 @@ result2 = (LFPOutput & nwb_key).fetch_nwb()
 There are also functions for retrieving part/parent table(s) and fetching data.
 
 1. These `get` functions will either return the part table of the Merge table or
-   the parent table with the source information for that part. 
+   the parent table with the source information for that part.
 
 2. This `fetch` will collect all relevant entries and return them as a list in
    the format specified by keyword arguments and one's DataJoint config.
@@ -176,7 +181,7 @@ result8 = LFPOutput.merge_fetch(as_dict=True)
 
 When deleting from Merge Tables, we can either...
 
-1. delete from the Merge Table itself with `merge_delete`_parent, deleting both
+1. delete from the Merge Table itself with `merge_delete_part`, deleting both
    the master and part.
 
 2. use `merge_delete_parent` to delete from the parent sources, getting rid of
