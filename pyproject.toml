@@ -14,6 +14,7 @@ authors = [
     { name = "Eric Denovellis", email = "eric.denovellis@ucsf.edu" },
     { name = "Ryan Ly", email = "rly@lbl.gov" },
     { name = "Daniel Gramling", email = "daniel.gramling@ucsf.edu" },
+    { name = "Chris Brozdowski", email = "chris.broz@ucsf.edu" },
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -77,6 +78,7 @@ test = [
     "kachery-cloud",
 ]
 docs = [
+    "hatch",                 # Get version from env 
     "mike",                  # Docs versioning
     "mkdocs",                # Docs core
     "mkdocs-exclude",        # Docs exclude files

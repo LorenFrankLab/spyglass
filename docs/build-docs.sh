@@ -11,7 +11,7 @@ cp -r ./notebooks/ ./docs/src/
 cp -r ./notebook-images ./docs/src/notebooks
 
 # Get major version
-FULL_VERSION=$(git describe --abbrev=0) # Most recent tag
+FULL_VERSION=$(hatch version) # Most recent tag
 export MAJOR_VERSION="${FULL_VERSION%.*}"
 echo "$MAJOR_VERSION"
 
