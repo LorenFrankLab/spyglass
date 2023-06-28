@@ -15,9 +15,10 @@ theme:
   logo: images/FrankLab.png
   favicon: images/Spyglass.svg
   features:
-    - toc.integrate
-    - navigation.sections
-    - navigation.expand
+    - toc.follow
+    # - navigation.expand # CBroz1: removed bc long tutorial list hides rest
+    # - toc.integrate
+    # - navigation.sections
     - navigation.top
     - navigation.instant # saves loading time - 1 browser page
     - navigation.tracking # even with above, changes URL by section
@@ -25,6 +26,7 @@ theme:
     - search.suggest
     - search.share
     - navigation.footer
+    - content.code.copy
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: auto
@@ -47,6 +49,11 @@ nav:
       - Home: installation/index.md
       - Local: installation/local.md
       - Productions: installation/production.md
+  - Miscellaneous:
+      - FigURL: misc/figurl_views.md
+      - Session Groups: misc/session_groups.md
+      - Insert Data: misc/insert_data.md
+      - Merge Tables: misc/merge_tables.md
   - Tutorials:
       - Introduction: notebooks/00_intro.ipynb
       - Spike Sorting: notebooks/01_spikesorting.ipynb
@@ -67,10 +74,6 @@ nav:
       - Spyglass Kachery Setup: notebooks/Spyglass_kachery_setup.ipynb
   - API Reference: api/ # defer to gen-files + literate-nav
   - How to Contribute: contribute.md
-  - Miscellaneous:
-      - FigURL: misc/figurl_views.md
-      - Session Groups: misc/session_groups.md
-      - Insert Data: misc/insert_data.md
   - Change Log: CHANGELOG.md
   - Copyright: LICENSE.md
 
@@ -87,6 +90,7 @@ plugins:
       canonical_version: latest
       css_dir: stylesheets
   - mkdocstrings:
+      enabled: true # Set to false to reduce build time
       default_handler: python
       handlers:
         python:
@@ -95,9 +99,6 @@ plugins:
             group_by_category: false
             line_length: 80
             docstring_style: numpy
-          selection:
-            docstring_style: numpy
-      enabled: true # Set to false to reduce build time
       watch:
         - src/spyglass/
   - literate-nav:
@@ -117,6 +118,13 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
 
 extra:
   generator: false # Disable watermark

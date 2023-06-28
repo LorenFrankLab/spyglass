@@ -30,10 +30,10 @@ pipeline. By convention...
    shares the same name as this table.
 
 ```python
-from spyglass.utils.dj_merge_tables import Merge
+from spyglass.utils.dj_merge_tables import _Merge
 
 @schema
-class MergeTable(Merge):
+class MergeTable(_Merge):
     definition = """
     merge_id: uuid
     ---
@@ -55,17 +55,47 @@ class MergeTable(Merge):
         """
 ```
 
+![Merge diagram](../images/merge_diagram.png)
+
 ## How
 
-The Merge class in Spyglass's utils is a subclass of DataJoint's
-[Manual Table](https://datajoint.com/docs/core/design/tables/tiers/#data-entry-lookup-and-manual)
-and adds functions to make the awkwardness of part tables more manageable. These
-functions are described in the API section, under `utils.dj_merge_tables`.
+### Merging
 
-One quirk of these utilities is that they take restrictions as arguments, rather
-than with operators. So `Table & "field='value'"` becomes
-`MergeTable.merge_view(restriction="field='value'"`)`. This is because
-`merge_view` is a `Union` rather than a true Table.
+The Merge class in Spyglass's utils is a subclass of DataJoint's [Manual
+Table](https://datajoint.com/docs/core/design/tables/tiers/#data-entry-lookup-and-manual)
+and adds functions to make the awkwardness of part tables more manageable.
+These functions are described in the
+[API section](../../api/src/spyglass/utils/dj_merge_tables/), under
+`utils.dj_merge_tables`.
+
+### Restricting
+
+One quirk of these utilities is that they take restrictions as arguments,
+rather than with operators. So `Table & "field='value'"` becomes
+`MergeTable.merge_view(restriction={'field':'value}`). This is because
+`merge_view` is a `Union` rather than a true Table. While `merge_view` can
+accept all valid restrictions, `merge_get_part` and `merge_get_parent` have
+additional restriction logic when supplied with `dicts`.
+
+### Building Downstream
+
+A downstream analysis will ideally be able to use all diverget pipelines
+interchangeably. If there are parameters that may be required for downstream
+processing, they should be included in the final table of the pipeline. In the
+example above, both `One` and `Two` might have a secondary key `params`. A
+downstream Computed table could do the following:
+
+```python
+def make(self, key):
+    try:
+        params = MergeTable.merge_get_parent(restriction=key).fetch('params')
+    except DataJointError:
+        params = default_params
+    processed_data = self.processing_func(key, params)
+```
+
+Note that the `try/except` above catches a possible error in the event `params`
+is not present in the parent.
 
 ## Example
 
@@ -106,9 +136,11 @@ LFPV1.populate(lfpv1_key)  # Also populates LFPOutput
 The Merge Table can also be populated with keys from `common_ephys.LFP`.
 
 ```python
-common_keys = CommonLFP.fetch(limit=3, as_dict=True)
-LFPOutput.insert1(common_keys[0], skip_duplicates=True)
-LFPOutput.insert(common_keys[1:], skip_duplicates=True)
+common_keys_CH = CommonLFP.fetch(limit=3, as_dict=True) # CH61
+LFPOutput.insert1(common_keys_CH[0], skip_duplicates=True)
+LFPOutput.insert(common_keys_CH[1:], skip_duplicates=True)
+common_keys_J1 = CommonLFP.fetch(limit=3, offset=80, as_dict=True) # J16
+LFPOutput.insert(common_keys_J1, skip_duplicates=True)
 ```
 
 `merge_view` shows a union of the master and all part tables.
@@ -130,23 +162,31 @@ nwb_key = LFPOutput.merge_restrict(nwb_file_dict).fetch(as_dict=True)[0]
 result2 = (LFPOutput & nwb_key).fetch_nwb()
 ```
 
-There are also functions for retrieving part table(s) and fetching data. This
-`fetch` will collect all relevant entries and return them as a list in the
-format specified by keyword arguments and one's DataJoint config.
+There are also functions for retrieving part/parent table(s) and fetching data.
+
+1. These `get` functions will either return the part table of the Merge table or
+   the parent table with the source information for that part.
+
+2. This `fetch` will collect all relevant entries and return them as a list in
+   the format specified by keyword arguments and one's DataJoint config.
 
 ```python
-result3 = (LFPOutput & common_keys[0]).merge_get_part(join_master=True)
-result4 = LFPOutput().merge_get_part(restriction=common_keys[0])
-result5 = LFPOutput.merge_fetch("filter_name", "nwb_file_name")
-result6 = LFPOutput.merge_fetch(as_dict=True)
+result3 = (LFPOutput & common_keys_CH[0]).merge_get_part(join_master=True)
+result4 = LFPOutput().merge_get_part(restriction=common_keys_CH[0])
+result5 = LFPOutput.merge_get_parent(restriction='nwb_file_name LIKE "CH%"')
+result6 = result5.fetch('lfp_sampling_rate') # Sample rate for all CH* files
+result7 = LFPOutput.merge_fetch("filter_name", "nwb_file_name")
+result8 = LFPOutput.merge_fetch(as_dict=True)
 ```
 
 When deleting from Merge Tables, we can either...
 
-1. delete from the Merge Table itself with `merge_delete`_parent, deleting both
+1. delete from the Merge Table itself with `merge_delete`, deleting both
    the master and part.
+
 2. use `merge_delete_parent` to delete from the parent sources, getting rid of
    the entries in the source table they came from.
+
 3. use `delete_downstream_merge` to find Merge Tables downstream and get rid
    full entries, avoiding orphaned master table entries.
 
@@ -155,9 +195,9 @@ protection with `dry_run`. When true (by default), these functions return
 a list of tables with the entries that would otherwise be deleted.
 
 ```python
-LFPOutput.merge_delete(common_keys[0])  # Delete from merge table
+LFPOutput.merge_delete(common_keys_CH[0])  # Delete from merge table
 LFPOutput.merge_delete_parent(restriction=nwb_file_dict, dry_run=True)
 delete_downstream_merge(
-    table=CommonLFP, restriction=common_keys[0], dry_run=True
+    table=CommonLFP, restriction=common_keys_CH[0], dry_run=True
 )
 ```

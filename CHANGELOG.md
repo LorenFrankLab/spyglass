@@ -2,7 +2,8 @@
 
 ## 0.4.1 (Unreleased)
 
-- Add mkdocs automated deployment
+- Add mkdocs automated deployment. #527, #537, #549, #551
+- Add class for Merge Tables. #556, #564
 
 ## 0.4.0 (May 22, 2023)
 

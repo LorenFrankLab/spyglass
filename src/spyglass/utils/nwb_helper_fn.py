@@ -63,13 +63,15 @@ def get_nwb_file(nwb_file_path):
 def get_config(nwb_file_path):
     """Return a dictionary of config settings for the given NWB file.
     If the file does not exist, return an empty dict.
+
     Parameters
     ----------
     nwb_file_path : str
         Absolute path to the NWB file.
+
     Returns
     -------
-    d : dict
+    dict
         Dictionary of configuration settings loaded from the corresponding YAML file
     """
     if nwb_file_path in __configs:  # load from cache if exists
