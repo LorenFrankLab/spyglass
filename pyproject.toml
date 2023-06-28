@@ -109,6 +109,6 @@ exclude = []
 line-length = 80
 
 [tool.codespell]
-skip = '.git,*.pdf,*.svg,*.ipynb'
+skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**'
 # Nevers - name in Citation
 ignore-words-list = 'nevers'

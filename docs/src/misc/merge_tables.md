@@ -79,7 +79,7 @@ additional restriction logic when supplied with `dicts`.
 
 ### Building Downstream
 
-A downstream analysis will ideally be able to use all diverget piplelines
+A downstream analysis will ideally be able to use all diverget pipelines
 interchangeably. If there are parameters that may be required for downstream
 processing, they should be included in the final table of the pipeline. In the
 example above, both `One` and `Two` might have a secondary key `params`. A
