@@ -8,12 +8,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
-from ..common.common_interval import IntervalList
-from ..common.common_nwbfile import AnalysisNwbfile
-from ..common.common_position import (
-    IntervalPositionInfo as CommonIntervalPositionInfo,
-)
-from ..utils.dj_helper_fn import fetch_nwb
+from ..common.common_position import IntervalPositionInfo as CommonPos
+from ..utils.dj_merge_tables import _Merge
 from .v1.dlc_utils import check_videofile, get_video_path, make_video
 from .v1.position_dlc_pose_estimation import DLCPoseEstimationSelection
 from .v1.position_dlc_selection import DLCPosV1
@@ -21,25 +17,19 @@ from .v1.position_trodes_position import TrodesPosV1
 
 schema = dj.schema("position_merge")
 
-_valid_data_sources = ["DLC", "Trodes", "Common"]
-
 
 @schema
-class PositionOutput(dj.Manual):
+class PositionOutput(_Merge):
     """
     Table to identify source of Position Information from upstream options
     (e.g. DLC, Trodes, etc...) To add another upstream option, a new Part table
-    should be added in the same syntax as DLCPos and TrodesPos and
-
-    Note: all part tables need to be named using the source+"Pos" convention
-    i.e. if the source='DLC', then the table is DLCPos
+    should be added in the same syntax as DLCPos and TrodesPos.
     """
 
     definition = """
-    -> IntervalList
-    source: varchar(40)
-    version: int
-    position_id: int
+    merge_id : uuid
+    ---
+    source: varchar(32)
     ---
     """
 
@@ -50,21 +40,9 @@ class PositionOutput(dj.Manual):
 
         definition = """
         -> PositionOutput
-        -> DLCPosV1
         ---
-        -> AnalysisNwbfile
-        position_object_id : varchar(80)
-        orientation_object_id : varchar(80)
-        velocity_object_id : varchar(80)
+        -> DLCPosV1
         """
-
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
 
     class TrodesPosV1(dj.Part):
         """
@@ -73,21 +51,9 @@ class PositionOutput(dj.Manual):
 
         definition = """
         -> PositionOutput
-        -> TrodesPosV1
         ---
-        -> AnalysisNwbfile
-        position_object_id : varchar(80)
-        orientation_object_id : varchar(80)
-        velocity_object_id : varchar(80)
+        -> TrodesPosV1
         """
-
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
 
     class CommonPos(dj.Part):
         """
@@ -96,116 +62,9 @@ class PositionOutput(dj.Manual):
 
         definition = """
         -> PositionOutput
-        -> CommonIntervalPositionInfo
         ---
-        -> AnalysisNwbfile
-        position_object_id : varchar(80)
-        orientation_object_id : varchar(80)
-        velocity_object_id : varchar(80)
+        -> CommonPos
         """
-
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
-
-    def insert1(self, key, params: Dict = None, **kwargs):
-        """Overrides insert1 to also insert into specific part table.
-
-        Parameters
-        ----------
-        key : Dict
-            key specifying the entry to insert
-        params : Dict, optional
-            A dictionary containing all table entries
-            not specified by the parent table (PosMerge)
-        """
-        assert (
-            key["source"] in _valid_data_sources
-        ), f"source needs to be one of {_valid_data_sources}"
-        position_id = key.get("position_id", None)
-        if position_id is None:
-            key["position_id"] = (
-                dj.U().aggr(self & key, n="max(position_id)").fetch1("n") or 0
-            ) + 1
-        else:
-            id = (self & key).fetch("position_id")
-            if len(id) > 0:
-                position_id = max(id) + 1
-            else:
-                position_id = max(0, position_id)
-            key["position_id"] = position_id
-        super().insert1(key, **kwargs)
-        source = key["source"]
-        if source in ["Common"]:
-            table_name = f"{source}Pos"
-        else:
-            version = key["version"]
-            table_name = f"{source}PosV{version}"
-        part_table = getattr(self, table_name)
-        # TODO: The parent table to refer to is hard-coded here, expecting it to be the second
-        # Table in the definition. This could be more flexible.
-        if params:
-            table_query = (
-                dj.FreeTable(dj.conn(), full_table_name=part_table.parents()[1])
-                & key
-                & params
-            )
-        else:
-            table_query = (
-                dj.FreeTable(dj.conn(), full_table_name=part_table.parents()[1])
-                & key
-            )
-        if any(
-            "head" in col
-            for col in list(table_query.fetch().dtype.fields.keys())
-        ):
-            (
-                analysis_file_name,
-                position_object_id,
-                orientation_object_id,
-                velocity_object_id,
-            ) = table_query.fetch1(
-                "analysis_file_name",
-                "head_position_object_id",
-                "head_orientation_object_id",
-                "head_velocity_object_id",
-            )
-        else:
-            (
-                analysis_file_name,
-                position_object_id,
-                orientation_object_id,
-                velocity_object_id,
-            ) = table_query.fetch1(
-                "analysis_file_name",
-                "position_object_id",
-                "orientation_object_id",
-                "velocity_object_id",
-            )
-        part_table.insert1(
-            {
-                **key,
-                "analysis_file_name": analysis_file_name,
-                "position_object_id": position_object_id,
-                "orientation_object_id": orientation_object_id,
-                "velocity_object_id": velocity_object_id,
-                **params,
-            },
-        )
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        source = self.fetch1("source")
-        if source in ["Common"]:
-            table_name = f"{source}Pos"
-        else:
-            version = self.fetch1("version")
-            table_name = f"{source}PosV{version}"
-        part_table = getattr(self, table_name) & self
-        return part_table.fetch_nwb()
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
@@ -285,7 +144,6 @@ class PositionVideoSelection(dj.Manual):
     plot_id                 : int
     plot                    : varchar(40) # Which position info to overlay on video file
     ---
-    position_ids            : mediumblob
     output_dir              : varchar(255)                 # directory where to save output video
     """
 
@@ -323,10 +181,11 @@ class PositionVideo(dj.Computed):
     """
 
     def make(self, key):
+        raise NotImplementedError("work in progress -DPG")
         assert key["plot"] in ["DLC", "Trodes", "Common", "All"]
         M_TO_CM = 100
-        output_dir, position_ids = (PositionVideoSelection & key).fetch1(
-            "output_dir", "position_ids"
+        output_dir = (PositionVideoSelection & key).fetch1(
+            "output_dir",
         )
 
         print("Loading position data...")
@@ -342,117 +201,102 @@ class PositionVideo(dj.Computed):
             "interval_list_name": key["interval_list_name"],
         }
         if key["plot"] == "DLC":
-            assert position_ids["dlc_position_id"]
-            pos_df = (
+            pos_df_key = (
                 PositionOutput()
-                & {
-                    **query,
-                    "source": "DLC",
-                    "position_id": position_ids["dlc_position_id"],
-                }
-            ).fetch1_dataframe()
+                .merge_restrict(
+                    {
+                        **query,
+                        "source": "DLCV1",
+                    }
+                )
+                .fetch1(as_dict=True)
+            )
+            pos_df = (PositionOutput & pos_df_key).fetch1_dataframe()
         elif key["plot"] == "Trodes":
-            assert position_ids["trodes_position_id"]
             pos_df = (
                 PositionOutput()
                 & {
                     **query,
-                    "source": "Trodes",
-                    "position_id": position_ids["trodes_position_id"],
+                    "source": "TrodesV1",
                 }
             ).fetch1_dataframe()
         elif key["plot"] == "Common":
-            assert position_ids["common_position_id"]
             pos_df = (
                 PositionOutput()
                 & {
                     **query,
-                    "source": "Common",
-                    "position_id": position_ids["common_position_id"],
+                    "source": "CommonV1",
                 }
             ).fetch1_dataframe()
         elif key["plot"] == "All":
             # Check which entries exist in PositionOutput
             merge_dict = {}
-            if "dlc_position_id" in position_ids:
-                if (
-                    len(
+            if (
+                len(
+                    PositionOutput()
+                    & {
+                        **query,
+                        "source": "DLCV1",
+                    }
+                )
+                > 0
+            ):
+                dlc_df = (
+                    (
                         PositionOutput()
                         & {
                             **query,
-                            "source": "DLC",
-                            "position_id": position_ids["dlc_position_id"],
+                            "source": "DLCV1",
                         }
                     )
-                    > 0
-                ):
-                    dlc_df = (
-                        (
-                            PositionOutput()
-                            & {
-                                **query,
-                                "source": "DLC",
-                                "position_id": position_ids["dlc_position_id"],
-                            }
-                        )
-                        .fetch1_dataframe()
-                        .drop(columns=["velocity_x", "velocity_y", "speed"])
-                    )
-                    merge_dict["DLC"] = dlc_df
-            if "trodes_position_id" in position_ids:
-                if (
-                    len(
+                    .fetch1_dataframe()
+                    .drop(columns=["velocity_x", "velocity_y", "speed"])
+                )
+                merge_dict["DLC"] = dlc_df
+            if (
+                len(
+                    PositionOutput()
+                    & {
+                        **query,
+                        "source": "TrodesV1",
+                    }
+                )
+                > 0
+            ):
+                trodes_df = (
+                    (
                         PositionOutput()
                         & {
                             **query,
-                            "source": "Trodes",
-                            "position_id": position_ids["trodes_position_id"],
+                            "source": "TrodesV1",
                         }
                     )
-                    > 0
-                ):
-                    trodes_df = (
-                        (
-                            PositionOutput()
-                            & {
-                                **query,
-                                "source": "Trodes",
-                                "position_id": position_ids[
-                                    "trodes_position_id"
-                                ],
-                            }
-                        )
-                        .fetch1_dataframe()
-                        .drop(columns=["velocity_x", "velocity_y", "speed"])
-                    )
-                    merge_dict["Trodes"] = trodes_df
-            if "common_position_id" in position_ids:
-                if (
-                    len(
+                    .fetch1_dataframe()
+                    .drop(columns=["velocity_x", "velocity_y", "speed"])
+                )
+                merge_dict["Trodes"] = trodes_df
+            if (
+                len(
+                    PositionOutput()
+                    & {
+                        **query,
+                        "source": "CommonV1",
+                    }
+                )
+                > 0
+            ):
+                common_df = (
+                    (
                         PositionOutput()
                         & {
                             **query,
-                            "source": "Common",
-                            "position_id": position_ids["common_position_id"],
+                            "source": "CommonV1",
                         }
                     )
-                    > 0
-                ):
-                    common_df = (
-                        (
-                            PositionOutput()
-                            & {
-                                **query,
-                                "source": "Common",
-                                "position_id": position_ids[
-                                    "common_position_id"
-                                ],
-                            }
-                        )
-                        .fetch1_dataframe()
-                        .drop(columns=["velocity_x", "velocity_y", "speed"])
-                    )
-                    merge_dict["Common"] = common_df
+                    .fetch1_dataframe()
+                    .drop(columns=["velocity_x", "velocity_y", "speed"])
+                )
+                merge_dict["Common"] = common_df
             pos_df = ft.reduce(
                 lambda left, right,: pd.merge(
                     left[1],

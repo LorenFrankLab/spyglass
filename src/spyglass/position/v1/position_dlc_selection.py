@@ -1,3 +1,4 @@
+import copy
 from pathlib import Path
 
 import datajoint as dj
@@ -52,6 +53,7 @@ class DLCPosV1(dj.Computed):
     """
 
     def make(self, key):
+        orig_key = copy.deepcopy(key)
         key["pose_eval_result"] = self.evaluate_pose_estimation(key)
         position_nwb_data = (DLCCentroid & key).fetch_nwb()[0]
         orientation_nwb_data = (DLCOrientation & key).fetch_nwb()[0]
@@ -128,19 +130,8 @@ class DLCPosV1(dj.Computed):
         self.insert1(key)
         from ..position_merge import PositionOutput
 
-        key["source"] = "DLC"
-        key["version"] = 1
-        dlc_key = key.copy()
-        del dlc_key["pose_eval_result"]
-        key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
-        valid_fields = PositionOutput().fetch().dtype.fields.keys()
-        entries_to_delete = [
-            entry for entry in key.keys() if entry not in valid_fields
-        ]
-        for entry in entries_to_delete:
-            del key[entry]
-
-        PositionOutput().insert1(key=key, params=dlc_key, skip_duplicates=True)
+        orig_key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
+        PositionOutput().insert1(orig_key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
