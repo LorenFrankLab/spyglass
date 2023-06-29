@@ -3,7 +3,7 @@ from itertools import chain as iter_chain
 from pprint import pprint
 
 import datajoint as dj
-from datajoint.condition import make_condition
+from datajoint.condition import AndList, make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, to_camel_case
@@ -47,20 +47,23 @@ class Merge(dj.Manual):
     @classmethod
     def _merge_restrict_parts(
         cls,
-        restriction: dict = True,
+        restriction: str = True,
         as_objects: bool = True,
         return_empties: bool = True,
+        add_invalid_restrict: bool = True,
     ) -> list:
         """Returns a list of parts with restrictions applied.
 
         Parameters
         ---------
-        restriction: dict, optional
-            Restriction to apply to the merged view. Default True, no restrictions.
+        restriction: str, optional
+            Restriction to apply to the parts. Default True, no restrictions.
         as_objects: bool, optional
             Default True. Return part tables as objects
         return_empties: bool, optional
             Default True. Return empty part tables
+        add_invalid_restrict: bool, optional
+            Default True. Include part for which the restriction is invalid.
 
         Returns
         ------
@@ -95,13 +98,21 @@ class Merge(dj.Manual):
             ]
         if isinstance(restriction, dict):  # restr by source already done above
             _ = restriction.pop(cls()._reserved_sk, None)  # won't work for str
+            # If a dict restriction has all invalid keys, it is treated as True
+            if not add_invalid_restrict:
+                parts_all = [  # so exclude tables w/ nonmatching attrs
+                    p
+                    for p in parts_all
+                    if all([k in p.heading.names for k in restriction.keys()])
+                ]
 
         parts = []
         for part in parts_all:
             try:
                 parts.append(part.restrict(restriction))
             except DataJointError:  # If restriction not valid on given part
-                parts.append(part)
+                if add_invalid_restrict:
+                    parts.append(part)
 
         if not return_empties:
             parts = [p for p in parts if len(p)]
@@ -113,7 +124,7 @@ class Merge(dj.Manual):
     @classmethod
     def _merge_restrict_parents(
         cls,
-        restriction: dict = True,
+        restriction: str = True,
         as_objects: bool = True,
         return_empties: bool = True,
     ) -> list:
@@ -124,7 +135,7 @@ class Merge(dj.Manual):
 
         Parameters
         ---------
-        restriction: dict, optional
+        restriction: str, optional
             Restriction to apply to the returned parent. Default True, no
             restrictions.
         as_objects: bool, optional
@@ -137,12 +148,10 @@ class Merge(dj.Manual):
         list
             list of datajoint tables, parents of parts of Merge Table
         """
+        # .restict(restriction) not work on returned part FreeTable
         part_parents = [
-            parent & part
-            # .restict(restriction)
-            # .fetch(
-            #     *part.heading.secondary_attributes, as_dict=True
-            # )
+            parent
+            & part.fetch(*part.heading.secondary_attributes, as_dict=True)
             for part in cls()._merge_restrict_parts(
                 restriction=restriction, return_empties=return_empties
             )
@@ -156,13 +165,13 @@ class Merge(dj.Manual):
 
     @classmethod
     def _merge_repr(
-        cls, restriction: dict = True, **kwargs
+        cls, restriction: str = True, **kwargs
     ) -> dj.expression.Union:
         """Merged view, including null entries for columns unique to one part table.
 
         Parameters
         ---------
-        restriction: dict, optional
+        restriction: str, optional
             Restriction to apply to the merged view
 
         Returns
@@ -172,7 +181,9 @@ class Merge(dj.Manual):
 
         parts = [
             cls() * p  # join with master to include sec key (i.e., 'source')
-            for p in cls._merge_restrict_parts(restriction=restriction)
+            for p in cls._merge_restrict_parts(
+                restriction=restriction, add_invalid_restrict=False
+            )
         ]
 
         primary_attrs = list(
@@ -256,17 +267,18 @@ class Merge(dj.Manual):
                     + f"{row}"
                 )
 
-        # 1. nullcontext() allows use within `make` but decreases reliability
-        # 2. cls.connection.transaction is more reliable but throws errors if
-        # used within another transaction, i.e. in `make`
+        context = (  # ensuring transaction if not already in one
+            cls.connection.transaction
+            if not cls.connection.in_transaction
+            else nullcontext()
+        )
 
-        with nullcontext():  # TODO: ensure this block within transaction
+        with context:
             super().insert(cls(), master_entries, **kwargs)
             for part, part_entries in parts_entries.items():
                 part.insert(part_entries, **kwargs)
 
-    @classmethod
-    def insert(cls, rows: list, **kwargs):
+    def insert(self, rows: list, **kwargs):
         """Merges table specific insert
 
         Ensuring db integrity and mutual exclusivity
@@ -284,15 +296,14 @@ class Merge(dj.Manual):
             If entry already exists, mutual exclusivity errors
             If data doesn't exist in part parents, integrity error
         """
-        cls._merge_insert(rows, **kwargs)
+        self._merge_insert(rows, **kwargs)
 
-    @classmethod
-    def merge_view(cls, restriction: dict = True):
+    def merge_view(cls, restriction: str = True):
         """Prints merged view, including null entries for unique columns.
 
         Parameters
         ---------
-        restriction: dict, optional
+        restriction: str, optional
             Restriction to apply to the merged view
         """
 
@@ -300,16 +311,17 @@ class Merge(dj.Manual):
         # getting passed a `Union`, which doesn't have a method we can
         # intercept to manage master/parts
 
+        # Want non classmeth to access restr
+
+        restriction = AndList((cls.restriction, restriction))
         return pprint(cls._merge_repr(restriction=restriction))
 
-    @classmethod
-    def merge_html(cls, restriction: dict = True):
+    def merge_html(cls, restriction: str = True):
         """Displays HTML in notebooks."""
 
         return HTML(repr_html(cls._merge_repr(restriction=restriction)))
 
-    @classmethod
-    def merge_restrict(cls, restriction: dict = True) -> dj.U:
+    def merge_restrict(self, restriction: str = True) -> dj.U:
         """Given a restriction, return a merged view with restriction applied.
 
         Example
@@ -318,7 +330,7 @@ class Merge(dj.Manual):
 
         Parameters
         ----------
-        restriction: dict
+        restriction: str
             Restriction one would apply if `merge_view` was a real table.
 
         Returns
@@ -326,15 +338,15 @@ class Merge(dj.Manual):
         datajoint.Union
             Merged view with restriction applied.
         """
-        return cls._merge_repr(restriction=restriction)
+        restriction = AndList((self.restriction, restriction))
+        return self._merge_repr(restriction=restriction)
 
-    @classmethod
-    def merge_delete(cls, restriction: dict = True, **kwargs):
+    def merge_delete(self, restriction: str = True, **kwargs):
         """Given a restriction string, delete corresponding entries.
 
         Parameters
         ----------
-        restriction: dict
+        restriction: str
             Optional restriction to apply before deletion from master/part
             tables. If not provided, delete all entries.
         kwargs: dict
@@ -344,17 +356,17 @@ class Merge(dj.Manual):
         -------
             >>> MergeTable.merge_delete("field = 1")
         """
+        restriction = AndList((self.restriction, restriction))
         uuids = [
             {k: v}
-            for entry in cls.merge_restrict(restriction).fetch("KEY")
+            for entry in self.merge_restrict(restriction).fetch("KEY")
             for k, v in entry.items()
-            if k == cls()._reserved_pk
+            if k == self()._reserved_pk
         ]
-        (cls() & uuids).delete(**kwargs)
+        (self() & uuids).delete(**kwargs)
 
-    @classmethod
     def merge_delete_parent(
-        cls, restriction: dict = True, dry_run=True, **kwargs
+        self, restriction: str = True, dry_run=True, **kwargs
     ) -> list:
         """Delete entries from merge master, part, and respective part parents
 
@@ -362,7 +374,7 @@ class Merge(dj.Manual):
 
         Parameters
         ----------
-        restriction: dict
+        restriction: str
             Optional restriction to apply before deletion from parents. If not
             provided, delete all entries present in Merge Table.
         dry_run: bool
@@ -371,19 +383,22 @@ class Merge(dj.Manual):
         kwargs: dict
             Additional keyword arguments for DataJoint delete.
         """
+        restriction = AndList((self.restriction, restriction))
 
-        part_parents = cls._merge_restrict_parents(
+        part_parents = self._merge_restrict_parents(
             restriction=restriction, as_objects=True, return_empties=False
         )
 
         if dry_run:
             return part_parents
 
-        super().delete(cls(), **kwargs)
+        super().delete(self(), **kwargs)
         for part_parent in part_parents:
             super().delete(part_parent, **kwargs)
 
-    def fetch_nwb(self, *attrs, **kwargs):
+    def fetch_nwb(self, restriction: str = True, *attrs, **kwargs):
+        """Return the AnalysisNwbfile file linked in the source."""
+        restriction = AndList((self.restriction, restriction))
         part_parents = self._merge_restrict_parents(
             restriction=self.restriction, return_empties=False
         )
@@ -403,7 +418,7 @@ class Merge(dj.Manual):
 
     def merge_get_part(
         self,
-        restriction: dict = True,
+        restriction: str = True,
         join_master: bool = False,
         restrict_part=True,
     ) -> dj.Table:
@@ -415,7 +430,7 @@ class Merge(dj.Manual):
 
         Parameters
         ----------
-        restriction: dict
+        restriction: str
             Optional restriction to apply before determining part to return.
             Default True.
         join_master: bool
@@ -435,6 +450,7 @@ class Merge(dj.Manual):
         ValueError
             If multiple sources are found, lists and suggests restricting
         """
+        restriction = AndList((self.restriction, restriction))
 
         sources = [
             to_camel_case(n.split("__")[-1].strip("`"))  # friendly part name
@@ -457,9 +473,8 @@ class Merge(dj.Manual):
 
         return self * part if join_master else part
 
-    @classmethod
     def merge_get_parent(
-        self, restriction: dict = True, join_master: bool = False
+        self, restriction: str = True, join_master: bool = False
     ) -> list:
         """Returns a list of part parents with restrictions applied.
 
@@ -468,7 +483,7 @@ class Merge(dj.Manual):
 
         Parameters
         ----------
-        restriction: dict
+        restriction: str
             Optional restriction to apply before determining parent to return.
             Default True.
         join_master: bool
@@ -479,6 +494,8 @@ class Merge(dj.Manual):
         list
             list of datajoint tables, parents of parts of Merge Table
         """
+        restriction = AndList((self.restriction, restriction))
+
         part_parents = self._merge_restrict_parents(
             restriction=restriction, as_objects=True, return_empties=False
         )
@@ -486,7 +503,7 @@ class Merge(dj.Manual):
         if len(part_parents) != 1:
             raise ValueError(
                 f"Found multiple potential parents: {part_parents}\n\t"
-                + "Try adding a restriction when invoking `get_parent`."
+                + "Try adding a string restriction when invoking `get_parent`."
             )
 
         if join_master:  # Alt: Master * Part shows source
@@ -494,12 +511,14 @@ class Merge(dj.Manual):
         else:  # Current default aligns with func name
             return part_parents[0]
 
-    @classmethod
-    def merge_fetch(cls, *attrs, **kwargs) -> list:
+    def merge_fetch(self, restriction: str = True, *attrs, **kwargs) -> list:
         """Perform a fetch across all parts. If >1 result, return as a list.
 
         Parameters
         ----------
+        restriction: str
+            Optional restriction to apply before determining parent to return.
+            Default True.
         attrs, kwargs
             arguments passed to DataJoint `fetch` call
 
@@ -508,9 +527,11 @@ class Merge(dj.Manual):
         Union[ List[np.array], List[dict], List[pd.DataFrame] ]
             Table contents, with type determined by kwargs
         """
+        restriction = AndList((self.restriction, restriction))
+
         results = []
-        parts = cls()._merge_restrict_parts(
-            restriction=cls._restriction, return_empties=False
+        parts = self()._merge_restrict_parts(
+            restriction=restriction, return_empties=False
         )
 
         for part in parts:
@@ -536,7 +557,7 @@ _Merge = Merge
 
 
 def delete_downstream_merge(
-    table: dj.Table, restriction: dict = True, dry_run=True, **kwargs
+    table: dj.Table, restriction: str = True, dry_run=True, **kwargs
 ) -> list:
     """Given a table/restriction, id or delete relevant downstream merge entries
 
@@ -544,7 +565,7 @@ def delete_downstream_merge(
     ----------
     table: dj.Table
         DataJoint table or restriction thereof
-    restriction: dict
+    restriction: str
         Optional restriction to apply before deletion from merge/part
         tables. If not provided, delete all downstream entries.
     dry_run: bool
@@ -558,6 +579,8 @@ def delete_downstream_merge(
     List[Tuple[dj.Table, dj.Table]]
         Entries in merge/part tables downstream of table input.
     """
+    restriction = AndList((table.restriction, restriction))
+
     if not restriction:
         restriction = True
 
