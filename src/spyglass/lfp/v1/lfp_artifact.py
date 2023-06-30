@@ -122,11 +122,11 @@ class LFPArtifactDetection(dj.Computed):
         # we need some name here for recording_name
         key["artifact_removed_interval_list_name"] = "_".join(
             [
-            key["nwb_file_name"],
-            key["target_interval_list_name"],
-            "LFP",
-            key["artifact_params_name"],
-            "artifact_removed_valid_times",
+                key["nwb_file_name"],
+                key["target_interval_list_name"],
+                "LFP",
+                key["artifact_params_name"],
+                "artifact_removed_valid_times",
             ]
         )
 
