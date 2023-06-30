@@ -18,7 +18,14 @@ RESERVED_SK_LENGTH = 32
 
 
 class Merge(dj.Manual):
-    """Adds funcs to support standard Merge table operations."""
+    """Adds funcs to support standard Merge table operations.
+
+    Many methods have the @classmethod decorator to permit MergeTable.method()
+    symtax. This makes access to instance attributes (e.g., (MergeTable &
+    "example='restriction'").restriction) harder, but these attributes have
+    limited utility when the user wants to, for example, restrict the merged
+    view rather than the master table itself.
+    """
 
     def __init__(self):
         super().__init__()
@@ -127,6 +134,7 @@ class Merge(dj.Manual):
         restriction: str = True,
         as_objects: bool = True,
         return_empties: bool = True,
+        add_invalid_restrict: bool = True,
     ) -> list:
         """Returns a list of part parents with restrictions applied.
 
@@ -142,6 +150,8 @@ class Merge(dj.Manual):
             Default True. Return part tables as objects
         return_empties: bool, optional
             Default True. Return empty part tables
+        add_invalid_restrict: bool, optional
+            Default True. Include part for which the restriction is invalid.
 
         Returns
         ------
@@ -153,7 +163,9 @@ class Merge(dj.Manual):
             parent
             & part.fetch(*part.heading.secondary_attributes, as_dict=True)
             for part in cls()._merge_restrict_parts(
-                restriction=restriction, return_empties=return_empties
+                restriction=restriction,
+                return_empties=return_empties,
+                add_invalid_restrict=add_invalid_restrict,
             )
             for parent in part.parents(as_objects=True)  # ID respective parents
             if cls().table_name not in parent.full_table_name  # Not merge table
@@ -164,9 +176,7 @@ class Merge(dj.Manual):
         return part_parents
 
     @classmethod
-    def _merge_repr(
-        cls, restriction: str = True, **kwargs
-    ) -> dj.expression.Union:
+    def _merge_repr(cls, restriction: str = True) -> dj.expression.Union:
         """Merged view, including null entries for columns unique to one part table.
 
         Parameters
@@ -182,7 +192,9 @@ class Merge(dj.Manual):
         parts = [
             cls() * p  # join with master to include sec key (i.e., 'source')
             for p in cls._merge_restrict_parts(
-                restriction=restriction, add_invalid_restrict=False
+                restriction=restriction,
+                add_invalid_restrict=False,
+                return_empties=False,
             )
         ]
 
@@ -267,16 +279,19 @@ class Merge(dj.Manual):
                     + f"{row}"
                 )
 
-        context = (  # ensuring transaction if not already in one
+        with cls._safe_context():
+            super().insert(cls(), master_entries, **kwargs)
+            for part, part_entries in parts_entries.items():
+                part.insert(part_entries, **kwargs)
+
+    @classmethod
+    def _safe_context(cls):
+        """Return transaction if not already in one."""
+        return (
             cls.connection.transaction
             if not cls.connection.in_transaction
             else nullcontext()
         )
-
-        with context:
-            super().insert(cls(), master_entries, **kwargs)
-            for part, part_entries in parts_entries.items():
-                part.insert(part_entries, **kwargs)
 
     def insert(self, rows: list, **kwargs):
         """Merges table specific insert
@@ -298,8 +313,11 @@ class Merge(dj.Manual):
         """
         self._merge_insert(rows, **kwargs)
 
+    @classmethod
     def merge_view(cls, restriction: str = True):
         """Prints merged view, including null entries for unique columns.
+
+        Note: To handle this Union as a table-like object, use `merge_resrict`
 
         Parameters
         ---------
@@ -311,17 +329,16 @@ class Merge(dj.Manual):
         # getting passed a `Union`, which doesn't have a method we can
         # intercept to manage master/parts
 
-        # Want non classmeth to access restr
-
-        restriction = AndList((cls.restriction, restriction))
         return pprint(cls._merge_repr(restriction=restriction))
 
+    @classmethod
     def merge_html(cls, restriction: str = True):
         """Displays HTML in notebooks."""
 
         return HTML(repr_html(cls._merge_repr(restriction=restriction)))
 
-    def merge_restrict(self, restriction: str = True) -> dj.U:
+    @classmethod
+    def merge_restrict(cls, restriction: str = True) -> dj.U:
         """Given a restriction, return a merged view with restriction applied.
 
         Example
@@ -338,10 +355,10 @@ class Merge(dj.Manual):
         datajoint.Union
             Merged view with restriction applied.
         """
-        restriction = AndList((self.restriction, restriction))
-        return self._merge_repr(restriction=restriction)
+        return cls._merge_repr(restriction=restriction)
 
-    def merge_delete(self, restriction: str = True, **kwargs):
+    @classmethod
+    def merge_delete(cls, restriction: str = True, **kwargs):
         """Given a restriction string, delete corresponding entries.
 
         Parameters
@@ -356,17 +373,17 @@ class Merge(dj.Manual):
         -------
             >>> MergeTable.merge_delete("field = 1")
         """
-        restriction = AndList((self.restriction, restriction))
         uuids = [
             {k: v}
-            for entry in self.merge_restrict(restriction).fetch("KEY")
+            for entry in cls.merge_restrict(restriction).fetch("KEY")
             for k, v in entry.items()
-            if k == self()._reserved_pk
+            if k == cls()._reserved_pk
         ]
-        (self() & uuids).delete(**kwargs)
+        (cls() & uuids).delete(**kwargs)
 
+    @classmethod
     def merge_delete_parent(
-        self, restriction: str = True, dry_run=True, **kwargs
+        cls, restriction: str = True, dry_run=True, **kwargs
     ) -> list:
         """Delete entries from merge master, part, and respective part parents
 
@@ -383,50 +400,66 @@ class Merge(dj.Manual):
         kwargs: dict
             Additional keyword arguments for DataJoint delete.
         """
-        restriction = AndList((self.restriction, restriction))
-
-        part_parents = self._merge_restrict_parents(
+        part_parents = cls._merge_restrict_parents(
             restriction=restriction, as_objects=True, return_empties=False
         )
 
         if dry_run:
             return part_parents
 
-        super().delete(self(), **kwargs)
-        for part_parent in part_parents:
-            super().delete(part_parent, **kwargs)
+        with cls._safe_context():
+            super().delete(cls(), **kwargs)
+            for part_parent in part_parents:
+                super().delete(part_parent, **kwargs)
 
-    def fetch_nwb(self, restriction: str = True, *attrs, **kwargs):
-        """Return the AnalysisNwbfile file linked in the source."""
-        restriction = AndList((self.restriction, restriction))
-        part_parents = self._merge_restrict_parents(
-            restriction=self.restriction, return_empties=False
+    @classmethod
+    def fetch_nwb(
+        cls, restriction: str = True, multi_source=False, *attrs, **kwargs
+    ):
+        """Return the AnalysisNwbfile file linked in the source.
+
+        Parameters
+        ----------
+        restriction: str, optional
+            Restriction to apply to parents before running fetch. Defalt none.
+        multi_source: bool
+            Return from multiple parents. Default False.
+        """
+        part_parents = cls._merge_restrict_parents(
+            restriction=restriction,
+            return_empties=False,
+            add_invalid_restrict=False,
         )
 
-        if len(part_parents) == 1:
-            return fetch_nwb(
-                part_parents[0],
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
-        else:
+        if not multi_source and len(part_parents) != 1:
             raise ValueError(
-                f"{len(part_parents)} possible sources found in Merge Table"
-                + part_parents
+                f"{len(part_parents)} possible sources found in Merge Table:"
+                + " and ".join([p.full_table_name for p in part_parents])
             )
 
+        nwbs = []
+        for part_parent in part_parents:
+            nwbs.extend(
+                fetch_nwb(
+                    part_parent,
+                    (AnalysisNwbfile, "analysis_file_abs_path"),
+                    *attrs,
+                    **kwargs,
+                )
+            )
+        return nwbs
+
+    @classmethod
     def merge_get_part(
-        self,
+        cls,
         restriction: str = True,
         join_master: bool = False,
         restrict_part=True,
     ) -> dj.Table:
         """Retrieve part table from a restricted Merge table.
 
-        Note: This returns the whole unrestricted part table. The provided
-        restriction is only used to identify the relevant part as a native
-        table.
+        Note: unlike other Merge Table methods, returns the native table, not
+        a FreeTable
 
         Parameters
         ----------
@@ -439,6 +472,10 @@ class Merge(dj.Manual):
             Apply restriction to part. Default True. If False, return the
             native part table.
 
+        Returns
+        ------
+        dj.Table
+            Native part table of Merge Table master
 
         Example
         -------
@@ -450,12 +487,13 @@ class Merge(dj.Manual):
         ValueError
             If multiple sources are found, lists and suggests restricting
         """
-        restriction = AndList((self.restriction, restriction))
-
         sources = [
             to_camel_case(n.split("__")[-1].strip("`"))  # friendly part name
-            for n in self._merge_restrict_parts(
-                restriction=restriction, as_objects=False, return_empties=False
+            for n in cls._merge_restrict_parts(
+                restriction=restriction,
+                as_objects=False,
+                return_empties=False,
+                add_invalid_restrict=False,
             )
         ]
 
@@ -466,20 +504,21 @@ class Merge(dj.Manual):
             )
 
         part = (
-            getattr(self, sources[0])().restrict(restriction)
+            getattr(cls, sources[0])().restrict(restriction)
             if restrict_part  # Re-apply restriction or don't
-            else getattr(self, sources[0])()
+            else getattr(cls, sources[0])()
         )
 
-        return self * part if join_master else part
+        return cls * part if join_master else part
 
+    @classmethod
     def merge_get_parent(
-        self, restriction: str = True, join_master: bool = False
-    ) -> list:
+        cls, restriction: str = True, join_master: bool = False
+    ) -> dj.FreeTable:
         """Returns a list of part parents with restrictions applied.
 
         Rather than part tables, we look at parents of those parts, the source
-        of the data.
+        of the data. If you need all parents, see `_merge_restrict_parent`
 
         Parameters
         ----------
@@ -491,13 +530,14 @@ class Merge(dj.Manual):
 
         Returns
         ------
-        list
-            list of datajoint tables, parents of parts of Merge Table
+        dj.FreeTable
+            Parent of parts of Merge Table as FreeTable.
         """
-        restriction = AndList((self.restriction, restriction))
-
-        part_parents = self._merge_restrict_parents(
-            restriction=restriction, as_objects=True, return_empties=False
+        part_parents = cls._merge_restrict_parents(
+            restriction=restriction,
+            as_objects=True,
+            return_empties=False,
+            add_invalid_restrict=False,
         )
 
         if len(part_parents) != 1:
@@ -507,10 +547,11 @@ class Merge(dj.Manual):
             )
 
         if join_master:  # Alt: Master * Part shows source
-            return self * part_parents[0]
+            return cls * part_parents[0]
         else:  # Current default aligns with func name
             return part_parents[0]
 
+    @classmethod
     def merge_fetch(self, restriction: str = True, *attrs, **kwargs) -> list:
         """Perform a fetch across all parts. If >1 result, return as a list.
 
@@ -527,11 +568,12 @@ class Merge(dj.Manual):
         Union[ List[np.array], List[dict], List[pd.DataFrame] ]
             Table contents, with type determined by kwargs
         """
-        restriction = AndList((self.restriction, restriction))
-
         results = []
         parts = self()._merge_restrict_parts(
-            restriction=restriction, return_empties=False
+            restriction=restriction,
+            as_objects=True,
+            return_empties=False,
+            add_invalid_restrict=False,
         )
 
         for part in parts:
