@@ -1,9 +1,8 @@
 name: Publish docs
 on:
   push:
-    tags:        # See PEP 440 for valid version format
-      - '*.*.*'  # For docs bump, use X.X.XaX
-  push:
+    tags: # See PEP 440 for valid version format
+      - "*.*.*" # For docs bump, use X.X.XaX
     branches:
       - test_branch
 
