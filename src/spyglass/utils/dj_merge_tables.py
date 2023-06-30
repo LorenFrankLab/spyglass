@@ -421,7 +421,7 @@ class Merge(dj.Manual):
         Parameters
         ----------
         restriction: str, optional
-            Restriction to apply to parents before running fetch. Defalt none.
+            Restriction to apply to parents before running fetch. Default none.
         multi_source: bool
             Return from multiple parents. Default False.
         """

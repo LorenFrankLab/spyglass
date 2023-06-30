@@ -73,14 +73,14 @@ These functions are described in the
 In short: restrict Merge Tables with arguments, not the `&` operator.
 
 - Normally: `Table & "field='value'"`
-- Instead: `MergeTable.merge_view(restriction="field='value'"`). 
+- Instead: `MergeTable.merge_view(restriction="field='value'"`).
 
-*Caution*. The `&` operator may look like it's working when using `dict`, but
+_Caution_. The `&` operator may look like it's working when using `dict`, but
 this is because invalid keys will be ignored. `Master & {'part_field':'value'}`
 is equivalent to `Master` alone
-([source](https://docs.datajoint.org/python/queries/06-Restriction.html#restriction-by-a-mapping)). 
+([source](https://docs.datajoint.org/python/queries/06-Restriction.html#restriction-by-a-mapping)).
 
-Whe provided as arguments, methods like `merge_get_part` and `merge_get_parent`
+When provided as arguments, methods like `merge_get_part` and `merge_get_parent`
 will override the permissive treatment of mappings described above to only
 return relevant tables.
 
