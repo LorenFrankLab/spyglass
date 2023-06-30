@@ -2457,7 +2457,7 @@ deleting a part entry before the master. To circumvent this, you can add
 call, but this will leave and orphaned primary key in the master. Instead, use
 <code>spyglass.utils.dj_merge_tables.delete_downstream_merge</code> to delete master/part pairs.</p>
 <h2 id="what">What<a class="headerlink" href="#what" title="Permanent link">&para;</a></h2>
-<p>A Merge Table is fundametally a master table with one part for each divergent
+<p>A Merge Table is fundamentally a master table with one part for each divergent
 pipeline. By convention...</p>
 <ol>
 <li>
@@ -2546,6 +2546,14 @@ result1 = restrict.fetch_nwb()
 
 nwb_key = LFPOutput.merge_restrict(nwb_file_dict).fetch(as_dict=True)[0]
 result2 = (LFPOutput &amp; nwb_key).fetch_nwb()
+</code></pre>
+<p>There are also functions for retrieving part table(s) and fetching data. This
+<code>fetch</code> will collect all relevant entries and return them as a list in the
+format specified by keyword arguments and one's DataJoint config.</p>
+<pre><code class="language-python">result3 = (LFPOutput &amp; common_keys[0]).merge_get_part(join_master=True)
+result4 = LFPOutput().merge_get_part(restriction=common_keys[0])
+result5 = LFPOutput.merge_fetch(&quot;filter_name&quot;, &quot;nwb_file_name&quot;)
+result6 = LFPOutput.merge_fetch(as_dict=True)
 </code></pre>
 <p>When deleting from Merge Tables, we can either...</p>
 <ol>
