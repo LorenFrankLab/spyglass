@@ -77,8 +77,8 @@ class Merge(dj.Manual):
         list
             list of datajoint tables, parts of Merge Table
         """
-        if not dj.conn.connection.dependencies._loaded:
-            dj.conn.connection.dependencies.load()  # Otherwise parts returns none
+
+        cls._ensure_dependencies_loaded()
 
         if not restriction:
             restriction = True
@@ -158,7 +158,8 @@ class Merge(dj.Manual):
         list
             list of datajoint tables, parents of parts of Merge Table
         """
-        # .restict(restriction) not work on returned part FreeTable
+        # .restict(restriction) does not work on returned part FreeTable
+        # & part.fetch below restricts parent to entries in merge table
         part_parents = [
             parent
             & part.fetch(*part.heading.secondary_attributes, as_dict=True)
@@ -224,7 +225,9 @@ class Merge(dj.Manual):
         return query
 
     @classmethod
-    def _merge_insert(cls, rows: list, **kwargs) -> None:
+    def _merge_insert(
+        cls, rows: list, mutual_exclusvity=True, **kwargs
+    ) -> None:
         """Insert rows into merge table, ensuring db integrity and mutual exclusivity
 
         Parameters
@@ -240,6 +243,7 @@ class Merge(dj.Manual):
             If entry already exists, mutual exclusivity errors
             If data doesn't exist in part parents, integrity error
         """
+        cls._ensure_dependencies_loaded()
 
         try:
             for r in iter(rows):
@@ -253,25 +257,30 @@ class Merge(dj.Manual):
         master_entries = []
         parts_entries = {p: [] for p in parts}
         for row in rows:
-            key = {}
-            for part in parts:
-                master = part.parents(as_objects=True)[-1]
+            key = {}  # empty to-be-inserted key
+            for part in parts:  # check each part
+                part_parent = part.parents(as_objects=True)[-1]
                 part_name = to_camel_case(part.table_name.split("__")[-1])
-                if master & row:
-                    if not key:
-                        key = (master & row).fetch1("KEY")
-                        master_pk = {
-                            cls()._reserved_pk: dj.hash.key_hash(key),
-                        }
-                        parts_entries[part].append({**master_pk, **key})
-                        master_entries.append(
-                            {**master_pk, cls()._reserved_sk: part_name}
-                        )
-                    else:
+                if part_parent & row:  # if row is in part parent
+                    if key and mutual_exclusvity:  # if key from other part
                         raise ValueError(
                             "Mutual Exclusivity Error! Entry exists in more "
                             + f"than one table - Entry: {row}"
                         )
+
+                    keys = (part_parent & row).fetch("KEY")  # get pk
+                    if len(keys) > 1:
+                        raise ValueError(
+                            "Ambiguous entry. Data has mult rows in"
+                            + f"{part_name}:\n\tData:{row}\n\t{keys}"
+                        )
+                    master_pk = {  # make uuid
+                        cls()._reserved_pk: dj.hash.key_hash(keys[0]),
+                    }
+                    parts_entries[part].append({**master_pk, **keys[0]})
+                    master_entries.append(
+                        {**master_pk, cls()._reserved_sk: part_name}
+                    )
 
             if not key:
                 raise ValueError(
@@ -293,7 +302,16 @@ class Merge(dj.Manual):
             else nullcontext()
         )
 
-    def insert(self, rows: list, **kwargs):
+    @classmethod
+    def _ensure_dependencies_loaded(cls) -> None:
+        """Ensure connection dependencies loaded.
+
+        Otherwise parts returns none
+        """
+        if not dj.conn.connection.dependencies._loaded:
+            dj.conn.connection.dependencies.load()
+
+    def insert(self, rows: list, mutual_exclusvity=True, **kwargs):
         """Merges table specific insert
 
         Ensuring db integrity and mutual exclusivity
@@ -302,6 +320,8 @@ class Merge(dj.Manual):
         ---------
         rows: List[dict]
             An iterable where an element is a dictionary.
+        mutual_exclusvity: bool
+            Check for mutual exclusivity before insert. Default True.
 
         Raises
         ------
@@ -311,7 +331,7 @@ class Merge(dj.Manual):
             If entry already exists, mutual exclusivity errors
             If data doesn't exist in part parents, integrity error
         """
-        self._merge_insert(rows, **kwargs)
+        self._merge_insert(rows, mutual_exclusvity=mutual_exclusvity, **kwargs)
 
     @classmethod
     def merge_view(cls, restriction: str = True):
@@ -521,12 +541,16 @@ class Merge(dj.Manual):
 
     @classmethod
     def merge_get_parent(
-        cls, restriction: str = True, join_master: bool = False
+        cls,
+        restriction: str = True,
+        join_master: bool = False,
+        multi_source=False,
     ) -> dj.FreeTable:
         """Returns a list of part parents with restrictions applied.
 
         Rather than part tables, we look at parents of those parts, the source
-        of the data. If you need all parents, see `_merge_restrict_parent`
+        of the data, and only the rows that have keys inserted in the merge
+        table.
 
         Parameters
         ----------
@@ -541,6 +565,7 @@ class Merge(dj.Manual):
         dj.FreeTable
             Parent of parts of Merge Table as FreeTable.
         """
+
         part_parents = cls._merge_restrict_parents(
             restriction=restriction,
             as_objects=True,
@@ -548,16 +573,17 @@ class Merge(dj.Manual):
             add_invalid_restrict=False,
         )
 
-        if len(part_parents) != 1:
+        if not multi_source and len(sources) != 1:
             raise ValueError(
                 f"Found multiple potential parents: {part_parents}\n\t"
                 + "Try adding a string restriction when invoking `get_parent`."
+                + "Or permitting multiple sources with `multi_source=True`."
             )
 
-        if join_master:  # Alt: Master * Part shows source
-            return cls * part_parents[0]
-        else:  # Current default aligns with func name
-            return part_parents[0]
+        if join_master:
+            part_parents = [cls * part for part in parts]
+
+        return part_parents if multi_source else part_parents[0]
 
     @classmethod
     def merge_fetch(self, restriction: str = True, *attrs, **kwargs) -> list:
@@ -596,6 +622,7 @@ class Merge(dj.Manual):
         # Note: this could collapse results like merge_view, but user may call
         # for recarray, pd.DataFrame, or dict, and fetched contents differ if
         # attrs or "KEY" called. Intercept format, merge, and then transform?
+
         if not results:
             print(
                 "No merge_fetch results.\n\t"
