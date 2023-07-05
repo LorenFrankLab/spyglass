@@ -1,3 +1,4 @@
+import copy
 import cv2
 import datajoint as dj
 import matplotlib.pyplot as plt
@@ -113,13 +114,15 @@ class LinearizedPositionV1(dj.Computed):
     """
 
     def make(self, key):
+        orig_key = copy.deepcopy(key)
         print(f"Computing linear position for: {key}")
 
         key["analysis_file_name"] = AnalysisNwbfile().create(
             key["nwb_file_name"]
         )
 
-        position_nwb = (PositionOutput & key).fetch_nwb()[0]
+        position_nwb = PositionOutput.fetch_nwb(key)[0]
+        # TODO: double-check this syntax
 
         position = np.asarray(
             position_nwb["position"].get_spatial_series().data
@@ -170,6 +173,9 @@ class LinearizedPositionV1(dj.Computed):
         )
 
         self.insert1(key)
+        from ..position_linearization_merge import LinearizedPositionOutput
+
+        LinearizedPositionOutput.insert1(orig_key, skip_duplicates=True)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
