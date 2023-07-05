@@ -70,12 +70,19 @@ These functions are described in the
 
 ### Restricting
 
-One quirk of these utilities is that they take restrictions as arguments,
-rather than with operators. So `Table & "field='value'"` becomes
-`MergeTable.merge_view(restriction={'field':'value}`). This is because
-`merge_view` is a `Union` rather than a true Table. While `merge_view` can
-accept all valid restrictions, `merge_get_part` and `merge_get_parent` have
-additional restriction logic when supplied with `dicts`.
+In short: restrict Merge Tables with arguments, not the `&` operator.
+
+- Normally: `Table & "field='value'"`
+- Instead: `MergeTable.merge_view(restriction="field='value'"`).
+
+_Caution_. The `&` operator may look like it's working when using `dict`, but
+this is because invalid keys will be ignored. `Master & {'part_field':'value'}`
+is equivalent to `Master` alone
+([source](https://docs.datajoint.org/python/queries/06-Restriction.html#restriction-by-a-mapping)).
+
+When provided as arguments, methods like `merge_get_part` and `merge_get_parent`
+will override the permissive treatment of mappings described above to only
+return relevant tables.
 
 ### Building Downstream
 
@@ -171,8 +178,7 @@ There are also functions for retrieving part/parent table(s) and fetching data.
    the format specified by keyword arguments and one's DataJoint config.
 
 ```python
-result3 = (LFPOutput & common_keys_CH[0]).merge_get_part(join_master=True)
-result4 = LFPOutput().merge_get_part(restriction=common_keys_CH[0])
+result4 = LFPOutput.merge_get_part(restriction=common_keys_CH[0],join_master=True)
 result5 = LFPOutput.merge_get_parent(restriction='nwb_file_name LIKE "CH%"')
 result6 = result5.fetch('lfp_sampling_rate') # Sample rate for all CH* files
 result7 = LFPOutput.merge_fetch("filter_name", "nwb_file_name")

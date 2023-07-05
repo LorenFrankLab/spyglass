@@ -96,7 +96,7 @@ class LFPArtifactDetection(dj.Computed):
         ).fetch1("artifact_params")
 
         artifact_detection_algorithm = artifact_params[
-            "ripple_detection_algorithm"
+            "artifact_detection_algorithm"
         ]
         artifact_detection_params = artifact_params[
             "artifact_detection_algorithm_params"
@@ -121,11 +121,13 @@ class LFPArtifactDetection(dj.Computed):
         # set up a name for no-artifact times using recording id
         # we need some name here for recording_name
         key["artifact_removed_interval_list_name"] = "_".join(
-            key["nwb_file_name"],
-            key["target_interval_list_name"],
-            "LFP",
-            key["artifact_params_name"],
-            "artifact_removed_valid_times",
+            [
+                key["nwb_file_name"],
+                key["target_interval_list_name"],
+                "LFP",
+                key["artifact_params_name"],
+                "artifact_removed_valid_times",
+            ]
         )
 
         LFPArtifactRemovedIntervalList.insert1(key, replace=True)

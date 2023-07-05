@@ -1,11 +1,8 @@
 name: Publish docs
 on:
-  pull_request:
-    branches:
-      - master
-    types:
-      - closed
   push:
+    tags: # See PEP 440 for valid version format
+      - "*.*.*" # For docs bump, use X.X.XaX
     branches:
       - test_branch
 
