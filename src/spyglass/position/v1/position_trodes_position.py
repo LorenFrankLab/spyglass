@@ -218,7 +218,7 @@ class TrodesPosV1(dj.Computed):
         self.insert1(key)
         from ..position_merge import PositionOutput
 
-        PositionOutput.insert1(orig_key)
+        PositionOutput.insert1(orig_key, skip_duplicates=True)
 
     @staticmethod
     def calculate_position_info_from_spatial_series(

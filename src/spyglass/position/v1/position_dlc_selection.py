@@ -130,8 +130,7 @@ class DLCPosV1(dj.Computed):
         self.insert1(key)
         from ..position_merge import PositionOutput
 
-        orig_key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
-        PositionOutput().insert1(orig_key)
+        PositionOutput().insert1(orig_key, skip_duplicates=True)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
