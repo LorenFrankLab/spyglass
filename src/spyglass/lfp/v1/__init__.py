@@ -1,14 +1,13 @@
 # flake8: noqa
-from .lfp import (
-    LFP,
-    ImportedLFP,
+from spyglass.lfp.v1.lfp import (
+    LFPV1,
+    ImportedLFPV1,
+    LFPElectrodeGroup,
+    LFPSelection,
+)
+from spyglass.lfp.v1.lfp_artifact import (
     LFPArtifactDetection,
     LFPArtifactDetectionParameters,
     LFPArtifactDetectionSelection,
     LFPArtifactRemovedIntervalList,
-    LFPBand,
-    LFPBandSelection,
-    LFPElectrodeGroup,
-    LFPOutput,
-    LFPSelection,
 )

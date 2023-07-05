@@ -1,19 +1,21 @@
-
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = "spyglass-neuro"
-version = "0.4.0"
+description = "Neuroscience data analysis framework for reproducible research"
+readme = "README.md"
+requires-python = ">=3.8,<3.10"
+license = { file = "LICENSE" }
 authors = [
     { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
     { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
     { name = "Eric Denovellis", email = "eric.denovellis@ucsf.edu" },
     { name = "Ryan Ly", email = "rly@lbl.gov" },
     { name = "Daniel Gramling", email = "daniel.gramling@ucsf.edu" },
+    { name = "Chris Brozdowski", email = "chris.broz@ucsf.edu" },
 ]
-description = "Neuroscience data analysis framework for reproducible research"
-readme = "README.md"
-license = { file = "LICENSE" }
-requires-python = ">=3.8,<3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -42,7 +44,6 @@ dependencies = [
     "trajectory_analysis_tools",
     "matplotlib",
     "seaborn",
-    "skan",
     "bottleneck",
     "numpy<1.24",
     "ipympl",
@@ -58,13 +59,7 @@ dependencies = [
     "spikeinterface",
     "ndx_franklab_novela>=0.1.0",
 ]
-
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-where = ["src"]
+dynamic = ["version"]
 
 [project.scripts]
 spyglass_cli = "spyglass.cli:cli"
@@ -75,11 +70,45 @@ spyglass_cli = "spyglass.cli:cli"
 
 [project.optional-dependencies]
 position = ["ffmpeg", "numba>=0.54", "deeplabcut<2.3.0"]
+test = [
+    "pytest",         # unit testing
+    "pytest-cov",     # code coverage
+    "kachery",        # database access
+    "kachery-client",
+    "kachery-cloud",
+]
+docs = [
+    "hatch",                 # Get version from env 
+    "mike",                  # Docs versioning
+    "mkdocs",                # Docs core
+    "mkdocs-exclude",        # Docs exclude files
+    "mkdocs-exclude-search", # Docs exclude files in search
+    "mkdocs-gen-files",      # Docs API generator
+    "mkdocs-jupyter",        # Docs render notebooks
+    "mkdocs-literate-nav",   # Dynamic page list for API docs
+    "mkdocs-material",       # Docs theme
+    "mkdocstrings[python]",  # Docs API docstrings
+]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+# this file is created/updated when the package is installed and used in
+# src/spyglass/__init__.py to set `spyglass.__version__`
+version-file = "src/spyglass/_version.py"
+
+[tool.hatch.build.targets.sdist]
+exclude = [".git_archival.txt"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spyglass"]
+exclude = []
 
 [tool.black]
 line-length = 80
 
 [tool.codespell]
-skip = '.git,*.pdf,*.svg,*.ipynb'
+skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**'
 # Nevers - name in Citation
 ignore-words-list = 'nevers'

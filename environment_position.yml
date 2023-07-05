@@ -6,7 +6,7 @@
 # conda activate spyglass-position
 # mamba env config vars set LD_LIBRARY_PATH=~/path/to/anaconda3/envs/spyglass-position/lib/
 # run mamba install -c conda-forge wxpython
-# cd into spyglass and run pip install -e .
+# cd into spyglass and run pip install -e .[position]
 name: spyglass-position
 channels:
   - conda-forge
@@ -31,7 +31,6 @@ dependencies:
   - ipython
   - matplotlib>=3.3
   - seaborn
-  - skan
   - bottleneck
   - ipympl
   - tqdm
@@ -48,7 +47,7 @@ dependencies:
   - pip:
     - pubnub<6.4.0
     - mountainsort4
-    - spikeinterface>0.90,<0.94.1
+    - spikeinterface>0.94,<0.98
     - pynwb>=2.2.0,<3
     - hdmf>=3.4.6
     - datajoint>=0.13.6
