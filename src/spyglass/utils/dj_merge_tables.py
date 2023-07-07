@@ -132,6 +132,7 @@ class Merge(dj.Manual):
     def _merge_restrict_parents(
         cls,
         restriction: str = True,
+        parent_name: str = None,
         as_objects: bool = True,
         return_empties: bool = True,
         add_invalid_restrict: bool = True,
@@ -146,6 +147,8 @@ class Merge(dj.Manual):
         restriction: str, optional
             Restriction to apply to the returned parent. Default True, no
             restrictions.
+        parent_name: str, optional
+            CamelCase name of the parent.
         as_objects: bool, optional
             Default True. Return part tables as objects
         return_empties: bool, optional
@@ -171,6 +174,12 @@ class Merge(dj.Manual):
             for parent in part.parents(as_objects=True)  # ID respective parents
             if cls().table_name not in parent.full_table_name  # Not merge table
         ]
+        if parent_name:
+            part_parents = [
+                p
+                for p in part_parents
+                if from_camel_case(parent_name) in p.full_table_name
+            ]
         if not as_objects:
             part_parents = [p.full_table_name for p in part_parents]
 
@@ -226,7 +235,7 @@ class Merge(dj.Manual):
 
     @classmethod
     def _merge_insert(
-        cls, rows: list, mutual_exclusvity=True, **kwargs
+        cls, rows: list, part_name: str = None, mutual_exclusvity=True, **kwargs
     ) -> None:
         """Insert rows into merge table, ensuring db integrity and mutual exclusivity
 
@@ -234,6 +243,8 @@ class Merge(dj.Manual):
         ---------
         rows: List[dict]
             An iterable where an element is a dictionary.
+        part: str, optional
+            CamelCase name of the part table
 
         Raises
         ------
@@ -254,15 +265,22 @@ class Merge(dj.Manual):
             raise TypeError('Input "rows" must be a list of dictionaries')
 
         parts = cls._merge_restrict_parts(as_objects=True)
+        if part_name:
+            parts = [
+                p
+                for p in parts
+                if from_camel_case(part_name) in p.full_table_name
+            ]
+
         master_entries = []
         parts_entries = {p: [] for p in parts}
         for row in rows:
-            key = {}  # empty to-be-inserted key
+            keys = []  # empty to-be-inserted key
             for part in parts:  # check each part
                 part_parent = part.parents(as_objects=True)[-1]
                 part_name = to_camel_case(part.table_name.split("__")[-1])
                 if part_parent & row:  # if row is in part parent
-                    if key and mutual_exclusvity:  # if key from other part
+                    if keys and mutual_exclusvity:  # if key from other part
                         raise ValueError(
                             "Mutual Exclusivity Error! Entry exists in more "
                             + f"than one table - Entry: {row}"
@@ -271,7 +289,7 @@ class Merge(dj.Manual):
                     keys = (part_parent & row).fetch("KEY")  # get pk
                     if len(keys) > 1:
                         raise ValueError(
-                            "Ambiguous entry. Data has mult rows in"
+                            "Ambiguous entry. Data has mult rows in "
                             + f"{part_name}:\n\tData:{row}\n\t{keys}"
                         )
                     master_pk = {  # make uuid
@@ -282,7 +300,7 @@ class Merge(dj.Manual):
                         {**master_pk, cls()._reserved_sk: part_name}
                     )
 
-            if not key:
+            if not keys:
                 raise ValueError(
                     "Non-existing entry in any of the parent tables - Entry: "
                     + f"{row}"
@@ -631,6 +649,13 @@ class Merge(dj.Manual):
                 + "`M.merge_fetch({'source':'X'})"
             )
         return results[0] if len(results) == 1 else results
+
+    @classmethod
+    def merge_populate(source: str, key=None):
+        raise NotImplementedError(
+            "CBroz: In the future, this command will support executing "
+            + "part_parent `make` and then inserting all entries into Merge"
+        )
 
 
 _Merge = Merge
