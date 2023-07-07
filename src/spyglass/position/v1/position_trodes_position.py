@@ -1,3 +1,4 @@
+import copy
 import os
 from pathlib import Path
 
@@ -106,6 +107,7 @@ class TrodesPosV1(dj.Computed):
     """
 
     def make(self, key):
+        orig_key = copy.deepcopy(key)
         print(f"Computing position for: {key}")
         key["analysis_file_name"] = AnalysisNwbfile().create(
             key["nwb_file_name"]
@@ -215,20 +217,10 @@ class TrodesPosV1(dj.Computed):
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
 
         self.insert1(key)
+
         from ..position_merge import PositionOutput
 
-        key["source"] = "Trodes"
-        key["version"] = 1
-        trodes_key = key.copy()
-        valid_fields = PositionOutput().fetch().dtype.fields.keys()
-        entries_to_delete = [
-            entry for entry in key.keys() if entry not in valid_fields
-        ]
-        for entry in entries_to_delete:
-            del key[entry]
-        PositionOutput().insert1(
-            key=key, params=trodes_key, skip_duplicates=True
-        )
+        PositionOutput._merge_insert([orig_key], part_name="TrodesPosV1")
 
     @staticmethod
     def calculate_position_info_from_spatial_series(
