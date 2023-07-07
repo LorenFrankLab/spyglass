@@ -215,10 +215,12 @@ class TrodesPosV1(dj.Computed):
         )
 
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+
         self.insert1(key)
+
         from ..position_merge import PositionOutput
 
-        PositionOutput.insert1(orig_key, skip_duplicates=True)
+        PositionOutput._merge_insert([orig_key], part_name="TrodesPosV1")
 
     @staticmethod
     def calculate_position_info_from_spatial_series(

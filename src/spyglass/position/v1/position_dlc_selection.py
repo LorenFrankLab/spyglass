@@ -13,7 +13,10 @@ from .dlc_utils import get_video_path, make_video
 from .position_dlc_centroid import DLCCentroid
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_orient import DLCOrientation
-from .position_dlc_pose_estimation import DLCPoseEstimation, DLCPoseEstimationSelection
+from .position_dlc_pose_estimation import (
+    DLCPoseEstimation,
+    DLCPoseEstimationSelection,
+)
 from .position_dlc_position import DLCSmoothInterpParams
 
 schema = dj.schema("position_v1_dlc_selection")
@@ -123,10 +126,11 @@ class DLCPosV1(dj.Computed):
             nwb_file_name=key["nwb_file_name"],
             analysis_file_name=key["analysis_file_name"],
         )
+        self.insert1(key)
 
         from ..position_merge import PositionOutput
 
-        self.insert1(key)
+        PositionOutput._merge_insert([orig_key], part_name="DLCPosV1")
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
