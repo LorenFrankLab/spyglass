@@ -1,19 +1,14 @@
 import functools as ft
 import os
 from pathlib import Path
-from typing import Dict
 
 import datajoint as dj
 import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
-from ..common.common_interval import IntervalList
-from ..common.common_nwbfile import AnalysisNwbfile
-from ..common.common_position import (
-    IntervalPositionInfo as CommonIntervalPositionInfo,
-)
-from ..utils.dj_helper_fn import fetch_nwb
+from ..common.common_position import IntervalPositionInfo as CommonPos
+from ..utils.dj_merge_tables import _Merge
 from .v1.dlc_utils import check_videofile, get_video_path, make_video
 from .v1.position_dlc_pose_estimation import DLCPoseEstimationSelection
 from .v1.position_dlc_selection import DLCPosV1
@@ -21,25 +16,19 @@ from .v1.position_trodes_position import TrodesPosV1
 
 schema = dj.schema("position_merge")
 
-_valid_data_sources = ["DLC", "Trodes", "Common"]
-
 
 @schema
-class PositionOutput(dj.Manual):
+class PositionOutput(_Merge):
     """
     Table to identify source of Position Information from upstream options
     (e.g. DLC, Trodes, etc...) To add another upstream option, a new Part table
-    should be added in the same syntax as DLCPos and TrodesPos and
-
-    Note: all part tables need to be named using the source+"Pos" convention
-    i.e. if the source='DLC', then the table is DLCPos
+    should be added in the same syntax as DLCPos and TrodesPos.
     """
 
     definition = """
-    -> IntervalList
-    source: varchar(40)
-    version: int
-    position_id: int
+    merge_id : uuid
+    ---
+    source: varchar(32)
     ---
     """
 
@@ -50,21 +39,9 @@ class PositionOutput(dj.Manual):
 
         definition = """
         -> PositionOutput
-        -> DLCPosV1
         ---
-        -> AnalysisNwbfile
-        position_object_id : varchar(80)
-        orientation_object_id : varchar(80)
-        velocity_object_id : varchar(80)
+        -> DLCPosV1
         """
-
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
 
     class TrodesPosV1(dj.Part):
         """
@@ -73,21 +50,9 @@ class PositionOutput(dj.Manual):
 
         definition = """
         -> PositionOutput
-        -> TrodesPosV1
         ---
-        -> AnalysisNwbfile
-        position_object_id : varchar(80)
-        orientation_object_id : varchar(80)
-        velocity_object_id : varchar(80)
+        -> TrodesPosV1
         """
-
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
 
     class CommonPos(dj.Part):
         """
@@ -96,119 +61,14 @@ class PositionOutput(dj.Manual):
 
         definition = """
         -> PositionOutput
-        -> CommonIntervalPositionInfo
         ---
-        -> AnalysisNwbfile
-        position_object_id : varchar(80)
-        orientation_object_id : varchar(80)
-        velocity_object_id : varchar(80)
+        -> CommonPos
         """
-
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
-
-    def insert1(self, key, params: Dict = None, **kwargs):
-        """Overrides insert1 to also insert into specific part table.
-
-        Parameters
-        ----------
-        key : Dict
-            key specifying the entry to insert
-        params : Dict, optional
-            A dictionary containing all table entries
-            not specified by the parent table (PosMerge)
-        """
-        assert (
-            key["source"] in _valid_data_sources
-        ), f"source needs to be one of {_valid_data_sources}"
-        position_id = key.get("position_id", None)
-        if position_id is None:
-            key["position_id"] = (
-                dj.U().aggr(self & key, n="max(position_id)").fetch1("n") or 0
-            ) + 1
-        else:
-            id = (self & key).fetch("position_id")
-            if len(id) > 0:
-                position_id = max(id) + 1
-            else:
-                position_id = max(0, position_id)
-            key["position_id"] = position_id
-        super().insert1(key, **kwargs)
-        source = key["source"]
-        if source in ["Common"]:
-            table_name = f"{source}Pos"
-        else:
-            version = key["version"]
-            table_name = f"{source}PosV{version}"
-        part_table = getattr(self, table_name)
-        # TODO: The parent table to refer to is hard-coded here, expecting it to be the second
-        # Table in the definition. This could be more flexible.
-        if params:
-            table_query = (
-                dj.FreeTable(dj.conn(), full_table_name=part_table.parents()[1])
-                & key
-                & params
-            )
-        else:
-            table_query = (
-                dj.FreeTable(dj.conn(), full_table_name=part_table.parents()[1])
-                & key
-            )
-        if any(
-            "head" in col
-            for col in list(table_query.fetch().dtype.fields.keys())
-        ):
-            (
-                analysis_file_name,
-                position_object_id,
-                orientation_object_id,
-                velocity_object_id,
-            ) = table_query.fetch1(
-                "analysis_file_name",
-                "head_position_object_id",
-                "head_orientation_object_id",
-                "head_velocity_object_id",
-            )
-        else:
-            (
-                analysis_file_name,
-                position_object_id,
-                orientation_object_id,
-                velocity_object_id,
-            ) = table_query.fetch1(
-                "analysis_file_name",
-                "position_object_id",
-                "orientation_object_id",
-                "velocity_object_id",
-            )
-        part_table.insert1(
-            {
-                **key,
-                "analysis_file_name": analysis_file_name,
-                "position_object_id": position_object_id,
-                "orientation_object_id": orientation_object_id,
-                "velocity_object_id": velocity_object_id,
-                **params,
-            },
-        )
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        source = self.fetch1("source")
-        if source in ["Common"]:
-            table_name = f"{source}Pos"
-        else:
-            version = self.fetch1("version")
-            table_name = f"{source}PosV{version}"
-        part_table = getattr(self, table_name) & self
-        return part_table.fetch_nwb()
 
     def fetch1_dataframe(self):
-        nwb_data = self.fetch_nwb()[0]
+        # proj replaces operator restriction to enable
+        # (TableName & restriction).fetch1_dataframe()
+        nwb_data = self.fetch_nwb(self.proj())[0]
         index = pd.Index(
             np.asarray(nwb_data["position"].get_spatial_series().timestamps),
             name="time",
@@ -285,7 +145,6 @@ class PositionVideoSelection(dj.Manual):
     plot_id                 : int
     plot                    : varchar(40) # Which position info to overlay on video file
     ---
-    position_ids            : mediumblob
     output_dir              : varchar(255)                 # directory where to save output video
     """
 
@@ -323,11 +182,15 @@ class PositionVideo(dj.Computed):
     """
 
     def make(self, key):
-        assert key["plot"] in ["DLC", "Trodes", "Common", "All"]
+        raise NotImplementedError("work in progress -DPG")
+
+        plot = key.get("plot")
+        if plot not in ["DLC", "Trodes", "Common", "All"]:
+            raise ValueError(f"Plot {key['plot']} not supported")
+            # CBroz: I was told only tests should `assert`, code should `raise`
+
         M_TO_CM = 100
-        output_dir, position_ids = (PositionVideoSelection & key).fetch1(
-            "output_dir", "position_ids"
-        )
+        output_dir = (PositionVideoSelection & key).fetch1("output_dir")
 
         print("Loading position data...")
         # raw_position_df = (
@@ -337,122 +200,27 @@ class PositionVideo(dj.Computed):
         #         "interval_list_name": key["interval_list_name"],
         #     }
         # ).fetch1_dataframe()
+
         query = {
             "nwb_file_name": key["nwb_file_name"],
             "interval_list_name": key["interval_list_name"],
         }
-        if key["plot"] == "DLC":
-            assert position_ids["dlc_position_id"]
-            pos_df = (
-                PositionOutput()
-                & {
-                    **query,
-                    "source": "DLC",
-                    "position_id": position_ids["dlc_position_id"],
-                }
-            ).fetch1_dataframe()
-        elif key["plot"] == "Trodes":
-            assert position_ids["trodes_position_id"]
-            pos_df = (
-                PositionOutput()
-                & {
-                    **query,
-                    "source": "Trodes",
-                    "position_id": position_ids["trodes_position_id"],
-                }
-            ).fetch1_dataframe()
-        elif key["plot"] == "Common":
-            assert position_ids["common_position_id"]
-            pos_df = (
-                PositionOutput()
-                & {
-                    **query,
-                    "source": "Common",
-                    "position_id": position_ids["common_position_id"],
-                }
-            ).fetch1_dataframe()
-        elif key["plot"] == "All":
+        merge_entries = {
+            "DLC": PositionOutput.DLCPosV1 & query,
+            "Trodes": PositionOutput.TrodesPosV1 & query,
+            "Common": PositionOutput.CommonPos & query,
+        }
+
+        position_mean_dict = {}
+        if plot == "All":
             # Check which entries exist in PositionOutput
             merge_dict = {}
-            if "dlc_position_id" in position_ids:
-                if (
-                    len(
-                        PositionOutput()
-                        & {
-                            **query,
-                            "source": "DLC",
-                            "position_id": position_ids["dlc_position_id"],
-                        }
+            for source, entries in merge_entries.items():
+                if entries:
+                    merge_dict[source] = entries.fetch1_dataframe().drop(
+                        columns=["velocity_x", "velocity_y", "speed"]
                     )
-                    > 0
-                ):
-                    dlc_df = (
-                        (
-                            PositionOutput()
-                            & {
-                                **query,
-                                "source": "DLC",
-                                "position_id": position_ids["dlc_position_id"],
-                            }
-                        )
-                        .fetch1_dataframe()
-                        .drop(columns=["velocity_x", "velocity_y", "speed"])
-                    )
-                    merge_dict["DLC"] = dlc_df
-            if "trodes_position_id" in position_ids:
-                if (
-                    len(
-                        PositionOutput()
-                        & {
-                            **query,
-                            "source": "Trodes",
-                            "position_id": position_ids["trodes_position_id"],
-                        }
-                    )
-                    > 0
-                ):
-                    trodes_df = (
-                        (
-                            PositionOutput()
-                            & {
-                                **query,
-                                "source": "Trodes",
-                                "position_id": position_ids[
-                                    "trodes_position_id"
-                                ],
-                            }
-                        )
-                        .fetch1_dataframe()
-                        .drop(columns=["velocity_x", "velocity_y", "speed"])
-                    )
-                    merge_dict["Trodes"] = trodes_df
-            if "common_position_id" in position_ids:
-                if (
-                    len(
-                        PositionOutput()
-                        & {
-                            **query,
-                            "source": "Common",
-                            "position_id": position_ids["common_position_id"],
-                        }
-                    )
-                    > 0
-                ):
-                    common_df = (
-                        (
-                            PositionOutput()
-                            & {
-                                **query,
-                                "source": "Common",
-                                "position_id": position_ids[
-                                    "common_position_id"
-                                ],
-                            }
-                        )
-                        .fetch1_dataframe()
-                        .drop(columns=["velocity_x", "velocity_y", "speed"])
-                    )
-                    merge_dict["Common"] = common_df
+
             pos_df = ft.reduce(
                 lambda left, right,: pd.merge(
                     left[1],
@@ -463,15 +231,33 @@ class PositionVideo(dj.Computed):
                 ),
                 merge_dict.items(),
             )
-        print("Loading video data...")
-        epoch = (
-            int(
-                key["interval_list_name"]
-                .replace("pos ", "")
-                .replace(" valid times", "")
+            position_mean_dict = {
+                source: {
+                    "position": np.asarray(
+                        pos_df[[f"position_x_{source}", f"position_y_{source}"]]
+                    ),
+                    "orientation": np.asarray(
+                        pos_df[[f"orientation_{source}"]]
+                    ),
+                }
+                for source in merge_dict.keys()
+            }
+        else:
+            if plot == "DLC":
+                # CBroz - why is this extra step needed for DLC?
+                pos_df_key = merge_entries[plot].fetch1(as_dict=True)
+                pos_df = (PositionOutput & pos_df_key).fetch1_dataframe()
+            elif plot in ["Trodes", "Common"]:
+                pos_df = merge_entries[plot].fetch1_dataframe()
+
+            position_mean_dict[plot]["position"] = np.asarray(
+                pos_df[["position_x", "position_y"]]
             )
-            + 1
-        )
+            position_mean_dict[plot]["orientation"] = np.asarray(
+                pos_df[["orientation"]]
+            )
+
+        print("Loading video data...")
 
         (
             video_path,
@@ -479,20 +265,24 @@ class PositionVideo(dj.Computed):
             meters_per_pixel,
             video_time,
         ) = get_video_path(
-            {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
+            {
+                "nwb_file_name": key["nwb_file_name"],
+                "epoch": int(
+                    "".join(filter(str.isdigit, key["interval_list_name"]))
+                )
+                + 1,
+            }
         )
         video_dir = os.path.dirname(video_path) + "/"
         video_frame_col_name = [
             col for col in pos_df.columns if "video_frame_ind" in col
-        ]
-        video_frame_inds = (
-            pos_df[video_frame_col_name[0]].astype(int).to_numpy()
-        )
-        if key["plot"] in ["DLC", "All"]:
-            temp_key = (PositionOutput.DLCPosV1 & key).fetch1("KEY")
-            video_path = (DLCPoseEstimationSelection & temp_key).fetch1(
-                "video_path"
-            )
+        ][0]
+        video_frame_inds = pos_df[video_frame_col_name].astype(int).to_numpy()
+        if plot in ["DLC", "All"]:
+            video_path = (
+                DLCPoseEstimationSelection
+                & (PositionOutput.DLCPosV1 & key).fetch1("KEY")
+            ).fetch1("video_path")
         else:
             video_path = check_videofile(
                 video_dir, key["output_dir"], video_filename
@@ -506,28 +296,7 @@ class PositionVideo(dj.Computed):
 
         # centroids = {'red': np.asarray(raw_position_df[['xloc', 'yloc']]),
         #              'green':  np.asarray(raw_position_df[['xloc2', 'yloc2']])}
-        position_mean_dict = {}
-        if key["plot"] in ["DLC", "Trodes", "Common"]:
-            position_mean_dict[key["plot"]]["position"] = np.asarray(
-                pos_df[["position_x", "position_y"]]
-            )
-            position_mean_dict[key["plot"]]["orientation"] = np.asarray(
-                pos_df[["orientation"]]
-            )
-        elif key["plot"] == "All":
-            position_mean_dict = {
-                source: {
-                    "position": np.asarray(
-                        pos_df[[f"position_x_{source}", f"position_y_{source}"]]
-                    ),
-                    "orientation": np.asarray(
-                        pos_df[[f"orientation_{source}"]]
-                    ),
-                }
-                for source in merge_dict.keys()
-            }
-        position_time = np.asarray(pos_df.index)
-        cm_per_pixel = meters_per_pixel * M_TO_CM
+
         print("Making video...")
 
         make_video(
@@ -535,10 +304,10 @@ class PositionVideo(dj.Computed):
             video_frame_inds,
             position_mean_dict,
             video_time,
-            position_time,
+            np.asarray(pos_df.index),
             processor="opencv",
             output_video_filename=output_video_filename,
-            cm_to_pixels=cm_per_pixel,
+            cm_to_pixels=meters_per_pixel * M_TO_CM,
             disable_progressbar=False,
         )
         self.insert1(key)
