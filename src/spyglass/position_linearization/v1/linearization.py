@@ -117,7 +117,6 @@ class LinearizedPositionV1(dj.Computed):
         print(f"Computing linear position for: {key}")
 
         position_nwb = PositionOutput.fetch_nwb(key)[0]
-        # TODO @dpeg22: double-check this syntax
         key["analysis_file_name"] = AnalysisNwbfile().create(
             key["nwb_file_name"]
         )
