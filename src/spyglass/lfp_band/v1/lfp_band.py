@@ -179,7 +179,6 @@ class LFPBandV1(dj.Computed):
     def make(self, key):
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
         lfp_key = {"merge_id": key["lfp_merge_id"]}
-        lfp_part_table = LFPOutput.merge_get_part(lfp_key)
         lfp_object = LFPOutput.fetch_nwb(lfp_key)[0]["lfp"]
 
         # get the electrodes to be filtered and their references
