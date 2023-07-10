@@ -85,7 +85,9 @@ class LFPBandSelection(dj.Manual):
                 "All elements in electrode_list must be valid electrode_ids in the LFPElectodeGroup table"
             )
         # sampling rate
-        lfp_sampling_rate = lfp_part_table.fetch1("lfp_sampling_rate")
+        lfp_sampling_rate = LFPOutput.merge_get_parent(lfp_key).fetch1(
+            "lfp_sampling_rate"
+        )
         decimation = lfp_sampling_rate // lfp_band_sampling_rate
         if lfp_sampling_rate // decimation != lfp_band_sampling_rate:
             raise ValueError(
