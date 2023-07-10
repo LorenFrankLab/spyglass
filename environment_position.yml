@@ -15,7 +15,7 @@ channels:
   - franklab
   - edeno
 dependencies:
-  - python>=3.8, <3.10
+  - python>=3.9, <3.10
   - jupyterlab>=3.*
   - pydotplus>=2.0.*
   - libgcc
