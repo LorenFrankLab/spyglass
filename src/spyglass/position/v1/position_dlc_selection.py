@@ -1,9 +1,11 @@
+import copy
 from pathlib import Path
 
 import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
+from datajoint.utils import to_camel_case
 from tqdm import tqdm as tqdm
 
 from ...common.common_nwbfile import AnalysisNwbfile
@@ -52,59 +54,60 @@ class DLCPosV1(dj.Computed):
     """
 
     def make(self, key):
+        orig_key = copy.deepcopy(key)
         key["pose_eval_result"] = self.evaluate_pose_estimation(key)
-        position_nwb_data = (DLCCentroid & key).fetch_nwb()[0]
-        orientation_nwb_data = (DLCOrientation & key).fetch_nwb()[0]
-        position_object = position_nwb_data["dlc_position"].spatial_series[
-            "position"
-        ]
-        velocity_object = position_nwb_data["dlc_velocity"].time_series[
-            "velocity"
-        ]
-        video_frame_object = position_nwb_data["dlc_velocity"].time_series[
-            "video_frame_ind"
-        ]
-        orientation_object = orientation_nwb_data[
-            "dlc_orientation"
-        ].spatial_series["orientation"]
+
+        pos_nwb = (DLCCentroid & key).fetch_nwb()[0]
+        ori_nwb = (DLCOrientation & key).fetch_nwb()[0]
+
+        pos_obj = pos_nwb["dlc_position"].spatial_series["position"]
+        vel_obj = pos_nwb["dlc_velocity"].time_series["velocity"]
+        vid_frame_obj = pos_nwb["dlc_velocity"].time_series["video_frame_ind"]
+        ori_obj = ori_nwb["dlc_orientation"].spatial_series["orientation"]
+
         position = pynwb.behavior.Position()
         orientation = pynwb.behavior.CompassDirection()
         velocity = pynwb.behavior.BehavioralTimeSeries()
+
         position.create_spatial_series(
-            name=position_object.name,
-            timestamps=np.asarray(position_object.timestamps),
-            conversion=position_object.conversion,
-            data=np.asarray(position_object.data),
-            reference_frame=position_object.reference_frame,
-            comments=position_object.comments,
-            description=position_object.description,
+            name=pos_obj.name,
+            timestamps=np.asarray(pos_obj.timestamps),
+            conversion=pos_obj.conversion,
+            data=np.asarray(pos_obj.data),
+            reference_frame=pos_obj.reference_frame,
+            comments=pos_obj.comments,
+            description=pos_obj.description,
         )
+
         orientation.create_spatial_series(
-            name=orientation_object.name,
-            timestamps=np.asarray(orientation_object.timestamps),
-            conversion=orientation_object.conversion,
-            data=np.asarray(orientation_object.data),
-            reference_frame=orientation_object.reference_frame,
-            comments=orientation_object.comments,
-            description=orientation_object.description,
+            name=ori_obj.name,
+            timestamps=np.asarray(ori_obj.timestamps),
+            conversion=ori_obj.conversion,
+            data=np.asarray(ori_obj.data),
+            reference_frame=ori_obj.reference_frame,
+            comments=ori_obj.comments,
+            description=ori_obj.description,
         )
+
         velocity.create_timeseries(
-            name=velocity_object.name,
-            timestamps=np.asarray(velocity_object.timestamps),
-            conversion=velocity_object.conversion,
-            unit=velocity_object.unit,
-            data=np.asarray(velocity_object.data),
-            comments=velocity_object.comments,
-            description=velocity_object.description,
+            name=vel_obj.name,
+            timestamps=np.asarray(vel_obj.timestamps),
+            conversion=vel_obj.conversion,
+            unit=vel_obj.unit,
+            data=np.asarray(vel_obj.data),
+            comments=vel_obj.comments,
+            description=vel_obj.description,
         )
+
         velocity.create_timeseries(
-            name=video_frame_object.name,
-            unit=video_frame_object.unit,
-            timestamps=np.asarray(video_frame_object.timestamps),
-            data=np.asarray(video_frame_object.data),
-            description=video_frame_object.description,
-            comments=video_frame_object.comments,
+            name=vid_frame_obj.name,
+            unit=vid_frame_obj.unit,
+            timestamps=np.asarray(vid_frame_obj.timestamps),
+            data=np.asarray(vid_frame_obj.data),
+            description=vid_frame_obj.description,
+            comments=vid_frame_obj.comments,
         )
+
         # Add to Analysis NWB file
         key["analysis_file_name"] = AnalysisNwbfile().create(
             key["nwb_file_name"]
@@ -124,23 +127,15 @@ class DLCPosV1(dj.Computed):
             nwb_file_name=key["nwb_file_name"],
             analysis_file_name=key["analysis_file_name"],
         )
-
         self.insert1(key)
+
         from ..position_merge import PositionOutput
 
-        key["source"] = "DLC"
-        key["version"] = 1
-        dlc_key = key.copy()
-        del dlc_key["pose_eval_result"]
-        key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
-        valid_fields = PositionOutput().fetch().dtype.fields.keys()
-        entries_to_delete = [
-            entry for entry in key.keys() if entry not in valid_fields
-        ]
-        for entry in entries_to_delete:
-            del key[entry]
-
-        PositionOutput().insert1(key=key, params=dlc_key, skip_duplicates=True)
+        part_name = to_camel_case(self.table_name.split("__")[-1])
+        # TODO: The next line belongs in a merge table function
+        PositionOutput._merge_insert(
+            [orig_key], part_name=part_name, skip_duplicates=True
+        )
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
