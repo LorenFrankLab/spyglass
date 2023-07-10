@@ -1,6 +1,7 @@
 import copy
 import cv2
 import datajoint as dj
+from datajoint.utils import to_camel_case
 import matplotlib.pyplot as plt
 import numpy as np
 from track_linearization import (
@@ -117,13 +118,11 @@ class LinearizedPositionV1(dj.Computed):
         orig_key = copy.deepcopy(key)
         print(f"Computing linear position for: {key}")
 
+        position_nwb = PositionOutput.fetch_nwb(key)[0]
+        # TODO @dpeg22: double-check this syntax
         key["analysis_file_name"] = AnalysisNwbfile().create(
             key["nwb_file_name"]
         )
-
-        position_nwb = PositionOutput.fetch_nwb(key)[0]
-        # TODO: double-check this syntax
-
         position = np.asarray(
             position_nwb["position"].get_spatial_series().data
         )
@@ -173,9 +172,12 @@ class LinearizedPositionV1(dj.Computed):
         )
 
         self.insert1(key)
+
         from ..position_linearization_merge import LinearizedPositionOutput
 
-        LinearizedPositionOutput.insert1(orig_key, skip_duplicates=True)
+        part_name = to_camel_case(self.table_name.split("__")[-1])
+
+        LinearizedPositionOutput._merge_insert([orig_key], part_name=part_name)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(

@@ -25,4 +25,6 @@ class LinearizedPositionOutput(_Merge):
         """
 
         def fetch1_dataframe(self):
-            return self.fetch_nwb()[0]["linearized_position"].set_index("time")
+            return self.fetch_nwb(self.proj())[0][
+                "linearized_position"
+            ].set_index("time")
