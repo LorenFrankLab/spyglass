@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pynwb
 import pynwb.behavior
+from datajoint.utils import to_camel_case
 from position_tools import (
     get_angle,
     get_centriod,
@@ -220,7 +221,11 @@ class TrodesPosV1(dj.Computed):
 
         from ..position_merge import PositionOutput
 
-        PositionOutput._merge_insert([orig_key], part_name="TrodesPosV1")
+        part_name = to_camel_case(self.table_name.split("__")[-1])
+
+        PositionOutput._merge_insert(
+            [orig_key], part_name=part_name, skip_duplicates=True
+        )
 
     @staticmethod
     def calculate_position_info_from_spatial_series(
