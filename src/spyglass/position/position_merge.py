@@ -1,7 +1,6 @@
 import functools as ft
 import os
 from pathlib import Path
-from typing import Dict
 
 import datajoint as dj
 import numpy as np
