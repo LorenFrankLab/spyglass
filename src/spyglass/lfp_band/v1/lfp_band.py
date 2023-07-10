@@ -77,7 +77,6 @@ class LFPBandSelection(dj.Manual):
 
         lfp_key = {"merge_id": lfp_merge_id}
         lfp_part_table = LFPOutput.merge_get_part(lfp_key)
-        print(lfp_part_table)
 
         query = LFPElectrodeGroup().LFPElectrode() & lfp_key
         available_electrodes = query.fetch("electrode_id")
