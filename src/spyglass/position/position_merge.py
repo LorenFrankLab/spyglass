@@ -1,7 +1,6 @@
 import functools as ft
 import os
 from pathlib import Path
-from typing import Dict
 
 import datajoint as dj
 import numpy as np
@@ -67,6 +66,8 @@ class PositionOutput(_Merge):
         """
 
     def fetch1_dataframe(self):
+        # proj replaces operator restriction to enable
+        # (TableName & restriction).fetch1_dataframe()
         nwb_data = self.fetch_nwb(self.proj())[0]
         index = pd.Index(
             np.asarray(nwb_data["position"].get_spatial_series().timestamps),
