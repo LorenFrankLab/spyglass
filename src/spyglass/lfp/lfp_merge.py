@@ -42,7 +42,7 @@ class LFPOutput(_Merge):
         """
 
     def fetch1_dataframe(self, *attrs, **kwargs):
-        nwb_lfp = self.fetch_nwb()[0]
+        nwb_lfp = self.fetch_nwb(self.proj())[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,
             index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
