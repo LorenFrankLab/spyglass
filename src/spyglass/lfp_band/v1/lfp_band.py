@@ -193,8 +193,8 @@ class LFPBandV1(dj.Computed):
         lfp_band_elect_id = lfp_band_elect_id[lfp_sort_order]
         lfp_band_ref_id = lfp_band_ref_id[lfp_sort_order]
 
-        lfp_sampling_rate = LFPOutput.merge_get_parent(lfp_key).fetch1(
-            "lfp_sampling_rate"
+        lfp_sampling_rate, lfp_interval_list = LFPOutput.merge_get_parent(lfp_key).fetch1(
+            "lfp_sampling_rate",  "interval_list_name"
         )
         interval_list_name, lfp_band_sampling_rate = (
             LFPBandSelection() & key
