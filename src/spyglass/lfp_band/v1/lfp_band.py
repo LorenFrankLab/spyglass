@@ -193,9 +193,9 @@ class LFPBandV1(dj.Computed):
         lfp_band_elect_id = lfp_band_elect_id[lfp_sort_order]
         lfp_band_ref_id = lfp_band_ref_id[lfp_sort_order]
 
-        lfp_sampling_rate, lfp_interval_list = LFPOutput.merge_get_parent(lfp_key).fetch1(
-            "lfp_sampling_rate",  "interval_list_name"
-        )
+        lfp_sampling_rate, lfp_interval_list = LFPOutput.merge_get_parent(
+            lfp_key
+        ).fetch1("lfp_sampling_rate", "interval_list_name")
         interval_list_name, lfp_band_sampling_rate = (
             LFPBandSelection() & key
         ).fetch1("target_interval_list_name", "lfp_band_sampling_rate")
@@ -207,10 +207,7 @@ class LFPBandV1(dj.Computed):
             }
         ).fetch1("valid_times")
         # the valid_times for this interval may be slightly beyond the valid times for the lfp itself,
-        # so we have to intersect the two
-        lfp_interval_list = LFPOutput.merge_get_parent(lfp_key).fetch1(
-            "interval_list_name"
-        )
+        # so we have to intersect the two lists
         lfp_valid_times = (
             IntervalList()
             & {

@@ -42,7 +42,7 @@ class LFPOutput(_Merge):
         """
 
     def fetch1_dataframe(self, *attrs, **kwargs):
-       # Note: `proj` below facilitates operator syntax eg Table & restrict
+        # Note: `proj` below facilitates operator syntax eg Table & restrict
         nwb_lfp = self.fetch_nwb(self.proj())[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,
