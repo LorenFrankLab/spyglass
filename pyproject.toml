@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "spyglass-neuro"
 description = "Neuroscience data analysis framework for reproducible research"
 readme = "README.md"
-requires-python = ">=3.8,<3.10"
+requires-python = ">=3.9,<3.10"
 license = { file = "LICENSE" }
 authors = [
     { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
@@ -78,7 +78,7 @@ test = [
     "kachery-cloud",
 ]
 docs = [
-    "hatch",                 # Get version from env 
+    "hatch",                 # Get version from env
     "mike",                  # Docs versioning
     "mkdocs",                # Docs core
     "mkdocs-exclude",        # Docs exclude files
