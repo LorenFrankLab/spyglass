@@ -1,10 +1,10 @@
 import copy
-import uuid
 
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from datajoint.utils import to_camel_case
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
 
@@ -64,12 +64,14 @@ class RippleLFPSelection(dj.Manual):
         group_name="CA1",
         **kwargs,
     ):
-        """Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
+        """Removes all electrodes for the specified nwb file and then
+        adds back the electrodes in the list
 
         Parameters
         ----------
         key : dict
-            dictionary corresponding to the LFPBand entry to use for ripple detection
+            dictionary corresponding to the LFPBand entry to use for
+            ripple detection
         electrode_list : list
             list of electrodes from LFPBandSelection.LFPBandElectrode
             to be used as the ripple LFP during detection
@@ -144,6 +146,7 @@ class RippleTimesV1(dj.Computed):
      """
 
     def make(self, key):
+        orig_key = copy.deepcopy(key)
         print(f"Computing ripple times for: {key}")
         ripple_params = (
             RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
@@ -183,14 +186,14 @@ class RippleTimesV1(dj.Computed):
         self.insert1(key)
 
         # finally, we insert this into the LFP output table.
-        from spyglass.ripple.ripple_merge import RippleTimesOutput
+        from ..ripple_merge import RippleTimesOutput
 
-        ripple_times_output_key = {
-            "merge_id": uuid.uuid1(),
-            "analysis_file_name": key["analysis_file_name"],
-            "ripple_times_object_id": key["ripple_times_object_id"],
-        }
-        RippleTimesOutput.insert1(ripple_times_output_key)
+        part_name = to_camel_case(self.table_name.split("__")[-1])
+
+        # TODO: The next line belongs in a merge table function
+        RippleTimesOutput._merge_insert(
+            [orig_key], part_name=part_name, skip_duplicates=True
+        )
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
@@ -222,7 +225,7 @@ class RippleTimesV1(dj.Computed):
         # warn/validate that there is only one wire per electrode
         lfp_key = copy.deepcopy(key)
         del lfp_key["interval_list_name"]
-        ripple_lfp_nwb = (LFPBandOutput & lfp_key).fetch_nwb()[0]
+        ripple_lfp_nwb = LFPBandOutput.fetch_nwb(lfp_key)[0]
         ripple_lfp_electrodes = ripple_lfp_nwb["filtered_data"].electrodes.data[
             :
         ]
