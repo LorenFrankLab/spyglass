@@ -11,7 +11,7 @@ cp -r ./notebooks/ ./docs/src/
 cp -r ./notebook-images ./docs/src/notebooks
 
 # Get major version
-FULL_VERSION=$(python -c "from spyglass import __version__; print(__version__)")
+FULL_VERSION=$(hatch version) # Most recent tag
 export MAJOR_VERSION="${FULL_VERSION%.*}"
 echo "$MAJOR_VERSION"
 

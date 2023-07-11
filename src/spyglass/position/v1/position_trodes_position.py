@@ -1,3 +1,4 @@
+import copy
 import os
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pynwb
 import pynwb.behavior
+from datajoint.utils import to_camel_case
 from position_tools import (
     get_angle,
     get_centriod,
@@ -106,6 +108,7 @@ class TrodesPosV1(dj.Computed):
     """
 
     def make(self, key):
+        orig_key = copy.deepcopy(key)
         print(f"Computing position for: {key}")
         key["analysis_file_name"] = AnalysisNwbfile().create(
             key["nwb_file_name"]
@@ -215,19 +218,13 @@ class TrodesPosV1(dj.Computed):
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
 
         self.insert1(key)
+
         from ..position_merge import PositionOutput
 
-        key["source"] = "Trodes"
-        key["version"] = 1
-        trodes_key = key.copy()
-        valid_fields = PositionOutput().fetch().dtype.fields.keys()
-        entries_to_delete = [
-            entry for entry in key.keys() if entry not in valid_fields
-        ]
-        for entry in entries_to_delete:
-            del key[entry]
-        PositionOutput().insert1(
-            key=key, params=trodes_key, skip_duplicates=True
+        part_name = to_camel_case(self.table_name.split("__")[-1])
+        # TODO: The next line belongs in a merge table function
+        PositionOutput._merge_insert(
+            [orig_key], part_name=part_name, skip_duplicates=True
         )
 
     @staticmethod

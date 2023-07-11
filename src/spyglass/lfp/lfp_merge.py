@@ -5,13 +5,13 @@ from spyglass.common.common_ephys import LFP as CommonLFP  # noqa: F401
 from spyglass.common.common_filter import FirFilterParameters  # noqa: F401
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.lfp.v1.lfp import LFPV1, ImportedLFPV1  # noqa: F401
-from spyglass.utils.dj_merge_tables import Merge
+from spyglass.utils.dj_merge_tables import _Merge
 
 schema = dj.schema("lfp_merge")
 
 
 @schema
-class LFPOutput(Merge):
+class LFPOutput(_Merge):
     definition = """
     merge_id: uuid
     ---
@@ -42,7 +42,8 @@ class LFPOutput(Merge):
         """
 
     def fetch1_dataframe(self, *attrs, **kwargs):
-        nwb_lfp = self.fetch_nwb()[0]
+        # Note: `proj` below facilitates operator syntax eg Table & restrict
+        nwb_lfp = self.fetch_nwb(self.proj())[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,
             index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
