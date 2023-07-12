@@ -23,6 +23,7 @@ RIPPLE_DETECTION_ALGORITHMS = {
     "Karlsson_ripple_detector": Karlsson_ripple_detector,
 }
 
+UPSTREAM_ACCEPTED_VERSIONS = ["LFPBandV1"]
 
 def interpolate_to_new_time(
     df, new_time, upsampling_interpolation_method="linear"
@@ -40,9 +41,13 @@ def interpolate_to_new_time(
 
 @schema
 class RippleLFPSelection(dj.Manual):
+    # proj required to rename merge_id to avoid downstream conflict
+    # with PositionOutput merge_id
     definition = """
-     -> LFPBand
+     -> LFPBandOutput.proj(lfp_band_merge_id='merge_id')
      group_name = 'CA1' : varchar(80)
+     ---
+     electrode_ids : mediumblob
      """
 
     class RippleLFPElectrode(dj.Part):
@@ -51,8 +56,13 @@ class RippleLFPSelection(dj.Manual):
         -> LFPBandSelection.LFPBandElectrode
         """
 
+
+    def validated_insert1(self, key, **kwargs):
+
     def insert1(self, key, **kwargs):
-        filter_name = (LFPBandOutput.LFPBandV1 & key).fetch1("filter_name")
+        filter_name = LFPBandOutput.merge_get_parent(
+            {"merge_id": key["lfp_band_merge_id"]}
+        ).fetch1("filter_name")
         if "ripple" not in filter_name.lower():
             raise UserWarning("Please use a ripple filter")
         super().insert1(key, **kwargs)
@@ -78,28 +88,35 @@ class RippleLFPSelection(dj.Manual):
         group_name : str, optional
             description of the electrode group, by default "CA1"
         """
-
-        RippleLFPSelection().insert1(
-            {**key, "group_name": group_name},
-            skip_duplicates=True,
-            **kwargs,
-        )
-        if not electrode_list:
-            electrode_list = (
-                (LFPBandSelection.LFPBandElectrode() & key)
-                .fetch("electrode_id")
-                .tolist()
-            )
+        lfp_entry = LFPBandOutput.merge_get_parent(
+            {"merge_id": key["lfp_band_merge_id"]}
+        ).fetch1()
+        source = (LFPBandOutput & {"merge_id": key["lfp_band_merge_id"]}).fetch1("source")
+        if source not in UPSTREAM_ACCEPTED_VERSIONS:
+            raise NotImplementedError("Ripple_V1 will currently only work with LFPBand_v1")
+        if electrode_list is None:
+            electrode_list = lfp_entry["electrode_ids"]
         electrode_list.sort()
+        lfp_key = LFPBandOutput.merge_get_parent(
+            {"merge_id": key["lfp_band_merge_id"]}
+        ).fetch1("KEY")
         electrode_keys = (
-            pd.DataFrame(LFPBandSelection.LFPBandElectrode() & key)
+            pd.DataFrame(LFPBandSelection.LFPBandElectrode() & lfp_key)
             .set_index("electrode_id")
             .loc[electrode_list]
             .reset_index()
             .loc[:, LFPBandSelection.LFPBandElectrode.primary_key]
         )
+        import pdb
+
+        pdb.set_trace()
         electrode_keys["group_name"] = group_name
         electrode_keys = electrode_keys.sort_values(by=["electrode_id"])
+        RippleLFPSelection().insert1(
+            {**key, "group_name": group_name},
+            skip_duplicates=True,
+            **kwargs,
+        )
         RippleLFPSelection().RippleLFPElectrode.insert(
             electrode_keys.to_dict(orient="records"),
             replace=True,
@@ -137,10 +154,12 @@ class RippleParameters(dj.Lookup):
 @schema
 class RippleTimesV1(dj.Computed):
     definition = """
-    -> RippleParameters
     -> RippleLFPSelection
-    -> PositionOutput
+    -> RippleParameters
+    -> PositionOutput.proj(pos_merge_id='merge_id')
+
     ---
+    electrode_ids : mediumblob
     -> AnalysisNwbfile
     ripple_times_object_id : varchar(40)
      """
