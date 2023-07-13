@@ -25,6 +25,7 @@ RIPPLE_DETECTION_ALGORITHMS = {
 
 UPSTREAM_ACCEPTED_VERSIONS = ["LFPBandV1"]
 
+
 def interpolate_to_new_time(
     df, new_time, upsampling_interpolation_method="linear"
 ):
@@ -56,16 +57,13 @@ class RippleLFPSelection(dj.Manual):
         -> LFPBandSelection.LFPBandElectrode
         """
 
-
-    def validated_insert1(self, key, **kwargs):
-
-    def insert1(self, key, **kwargs):
+    @staticmethod
+    def validate_key(key):
         filter_name = LFPBandOutput.merge_get_parent(
             {"merge_id": key["lfp_band_merge_id"]}
         ).fetch1("filter_name")
         if "ripple" not in filter_name.lower():
             raise UserWarning("Please use a ripple filter")
-        super().insert1(key, **kwargs)
 
     @staticmethod
     def set_lfp_electrodes(
@@ -88,18 +86,23 @@ class RippleLFPSelection(dj.Manual):
         group_name : str, optional
             description of the electrode group, by default "CA1"
         """
-        lfp_entry = LFPBandOutput.merge_get_parent(
-            {"merge_id": key["lfp_band_merge_id"]}
-        ).fetch1()
-        source = (LFPBandOutput & {"merge_id": key["lfp_band_merge_id"]}).fetch1("source")
-        if source not in UPSTREAM_ACCEPTED_VERSIONS:
-            raise NotImplementedError("Ripple_V1 will currently only work with LFPBand_v1")
-        if electrode_list is None:
-            electrode_list = lfp_entry["electrode_ids"]
-        electrode_list.sort()
         lfp_key = LFPBandOutput.merge_get_parent(
             {"merge_id": key["lfp_band_merge_id"]}
         ).fetch1("KEY")
+        source = (
+            LFPBandOutput & {"merge_id": key["lfp_band_merge_id"]}
+        ).fetch1("source")
+        if source not in UPSTREAM_ACCEPTED_VERSIONS:
+            raise NotImplementedError(
+                "Ripple V1 will currently only work with LFPBandV1"
+            )
+        if electrode_list is None:
+            electrode_list = (
+                (LFPBandSelection.LFPBandElectrode & lfp_key)
+                .fetch("electrode_id")
+                .tolist()
+            )
+        electrode_list.sort()
         electrode_keys = (
             pd.DataFrame(LFPBandSelection.LFPBandElectrode() & lfp_key)
             .set_index("electrode_id")
@@ -107,11 +110,10 @@ class RippleLFPSelection(dj.Manual):
             .reset_index()
             .loc[:, LFPBandSelection.LFPBandElectrode.primary_key]
         )
-        import pdb
-
-        pdb.set_trace()
         electrode_keys["group_name"] = group_name
+        electrode_keys["lfp_band_merge_id"] = key["lfp_band_merge_id"]
         electrode_keys = electrode_keys.sort_values(by=["electrode_id"])
+        RippleLFPSelection.validate_key(key)
         RippleLFPSelection().insert1(
             {**key, "group_name": group_name},
             skip_duplicates=True,
@@ -159,13 +161,17 @@ class RippleTimesV1(dj.Computed):
     -> PositionOutput.proj(pos_merge_id='merge_id')
 
     ---
-    electrode_ids : mediumblob
     -> AnalysisNwbfile
     ripple_times_object_id : varchar(40)
      """
 
     def make(self, key):
         orig_key = copy.deepcopy(key)
+
+        nwb_file_name, interval_list_name = LFPBandOutput.merge_get_parent(
+            {"merge_id": key["lfp_band_merge_id"]}
+        ).fetch1("nwb_file_name", "target_interval_list_name")
+
         print(f"Computing ripple times for: {key}")
         ripple_params = (
             RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
@@ -178,8 +184,9 @@ class RippleTimesV1(dj.Computed):
             speed,
             interval_ripple_lfps,
             sampling_frequency,
-        ) = self.get_ripple_lfps_and_position_info(key)
-
+        ) = self.get_ripple_lfps_and_position_info(
+            key, nwb_file_name, interval_list_name
+        )
         ripple_times = RIPPLE_DETECTION_ALGORITHMS[ripple_detection_algorithm](
             time=np.asarray(interval_ripple_lfps.index),
             filtered_lfps=np.asarray(interval_ripple_lfps),
@@ -187,24 +194,21 @@ class RippleTimesV1(dj.Computed):
             sampling_frequency=sampling_frequency,
             **ripple_detection_params,
         )
-
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
-        key["analysis_file_name"] = nwb_analysis_file.create(
-            key["nwb_file_name"]
-        )
+        key["analysis_file_name"] = nwb_analysis_file.create(nwb_file_name)
         key["ripple_times_object_id"] = nwb_analysis_file.add_nwb_object(
             analysis_file_name=key["analysis_file_name"],
             nwb_object=ripple_times,
         )
         nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
+            nwb_file_name=nwb_file_name,
             analysis_file_name=key["analysis_file_name"],
         )
 
         self.insert1(key)
 
-        # finally, we insert this into the LFP output table.
+        # finally, we insert this into the RippleTimesOutput table.
         from ..ripple_merge import RippleTimesOutput
 
         part_name = to_camel_case(self.table_name.split("__")[-1])
@@ -227,10 +231,9 @@ class RippleTimesV1(dj.Computed):
         return [data["ripple_times"] for data in self.fetch_nwb()]
 
     @staticmethod
-    def get_ripple_lfps_and_position_info(key):
-        nwb_file_name = key["nwb_file_name"]
-        interval_list_name = key["target_interval_list_name"]
-
+    def get_ripple_lfps_and_position_info(
+        key, nwb_file_name, interval_list_name
+    ):
         ripple_params = (
             RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
         ).fetch1("ripple_param_dict")
@@ -242,25 +245,21 @@ class RippleTimesV1(dj.Computed):
         )
 
         # warn/validate that there is only one wire per electrode
-        lfp_key = copy.deepcopy(key)
-        del lfp_key["interval_list_name"]
-        ripple_lfp_nwb = LFPBandOutput.fetch_nwb(lfp_key)[0]
-        ripple_lfp_electrodes = ripple_lfp_nwb["filtered_data"].electrodes.data[
-            :
-        ]
+        ripple_lfp_nwb = LFPBandOutput.fetch_nwb(
+            {"merge_id": key["lfp_band_merge_id"]}
+        )[0]
+        ripple_lfp_electrodes = ripple_lfp_nwb["lfp_band"].electrodes.data[:]
         elec_mask = np.full_like(ripple_lfp_electrodes, 0, dtype=bool)
         valid_elecs = [
             elec for elec in electrode_keys if elec in ripple_lfp_electrodes
         ]
         lfp_indexed_elec_ids = get_electrode_indices(
-            ripple_lfp_nwb["filtered_data"], valid_elecs
+            ripple_lfp_nwb["lfp_band"], valid_elecs
         )
         elec_mask[lfp_indexed_elec_ids] = True
         ripple_lfp = pd.DataFrame(
-            ripple_lfp_nwb["filtered_data"].data,
-            index=pd.Index(
-                ripple_lfp_nwb["filtered_data"].timestamps, name="time"
-            ),
+            ripple_lfp_nwb["lfp_band"].data,
+            index=pd.Index(ripple_lfp_nwb["lfp_band"].timestamps, name="time"),
         )
         sampling_frequency = ripple_lfp_nwb["lfp_band_sampling_rate"]
 
@@ -274,12 +273,9 @@ class RippleTimesV1(dj.Computed):
             }
         ).fetch1("valid_times")
 
-        pos_key = {
-            k: v
-            for k, v in key.items()
-            if k in list(PositionOutput.fetch().dtype.fields.keys())
-        }
-        position_info = (PositionOutput() & pos_key).fetch1_dataframe()
+        position_info = (
+            PositionOutput() & {"merge_id": key["pos_merge_id"]}
+        ).fetch1_dataframe()
 
         position_info = pd.concat(
             [
