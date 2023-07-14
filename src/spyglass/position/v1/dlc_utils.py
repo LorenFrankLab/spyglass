@@ -319,21 +319,18 @@ def get_video_path(key):
     """
     import pynwb
 
-    from ...common.common_behav import VideoFile
+    from ...common import common_behav
 
-    video_info = (
-        VideoFile()
-        & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
-    ).fetch1()
+    valid_fields = common_behav.VideoFile.fetch().dtype.fields.keys()
+    video_key = {k: val for k, val in key.items() if k in valid_fields}
+    video_info = (common_behav.VideoFile() & video_key).fetch1()
     nwb_path = (
         f"{os.getenv('SPYGLASS_BASE_DIR')}/raw/{video_info['nwb_file_name']}"
     )
     with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
         nwb_file = in_out.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        video_filepath = VideoFile.get_abs_path(
-            {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
-        )
+        video_filepath = common_behav.VideoFile.get_abs_path(video_key)
         video_dir = os.path.dirname(video_filepath) + "/"
         video_filename = video_filepath.split(video_dir)[-1]
         meters_per_pixel = nwb_video.device.meters_per_pixel
