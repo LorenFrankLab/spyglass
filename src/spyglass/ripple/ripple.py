@@ -10,8 +10,7 @@ from ripple_detection.core import gaussian_smooth, get_envelope
 
 from spyglass.common import IntervalList  # noqa
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.lfp_band.lfp_band_merge import LFPBandOutput
-from spyglass.lfp_band.v1.lfp_band import LFPBandSelection
+from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.position import PositionOutput
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
@@ -23,6 +22,7 @@ RIPPLE_DETECTION_ALGORITHMS = {
     "Karlsson_ripple_detector": Karlsson_ripple_detector,
 }
 
+# Do we need this anymore given that LFPBand is no longer a merge table?
 UPSTREAM_ACCEPTED_VERSIONS = ["LFPBandV1"]
 
 
@@ -59,9 +59,7 @@ class RippleLFPSelection(dj.Manual):
 
     @staticmethod
     def validate_key(key):
-        filter_name = LFPBandOutput.merge_get_parent(
-            {"merge_id": key["lfp_band_merge_id"]}
-        ).fetch1("filter_name")
+        filter_name = (LFPBandV1 & key).fetch1("filter_name")
         if "ripple" not in filter_name.lower():
             raise UserWarning("Please use a ripple filter")
 
