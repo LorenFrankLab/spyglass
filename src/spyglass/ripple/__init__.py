@@ -1,1 +1,0 @@
-from spyglass.ripple.ripple_merge import RippleTimesOutput
