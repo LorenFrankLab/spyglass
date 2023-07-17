@@ -60,7 +60,7 @@ class LFPBandSelection(dj.Manual):
         ----------
         nwb_file_name: str
             The name of the NWB file containing the LFP data
-        merge_id: int
+        lfp_merge_id: int
             The uuid of the LFP data to be filtered
         electrode_list: list
             A list of the electrodes to be filtered
@@ -76,9 +76,7 @@ class LFPBandSelection(dj.Manual):
         # electrode_list
 
         lfp_key = {"merge_id": lfp_merge_id}
-        lfp_output_table = LFPOutput & lfp_key
-        lfp_part_table = lfp_output_table.get_part_table()
-        print(lfp_part_table)
+        lfp_part_table = LFPOutput.merge_get_part(lfp_key)
 
         query = LFPElectrodeGroup().LFPElectrode() & lfp_key
         available_electrodes = query.fetch("electrode_id")
@@ -87,7 +85,9 @@ class LFPBandSelection(dj.Manual):
                 "All elements in electrode_list must be valid electrode_ids in the LFPElectodeGroup table"
             )
         # sampling rate
-        lfp_sampling_rate = lfp_part_table.fetch1("filter_sampling_rate")
+        lfp_sampling_rate = LFPOutput.merge_get_parent(lfp_key).fetch1(
+            "lfp_sampling_rate"
+        )
         decimation = lfp_sampling_rate // lfp_band_sampling_rate
         if lfp_sampling_rate // decimation != lfp_band_sampling_rate:
             raise ValueError(
@@ -179,9 +179,7 @@ class LFPBandV1(dj.Computed):
     def make(self, key):
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
         lfp_key = {"merge_id": key["lfp_merge_id"]}
-        lfp_output_table = LFPOutput & lfp_key
-        lfp_part_table = lfp_output_table.get_part_table()
-        lfp_object = lfp_output_table.fetch_nwb()[0]["lfp"]
+        lfp_object = LFPOutput.fetch_nwb(lfp_key)[0]["lfp"]
 
         # get the electrodes to be filtered and their references
         lfp_band_elect_id, lfp_band_ref_id = (
@@ -195,7 +193,9 @@ class LFPBandV1(dj.Computed):
         lfp_band_elect_id = lfp_band_elect_id[lfp_sort_order]
         lfp_band_ref_id = lfp_band_ref_id[lfp_sort_order]
 
-        lfp_sampling_rate = lfp_part_table.fetch1("filter_sampling_rate")
+        lfp_sampling_rate, lfp_interval_list = LFPOutput.merge_get_parent(
+            lfp_key
+        ).fetch1("lfp_sampling_rate", "interval_list_name")
         interval_list_name, lfp_band_sampling_rate = (
             LFPBandSelection() & key
         ).fetch1("target_interval_list_name", "lfp_band_sampling_rate")
@@ -207,8 +207,7 @@ class LFPBandV1(dj.Computed):
             }
         ).fetch1("valid_times")
         # the valid_times for this interval may be slightly beyond the valid times for the lfp itself,
-        # so we have to intersect the two
-        lfp_interval_list = lfp_part_table.fetch1("target_interval_list_name")
+        # so we have to intersect the two lists
         lfp_valid_times = (
             IntervalList()
             & {
