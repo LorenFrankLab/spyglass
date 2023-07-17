@@ -31,42 +31,6 @@ class DLCPoseEstimationSelection(dj.Manual):
     """
 
     @classmethod
-    def get_video_crop(cls, video_path):
-        """
-        Queries the user to determine the cropping parameters for a given video
-
-        Parameters
-        ----------
-        video_path : str
-            path to the video file
-
-        Returns
-        -------
-        crop_ints : list
-            list of 4 integers [x min, x max, y min, y max]
-        """
-
-        cap = cv2.VideoCapture(video_path)
-        _, frame = cap.read()
-        fig, ax = plt.subplots(figsize=(20, 10))
-        ax.imshow(frame)
-        xlims = ax.get_xlim()
-        ylims = ax.get_ylim()
-        ax.set_xticks(np.arange(xlims[0], xlims[-1], 50))
-        ax.set_yticks(np.arange(ylims[0], ylims[-1], -50))
-        ax.grid(visible=True, color="white", lw=0.5, alpha=0.5)
-        display(fig)
-        crop_input = input(
-            "Please enter the crop parameters for your video in format xmin, xmax, ymin, ymax, or 'none'\n"
-        )
-        plt.close()
-        if crop_input.lower() == "none":
-            return None
-        crop_ints = [int(val) for val in crop_input.split(",")]
-        assert all(isinstance(val, int) for val in crop_ints)
-        return crop_ints
-
-    @classmethod
     def insert_estimation_task(
         cls,
         key,
@@ -82,10 +46,11 @@ class DLCPoseEstimationSelection(dj.Manual):
         Parameters
         ----------
         key: DataJoint key specifying a pairing of VideoRecording and Model.
-        task_mode (bool): Default 'trigger' computation. Or 'load' existing results.
+        task_mode (bool): Default 'trigger' computation.
+        Or 'load' existing results.
         params (dict): Optional. Parameters passed to DLC's analyze_videos:
-            videotype, gputouse, save_as_csv, batchsize, cropping, TFGPUinference,
-            dynamic, robust_nframes, allow_growth, use_shelve
+            videotype, gputouse, save_as_csv, batchsize, cropping,
+            TFGPUinference, dynamic, robust_nframes, allow_growth, use_shelve
         """
         from .dlc_utils import check_videofile, get_video_path
 
@@ -117,6 +82,43 @@ class DLCPoseEstimationSelection(dj.Manual):
             )
         logger.logger.info("inserted entry into Pose Estimation Selection")
         return {**key, "task_mode": task_mode}
+
+    @classmethod
+    def get_video_crop(cls, video_path):
+        """
+        Queries the user to determine the cropping parameters for a given video
+
+        Parameters
+        ----------
+        video_path : str
+            path to the video file
+
+        Returns
+        -------
+        crop_ints : list
+            list of 4 integers [x min, x max, y min, y max]
+        """
+
+        cap = cv2.VideoCapture(video_path)
+        _, frame = cap.read()
+        fig, ax = plt.subplots(figsize=(20, 10))
+        ax.imshow(frame)
+        xlims = ax.get_xlim()
+        ylims = ax.get_ylim()
+        ax.set_xticks(np.arange(xlims[0], xlims[-1], 50))
+        ax.set_yticks(np.arange(ylims[0], ylims[-1], -50))
+        ax.grid(visible=True, color="white", lw=0.5, alpha=0.5)
+        display(fig)
+        crop_input = input(
+            "Please enter the crop parameters for your video in format "
+            "xmin, xmax, ymin, ymax, or 'none'\n"
+        )
+        plt.close()
+        if crop_input.lower() == "none":
+            return None
+        crop_ints = [int(val) for val in crop_input.split(",")]
+        assert all(isinstance(val, int) for val in crop_ints)
+        return crop_ints
 
 
 @schema
@@ -254,7 +256,8 @@ class DLCPoseEstimation(dj.Computed):
             del key["meters_per_pixel"]
             body_parts = dlc_result.df.columns.levels[0]
             body_parts_df = {}
-            # Insert dlc pose estimation into analysis NWB file for each body part.
+            # Insert dlc pose estimation into analysis NWB file for
+            # each body part.
             for body_part in bodyparts:
                 if body_part in body_parts:
                     body_parts_df[body_part] = pd.DataFrame.from_dict(
