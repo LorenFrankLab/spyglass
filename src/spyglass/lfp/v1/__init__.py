@@ -11,3 +11,4 @@ from spyglass.lfp.v1.lfp_artifact import (
     LFPArtifactDetectionSelection,
     LFPArtifactRemovedIntervalList,
 )
+from spyglass.lfp.v1.lfp_band import LFPBandV1, LFPBandSelection
