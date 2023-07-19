@@ -107,7 +107,7 @@ def base_dir() -> str:
 
 
 def _set_env_with_dict(env_dict: dict):
-    """Sets env vars from dict {str: Any} where Any is convertable to str."""
+    """Sets env vars from dict {str: Any} where Any is convertible to str."""
     env_to_set = {**env_defaults, **env_dict}
     for var, val in env_to_set.items():
         os.environ[var] = str(val)
