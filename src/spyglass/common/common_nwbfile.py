@@ -88,8 +88,6 @@ class Nwbfile(dj.Manual):
 
         return load_config()["SPYGLASS_RAW_DIR"] + "/" + nwb_file_name
 
-        return str(nwb_file_abspath)
-
     @staticmethod
     def add_to_lock(nwb_file_name):
         """Add the specified NWB file to the file with the list of NWB files to be locked.

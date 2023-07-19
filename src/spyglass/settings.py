@@ -34,7 +34,8 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
     Uses a relative_dirs dict defined in settings.py to (a) gather user
     settings from dj.config or os environment variables or defaults relative to
     base, in that order (b) set environment variables, and (c) make dirs that
-    don't exist.
+    don't exist. NOTE: when passed a base_dir, it will ignore env vars to
+    facilitate testing.
 
     Parameters
     ----------
@@ -59,24 +60,23 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
         return config
 
     dj_spy = dj.config.get("custom", {}).get("spyglass_dirs", {})
-    base_dir = (
+    resolved_base = (
         base_dir
         or dj_spy.get("base")
         or os.environ.get("SPYGLASS_BASE_DIR", ".")
     )
-    if not base_dir:
+    if not resolved_base:
         raise ValueError(
             "SPYGLASS_BASE_DIR not defined in dj.config or os env vars"
         )
-
-    config_dirs = {"SPYGLASS_BASE_DIR": base_dir}
+    config_dirs = {"SPYGLASS_BASE_DIR": resolved_base}
     for prefix, dirs in relative_dirs.items():
         for dir, dir_str in dirs.items():
             dir_env_fmt = f"{prefix.upper()}_{dir.upper()}_DIR"
+            # Ignore env vars if base was passed to func
+            env_loc = os.environ.get(dir_env_fmt) if not base_dir else None
             dir_location = (
-                dj_spy.get(dir)
-                or os.environ.get(dir_env_fmt)
-                or base_dir + "/" + dir_str
+                dj_spy.get(dir) or env_loc or resolved_base + "/" + dir_str
             ).replace('"', "")
             config_dirs.update({dir_env_fmt: dir_location})
 
@@ -107,9 +107,10 @@ def base_dir() -> str:
 
 
 def _set_env_with_dict(env_dict: dict):
+    """Sets env vars from dict {str: Any} where Any is convertable to str."""
     env_to_set = {**env_defaults, **env_dict}
     for var, val in env_to_set.items():
-        os.environ[var] = val
+        os.environ[var] = str(val)
 
 
 def _mkdirs_from_dict_vals(dir_dict: dict):
