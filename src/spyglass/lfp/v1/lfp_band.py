@@ -397,7 +397,7 @@ class LFPBandV1(dj.Computed):
             If any electrodes passed to electrode_list are invalid for the dataset
         """
 
-        filtered_band = self.fetch_nwb()[0]["filtered_data"]
+        filtered_band = self.fetch_nwb()[0]["lfp_band"]
         electrode_index = np.isin(
             filtered_band.electrodes.data[:], electrode_list
         )
