@@ -55,8 +55,9 @@ nav:
       - Insert Data: misc/insert_data.md
       - Merge Tables: misc/merge_tables.md
   - Tutorials:
-      - Introduction: notebooks/00_intro.ipynb
-      - Spike Sorting: notebooks/01_spikesorting.ipynb
+      - Database Connection: notebooks/00_Dabase_Connection.ipynb
+      - Insert Data: notebooks/01_Insert_Data.ipynb
+      - Spike Sorting: notebooks/02_Spike_Sorting.ipynb
       - Curation: notebooks/02_curation.ipynb
       - LFP: notebooks/03_lfp.ipynb
       - Position:
@@ -70,7 +71,6 @@ nav:
       - 1D Clusterless Decoding: notebooks/10_1D_Clusterless_Decoding.ipynb
       - 2D Clusterless Decoding: notebooks/11_2D_Clusterless_Decoding.ipynb
       - Ripple Detection: notebooks/12_Ripple_Detection.ipynb
-      - Docker: notebooks/docker_mysql_tutorial.ipynb
       - Spyglass Kachery Setup: notebooks/Spyglass_kachery_setup.ipynb
   - API Reference: api/ # defer to gen-files + literate-nav
   - How to Contribute: contribute.md
