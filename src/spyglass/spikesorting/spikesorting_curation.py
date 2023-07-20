@@ -392,11 +392,11 @@ class MetricParameters(dj.Manual):
     metric_default_params = {
         "snr": {
             "peak_sign": "neg",
-            # "random_chunk_kwargs_dict": {
-            #     "num_chunks_per_segment": 20,
-            #     "chunk_size": 10000,
-            #     "seed": 0,
-            # },
+            "random_chunk_kwargs_dict": {
+                "num_chunks_per_segment": 20,
+                "chunk_size": 10000,
+                "seed": 0,
+            },
         },
         "isi_violation": {"isi_threshold_ms": 1.5, "min_isi_ms": 0.0},
         "nn_isolation": {
@@ -551,6 +551,9 @@ class QualityMetrics(dj.Computed):
                 metric[str(unit_id)] = metric_func(
                     waveform_extractor, this_unit_id=unit_id, **metric_params
                 )
+                #nn_isolation returns tuple with isolation and unit number. We only want isolation.
+                if metric_name == "nn_isolation":
+                    metric[str(unit_id)] = metric[str(unit_id)][0]
         return metric
 
     def _dump_to_json(self, qm_dict, save_path):
