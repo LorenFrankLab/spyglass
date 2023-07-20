@@ -10,7 +10,7 @@ from typing import List
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
-import spikeinterface.preprocessing as sp
+import spikeinterface.preprocessing as sip
 import spikeinterface.qualitymetrics as sq
 
 from ..common.common_interval import IntervalList
@@ -322,7 +322,7 @@ class Waveforms(dj.Computed):
         waveform_params = (WaveformParameters & key).fetch1("waveform_params")
         if "whiten" in waveform_params:
             if waveform_params.pop("whiten"):
-                recording = sp.whiten(recording, dtype=np.float16)
+                recording = sip.whiten(recording, dtype="float32")
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key["waveform_extractor_path"] = str(

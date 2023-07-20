@@ -201,6 +201,7 @@ class SpikeSorting(dj.Computed):
             # need to remove tempdir and whiten from sorter_params
             sorter_params.pop("tempdir", None)
             sorter_params.pop("whiten", None)
+            sorter_params.pop("outputs", None)
 
             # Detect peaks for clusterless decoding
             detected_spikes = detect_peaks(recording, **sorter_params)
@@ -210,12 +211,12 @@ class SpikeSorting(dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
         else:
-            # whiten recording; make sure dtype is float16
-            recording = sip.whiten(recording, dtype="float16")
-            if sorter_params["whiten"] == True:
-                print(
-                    "Warning: the recording is whitened prior to sorting but the sorter param includes whitening"
-                )
+            if "whiten" in sorter_params.keys():
+                if sorter_params["whiten"]:
+                    sorter_params["whiten"] = False  # set whiten to False
+            # whiten recording separately; make sure dtype is float32
+            # to avoid downstream error with svd
+            recording = sip.whiten(recording, dtype="float32")
             sorting = sis.run_sorter(
                 sorter,
                 recording,

@@ -2,14 +2,10 @@ import bottleneck
 import cv2
 import datajoint as dj
 import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 import pandas as pd
 import pynwb
 import pynwb.behavior
-import skimage
-from matplotlib.path import Path
-from matplotlib.widgets import PolygonSelector
 from position_tools import (
     get_angle,
     get_centriod,
@@ -19,8 +15,6 @@ from position_tools import (
     interpolate_nan,
 )
 from position_tools.core import gaussian_smooth
-from skan import skeleton_to_csgraph
-from skan.draw import _clean_positions_dict
 from tqdm import tqdm_notebook as tqdm
 from track_linearization import (
     get_linearized_position,
@@ -916,120 +910,3 @@ class PositionVideo(dj.Computed):
         video.release()
         out.release()
         cv2.destroyAllWindows()
-
-
-class SelectFromCollection:
-    """
-    Select indices from a matplotlib collection using `PolygonSelector`.
-
-    Selected indices are saved in the `ind` attribute. This tool fades out the
-    points that are not part of the selection (i.e., reduces their alpha
-    values). If your collection has alpha < 1, this tool will permanently
-    alter the alpha values.
-
-    Note that this tool selects collection objects based on their *origins*
-    (i.e., `offsets`).
-
-    Attributes
-    ----------
-    ax : `~matplotlib.axes.Axes`
-        Axes to interact with.
-    collection : `matplotlib.collections.Collection` subclass
-        Collection you want to select from.
-    alpha_other : 0 <= float <= 1
-        To highlight a selection, this tool sets all selected points to an
-        alpha value of 1 and non-selected points to *alpha_other*.
-    """
-
-    def __init__(self, ax, video_filename, alpha_other=0.3):
-        self.ax = ax
-        self.canvas = ax.figure.canvas
-        self.poly = PolygonSelector(
-            ax=ax,
-            onselect=self.onselect,
-            lineprops=dict(
-                color="white", linestyle="-", linewidth=2, alpha=0.5, zorder=10
-            ),
-            markerprops=dict(
-                marker="o",
-                markersize=7,
-                mec="white",
-                mfc="white",
-                alpha=0.5,
-                zorder=10,
-            ),
-        )
-        self.ind = []
-        self.video_filename = video_filename
-        self.video = cv2.VideoCapture(video_filename)
-        self.frame = self.get_video_frame()
-        ax.imshow(self.frame, picker=True, zorder=-1)
-
-        x, y = np.meshgrid(
-            np.arange(self.frame.shape[1]), np.arange(self.frame.shape[0])
-        )
-
-        self.collection = ax.scatter(x, y, s=1, alpha=0.0, zorder=1)
-        self.alpha_other = alpha_other
-
-        self.xys = self.collection.get_offsets()
-        self.Npts = len(self.xys)
-
-        # Ensure that we have separate colors for each object
-        self.fc = self.collection.get_facecolors()
-        if len(self.fc) == 0:
-            raise ValueError("Collection must have a facecolor")
-        elif len(self.fc) == 1:
-            self.fc = np.tile(self.fc, (self.Npts, 1))
-
-    def onselect(self, verts):
-        path = Path(verts)
-        self.is_in = path.contains_points(self.xys)
-        self.ind = np.nonzero(path.contains_points(self.xys))[0]
-        self.fc[:, -1] = self.alpha_other
-        self.fc[self.ind, -1] = 1
-        self.collection.set_facecolors(self.fc)
-        self.canvas.draw_idle()
-
-    def disconnect(self):
-        self.poly.disconnect_events()
-        self.fc[:, -1] = 1
-        self.collection.set_facecolors(self.fc)
-        self.canvas.draw_idle()
-
-    def get_video_frame(self):
-        is_grabbed, frame = self.video.read()
-        if is_grabbed:
-            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-    def get_polygon_mask(self, plot_mask=True):
-        frame_shape = self.frame.shape[:2]
-        is_in_polygon = np.zeros(frame_shape, dtype=bool)
-        ind2D = np.unravel_index(self.ind, frame_shape)
-        is_in_polygon[ind2D] = True
-
-        if plot_mask:
-            self.ax.pcolormesh(is_in_polygon, alpha=0.3)
-        return is_in_polygon
-
-    def get_graph(self):
-        mask = self.get_polygon_mask()
-        skeleton = skimage.morphology.skeletonize(mask)
-        csr_graph, coordinates, _ = skeleton_to_csgraph(skeleton)
-        nx_graph = nx.from_scipy_sparse_matrix(csr_graph)
-        node_positions = dict(
-            zip(range(coordinates.shape[0]), coordinates[:, ::-1])
-        )
-        _clean_positions_dict(node_positions, nx_graph)
-        node_ind = np.asarray(list(node_positions.keys()))
-        temp_node_positions = np.full((node_ind.max() + 1, 2), np.nan)
-        temp_node_positions[node_ind] = np.asarray(
-            list(node_positions.values())
-        )
-        node_positions = temp_node_positions
-        edges = list(nx_graph.edges)
-
-        self.node_positions = node_positions
-        self.edges = edges
-
-        return node_positions, edges
