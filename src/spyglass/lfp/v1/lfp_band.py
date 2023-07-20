@@ -1,5 +1,3 @@
-import uuid
-
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -16,7 +14,7 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_merge import LFPOutput
-from spyglass.lfp.lfp_electrodes import LFPElectrodeGroup
+from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
