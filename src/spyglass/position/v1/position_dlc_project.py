@@ -357,7 +357,17 @@ class DLCProject(dj.Manual):
             else:
                 config_path = (cls & key).fetch1("config_path")
         if (not key) & add_to_files:
-            raise ValueError("Cannot set add_to_files=True without passing key")
+            if config_path:
+                if len(cls & {"config_path": config_path}) == 1:
+                    pass
+                else:
+                    raise ValueError(
+                        "Cannot set add_to_files=True without passing key"
+                    )
+            else:
+                raise ValueError(
+                    "Cannot set add_to_files=True without passing key"
+                )
 
         if all(isinstance(n, Dict) for n in video_list):
             videos_to_convert = [
