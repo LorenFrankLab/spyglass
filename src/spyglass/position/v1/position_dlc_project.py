@@ -324,6 +324,9 @@ class DLCProject(dj.Manual):
         }
         # TODO: make permissions setting more flexible.
         if set_permissions:
+            raise NotImplementedError(
+                "permission-setting is not functional at this time"
+            )
             permissions = (
                 stat.S_IRUSR
                 | stat.S_IWUSR
