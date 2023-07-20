@@ -265,41 +265,12 @@ class DLCProject(dj.Manual):
         # If dict, assume of form {'nwb_file_name': nwb_file_name,
         # 'epoch': epoch, "video_file_num": num} and pass to get_video_path
         # to reference VideoFile table for path
-
-        if all(isinstance(n, Dict) for n in video_list):
-            videos_to_convert = [
-                get_video_path(video_key) for video_key in video_list
-            ]
-            videos = [
-                check_videofile(
-                    video_path=video[0],
-                    output_path=output_path,
-                    video_filename=video[1],
-                )[0].as_posix()
-                for video in videos_to_convert
-            ]
-        # If not dict, assume list of video file paths
-        # that may or may not need to be converted
-        else:
-            videos = []
-            if not all([Path(video).exists() for video in video_list]):
-                raise OSError("at least one file in video_list does not exist")
-            for video in video_list:
-                video_path = Path(video).parent
-                video_filename = video.rsplit(
-                    video_path.as_posix(), maxsplit=1
-                )[-1].split("/")[-1]
-                videos.extend(
-                    [
-                        check_videofile(
-                            video_path=video_path,
-                            output_path=output_path,
-                            video_filename=video_filename,
-                        )[0].as_posix()
-                    ]
-                )
-            if len(videos) < 1:
-                raise ValueError(f"no .mp4 videos found in{video_path}")
+        videos = cls.add_video_files(
+            config_path=config_path,
+            video_list=video_list,
+            output_path=output_path,
+            add_to_files=False,
+        )
         from deeplabcut import create_new_project
 
         config_path = create_new_project(
@@ -366,6 +337,70 @@ class DLCProject(dj.Manual):
         if isinstance(config_path, PosixPath):
             config_path = config_path.as_posix()
         return {"project_name": project_name, "config_path": config_path}
+
+    @classmethod
+    def add_video_files(
+        cls,
+        video_list,
+        config_path=None,
+        key=None,
+        output_path: str = os.getenv("DLC_VIDEO_PATH"),
+        add_new=False,
+        add_to_files=True,
+        **kwargs,
+    ):
+        if not config_path:
+            if not key:
+                raise ValueError(
+                    "at least one of config_path or key have to be passed"
+                )
+            else:
+                config_path = (cls & key).fetch1("config_path")
+        if (not key) & add_to_files:
+            raise ValueError("Cannot set add_to_files=True without passing key")
+
+        if all(isinstance(n, Dict) for n in video_list):
+            videos_to_convert = [
+                get_video_path(video_key) for video_key in video_list
+            ]
+            videos = [
+                check_videofile(
+                    video_path=video[0],
+                    output_path=output_path,
+                    video_filename=video[1],
+                )[0].as_posix()
+                for video in videos_to_convert
+            ]
+        # If not dict, assume list of video file paths
+        # that may or may not need to be converted
+        else:
+            videos = []
+            if not all([Path(video).exists() for video in video_list]):
+                raise OSError("at least one file in video_list does not exist")
+            for video in video_list:
+                video_path = Path(video).parent
+                video_filename = video.rsplit(
+                    video_path.as_posix(), maxsplit=1
+                )[-1].split("/")[-1]
+                videos.extend(
+                    [
+                        check_videofile(
+                            video_path=video_path,
+                            output_path=output_path,
+                            video_filename=video_filename,
+                        )[0].as_posix()
+                    ]
+                )
+            if len(videos) < 1:
+                raise ValueError(f"no .mp4 videos found in{video_path}")
+        if add_new:
+            from deeplabcut import add_new_videos
+
+            add_new_videos(config=config_path, videos=videos, copy_videos=True)
+        if add_to_files:
+            # Add videos to training files
+            cls.add_training_files(key, **kwargs)
+        return videos
 
     @classmethod
     def add_training_files(cls, key, **kwargs):
