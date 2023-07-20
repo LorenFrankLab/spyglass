@@ -383,10 +383,8 @@ class LFPBandV1(dj.Computed):
         """Fetches the filtered data as a dataframe"""
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
-            filtered_nwb["filtered_data"].data,
-            index=pd.Index(
-                filtered_nwb["filtered_data"].timestamps, name="time"
-            ),
+            filtered_nwb["lfp_band"].data,
+            index=pd.Index(filtered_nwb["lfp_band"].timestamps, name="time"),
         )
 
     def compute_analytic_signal(self, electrode_list: list[int], **kwargs):
@@ -408,7 +406,7 @@ class LFPBandV1(dj.Computed):
             If any electrodes passed to electrode_list are invalid for the dataset
         """
 
-        filtered_band = self.fetch_nwb()[0]["filtered_data"]
+        filtered_band = self.fetch_nwb()[0]["lfp_band"]
         electrode_index = np.isin(
             filtered_band.electrodes.data[:], electrode_list
         )
