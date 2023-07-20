@@ -236,7 +236,10 @@ class DLCProject(dj.Manual):
         frames_per_video : int
             number of frames to extract from each video
         video_list : list
-            list of dicts of form [{'nwb_file_name': nwb_file_name, 'epoch': epoch #},...]
+            list of dicts of form
+            [{'nwb_file_name': nwb_file_name,
+            'epoch': epoch #,
+            "video_file_num": #},...]
             to query VideoFile table for videos to train on.
             Can also be list of absolute paths to import videos from
         output_path : str
@@ -259,8 +262,9 @@ class DLCProject(dj.Manual):
         if not bool(LabTeam() & {"team_name": lab_team}):
             raise ValueError(f"team_name: {lab_team} does not exist in LabTeam")
         skeleton_node = None
-        # If dict, assume of form {'nwb_file_name': nwb_file_name, 'epoch': epoch}
-        # and pass to get_video_path to reference VideoFile table for path
+        # If dict, assume of form {'nwb_file_name': nwb_file_name,
+        # 'epoch': epoch, "video_file_num": num} and pass to get_video_path
+        # to reference VideoFile table for path
 
         if all(isinstance(n, Dict) for n in video_list):
             videos_to_convert = [
@@ -274,7 +278,8 @@ class DLCProject(dj.Manual):
                 )[0].as_posix()
                 for video in videos_to_convert
             ]
-        # If not dict, assume list of video file paths that may or may not need to be converted
+        # If not dict, assume list of video file paths
+        # that may or may not need to be converted
         else:
             videos = []
             if not all([Path(video).exists() for video in video_list]):
@@ -364,7 +369,8 @@ class DLCProject(dj.Manual):
 
     @classmethod
     def add_training_files(cls, key, **kwargs):
-        """Add training videos and labeled frames .h5 and .csv to DLCProject.File"""
+        """Add training videos and labeled frames .h5
+        and .csv to DLCProject.File"""
         config_path = (cls & {"project_name": key["project_name"]}).fetch1(
             "config_path"
         )
@@ -381,7 +387,8 @@ class DLCProject(dj.Manual):
             )[0]
             training_files.extend(
                 glob.glob(
-                    f"{cfg['project_path']}/labeled-data/{video_name}/*Collected*"
+                    f"{cfg['project_path']}/"
+                    f"labeled-data/{video_name}/*Collected*"
                 )
             )
         for video in video_names:
@@ -444,16 +451,19 @@ class DLCProject(dj.Manual):
         video_filenames: Union[str, List],
         **kwargs,
     ):
-        """Function to import pre-labeled frames from an existing project into a new project
+        """Function to import pre-labeled frames from an existing project
+        into a new project
 
         Parameters
         ----------
         key : Dict
             key to specify entry in DLCProject table to add labeled frames to
         import_project_path : str
-            absolute path to project directory containing labeled frames to import
+            absolute path to project directory containing
+            labeled frames to import
         video_filenames : str or List
-            filename or list of filenames of video(s) from which to import frames.
+            filename or list of filenames of video(s)
+            from which to import frames.
             without file extension
         """
         project_entry = (cls & key).fetch1()
@@ -463,9 +473,10 @@ class DLCProject(dj.Manual):
             f"{current_project_path.as_posix()}/labeled-data"
         )
         if isinstance(import_project_path, PosixPath):
-            assert (
-                import_project_path.exists()
-            ), f"import_project_path: {import_project_path.as_posix()} does not exist"
+            assert import_project_path.exists(), (
+                "import_project_path: "
+                f"{import_project_path.as_posix()} does not exist"
+            )
             import_labeled_data_path = Path(
                 f"{import_project_path.as_posix()}/labeled-data"
             )
@@ -491,7 +502,8 @@ class DLCProject(dj.Manual):
             dlc_df.columns.set_levels([team_name], level=0, inplace=True)
             dlc_df.to_hdf(
                 Path(
-                    f"{current_labeled_data_path.as_posix()}/{video_file}/CollectedData_{team_name}.h5"
+                    f"{current_labeled_data_path.as_posix()}/"
+                    f"{video_file}/CollectedData_{team_name}.h5"
                 ).as_posix(),
                 "df_with_missing",
             )
