@@ -1,5 +1,6 @@
 import os
 import pathlib
+import re
 from typing import Dict
 
 import datajoint as dj
@@ -217,7 +218,7 @@ class VideoFile(dj.Imported):
                 "interval_list_name": interval_list_name,
             }
         ).fetch1("valid_times")
-
+        cam_device_str = r"camera_device (\d+)"
         is_found = False
         for ind, video in enumerate(videos.values()):
             if isinstance(video, pynwb.image.ImageSeries):
@@ -228,7 +229,11 @@ class VideoFile(dj.Imported):
                     interval_list_contains(valid_times, video_obj.timestamps)
                     > 0.9 * len(video_obj.timestamps)
                 ):
-                    key["video_file_num"] = ind
+                    nwb_cam_device = video_obj.device.name
+                    # returns whatever was captured in the first group (within the parentheses) of the regular expression -- in this case, 0
+                    key["video_file_num"] = int(
+                        re.match(cam_device_str, nwb_cam_device)[1]
+                    )
                     camera_name = video_obj.device.camera_name
                     if CameraDevice & {"camera_name": camera_name}:
                         key["camera_name"] = video_obj.device.camera_name
