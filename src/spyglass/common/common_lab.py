@@ -191,8 +191,9 @@ def decompose_name(full_name: str) -> tuple:
         A tuple of the full, first, last name parts.
     """
     if full_name.count(", ") != 1 and full_name.count(" ") != 1:
-        print(f"Names should be stored as 'last, first'. Skipping {full_name}")
-        return
+        raise ValueError(
+            f"Names should be stored as 'last, first'. Skipping {full_name}"
+        )
     elif ", " in full_name:
         last, first = full_name.title().split(", ")
     else:

@@ -45,20 +45,17 @@ theme:
 
 nav:
   - Home: index.md
-  - Installation:
-      - Home: installation/index.md
-      - Local: installation/local.md
-      - Productions: installation/production.md
+  - Installation: installation.md
   - Miscellaneous:
       - FigURL: misc/figurl_views.md
       - Session Groups: misc/session_groups.md
       - Insert Data: misc/insert_data.md
       - Merge Tables: misc/merge_tables.md
   - Tutorials:
-      - Database Connection: notebooks/00_Dabase_Connection.ipynb
+      - Setup: notebooks/00_Setup.ipynb
       - Insert Data: notebooks/01_Insert_Data.ipynb
       - Spike Sorting: notebooks/02_Spike_Sorting.ipynb
-      - Curation: notebooks/02_curation.ipynb
+      - Curation: notebooks/03_Curation.ipynb
       - LFP: notebooks/03_lfp.ipynb
       - Position:
           - Information: notebooks/4_position_info.ipynb

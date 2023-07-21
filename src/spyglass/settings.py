@@ -22,6 +22,7 @@ relative_dirs = dict(
         temp="tmp",
     ),
     kachery=dict(
+        cloud="kachery-storage",
         storage="kachery-storage",
         temp="tmp",
     ),
@@ -59,10 +60,11 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
     if config_loaded and not force_reload:
         return config
 
-    dj_spy = dj.config.get("custom", {}).get("spyglass_dirs", {})
+    dj_spyglass = dj.config.get("custom", {}).get("spyglass_dirs", {})
+    dj_kachery = dj.config.get("custom", {}).get("kachery_dirs", {})
     resolved_base = (
         base_dir
-        or dj_spy.get("base")
+        or dj_spyglass.get("base")
         or os.environ.get("SPYGLASS_BASE_DIR", ".")
     )
     if not resolved_base:
@@ -76,7 +78,10 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
             # Ignore env vars if base was passed to func
             env_loc = os.environ.get(dir_env_fmt) if not base_dir else None
             dir_location = (
-                dj_spy.get(dir) or env_loc or resolved_base + "/" + dir_str
+                dj_spyglass.get(dir)
+                or dj_kachery.get(dir)
+                or env_loc
+                or resolved_base + "/" + dir_str
             ).replace('"', "")
             config_dirs.update({dir_env_fmt: dir_location})
 
@@ -104,6 +109,20 @@ def base_dir() -> str:
     if not config_loaded or not config:
         config = load_config()
     return config.get("SPYGLASS_BASE_DIR")
+
+
+def raw_dir() -> str:
+    """Retrieve the base directory from the configuration.
+
+    Returns
+    -------
+    str
+        The base directory path.
+    """
+    global config
+    if not config_loaded or not config:
+        config = load_config()
+    return config.get("SPYGLASS_RAW_DIR")
 
 
 def _set_env_with_dict(env_dict: dict):
