@@ -1,11 +1,10 @@
-import copy
 import os
 
 import datajoint as dj
 import kachery_cloud as kcl
 
+from ..common.common_lab import Lab  # noqa
 from ..common.common_nwbfile import AnalysisNwbfile
-from ..common.common_lab import Lab
 
 # define the environment variable name for the kachery zone and the cloud directory
 kachery_zone_envar = "KACHERY_ZONE"
@@ -168,36 +167,41 @@ class AnalysisNwbfileKachery(dj.Computed):
         is_success : bool
             True if the file was successfully downloaded, False otherwise
         """
-        uri, kachery_zone_name = (
+        fetched_list = (
             AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}
-        ).fetch1("analysis_file_uri", "kachery_zone_name")
-        if len(uri) == 0:
-            return False
-        print("uri:", uri)
-        if not kachery_download_file(
-            uri=uri,
-            dest=AnalysisNwbfile.get_abs_path(analysis_file_name),
-            kachery_zone_name=kachery_zone_name,
-        ):
-            raise Exception(f"{analysis_file_name} cannot be downloaded")
-        # now download the linked file(s)
-        linked_files = (
-            AnalysisNwbfileKachery.LinkedFile
-            & {"analysis_file_name": analysis_file_name}
-        ).fetch(as_dict=True)
-        for file in linked_files:
-            uri = file["linked_file_uri"]
-            print(f"attempting to download linked file uri {uri}")
-            linked_file_path = (
-                os.environ["SPYGLASS_BASE_DIR"] + file["linked_file_rel_path"]
-            )
-            if not kachery_download_file(
+        ).fetch("analysis_file_uri", "kachery_zone_name")
+        downloaded = False
+        for uri, kachery_zone_name in zip(fetched_list[0], fetched_list[1]):
+            if len(uri) == 0:
+                return False
+            print("uri:", uri)
+            if kachery_download_file(
                 uri=uri,
-                dest=linked_file_path,
+                dest=AnalysisNwbfile.get_abs_path(analysis_file_name),
                 kachery_zone_name=kachery_zone_name,
             ):
-                raise Exception(
-                    f"Linked file {linked_file_path} cannot be downloaded"
-                )
+                downloaded = True
+                # now download the linked file(s)
+                linked_files = (
+                    AnalysisNwbfileKachery.LinkedFile
+                    & {"analysis_file_name": analysis_file_name}
+                ).fetch(as_dict=True)
+                for file in linked_files:
+                    uri = file["linked_file_uri"]
+                    print(f"attempting to download linked file uri {uri}")
+                    linked_file_path = (
+                        os.environ["SPYGLASS_BASE_DIR"]
+                        + file["linked_file_rel_path"]
+                    )
+                    if not kachery_download_file(
+                        uri=uri,
+                        dest=linked_file_path,
+                        kachery_zone_name=kachery_zone_name,
+                    ):
+                        raise Exception(
+                            f"Linked file {linked_file_path} cannot be downloaded"
+                        )
+        if not downloaded:
+            raise Exception(f"{analysis_file_name} cannot be downloaded")
 
         return True
