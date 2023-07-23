@@ -2,14 +2,14 @@ import datajoint as dj
 
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.common_session import SessionGroup
+from spyglass.common.common_session import Session
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 
 schema = dj.schema("lfp_imported")
 
 
 @schema
-class ImportedLFPV1(dj.Imported):
+class ImportedLFP(dj.Imported):
     definition = """
     -> Session                      # the session to which this LFP belongs
     -> LFPElectrodeGroup            # the group of electrodes to be filtered

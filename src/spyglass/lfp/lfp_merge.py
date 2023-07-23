@@ -5,7 +5,7 @@ from spyglass.common.common_ephys import LFP as CommonLFP  # noqa: F401
 from spyglass.common.common_filter import FirFilterParameters  # noqa: F401
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.lfp.v1.lfp import LFPV1  # noqa: F401
-from spyglass.lfp.lfp_imported import ImportedLFPV1  # noqa: F401
+from spyglass.lfp.lfp_imported import ImportedLFP  # noqa: F401
 from spyglass.utils.dj_merge_tables import _Merge
 
 schema = dj.schema("lfp_merge")
@@ -26,11 +26,11 @@ class LFPOutput(_Merge):
         -> LFPV1
         """
 
-    class ImportedLFPV1(dj.Part):
+    class ImportedLFP(dj.Part):
         definition = """
         -> master
         ---
-        -> ImportedLFPV1
+        -> ImportedLFP
         """
 
     class CommonLFP(dj.Part):
