@@ -2,13 +2,13 @@ import datajoint as dj
 import pandas as pd
 
 from spyglass.lfp_band.v1.lfp_band import LFPBandV1  # noqa F401
-from spyglass.utils.dj_merge_tables import Merge
+from spyglass.utils.dj_merge_tables import _Merge
 
 schema = dj.schema("lfp_band_merge")
 
 
 @schema
-class LFPBandOutput(Merge):
+class LFPBandOutput(_Merge):
     definition = """
     merge_id: uuid
     ---
