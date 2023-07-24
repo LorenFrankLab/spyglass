@@ -10,3 +10,6 @@ from spyglass.lfp.v1.lfp_artifact import (
     LFPArtifactDetectionSelection,
     LFPArtifactRemovedIntervalList,
 )
+
+# Commented out to prevent circular import
+# from spyglass.lfp.v1.lfp_band import LFPBandV1, LFPBandSelection
