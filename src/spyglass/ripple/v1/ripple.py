@@ -10,8 +10,7 @@ from ripple_detection.core import gaussian_smooth, get_envelope
 
 from spyglass.common import IntervalList  # noqa
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.lfp_band.lfp_band_merge import LFPBandOutput
-from spyglass.lfp_band.v1.lfp_band import LFPBandSelection
+from spyglass.lfp.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.position import PositionOutput
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
@@ -23,6 +22,7 @@ RIPPLE_DETECTION_ALGORITHMS = {
     "Karlsson_ripple_detector": Karlsson_ripple_detector,
 }
 
+# Do we need this anymore given that LFPBand is no longer a merge table?
 UPSTREAM_ACCEPTED_VERSIONS = ["LFPBandV1"]
 
 
@@ -45,7 +45,7 @@ class RippleLFPSelection(dj.Manual):
     # proj required to rename merge_id to avoid downstream conflict
     # with PositionOutput merge_id
     definition = """
-     -> LFPBandOutput.proj(lfp_band_merge_id='merge_id')
+     -> LFPBandV1.proj(lfp_band_merge_id='merge_id')
      group_name = 'CA1' : varchar(80)
      ---
      electrode_ids : mediumblob
@@ -59,9 +59,7 @@ class RippleLFPSelection(dj.Manual):
 
     @staticmethod
     def validate_key(key):
-        filter_name = LFPBandOutput.merge_get_parent(
-            {"merge_id": key["lfp_band_merge_id"]}
-        ).fetch1("filter_name")
+        filter_name = (LFPBandV1 & key).fetch1("filter_name")
         if "ripple" not in filter_name.lower():
             raise UserWarning("Please use a ripple filter")
 
@@ -86,12 +84,12 @@ class RippleLFPSelection(dj.Manual):
         group_name : str, optional
             description of the electrode group, by default "CA1"
         """
-        lfp_key = LFPBandOutput.merge_get_parent(
+        lfp_key = LFPBandV1.merge_get_parent(
             {"merge_id": key["lfp_band_merge_id"]}
         ).fetch1("KEY")
-        source = (
-            LFPBandOutput & {"merge_id": key["lfp_band_merge_id"]}
-        ).fetch1("source")
+        source = (LFPBandV1 & {"merge_id": key["lfp_band_merge_id"]}).fetch1(
+            "source"
+        )
         if source not in UPSTREAM_ACCEPTED_VERSIONS:
             raise NotImplementedError(
                 "Ripple V1 will currently only work with LFPBandV1"
@@ -168,9 +166,9 @@ class RippleTimesV1(dj.Computed):
     def make(self, key):
         orig_key = copy.deepcopy(key)
 
-        nwb_file_name, interval_list_name = LFPBandOutput.merge_get_parent(
-            {"merge_id": key["lfp_band_merge_id"]}
-        ).fetch1("nwb_file_name", "target_interval_list_name")
+        nwb_file_name, interval_list_name = (LFPBandV1 & key).fetch1(
+            "nwb_file_name", "target_interval_list_name"
+        )
 
         print(f"Computing ripple times for: {key}")
         ripple_params = (
@@ -208,16 +206,6 @@ class RippleTimesV1(dj.Computed):
 
         self.insert1(key)
 
-        # finally, we insert this into the RippleTimesOutput table.
-        from ..ripple_merge import RippleTimesOutput
-
-        part_name = to_camel_case(self.table_name.split("__")[-1])
-
-        # TODO: The next line belongs in a merge table function
-        RippleTimesOutput._merge_insert(
-            [orig_key], part_name=part_name, skip_duplicates=True
-        )
-
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
             self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
@@ -245,9 +233,7 @@ class RippleTimesV1(dj.Computed):
         )
 
         # warn/validate that there is only one wire per electrode
-        ripple_lfp_nwb = LFPBandOutput.fetch_nwb(
-            {"merge_id": key["lfp_band_merge_id"]}
-        )[0]
+        ripple_lfp_nwb = (LFPBandV1 & key).fetch_nwb()[0]
         ripple_lfp_electrodes = ripple_lfp_nwb["lfp_band"].electrodes.data[:]
         elec_mask = np.full_like(ripple_lfp_electrodes, 0, dtype=bool)
         valid_elecs = [
