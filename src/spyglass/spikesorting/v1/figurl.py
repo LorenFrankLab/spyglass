@@ -12,8 +12,9 @@ import sortingview.views as vv
 
 schema = dj.schema("spikesorting_v1_figurl")
 
+
 @schema
-class SortingView(dj.Computed):
+class SpikeSortingFigURL(dj.Computed):
     definition = """
     -> SpikeSortingOutput
     ---
