@@ -266,7 +266,6 @@ class DLCProject(dj.Manual):
         # 'epoch': epoch, "video_file_num": num} and pass to get_video_path
         # to reference VideoFile table for path
         videos = cls.add_video_files(
-            config_path=config_path,
             video_list=video_list,
             output_path=output_path,
             add_to_files=False,
