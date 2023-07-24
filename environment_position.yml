@@ -34,7 +34,6 @@ dependencies:
   - bottleneck
   - ipympl
   - tqdm
-  - nb_conda
   - ffmpeg
   - pytorch<1.12.0
   - torchvision
