@@ -349,10 +349,10 @@ class DLCProject(dj.Manual):
         add_to_files=True,
         **kwargs,
     ):
-        if not config_path:
+        if add_new & (not config_path):
             if not key:
                 raise ValueError(
-                    "at least one of config_path or key have to be passed"
+                    "at least one of config_path or key have to be passed if add_new=True"
                 )
             else:
                 config_path = (cls & key).fetch1("config_path")
