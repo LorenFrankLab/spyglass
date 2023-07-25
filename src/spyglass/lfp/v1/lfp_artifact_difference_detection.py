@@ -14,6 +14,7 @@ from spyglass.utils.nwb_helper_fn import get_valid_intervals
 
 def difference_artifact_detector(
     recording: None,
+    timestamps: None,
     amplitude_thresh_1st: Union[float, None] = None,
     amplitude_thresh_2nd: Union[float, None] = None,
     proportion_above_thresh_1st: float = 1.0,
@@ -21,6 +22,7 @@ def difference_artifact_detector(
     removal_window_ms: float = 1.0,
     local_window_ms: float = 1.0,
     sampling_frequency: float = 1000.0,
+    referencing: int = 0,
 ):
     """Detects times during which artifacts do and do not occur.
 
@@ -50,7 +52,13 @@ def difference_artifact_detector(
         Intervals in which artifacts are detected (including removal windows), unit: seconds
     """
 
-    valid_timestamps = recording.timestamps
+    # NOTE: 7-17-23 updated to remove recording.data, since it will converted to numpy array before referencing
+    # check for referencing flag
+    if referencing == 1:
+        print("referencing activated. may be set to -1")
+
+    # valid_timestamps = recording.timestamps
+    valid_timestamps = timestamps
 
     local_window = int(local_window_ms / 2)
 
@@ -78,34 +86,80 @@ def difference_artifact_detector(
 
     # want to detect frames without parallel processing
     # compute the number of electrodes that have to be above threshold
-    nelect_above_1st = np.ceil(
-        proportion_above_thresh_1st * recording.data.shape[1]
-    )
-    nelect_above_2nd = np.ceil(
-        proportion_above_thresh_2nd * recording.data.shape[1]
-    )
+    nelect_above_1st = np.ceil(proportion_above_thresh_1st * recording.shape[1])
+    nelect_above_2nd = np.ceil(proportion_above_thresh_2nd * recording.shape[1])
+    print("num tets 1", nelect_above_1st, "num tets 2", nelect_above_2nd)
+    print("data shape", recording.shape)
 
     # find the artifact occurrences using one or both thresholds, across channels
     # replace with LFP artifact code
     # is this supposed to be indices??
     if amplitude_thresh_1st is not None:
         # first find times with large amp change
-        artifact_boolean = np.sum(
-            (np.abs(np.diff(recording.data, axis=0)) > amplitude_thresh_1st),
-            axis=1,
+        # try another way of doing this - sum diff over several timebins
+        # artifact_boolean = np.sum(
+        #    (np.abs(np.diff(recording.data, axis=0)) > amplitude_thresh_1st),
+        #    axis=1,
+        # )
+        diff_array = np.diff(recording, axis=0)
+        print("updated script")
+        diff_array_5 = (
+            diff_array
+            + np.roll(diff_array, 1, axis=0)
+            + np.roll(diff_array, -1, axis=0)
+            + np.roll(diff_array, 2, axis=0)
+            + np.roll(diff_array, -2, axis=0)
+            + np.roll(diff_array, 3, axis=0)
+            + np.roll(diff_array, -3, axis=0)
+            + np.roll(diff_array, 4, axis=0)
+            + np.roll(diff_array, -4, axis=0)
+            + np.roll(diff_array, 5, axis=0)
+            + np.roll(diff_array, -5, axis=0)
+            + np.roll(diff_array, 6, axis=0)
+            + np.roll(diff_array, -6, axis=0)
+            + np.roll(diff_array, 7, axis=0)
+            + np.roll(diff_array, -7, axis=0)
+            # + np.roll(diff_array, 8, axis=0)
+            # + np.roll(diff_array, -8, axis=0)
+            # + np.roll(diff_array, 9, axis=0)
+            # + np.roll(diff_array, -9, axis=0)
+            # + np.roll(diff_array, 10, axis=0)
+            # + np.roll(diff_array, -10, axis=0)
+            # + np.roll(diff_array, 11, axis=0)
+            # + np.roll(diff_array, -11, axis=0)
+            # + np.roll(diff_array, 12, axis=0)
+            # + np.roll(diff_array, -12, axis=0)
+            # + np.roll(diff_array, 13, axis=0)
+            # + np.roll(diff_array, -13, axis=0)
         )
-        above_thresh_1st = np.where(artifact_boolean >= nelect_above_1st)[0]
+
+        artifact_times_all_5 = np.sum(
+            (np.abs(diff_array_5) > amplitude_thresh_1st), axis=1
+        )
+
+        above_thresh_1st = np.where(artifact_times_all_5 >= nelect_above_1st)[0]
+        # above_thresh_1st = np.where(artifact_boolean >= nelect_above_1st)[0]
+
+        # debugging - print specific artifact times
+        # print(
+        #    "first",
+        #    above_thresh_1st[
+        #        (above_thresh_1st > 2479734) & (above_thresh_1st < 2479933)
+        #    ],
+        # )
 
         # second, find artifacts with large baseline change
+        print("thresh", amplitude_thresh_2nd, "window", local_window)
+
         big_artifacts = np.zeros(
-            (recording.data.shape[1], above_thresh_1st.shape[0])
+            (recording.shape[1], above_thresh_1st.shape[0])
         )
         for art_count in np.arange(above_thresh_1st.shape[0]):
             if above_thresh_1st[art_count] <= local_window:
                 local_min = local_max = above_thresh_1st[art_count]
             else:
                 local_max = np.max(
-                    recording.data[
+                    recording[
                         above_thresh_1st[art_count]
                         - local_window : above_thresh_1st[art_count]
                         + local_window,
@@ -114,7 +168,7 @@ def difference_artifact_detector(
                     axis=0,
                 )
                 local_min = np.min(
-                    recording.data[
+                    recording[
                         above_thresh_1st[art_count]
                         - local_window : above_thresh_1st[art_count]
                         + local_window,
@@ -133,6 +187,12 @@ def difference_artifact_detector(
 
     artifact_frames = above_thresh.copy()
     print("detected ", artifact_frames.shape[0], " artifacts")
+    ## print specific artifact times
+    # print(
+    #    artifact_frames[
+    #        (artifact_frames > 2479734) & (artifact_frames < 2479933)
+    #    ]
+    # )
 
     # turn ms to remove total into s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms / 1000 * 0.5

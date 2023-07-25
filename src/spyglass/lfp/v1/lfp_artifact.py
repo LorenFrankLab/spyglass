@@ -6,6 +6,8 @@ from spyglass.lfp.v1.lfp_artifact_difference_detection import (
     difference_artifact_detector,
 )
 from spyglass.lfp.v1.lfp_artifact_MAD_detection import mad_artifact_detector
+import numpy as np
+from spyglass.common import get_electrode_indices
 
 schema = dj.schema("lfp_v1")
 
@@ -42,6 +44,27 @@ class LFPArtifactDetectionParameters(dj.Manual):
 
         self.insert1(
             ["default_difference", artifact_params], skip_duplicates=True
+        )
+
+        artifact_params = {
+            "artifact_detection_algorithm": "difference",
+            "artifact_detection_algorithm_params": {
+                "amplitude_thresh_1st": 500,  # must be None or >= 0
+                "proportion_above_thresh_1st": 0.1,
+                "amplitude_thresh_2nd": 1000,  # must be None or >= 0
+                "proportion_above_thresh_2nd": 0.05,
+                "removal_window_ms": 10.0,  # in milliseconds
+                "local_window_ms": 40.0,  # in milliseconds
+            },
+            "referencing": {
+                "ref_on": 1,
+                "reference_list": [0, 0, 0, 0, 0],
+                "electrode_list": [0, 0],
+            },
+        }
+
+        self.insert1(
+            ["default_difference_ref", artifact_params], skip_duplicates=True
         )
 
         artifact_params_none = {
@@ -102,18 +125,52 @@ class LFPArtifactDetection(dj.Computed):
             "artifact_detection_algorithm_params"
         ]
 
+        lfp_band_ref_id = artifact_params["referencing"]["reference_list"]
+
         # get LFP data
         lfp_eseries = (LFPV1() & key).fetch_nwb()[0]["lfp"]
         sampling_frequency = (LFPV1() & key).fetch("lfp_sampling_rate")[0]
 
-        (
-            artifact_removed_valid_times,
-            artifact_times,
-        ) = ARTIFACT_DETECTION_ALGORITHMS[artifact_detection_algorithm](
-            lfp_eseries,
-            **artifact_detection_params,
-            sampling_frequency=sampling_frequency,
+        # do referencing at this step
+        lfp_data = np.asarray(
+            lfp_eseries.data[:, :],
+            dtype=type(lfp_eseries.data[0][0]),
         )
+
+        lfp_band_ref_index = get_electrode_indices(lfp_eseries, lfp_band_ref_id)
+        lfp_band_elect_index = get_electrode_indices(
+            lfp_eseries, artifact_params["referencing"]["electrode_list"]
+        )
+
+        # maybe this lfp_elec_list is supposed to be a list on indices
+
+        for index, elect_index in enumerate(lfp_band_elect_index):
+            if lfp_band_ref_id[index] != -1:
+                lfp_data[:, elect_index] = (
+                    lfp_data[:, elect_index]
+                    - lfp_data[:, lfp_band_ref_index[index]]
+                )
+
+        if artifact_detection_algorithm == "difference":
+            (
+                artifact_removed_valid_times,
+                artifact_times,
+            ) = ARTIFACT_DETECTION_ALGORITHMS[artifact_detection_algorithm](
+                lfp_data,
+                timestamps=lfp_eseries.timestamps,
+                **artifact_detection_params,
+                sampling_frequency=sampling_frequency,
+                referencing=artifact_params["referencing"]["ref_on"],
+            )
+        else:
+            (
+                artifact_removed_valid_times,
+                artifact_times,
+            ) = ARTIFACT_DETECTION_ALGORITHMS[artifact_detection_algorithm](
+                lfp_eseries,
+                **artifact_detection_params,
+                sampling_frequency=sampling_frequency,
+            )
 
         key["artifact_times"] = artifact_times
         key["artifact_removed_valid_times"] = artifact_removed_valid_times
