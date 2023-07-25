@@ -1,10 +1,7 @@
-import copy
-
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from datajoint.utils import to_camel_case
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
 
@@ -42,8 +39,6 @@ def interpolate_to_new_time(
 
 @schema
 class RippleLFPSelection(dj.Manual):
-    # proj required to rename merge_id to avoid downstream conflict
-    # with PositionOutput merge_id
     definition = """
      -> LFPBandV1
      group_name = 'CA1' : varchar(80)
@@ -82,10 +77,6 @@ class RippleLFPSelection(dj.Manual):
         group_name : str, optional
             description of the electrode group, by default "CA1"
         """
-        # if source not in UPSTREAM_ACCEPTED_VERSIONS:
-        #     raise NotImplementedError(
-        #         "Ripple V1 will currently only work with LFPBandV1"
-        #     )
         if electrode_list is None:
             electrode_list = (
                 (LFPBandSelection.LFPBandElectrode & key)
@@ -93,13 +84,20 @@ class RippleLFPSelection(dj.Manual):
                 .tolist()
             )
         electrode_list.sort()
-        electrode_keys = (
-            pd.DataFrame(LFPBandSelection.LFPBandElectrode() & key)
-            .set_index("electrode_id")
-            .loc[electrode_list]
-            .reset_index()
-            .loc[:, LFPBandSelection.LFPBandElectrode.primary_key]
-        )
+        try:
+            electrode_keys = (
+                pd.DataFrame(LFPBandSelection.LFPBandElectrode() & key)
+                .set_index("electrode_id")
+                .loc[np.asarray(electrode_list)]
+                .reset_index()
+                .loc[:, LFPBandSelection.LFPBandElectrode.primary_key]
+            )
+        except KeyError as err:
+            print(err)
+            raise KeyError(
+                "Attempting to use electrode_ids that aren't in the associated"
+                " LFPBand filtered dataset."
+            ) from err
         electrode_keys["group_name"] = group_name
         electrode_keys = electrode_keys.sort_values(by=["electrode_id"])
         RippleLFPSelection.validate_key(key)
@@ -155,8 +153,6 @@ class RippleTimesV1(dj.Computed):
      """
 
     def make(self, key):
-        orig_key = copy.deepcopy(key)
-
         nwb_file_name, interval_list_name = (LFPBandV1 & key).fetch1(
             "nwb_file_name", "target_interval_list_name"
         )
