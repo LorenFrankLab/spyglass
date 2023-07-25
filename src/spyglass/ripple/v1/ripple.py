@@ -45,10 +45,8 @@ class RippleLFPSelection(dj.Manual):
     # proj required to rename merge_id to avoid downstream conflict
     # with PositionOutput merge_id
     definition = """
-     -> LFPBandV1.proj(lfp_band_merge_id='merge_id')
+     -> LFPBandV1
      group_name = 'CA1' : varchar(80)
-     ---
-     electrode_ids : mediumblob
      """
 
     class RippleLFPElectrode(dj.Part):
@@ -84,32 +82,25 @@ class RippleLFPSelection(dj.Manual):
         group_name : str, optional
             description of the electrode group, by default "CA1"
         """
-        lfp_key = LFPBandV1.merge_get_parent(
-            {"merge_id": key["lfp_band_merge_id"]}
-        ).fetch1("KEY")
-        source = (LFPBandV1 & {"merge_id": key["lfp_band_merge_id"]}).fetch1(
-            "source"
-        )
-        if source not in UPSTREAM_ACCEPTED_VERSIONS:
-            raise NotImplementedError(
-                "Ripple V1 will currently only work with LFPBandV1"
-            )
+        # if source not in UPSTREAM_ACCEPTED_VERSIONS:
+        #     raise NotImplementedError(
+        #         "Ripple V1 will currently only work with LFPBandV1"
+        #     )
         if electrode_list is None:
             electrode_list = (
-                (LFPBandSelection.LFPBandElectrode & lfp_key)
+                (LFPBandSelection.LFPBandElectrode & key)
                 .fetch("electrode_id")
                 .tolist()
             )
         electrode_list.sort()
         electrode_keys = (
-            pd.DataFrame(LFPBandSelection.LFPBandElectrode() & lfp_key)
+            pd.DataFrame(LFPBandSelection.LFPBandElectrode() & key)
             .set_index("electrode_id")
             .loc[electrode_list]
             .reset_index()
             .loc[:, LFPBandSelection.LFPBandElectrode.primary_key]
         )
         electrode_keys["group_name"] = group_name
-        electrode_keys["lfp_band_merge_id"] = key["lfp_band_merge_id"]
         electrode_keys = electrode_keys.sort_values(by=["electrode_id"])
         RippleLFPSelection.validate_key(key)
         RippleLFPSelection().insert1(
@@ -258,11 +249,9 @@ class RippleTimesV1(dj.Computed):
                 "interval_list_name": interval_list_name,
             }
         ).fetch1("valid_times")
-
         position_info = (
             PositionOutput() & {"merge_id": key["pos_merge_id"]}
         ).fetch1_dataframe()
-
         position_info = pd.concat(
             [
                 position_info.loc[slice(valid_time[0], valid_time[1])]
