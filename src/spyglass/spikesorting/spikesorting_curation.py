@@ -551,7 +551,7 @@ class QualityMetrics(dj.Computed):
                 metric[str(unit_id)] = metric_func(
                     waveform_extractor, this_unit_id=unit_id, **metric_params
                 )
-                #nn_isolation returns tuple with isolation and unit number. We only want isolation.
+                # nn_isolation returns tuple with isolation and unit number. We only want isolation.
                 if metric_name == "nn_isolation":
                     metric[str(unit_id)] = metric[str(unit_id)][0]
         return metric
