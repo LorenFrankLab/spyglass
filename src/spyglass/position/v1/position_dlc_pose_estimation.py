@@ -234,7 +234,13 @@ class DLCPoseEstimation(dj.Computed):
             ).strftime("%Y-%m-%d %H:%M:%S")
 
             logger.logger.info("getting raw position")
-            interval_list_name = f"pos {key['epoch']-1} valid times"
+            interval_list_name = (
+                key["interval_list_name"]
+                if "interval_list_name" in key
+                else f"pos {key['epoch']-1} valid times"
+            )
+            if "interval_list_name" in key:
+                del key["interval_list_name"]
             spatial_series = (
                 RawPosition()
                 & {**key, "interval_list_name": interval_list_name}
