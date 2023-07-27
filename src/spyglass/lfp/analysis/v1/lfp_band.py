@@ -1,5 +1,3 @@
-import uuid
-
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -16,7 +14,7 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_merge import LFPOutput
-from spyglass.lfp.v1.lfp import LFPElectrodeGroup
+from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
@@ -255,11 +253,12 @@ class LFPBandV1(dj.Computed):
         lfp_band_ref_index = get_electrode_indices(lfp_object, lfp_band_ref_id)
 
         # subtract off the references for the selected channels
+        lfp_data_original = lfp_data.copy()
         for index, elect_index in enumerate(lfp_band_elect_index):
             if lfp_band_ref_id[index] != -1:
                 lfp_data[:, elect_index] = (
-                    lfp_data[:, elect_index]
-                    - lfp_data[:, lfp_band_ref_index[index]]
+                    lfp_data_original[:, elect_index]
+                    - lfp_data_original[:, lfp_band_ref_index[index]]
                 )
 
         # get the LFP filter that matches the raw data
@@ -365,15 +364,6 @@ class LFPBandV1(dj.Computed):
 
         self.insert1(key)
 
-        from spyglass.lfp_band.lfp_band_merge import LFPBandOutput
-
-        lfp_band_output_key = {
-            "merge_id": uuid.uuid1(),
-            "analysis_file_name": lfp_band_file_name,
-            "lfp_band_object_id": lfp_band_object_id,
-        }
-        LFPBandOutput.insert1(lfp_band_output_key)
-
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
             self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
@@ -383,10 +373,8 @@ class LFPBandV1(dj.Computed):
         """Fetches the filtered data as a dataframe"""
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
-            filtered_nwb["filtered_data"].data,
-            index=pd.Index(
-                filtered_nwb["filtered_data"].timestamps, name="time"
-            ),
+            filtered_nwb["lfp_band"].data,
+            index=pd.Index(filtered_nwb["lfp_band"].timestamps, name="time"),
         )
 
     def compute_analytic_signal(self, electrode_list: list[int], **kwargs):
@@ -408,7 +396,7 @@ class LFPBandV1(dj.Computed):
             If any electrodes passed to electrode_list are invalid for the dataset
         """
 
-        filtered_band = self.fetch_nwb()[0]["filtered_data"]
+        filtered_band = self.fetch_nwb()[0]["lfp_band"]
         electrode_index = np.isin(
             filtered_band.electrodes.data[:], electrode_list
         )
