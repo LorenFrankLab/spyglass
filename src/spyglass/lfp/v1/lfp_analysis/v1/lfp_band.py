@@ -1,5 +1,3 @@
-import uuid
-
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -16,7 +14,7 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_merge import LFPOutput
-from spyglass.lfp.v1.lfp import LFPElectrodeGroup
+from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
@@ -365,15 +363,6 @@ class LFPBandV1(dj.Computed):
             )
 
         self.insert1(key)
-
-        from spyglass.lfp_band.lfp_band_merge import LFPBandOutput
-
-        lfp_band_output_key = {
-            "merge_id": uuid.uuid1(),
-            "analysis_file_name": lfp_band_file_name,
-            "lfp_band_object_id": lfp_band_object_id,
-        }
-        LFPBandOutput.insert1(lfp_band_output_key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
