@@ -253,11 +253,12 @@ class LFPBandV1(dj.Computed):
         lfp_band_ref_index = get_electrode_indices(lfp_object, lfp_band_ref_id)
 
         # subtract off the references for the selected channels
+        lfp_data_original = lfp_data.copy()
         for index, elect_index in enumerate(lfp_band_elect_index):
             if lfp_band_ref_id[index] != -1:
                 lfp_data[:, elect_index] = (
-                    lfp_data[:, elect_index]
-                    - lfp_data[:, lfp_band_ref_index[index]]
+                    lfp_data_original[:, elect_index]
+                    - lfp_data_original[:, lfp_band_ref_index[index]]
                 )
 
         # get the LFP filter that matches the raw data
