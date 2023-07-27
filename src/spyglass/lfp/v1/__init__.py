@@ -1,7 +1,6 @@
 # flake8: noqa
 from spyglass.lfp.v1.lfp import (
     LFPV1,
-    ImportedLFPV1,
     LFPElectrodeGroup,
     LFPSelection,
 )

@@ -4,7 +4,8 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 
-from spyglass.common.common_ephys import Electrode, Raw
+from spyglass.common.common_ephys import Raw
+from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.common.common_interval import (
     IntervalList,
@@ -18,57 +19,6 @@ from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
 schema = dj.schema("lfp_v1")
 
 MIN_LFP_INTERVAL_DURATION = 1.0  # 1 second minimum interval duration
-
-
-@schema
-class LFPElectrodeGroup(dj.Manual):
-    definition = """
-     -> Session                             # the session to which this LFP belongs
-     lfp_electrode_group_name: varchar(200) # the name of this group of electrodes
-     """
-
-    class LFPElectrode(dj.Part):
-        definition = """
-        -> LFPElectrodeGroup # the group of electrodes to be filtered
-        -> Electrode        # the electrode to be filtered
-        """
-
-    @staticmethod
-    def create_lfp_electrode_group(
-        nwb_file_name: str, group_name: str, electrode_list: list[int]
-    ):
-        """Adds an LFPElectrodeGroup and the individual electrodes
-
-        Parameters
-        ----------
-        nwb_file_name : str
-            The name of the nwb file (e.g. the session)
-        group_name : str
-            The name of this group (< 200 char)
-        electrode_list : list
-            A list of the electrode ids to include in this group.
-        """
-        # remove the session and then recreate the session and Electrode list
-        # check to see if the user allowed the deletion
-        key = {
-            "nwb_file_name": nwb_file_name,
-            "lfp_electrode_group_name": group_name,
-        }
-        LFPElectrodeGroup().insert1(key, skip_duplicates=True)
-
-        # TODO: do this in a better way
-        all_electrodes = (Electrode() & {"nwb_file_name": nwb_file_name}).fetch(
-            as_dict=True
-        )
-        primary_key = Electrode.primary_key
-        for e in all_electrodes:
-            # create a dictionary so we can insert the electrodes
-            if e["electrode_id"] in electrode_list:
-                lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
-                lfpelectdict["lfp_electrode_group_name"] = group_name
-                LFPElectrodeGroup().LFPElectrode.insert1(
-                    lfpelectdict, skip_duplicates=True
-                )
 
 
 @schema
@@ -225,22 +175,4 @@ class LFPV1(dj.Computed):
         return pd.DataFrame(
             nwb_lfp["lfp"].data,
             index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
-        )
-
-
-@schema
-class ImportedLFPV1(dj.Imported):
-    definition = """
-    -> Session                      # the session to which this LFP belongs
-    -> LFPElectrodeGroup            # the group of electrodes to be filtered
-    -> IntervalList # the original set of times to be filtered
-    lfp_object_id: varchar(40)      # the NWB object ID for loading this object from the file
-    ---
-    lfp_sampling_rate: float        # the sampling rate, in samples/sec
-    -> AnalysisNwbfile
-    """
-
-    def make(self, key):
-        raise NotImplementedError(
-            "For `insert`, use `allow_direct_insert=True`"
         )
