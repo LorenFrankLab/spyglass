@@ -5,6 +5,7 @@ from pathlib import Path
 import datajoint as dj
 import numpy as np
 import pandas as pd
+from datajoint.utils import to_camel_case
 from tqdm import tqdm as tqdm
 
 from ..common.common_position import IntervalPositionInfo as CommonPos
@@ -15,6 +16,12 @@ from .v1.position_dlc_selection import DLCPosV1
 from .v1.position_trodes_position import TrodesPosV1
 
 schema = dj.schema("position_merge")
+
+source_class_dict = {
+    "IntervalPositionInfo": CommonPos,
+    "DLCPosV1": DLCPosV1,
+    "TrodesPosV1": TrodesPosV1,
+}
 
 
 @schema
@@ -68,73 +75,14 @@ class PositionOutput(_Merge):
     def fetch1_dataframe(self):
         # proj replaces operator restriction to enable
         # (TableName & restriction).fetch1_dataframe()
-        nwb_data = self.fetch_nwb(self.proj())[0]
-        index = pd.Index(
-            np.asarray(nwb_data["position"].get_spatial_series().timestamps),
-            name="time",
+        key = self.merge_restrict(self.proj())
+        query = (
+            source_class_dict[
+                to_camel_case(self.merge_get_parent(self.proj()).table_name)
+            ]
+            & key
         )
-        if (
-            "video_frame_ind"
-            in nwb_data["velocity"].fields["time_series"].keys()
-        ):
-            COLUMNS = [
-                "video_frame_ind",
-                "position_x",
-                "position_y",
-                "orientation",
-                "velocity_x",
-                "velocity_y",
-                "speed",
-            ]
-            return pd.DataFrame(
-                np.concatenate(
-                    (
-                        np.asarray(
-                            nwb_data["velocity"]
-                            .get_timeseries("video_frame_ind")
-                            .data,
-                            dtype=int,
-                        )[:, np.newaxis],
-                        np.asarray(
-                            nwb_data["position"].get_spatial_series().data
-                        ),
-                        np.asarray(
-                            nwb_data["orientation"].get_spatial_series().data
-                        )[:, np.newaxis],
-                        np.asarray(
-                            nwb_data["velocity"].get_timeseries("velocity").data
-                        ),
-                    ),
-                    axis=1,
-                ),
-                columns=COLUMNS,
-                index=index,
-            )
-        else:
-            COLUMNS = [
-                "position_x",
-                "position_y",
-                "orientation",
-                "velocity_x",
-                "velocity_y",
-                "speed",
-            ]
-            return pd.DataFrame(
-                np.concatenate(
-                    (
-                        np.asarray(
-                            nwb_data["position"].get_spatial_series().data
-                        ),
-                        np.asarray(
-                            nwb_data["orientation"].get_spatial_series().data
-                        )[:, np.newaxis],
-                        np.asarray(nwb_data["velocity"].get_timeseries().data),
-                    ),
-                    axis=1,
-                ),
-                columns=COLUMNS,
-                index=index,
-            )
+        return query.fetch1_dataframe()
 
 
 @schema
