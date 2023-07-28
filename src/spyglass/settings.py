@@ -17,7 +17,7 @@ relative_dirs = dict(
         raw="raw",
         analysis="analysis",
         recording="recording",
-        spike_sorting_storage="spikesorting",
+        sorting="spikesorting",  # "SPYGLASS_SORTING_DIR"
         waveforms="waveforms",
         temp="tmp",
     ),
