@@ -9,7 +9,7 @@ import probeinterface as pi
 import spikeinterface as si
 import spikeinterface.extractors as se
 
-from ..common.common_device import Probe, ProbeType
+from ..common.common_device import Probe, ProbeType  # noqa: F401
 from ..common.common_ephys import Electrode, ElectrodeGroup
 from ..common.common_interval import (
     IntervalList,
@@ -17,9 +17,9 @@ from ..common.common_interval import (
     intervals_by_length,
     union_adjacent_index,
 )
-from ..common.common_lab import LabTeam
+from ..common.common_lab import LabTeam  # noqa: F401
 from ..common.common_nwbfile import Nwbfile
-from ..common.common_session import Session
+from ..common.common_session import Session  # noqa: F401
 from ..utils.dj_helper_fn import dj_replace
 
 schema = dj.schema("spikesorting_recording")
@@ -59,12 +59,15 @@ class SortGroup(dj.Manual):
         Parameters
         ----------
         nwb_file_name : str
-            the name of the NWB file whose electrodes should be put into sorting groups
+            the name of the NWB file whose electrodes should be put into
+            sorting groups
         references : dict, optional
             If passed, used to set references. Otherwise, references set using
-            original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
+            original reference electrodes from config. Keys: electrode groups.
+            Values: reference electrode.
         omit_ref_electrode_group : bool
-            Optional. If True, no sort group is defined for electrode group of reference.
+            Optional. If True, no sort group is defined for electrode group of
+            reference.
         omit_unitrode : bool
             Optional. If True, no sort groups are defined for unitrodes.
         """
@@ -109,12 +112,14 @@ class SortGroup(dj.Manual):
                         ]
                     else:
                         ValueError(
-                            f"Error in electrode group {e_group}: reference electrodes are not all the same"
+                            f"Error in electrode group {e_group}: reference "
+                            + "electrodes are not all the same"
                         )
                 else:
                     if e_group not in references.keys():
                         raise Exception(
-                            f"electrode group {e_group} not a key in references, so cannot set reference"
+                            f"electrode group {e_group} not a key in "
+                            + "references, so cannot set reference"
                         )
                     else:
                         sg_key["sort_reference_electrode_id"] = references[
@@ -135,14 +140,16 @@ class SortGroup(dj.Manual):
                     len(reference_electrode_group) != 1
                 ):
                     raise Exception(
-                        f"Should have found exactly one electrode group for reference electrode,"
-                        f"but found {len(reference_electrode_group)}."
+                        "Should have found exactly one electrode group for "
+                        + "reference electrode, but found "
+                        + f"{len(reference_electrode_group)}."
                     )
                 if omit_ref_electrode_group and (
                     str(e_group) == str(reference_electrode_group)
                 ):
                     print(
-                        f"Omitting electrode group {e_group} from sort groups because contains reference."
+                        f"Omitting electrode group {e_group} from sort groups "
+                        + "because contains reference."
                     )
                     continue
                 shank_elect = electrodes["electrode_id"][
