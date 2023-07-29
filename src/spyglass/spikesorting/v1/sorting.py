@@ -16,12 +16,13 @@ from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.spikesorting.merge import ArtifactOutput
-from spyglass.spikesorting.recording import (
+from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
 
 schema = dj.schema("spikesorting_v1_sorting")
+
 
 @schema
 class SpikeSorterParameter(dj.Manual):

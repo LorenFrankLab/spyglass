@@ -19,6 +19,7 @@ from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 
 schema = dj.schema("spikesorting_v1_artifact")
 
+
 @schema
 class ArtifactDetectionParameter(dj.Manual):
     definition = """
@@ -47,7 +48,7 @@ class ArtifactDetectionParameter(dj.Manual):
 @schema
 class ArtifactDetectionSelection(dj.Manual):
     definition = """
-    # Processed recording + artifact detection parameter
+    # Processed recording and artifact detection parameter
     -> SpikeSortingRecording
     -> ArtifactDetectionParameter
     """
@@ -129,6 +130,7 @@ class ArtifactIntervalV1(dj.Computed):
 
             # insert into computed table
             self.insert1(key)
+
 
 def _get_artifact_times(
     recording: si.BaseRecording,

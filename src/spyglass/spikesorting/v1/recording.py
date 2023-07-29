@@ -24,6 +24,7 @@ from spyglass.utils.dj_helper_fn import dj_replace
 
 schema = dj.schema("spikesorting_v1_recording")
 
+
 @schema
 class SortGroup(dj.Manual):
     definition = """
@@ -70,7 +71,9 @@ class SortGroup(dj.Manual):
         """
         # get the electrodes from this NWB file
         electrodes = (
-            Electrode() & {"nwb_file_name": nwb_file_name} & {"bad_channel": "False"}
+            Electrode()
+            & {"nwb_file_name": nwb_file_name}
+            & {"bad_channel": "False"}
         ).fetch()
         e_groups = list(np.unique(electrodes["electrode_group_name"]))
         e_groups.sort(key=int)  # sort electrode groups numerically
@@ -81,7 +84,9 @@ class SortGroup(dj.Manual):
         for e_group in e_groups:
             # for each electrode group, get a list of the unique shank numbers
             shank_list = np.unique(
-                electrodes["probe_shank"][electrodes["electrode_group_name"] == e_group]
+                electrodes["probe_shank"][
+                    electrodes["electrode_group_name"] == e_group
+                ]
             )
             sge_key["electrode_group_name"] = e_group
             # get the indices of all electrodes in this group / shank and set their sorting group
@@ -89,14 +94,18 @@ class SortGroup(dj.Manual):
                 sg_key["sort_group_id"] = sge_key["sort_group_id"] = sort_group
                 # specify reference electrode. Use 'references' if passed, otherwise use reference from config
                 if not references:
-                    shank_elect_ref = electrodes["original_reference_electrode"][
+                    shank_elect_ref = electrodes[
+                        "original_reference_electrode"
+                    ][
                         np.logical_and(
                             electrodes["electrode_group_name"] == e_group,
                             electrodes["probe_shank"] == shank,
                         )
                     ]
                     if np.max(shank_elect_ref) == np.min(shank_elect_ref):
-                        sg_key["sort_reference_electrode_id"] = shank_elect_ref[0]
+                        sg_key["sort_reference_electrode_id"] = shank_elect_ref[
+                            0
+                        ]
                     else:
                         ValueError(
                             f"Error in electrode group {e_group}: reference electrodes are not all the same"
@@ -107,14 +116,19 @@ class SortGroup(dj.Manual):
                             f"electrode group {e_group} not a key in references, so cannot set reference"
                         )
                     else:
-                        sg_key["sort_reference_electrode_id"] = references[e_group]
+                        sg_key["sort_reference_electrode_id"] = references[
+                            e_group
+                        ]
                 # Insert sort group and sort group electrodes
                 reference_electrode_group = electrodes[
-                    electrodes["electrode_id"] == sg_key["sort_reference_electrode_id"]
+                    electrodes["electrode_id"]
+                    == sg_key["sort_reference_electrode_id"]
                 ][
                     "electrode_group_name"
                 ]  # reference for this electrode group
-                if len(reference_electrode_group) == 1:  # unpack single reference
+                if (
+                    len(reference_electrode_group) == 1
+                ):  # unpack single reference
                     reference_electrode_group = reference_electrode_group[0]
                 elif (int(sg_key["sort_reference_electrode_id"]) > 0) and (
                     len(reference_electrode_group) != 1
@@ -162,7 +176,9 @@ class SortGroup(dj.Manual):
         (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
         # get the electrodes from this NWB file
         electrodes = (
-            Electrode() & {"nwb_file_name": nwb_file_name} & {"bad_channel": "False"}
+            Electrode()
+            & {"nwb_file_name": nwb_file_name}
+            & {"bad_channel": "False"}
         ).fetch()
         e_groups = np.unique(electrodes["electrode_group_name"])
         sg_key = dict()
@@ -259,7 +275,9 @@ class SortGroup(dj.Manual):
 
         geometry = np.zeros((n_chan, 2), dtype="float")
         tmp_geom = np.zeros((n_chan, 3), dtype="float")
-        for i, electrode_id in enumerate(channel_group[sort_group_id]["channels"]):
+        for i, electrode_id in enumerate(
+            channel_group[sort_group_id]["channels"]
+        ):
             # get the relative x and y locations of this channel from the probe table
             probe_electrode = int(
                 electrodes["probe_electrode"][
@@ -289,10 +307,12 @@ class SortGroup(dj.Manual):
                     )
         return np.ndarray.tolist(geometry)
 
+
 @schema
 class SpikeSortingPreprocessingParameter(dj.Manual):
     definition = """
-    # Parameter for denoising (filtering and referencing/whitening) recording prior to spike sorting
+    # Parameter for denoising (filtering and referencing/whitening) recording
+    # prior to spike sorting
     preproc_param_name: varchar(200)
     ---
     preproc_param: blob
@@ -319,13 +339,14 @@ class SpikeSortingPreprocessingParameter(dj.Manual):
 @schema
 class SpikeSortingRecordingSelection(dj.Manual):
     definition = """
-    # Raw voltage traces + parameter
+    # Raw voltage traces and parameter
     -> Raw
     -> SortGroup
     -> IntervalList
     -> SpikeSortingPreprocessingParameter
     -> LabTeam
     """
+
 
 @schema
 class SpikeSortingRecording(dj.Computed):
@@ -380,7 +401,9 @@ class SpikeSortingRecording(dj.Computed):
         if recording.get_num_segments() > 1:
             frames_per_segment = [0]
             for i in range(recording.get_num_segments()):
-                frames_per_segment.append(recording.get_num_frames(segment_index=i))
+                frames_per_segment.append(
+                    recording.get_num_frames(segment_index=i)
+                )
 
             cumsum_frames = np.cumsum(frames_per_segment)
             total_frames = np.sum(frames_per_segment)
@@ -426,9 +449,13 @@ class SpikeSortingRecording(dj.Computed):
                 "interval_list_name": interval_list_name,
             }
         ).fetch1("valid_times")
-        valid_sort_times = interval_list_intersect(sort_interval, valid_interval_times)
+        valid_sort_times = interval_list_intersect(
+            sort_interval, valid_interval_times
+        )
         # Exclude intervals shorter than specified length
-        params = (SpikeSortingPreprocessingParameters & key).fetch1("preproc_params")
+        params = (SpikeSortingPreprocessingParameters & key).fetch1(
+            "preproc_params"
+        )
         if "min_segment_length" in params:
             valid_sort_times = intervals_by_length(
                 valid_sort_times, min_length=params["min_segment_length"]
@@ -453,7 +480,9 @@ class SpikeSortingRecording(dj.Computed):
         """
 
         nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
-        recording = se.read_nwb_recording(nwb_file_abs_path, load_time_vector=True)
+        recording = se.read_nwb_recording(
+            nwb_file_abs_path, load_time_vector=True
+        )
 
         valid_sort_times = self._get_sort_interval_valid_times(key)
         # shape is (N, 2)
@@ -468,14 +497,17 @@ class SpikeSortingRecording(dj.Computed):
             union_adjacent_index, valid_sort_times_indices
         )
         if valid_sort_times_indices.ndim == 1:
-            valid_sort_times_indices = np.expand_dims(valid_sort_times_indices, 0)
+            valid_sort_times_indices = np.expand_dims(
+                valid_sort_times_indices, 0
+            )
 
         # create an AppendRecording if there is more than one disjoint sort interval
         if len(valid_sort_times_indices) > 1:
             recordings_list = []
             for interval_indices in valid_sort_times_indices:
                 recording_single = recording.frame_slice(
-                    start_frame=interval_indices[0], end_frame=interval_indices[1]
+                    start_frame=interval_indices[0],
+                    end_frame=interval_indices[1],
                 )
                 recordings_list.append(recording_single)
             recording = si.append_recordings(recordings_list)
