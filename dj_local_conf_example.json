@@ -1,0 +1,36 @@
+{
+  "database.host": "localhost",
+  "database.password": "tutorial",
+  "database.user": "root",
+  "database.port": 3306,
+  "database.reconnect": true,
+  "connection.init_function": null,
+  "connection.charset": "",
+  "loglevel": "INFO",
+  "safemode": true,
+  "fetch_format": "array",
+  "display.limit": 12,
+  "display.width": 14,
+  "display.show_tuple_count": true,
+  "database.use_tls": null,
+  "enable_python_native_blobs": true,
+  "filepath_checksum_size_limit": null,
+  "stores": {
+    "raw": {
+      "protocol": "file",
+      "location": "/your/base/path/raw",
+      "stage": "/your/base/path/raw"
+    },
+    "analysis": {
+      "protocol": "file",
+      "location": "/your/base/path/analysis",
+      "stage": "/your/base/path/analysis"
+    }
+  },
+  "custom": {
+    "database.prefix": "username_",
+    "spyglass_dirs": {
+      "base": "/your/base/path"
+    }
+  }
+}

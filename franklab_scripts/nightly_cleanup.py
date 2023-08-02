@@ -15,7 +15,8 @@ from spyglass.decoding.clusterless import (
 
 warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
-os.environ["SPIKE_SORTING_STORAGE_DIR"] = "/stelmo/nwb/spikesorting"
+# NOTE: "SPIKE_SORTING_STORAGE_DIR" -> "SPYGLASS_SORTING_DIR"
+os.environ["SPYGLASS_SORTING_DIR"] = "/stelmo/nwb/spikesorting"
 
 
 # import tables so that we can call them easily

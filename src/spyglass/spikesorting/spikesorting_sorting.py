@@ -14,6 +14,7 @@ from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
 from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import AnalysisNwbfile
+from ..settings import load_config
 from ..utils.dj_helper_fn import fetch_nwb
 from .spikesorting_artifact import ArtifactRemovedIntervalList
 from .spikesorting_recording import (
@@ -134,7 +135,7 @@ class SpikeSorting(dj.Computed):
            (this is redundant with 2; will change in the future)
 
         """
-
+        # CBroz: does this not work w/o arg? as .populate() ?
         recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
         recording = si.load_extractor(recording_path)
 
@@ -227,7 +228,9 @@ class SpikeSorting(dj.Computed):
         key["time_of_sort"] = int(time.time())
 
         print("Saving sorting results...")
-        sorting_folder = Path(os.getenv("SPYGLASS_SORTING_DIR"))
+
+        sorting_folder = Path(load_config().get("SPYGLASS_SORTING_DIR"))
+
         sorting_name = self._get_sorting_name(key)
         key["sorting_path"] = str(sorting_folder / Path(sorting_name))
         if os.path.exists(key["sorting_path"]):
