@@ -664,6 +664,12 @@ _Merge = Merge
 # Aliased because underscore otherwise excludes from API docs.
 
 
+_Merge = Merge
+
+# Underscore as class name avoids errors when this included in a Diagram
+# Aliased because underscore otherwise excludes from API docs.
+
+
 def delete_downstream_merge(
     table: dj.Table, restriction: str = True, dry_run=True, **kwargs
 ) -> list:
