@@ -23,17 +23,17 @@ dependencies:
   - tqdm
   - pyfftw<=0.12.0  # used by ghostipy. install from conda-forge so that it works on Mac ARM processors
   - pip:
-    - pubnub<6.4.0
-    - spikeinterface>=0.98.2,<0.99
-    - pynwb>=2.2.0,<3
-    - hdmf>=3.4.6
-    - datajoint>=0.13.6
-    - ghostipy
-    - pymysql
-    - sortingview>=0.11
-    - figurl-jupyter
-    - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
-    - pyyaml
-    - click
-    - 'black[jupyter]'
-    - .
+      - pubnub<6.4.0
+      - spikeinterface>=0.98.2,<0.99
+      - pynwb>=2.2.0,<3
+      - hdmf>=3.4.6
+      - datajoint>=0.13.6
+      - ghostipy
+      - pymysql
+      - sortingview>=0.11
+      - figurl-jupyter
+      - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
+      - pyyaml
+      - click
+      - 'black[jupyter]'
+      - .
