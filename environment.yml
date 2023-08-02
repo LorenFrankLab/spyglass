@@ -35,5 +35,5 @@ dependencies:
       - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
       - pyyaml
       - click
-      - 'black[jupyter]'
+      - "black[jupyter]"
       - .
