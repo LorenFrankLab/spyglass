@@ -36,3 +36,4 @@ dependencies:
     - pyyaml
     - click
     - 'black[jupyter]'
+    - .
