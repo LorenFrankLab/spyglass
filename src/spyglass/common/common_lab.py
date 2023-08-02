@@ -1,5 +1,8 @@
-"""Schema for institution name, lab team, lab name, and lab members (independent of a session)."""
+"""Schema for institution, lab team/name/members. Session-independent."""
 import datajoint as dj
+
+from ..utils.nwb_helper_fn import get_nwb_file
+from .common_nwbfile import Nwbfile
 
 schema = dj.schema("common_lab")
 
@@ -13,8 +16,9 @@ class LabMember(dj.Manual):
     last_name: varchar(200)
     """
 
-    # NOTE that names must be unique here. If there are two neuroscientists named Jack Black that have data in this
-    # database, this will create an incorrect linkage. NWB does not yet provide unique IDs for names.
+    # NOTE that names must be unique here. If there are two neuroscientists
+    # named Jack Black that have data in this database, this will create an
+    # incorrect linkage. NWB does not yet provide unique IDs for names.
 
     class LabMemberInfo(dj.Part):
         definition = """
@@ -34,34 +38,43 @@ class LabMember(dj.Manual):
         nwbf: pynwb.NWBFile
             The NWB file with experimenter information.
         """
+        if isinstance(nwbf, str):
+            nwb_file_abspath = Nwbfile.get_abs_path(nwbf)
+            nwbf = get_nwb_file(nwb_file_abspath)
+
         if nwbf.experimenter is None:
             print("No experimenter metadata found.\n")
             return
+
         for experimenter in nwbf.experimenter:
             cls.insert_from_name(experimenter)
-            # each person is by default the member of their own LabTeam (same as their name)
+
+            # each person is by default the member of their own LabTeam
+            # (same as their name)
+
+            full_name, _, _ = decompose_name(experimenter)
             LabTeam.create_new_team(
-                team_name=experimenter, team_members=[experimenter]
+                team_name=full_name, team_members=[full_name]
             )
 
     @classmethod
     def insert_from_name(cls, full_name):
         """Insert a lab member by name.
 
-        The first name is the part of the name that precedes the last space, and the last name is the part of the
-        name that follows the last space.
-
         Parameters
         ----------
         full_name : str
             The name to be added.
         """
-        labmember_dict = dict()
-        labmember_dict["lab_member_name"] = full_name
-        full_name_split = str.split(full_name)
-        labmember_dict["first_name"] = " ".join(full_name_split[:-1])
-        labmember_dict["last_name"] = full_name_split[-1]
-        cls.insert1(labmember_dict, skip_duplicates=True)
+        _, first, last = decompose_name(full_name)
+        cls.insert1(
+            dict(
+                lab_member_name=f"{first} {last}",
+                first_name=first,
+                last_name=last,
+            ),
+            skip_duplicates=True,
+        )
 
 
 @schema
@@ -105,10 +118,10 @@ class LabTeam(dj.Manual):
             query = (
                 LabMember.LabMemberInfo() & {"lab_member_name": team_member}
             ).fetch("google_user_name")
-            if not len(query):
+            if not query:
                 print(
-                    f"Please add the Google user ID for {team_member} in the LabMember.LabMemberInfo table "
-                    "if you want to give them permission to manually curate sorting by this team."
+                    f"Please add the Google user ID for {team_member} in the "
+                    + "LabMember.LabMemberInfo table to help manage permissions."
                 )
             labteammember_dict = dict()
             labteammember_dict["team_name"] = team_name
@@ -160,3 +173,30 @@ class Lab(dj.Manual):
             print("No lab metadata found.\n")
             return
         cls.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)
+
+
+def decompose_name(full_name: str) -> tuple:
+    """Return the full, first and last name parts of a full name.
+
+    Names capitalized. Decomposes either comma- or space-separated.
+
+    Parameters
+    ----------
+    full_name: str
+        The full name to decompose.
+
+    Returns
+    -------
+    tuple
+        A tuple of the full, first, last name parts.
+    """
+    if full_name.count(", ") != 1 and full_name.count(" ") != 1:
+        raise ValueError(
+            f"Names should be stored as 'last, first'. Skipping {full_name}"
+        )
+    elif ", " in full_name:
+        last, first = full_name.title().split(", ")
+    else:
+        first, last = full_name.title().split(" ")
+    full = f"{first} {last}"
+    return full, first, last

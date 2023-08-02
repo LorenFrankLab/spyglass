@@ -3,6 +3,7 @@ import pathlib
 import random
 import stat
 import string
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -11,6 +12,7 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
+from ..settings import load_config
 from ..utils.dj_helper_fn import get_child_tables
 from ..utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
@@ -69,7 +71,7 @@ class Nwbfile(dj.Manual):
 
     @staticmethod
     def get_abs_path(nwb_file_name):
-        """Return the absolute path for a stored raw NWB file given just the file name.
+        """Return absolute path for a stored raw NWB file given file name.
 
         The SPYGLASS_BASE_DIR environment variable must be set.
 
@@ -83,13 +85,8 @@ class Nwbfile(dj.Manual):
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
-        assert (
-            base_dir is not None
-        ), "You must set SPYGLASS_BASE_DIR or provide the base_dir argument"
 
-        nwb_file_abspath = base_dir / "raw" / nwb_file_name
-        return str(nwb_file_abspath)
+        return load_config()["SPYGLASS_RAW_DIR"] + "/" + nwb_file_name
 
     @staticmethod
     def add_to_lock(nwb_file_name):
