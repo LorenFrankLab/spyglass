@@ -10,6 +10,7 @@ env_defaults = dict(
     FIGURL_CHANNEL="franklab2",
     DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE",
     KACHERY_CLOUD_EPHEMERAL="TRUE",
+
 )
 relative_dirs = dict(
     # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
@@ -62,6 +63,7 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
 
     dj_spyglass = dj.config.get("custom", {}).get("spyglass_dirs", {})
     dj_kachery = dj.config.get("custom", {}).get("kachery_dirs", {})
+
     resolved_base = (
         base_dir
         or dj_spyglass.get("base")
@@ -85,13 +87,20 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
             ).replace('"', "")
             config_dirs.update({dir_env_fmt: dir_location})
 
-    _set_env_with_dict(config_dirs)
+    kachery_zone_dict = {"KACHERY_ZONE": (
+        os.environ.get("KACHERY_ZONE")
+        or dj.config.get('custom',{}).get('kachery_zone')
+        or "franklab.default"
+    )}
+
+    _set_env_with_dict({**config_dirs,**kachery_zone_dict})
     _mkdirs_from_dict_vals(config_dirs)
     _set_dj_config_stores(config_dirs)
 
     config = dict(
         **config_defaults,
         **config_dirs,
+        **kachery_zone_dict
     )
     config_loaded = True
     return config

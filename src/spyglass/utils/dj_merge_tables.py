@@ -541,7 +541,7 @@ class Merge(dj.Manual):
 
         if not multi_source and len(sources) != 1:
             raise ValueError(
-                f"Found multiple potential parts: {sources}\n\t"
+                f"Found {len(sources)} potential parts: {sources}\n\t"
                 + "Try adding a restriction before invoking `get_part`.\n\t"
                 + "Or permitting multiple sources with `multi_source=True`."
             )
@@ -593,9 +593,10 @@ class Merge(dj.Manual):
 
         if not multi_source and len(part_parents) != 1:
             raise ValueError(
-                f"Found multiple potential parents: {part_parents}\n\t"
-                + "Try adding a string restriction when invoking `get_parent`."
-                + "Or permitting multiple sources with `multi_source=True`."
+                f"Found  {len(part_parents)} potential parents: {part_parents}"
+                + "\n\tTry adding a string restriction when invoking "
+                + "`get_parent`. Or permitting multiple sources with "
+                + "`multi_source=True`."
             )
 
         if join_master:
