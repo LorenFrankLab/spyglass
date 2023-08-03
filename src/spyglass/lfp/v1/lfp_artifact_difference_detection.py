@@ -65,7 +65,9 @@ def difference_artifact_detector(
 
     # if both thresholds are None, we skip artifact detection
     if amplitude_thresh_1st is None:
-        recording_interval = np.asarray([valid_timestamps[0], valid_timestamps[-1]])
+        recording_interval = np.asarray(
+            [valid_timestamps[0], valid_timestamps[-1]]
+        )
         artifact_times_empty = np.asarray([])
         print("Amplitude threshold is None, skipping artifact detection")
         return recording_interval, artifact_times_empty
@@ -99,17 +101,19 @@ def difference_artifact_detector(
         print("updated script")
         if referencing == 0:
             print("referencing off")
-            window = np.ones((15,1))
+            window = np.ones((15, 1))
 
         elif referencing == 1:
             print("referencing on")
-            window = np.ones((3,1))
+            window = np.ones((3, 1))
         # sum differences over bins using convolution for speed
-        width = int((window.size-1)/2)
-        diff_array = np.pad(diff_array,
-                      pad_width=((width,width),(0,0)),
-                      mode="constant")
-        diff_array_5 = scipy.signal.convolve(data, window, mode ='valid', axis=0)
+        width = int((window.size - 1) / 2)
+        diff_array = np.pad(
+            diff_array, pad_width=((width, width), (0, 0)), mode="constant"
+        )
+        diff_array_5 = scipy.signal.convolve(
+            diff_array, window, mode="valid", axis=0
+        )
 
         artifact_times_all_5 = np.sum(
             (np.abs(diff_array_5) > amplitude_thresh_1st), axis=1
@@ -120,7 +124,9 @@ def difference_artifact_detector(
         # second, find artifacts with large baseline change
         print("thresh", amplitude_thresh_2nd, "window", local_window)
 
-        big_artifacts = np.zeros((recording.shape[1], above_thresh_1st.shape[0]))
+        big_artifacts = np.zeros(
+            (recording.shape[1], above_thresh_1st.shape[0])
+        )
         for art_count in np.arange(above_thresh_1st.shape[0]):
             if above_thresh_1st[art_count] <= local_window:
                 local_min = local_max = above_thresh_1st[art_count]
@@ -159,14 +165,18 @@ def difference_artifact_detector(
     half_removal_window_s = removal_window_ms / 1000 * 0.5
 
     if len(artifact_frames) == 0:
-        recording_interval = np.asarray([[valid_timestamps[0], valid_timestamps[-1]]])
+        recording_interval = np.asarray(
+            [[valid_timestamps[0], valid_timestamps[-1]]]
+        )
         artifact_times_empty = np.asarray([])
         print("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
     artifact_intervals = interval_from_inds(artifact_frames)
 
-    artifact_intervals_s = np.zeros((len(artifact_intervals), 2), dtype=np.float64)
+    artifact_intervals_s = np.zeros(
+        (len(artifact_intervals), 2), dtype=np.float64
+    )
     for interval_idx, interval in enumerate(artifact_intervals):
         artifact_intervals_s[interval_idx] = [
             valid_timestamps[interval[0]] - half_removal_window_s,
