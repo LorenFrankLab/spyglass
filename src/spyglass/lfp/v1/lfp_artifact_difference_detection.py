@@ -3,6 +3,7 @@ from functools import reduce
 from typing import Union
 
 import numpy as np
+import scipy.signal
 
 from spyglass.common.common_interval import (
     _union_concat,
@@ -98,31 +99,17 @@ def difference_artifact_detector(
         print("updated script")
         if referencing == 0:
             print("referencing off")
-            diff_array_5 = (
-                diff_array
-                + np.roll(diff_array, 1, axis=0)
-                + np.roll(diff_array, -1, axis=0)
-                + np.roll(diff_array, 2, axis=0)
-                + np.roll(diff_array, -2, axis=0)
-                + np.roll(diff_array, 3, axis=0)
-                + np.roll(diff_array, -3, axis=0)
-                + np.roll(diff_array, 4, axis=0)
-                + np.roll(diff_array, -4, axis=0)
-                + np.roll(diff_array, 5, axis=0)
-                + np.roll(diff_array, -5, axis=0)
-                + np.roll(diff_array, 6, axis=0)
-                + np.roll(diff_array, -6, axis=0)
-                + np.roll(diff_array, 7, axis=0)
-                + np.roll(diff_array, -7, axis=0)
-            )
+            window = np.ones((15,1))
 
         elif referencing == 1:
             print("referencing on")
-            diff_array_5 = (
-                diff_array
-                + np.roll(diff_array, 1, axis=0)
-                + np.roll(diff_array, -1, axis=0)
-            )
+            window = np.ones((3,1))
+        # sum differences over bins using convolution for speed
+        width = int((window.size-1)/2)
+        diff_array = np.pad(diff_array,
+                      pad_width=((width,width),(0,0)),
+                      mode="constant")
+        diff_array_5 = scipy.signal.convolve(data, window, mode ='valid', axis=0)
 
         artifact_times_all_5 = np.sum(
             (np.abs(diff_array_5) > amplitude_thresh_1st), axis=1
