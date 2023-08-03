@@ -384,7 +384,9 @@ class UnitMarksIndicator(dj.Computed):
         return np.linspace(start_time, end_time, n_samples)
 
     @staticmethod
-    def plot_all_marks(marks_indicators: xr.DataArray, plot_size=5, s=10):
+    def plot_all_marks(
+        marks_indicators: xr.DataArray, plot_size=5, s=10, plot_limit=None
+    ):
         """Plots 2D slices of each of the spike features against each other
         for all electrodes.
 
@@ -392,8 +394,17 @@ class UnitMarksIndicator(dj.Computed):
         ----------
         marks_indicators : xr.DataArray, shape (n_time, n_electrodes, n_features)
             Spike times and associated spike waveform features binned into
+        plot_size : int, optional
+            Default 5. Matplotlib figure size for each mark.
+        s : int, optional
+            Default 10. Marker size
+        plot_limit : int, optional
+            Default None. Limits to first N electrodes.
         """
-        for electrode_ind in marks_indicators.electrodes:
+        if not plot_limit:
+            plot_limit = len(marks_indicators.electrodes)
+
+        for electrode_ind in marks_indicators.electrodes[:plot_limit]:
             marks = (
                 marks_indicators.sel(electrodes=electrode_ind)
                 .dropna("time", how="all")
