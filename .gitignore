@@ -6,7 +6,6 @@ mysql_config
 
 # Notebooks
 *.ipynb
-
 !notebooks/00_intro.ipynb
 !notebooks/01_spikesorting.ipynb
 !notebooks/02_curation.ipynb

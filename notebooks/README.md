@@ -1,4 +1,4 @@
-w# Tutorial Notebooks
+# Tutorial Notebooks
 
 There are several paths one can take to these notebooks. The notebooks have
 two-digits in their names, the first of which indicates it's 'batch', as
@@ -37,3 +37,15 @@ processing.
   mental position.
 
 <!-- CBroz: Did I get this right? -->
+
+## Developer note
+
+The `py_scripts` directory contains the same notebook data in `.py` form to
+facilitate GitHub PR reviews. To update them, run the following from the
+root Spyglass directory
+
+```bash
+pip install jupytext
+jupytext --to py notebooks/*ipynb
+mv notebooks/*py notebooks/py_scripts
+```

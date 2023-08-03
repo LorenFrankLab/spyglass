@@ -91,7 +91,7 @@ dj.Diagram(sgc.Session) - 1 + 2
 # By adding diagrams together, of adding and subtracting levels, we can visualize
 # key parts of Spyglass.
 #
-# _Note:_ Notice the *Selection* tables. This is a design pattern that selects a
+# _Note:_ Notice the *Selection* tables. This is a design pattern that selects a 
 # subset of upstream items for further processing. In some cases, these also pair
 # the selected data with processing parameters.
 
@@ -148,7 +148,7 @@ sgc.LabMember.insert_from_nwbfile(nwb_file_name)
 #
 
 sgc.LabMember.LabMemberInfo.insert(
-    [  # Full name, Google email address, DataJont username
+    [  # Full name, Google email address, DataJoint username
         ["Firstname Lastname", "example1@gmail.com", "example1"],
         ["Firstname2 Lastname2", "example2@gmail.com", "example2"],
     ],
@@ -161,8 +161,6 @@ sgc.LabMember.LabMemberInfo()
 # collaborates on the same projects. Data is associated with a given team,
 # granting members analysis (e.g., curation) and deletion (coming soon)
 # privileges.
-#
-
 #
 
 sgc.LabTeam().create_new_team(
@@ -271,7 +269,7 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # these with [`fetch`](https://datajoint.com/docs/core/datajoint-python/0.14/query/fetch/)
 #
 # _Note:_ like `insert`/`insert1`, `fetch` can be uses as `fetch1` to raise an
-# error when many (or no) etries are retrieved. To limit to one entry when there
+# error when many (or no) entries are retrieved. To limit to one entry when there
 # may be many, use `query.fetch(limit=1)[0]`
 #
 
