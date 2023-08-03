@@ -64,9 +64,7 @@ def difference_artifact_detector(
 
     # if both thresholds are None, we skip artifact detection
     if amplitude_thresh_1st is None:
-        recording_interval = np.asarray(
-            [valid_timestamps[0], valid_timestamps[-1]]
-        )
+        recording_interval = np.asarray([valid_timestamps[0], valid_timestamps[-1]])
         artifact_times_empty = np.asarray([])
         print("Amplitude threshold is None, skipping artifact detection")
         return recording_interval, artifact_times_empty
@@ -92,15 +90,10 @@ def difference_artifact_detector(
     print("data shape", recording.shape)
 
     # find the artifact occurrences using one or both thresholds, across channels
-    # replace with LFP artifact code
-    # is this supposed to be indices??
+
     if amplitude_thresh_1st is not None:
-        # first find times with large amp change
-        # try another way of doing this - sum diff over several timebins
-        # artifact_boolean = np.sum(
-        #    (np.abs(np.diff(recording.data, axis=0)) > amplitude_thresh_1st),
-        #    axis=1,
-        # )
+        # first find times with large amp change: sum diff over several timebins
+
         diff_array = np.diff(recording, axis=0)
         print("updated script")
         if referencing == 0:
@@ -121,18 +114,6 @@ def difference_artifact_detector(
                 + np.roll(diff_array, -6, axis=0)
                 + np.roll(diff_array, 7, axis=0)
                 + np.roll(diff_array, -7, axis=0)
-                # + np.roll(diff_array, 8, axis=0)
-                # + np.roll(diff_array, -8, axis=0)
-                # + np.roll(diff_array, 9, axis=0)
-                # + np.roll(diff_array, -9, axis=0)
-                # + np.roll(diff_array, 10, axis=0)
-                # + np.roll(diff_array, -10, axis=0)
-                # + np.roll(diff_array, 11, axis=0)
-                # + np.roll(diff_array, -11, axis=0)
-                # + np.roll(diff_array, 12, axis=0)
-                # + np.roll(diff_array, -12, axis=0)
-                # + np.roll(diff_array, 13, axis=0)
-                # + np.roll(diff_array, -13, axis=0)
             )
 
         elif referencing == 1:
@@ -148,22 +129,11 @@ def difference_artifact_detector(
         )
 
         above_thresh_1st = np.where(artifact_times_all_5 >= nelect_above_1st)[0]
-        # above_thresh_1st = np.where(artifact_boolean >= nelect_above_1st)[0]
-
-        # debugging - print specific artifact times
-        # print(
-        #    "first",
-        #    above_thresh_1st[
-        #        (above_thresh_1st > 2479734) & (above_thresh_1st < 2479933)
-        #    ],
-        # )
 
         # second, find artifacts with large baseline change
         print("thresh", amplitude_thresh_2nd, "window", local_window)
 
-        big_artifacts = np.zeros(
-            (recording.shape[1], above_thresh_1st.shape[0])
-        )
+        big_artifacts = np.zeros((recording.shape[1], above_thresh_1st.shape[0]))
         for art_count in np.arange(above_thresh_1st.shape[0]):
             if above_thresh_1st[art_count] <= local_window:
                 local_min = local_max = above_thresh_1st[art_count]
@@ -197,29 +167,19 @@ def difference_artifact_detector(
 
     artifact_frames = above_thresh.copy()
     print("detected ", artifact_frames.shape[0], " artifacts")
-    ## print specific artifact times
-    # print(
-    #    artifact_frames[
-    #        (artifact_frames > 2479734) & (artifact_frames < 2479933)
-    #    ]
-    # )
 
     # turn ms to remove total into s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms / 1000 * 0.5
 
     if len(artifact_frames) == 0:
-        recording_interval = np.asarray(
-            [[valid_timestamps[0], valid_timestamps[-1]]]
-        )
+        recording_interval = np.asarray([[valid_timestamps[0], valid_timestamps[-1]]])
         artifact_times_empty = np.asarray([])
         print("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
     artifact_intervals = interval_from_inds(artifact_frames)
 
-    artifact_intervals_s = np.zeros(
-        (len(artifact_intervals), 2), dtype=np.float64
-    )
+    artifact_intervals_s = np.zeros((len(artifact_intervals), 2), dtype=np.float64)
     for interval_idx, interval in enumerate(artifact_intervals):
         artifact_intervals_s[interval_idx] = [
             valid_timestamps[interval[0]] - half_removal_window_s,
