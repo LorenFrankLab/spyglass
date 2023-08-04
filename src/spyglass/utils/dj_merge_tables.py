@@ -208,12 +208,16 @@ class Merge(dj.Manual):
             )
         ]
 
+        if not parts:
+            print(f"No entries found for restriction: {restriction}")
+            return
+
         primary_attrs = list(
             dict.fromkeys(  # get all columns from parts
                 iter_chain.from_iterable([p.heading.names for p in parts])
             )
         )
-        # primary_attrs.append(cls()._reserved_sk)
+
         query = dj.U(*primary_attrs) * parts[0].proj(  # declare query
             ...,  # include all attributes from part 0
             **{
@@ -450,10 +454,14 @@ class Merge(dj.Manual):
         )
 
         # CB: Removed transaction protection here bc 'no' confirmation resp
-        # still resulted in deletes. If re-readd, consider transaction=False
+        # still resulted in deletes. If re-add, consider transaction=False
         super().delete((cls & merge_ids), **kwargs)
+
+        if cls & merge_ids:  # If 'no' on del prompt from above, skip below
+            return  # User can still abort del below, but yes/no is unlikly
+
         for part_parent in part_parents:
-            super().delete(part_parent, **kwargs)
+            super().delete(part_parent, **kwargs)  # add safemode=False?
 
     @classmethod
     def fetch_nwb(
@@ -546,8 +554,8 @@ class Merge(dj.Manual):
 
         if not multi_source and len(sources) != 1:
             raise ValueError(
-                f"Found multiple potential parts: {sources}\n\t"
-                + "Try adding a restriction before invoking `get_part`.\n\t"
+                f"Found {len(sources)} potential parts: {sources}\n\t"
+                + "\n\tTry adjusting the restriction. "
                 + "Or permitting multiple sources with `multi_source=True`."
             )
 
@@ -598,8 +606,8 @@ class Merge(dj.Manual):
 
         if not multi_source and len(part_parents) != 1:
             raise ValueError(
-                f"Found multiple potential parents: {part_parents}\n\t"
-                + "Try adding a string restriction when invoking `get_parent`."
+                f"Found {len(part_parents)} possible parents: {part_parents}"
+                + "\n\tTry adjusting the restriction. "
                 + "Or permitting multiple sources with `multi_source=True`."
             )
 
