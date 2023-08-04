@@ -445,10 +445,15 @@ class Merge(dj.Manual):
         if dry_run:
             return part_parents
 
-        with cls._safe_context():
-            super().delete(cls(), **kwargs)
-            for part_parent in part_parents:
-                super().delete(part_parent, **kwargs)
+        merge_ids = cls.merge_restrict(restriction).fetch(
+            RESERVED_PRIMARY_KEY, as_dict=True
+        )
+
+        # CB: Removed transaction protection here bc 'no' confirmation resp
+        # still resulted in deletes. If re-readd, consider transaction=False
+        super().delete((cls & merge_ids), **kwargs)
+        for part_parent in part_parents:
+            super().delete(part_parent, **kwargs)
 
     @classmethod
     def fetch_nwb(
@@ -656,12 +661,6 @@ class Merge(dj.Manual):
             "CBroz: In the future, this command will support executing "
             + "part_parent `make` and then inserting all entries into Merge"
         )
-
-
-_Merge = Merge
-
-# Underscore as class name avoids errors when this included in a Diagram
-# Aliased because underscore otherwise excludes from API docs.
 
 
 _Merge = Merge
