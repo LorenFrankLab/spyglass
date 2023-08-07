@@ -1,111 +1,112 @@
 #!/usr/bin/python
 
 import os
-import pathlib
 import sys
 import tempfile
 
 import datajoint as dj
 import yaml
+import json
+import warnings
+
+from pymysql.err import OperationalError
 
 
-def generate_config_yaml(filename: str, **kwargs):
-    """Generate a yaml configuration file for the specified user_name. By default this
+def generate_config(filename: str = None, **kwargs):
+    """Generate a datajoint configuration file.
 
     Parameters
     ----------
     filename : str
-        The name of the file to generate
-    output : str
-        File type to generate. Either yaml or json
+        The name of the file to generate. Must be either yaml or json
     **kwargs: list of parameters names and values that can include
-        database_host : host name of system running mysql (default lmf-db.cin.ucsf.edu)
+        base_dir : SPYGLASS_BASE_DIR
+        database_user : user name of system running mysql
+        database_host : mysql host name (default lmf-db.cin.ucsf.edu)
         database_port : port number for mysql server (default 3306)
-        database_use_tls : True or False (default True to use tls encryption)
-        raw
+        database_use_tls : Default True. Use TLS encryption.
     """
-    config = {}
-    # define the hostname and port to connect
-    print("printing kwargs")
-    print(kwargs)
-    config["database.host"] = (
-        kwargs["database_host"]
-        if "database_host" in kwargs
-        else "lmf-db.cin.ucsf.edu"
-    )
-    config["database.port"] = (
-        kwargs["database_port"] if "database_port" in kwargs else 3306
-    )
-    config["database.use_tls"] = (
-        kwargs["database_use_tls"] if "database.use_tls" in kwargs else True
-    )
-    config["filepath_checksum_size_limit"] = 1 * 1024**3
-    config["enable_python_native_blobs"] = True
+    # TODO: merge with existing spyglass.settings.py
 
-    # next, set up external stores
-    # (read about them here: https://docs.datajoint.io/python/admin/5-blob-config.html)
+    base_dir = os.environ.get("SPYGLASS_BASE_DIR") or kwargs.get("base_dir")
+    if not base_dir:
+        raise ValueError(
+            "Please set base directory environment variable SPYGLASS_BASE_DIR"
+        )
 
-    assert (
-        os.getenv("SPYGLASS_BASE_DIR") is not None
-    ), "environment variable SPYGLASS_BASE_DIR must be set"
+    base_dir = os.path.abspath(base_dir)
+    if not os.path.exists(base_dir):
+        warnings.warn(f"Base dir does not exist on this machine: {base_dir}")
 
-    data_dir = pathlib.Path(os.environ["SPYGLASS_BASE_DIR"])
-    raw_dir = data_dir / "raw"
-    analysis_dir = data_dir / "analysis"
+    raw_dir = os.path.join(base_dir, "raw")
+    analysis_dir = os.path.join(base_dir, "analysis")
 
-    config["stores"] = {
-        "raw": {
-            "protocol": "file",
-            "location": str(raw_dir),
-            "stage": str(raw_dir),
+    config = {
+        "database.host": kwargs.get("database_host", "lmf-db.cin.ucsf.edu"),
+        "database.user": kwargs.get("database_user"),
+        "database.port": kwargs.get("database_port", 3306),
+        "database.use_tls": kwargs.get("database_use_tls", True),
+        "filepath_checksum_size_limit": 1 * 1024**3,
+        "enable_python_native_blobs": True,
+        "stores": {
+            "raw": {
+                "protocol": "file",
+                "location": raw_dir,
+                "stage": raw_dir,
+            },
+            "analysis": {
+                "protocol": "file",
+                "location": analysis_dir,
+                "stage": analysis_dir,
+            },
         },
-        "analysis": {
-            "protocol": "file",
-            "location": str(analysis_dir),
-            "stage": str(analysis_dir),
-        },
+        "custom": {"spyglass_dirs": {"base": base_dir}},
     }
-    with open(filename, "w") as outfile:
-        if filename.endswith("json"):
-            import json  # noqa: F821
+    if not kwargs.get("database_user"):
+        # Adding then removing if empty retains order to make easier to read
+        config.pop("database.user")
 
-            json.dump(config, outfile, indent=2)
-        else:
-            yaml.dump(config, outfile, default_flow_style=False)
+    if not filename:
+        filename = "dj_local_config.json"
+    if os.path(filename).exists():
+        warnings.warn(f"File already exists: {filename}")
+    else:
+        with open(filename, "w") as outfile:
+            if filename.endswith("json"):
+                json.dump(config, outfile, indent=2)
+            else:
+                yaml.dump(config, outfile, default_flow_style=False)
+
+    return config
 
 
-def set_configuration(user_name: str, file_name: str = None):
-    """Sets the dj.config parameters for the specified user. Allows for specification of a yaml file with the defaults;
-    if no file is specified, it will write one using the generate_config_yaml function.
+def set_configuration(config: dict):
+    """Sets the dj.config parameters.
 
     Parameters
     ----------
-    user_name : str
-        The user_name to set configuration options for
-    file_name : str, optional
-        A yaml file with the configuration information, by default None
+    config : dict
+        Datajoint config as dictionary
     """
-    if file_name is None:
-        # create a named temporary file and write the default config to it
-        config_file = tempfile.NamedTemporaryFile("r+")
-        generate_config_yaml(config_file.name)
-        config_file.seek(0)
-    else:
-        config_file = open(file_name)
-
-    # now read in the config file
-    config = yaml.full_load(config_file)
-
     # copy the elements of config to dj.config
-    for item in config:
-        dj.config[item] = config[item]
+    for key, value in config.items():
+        dj.config[key] = value
 
-    # set the users password
-    dj.set_password()
+    dj.set_password()  # set the users password
+    dj.config.save_global()  # save these settings
 
-    # finally, save these settings
-    dj.config.save_global()
+
+def main(*args):
+    user_name, base_dir, outfile = args + (None,) * (3 - len(args))
+
+    config = generate_config(
+        outfile, database_user=user_name, base_dir=base_dir
+    )
+    try:
+        set_configuration(config)
+    except OperationalError as e:
+        warnings.warn(f"Database connections issues: {e}")
 
 
 if __name__ == "__main__":
-    set_configuration(*sys.argv[1:])
+    main(*sys.argv[1:])
