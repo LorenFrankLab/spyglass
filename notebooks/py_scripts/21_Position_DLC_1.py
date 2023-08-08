@@ -29,12 +29,12 @@
 #   inserts, see
 #   [the Insert Data notebook](./01_Insert_Data.ipynb)
 #
-# This tutorial will extract position via DeepLabCut (DLC). It will walk through... 
+# This tutorial will extract position via DeepLabCut (DLC). It will walk through...
 # - creating a DLC project
 # - extracting and labeling frames
 # - training your model
 #
-# If you already have a pretrained project, you can either skip to the 
+# If you already have a pretrained project, you can either skip to the
 # [next tutorial](./22_Position_DLC_2.ipynb) to load it into the database, or skip
 # to the [following tutorial](./23_Position_DLC_3.ipynb) to start pose estimation
 # with a model that is already inserted.
@@ -82,11 +82,11 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # <div class="alert alert-block alert-info">
 #     <b>Notes:</b><ul>
 #     <li>
-#         The cells within this <code>DLCProject</code> step need to be performed 
+#         The cells within this <code>DLCProject</code> step need to be performed
 #         in a local Jupyter notebook to allow for use of the frame labeling GUI
 #     </li>
 #     <li>
-#         Please do not add to the <code>BodyPart</code> table in the production 
+#         Please do not add to the <code>BodyPart</code> table in the production
 #         database unless necessary.
 #     </li>
 #     </ul>
@@ -125,7 +125,7 @@ video_list = [
 # - A team name, as shown in `LabTeam` for setting permissions. Here, we'll
 #  use "LorenLab".
 # - A `project_name`, as a unique identifier for this DLC project. Here, we'll use
-#  __"tutorial_scratch_yourinitials"__ 
+#  __"tutorial_scratch_yourinitials"__
 # - `bodyparts` is a list of body parts for which we want to extract position.
 #   The pre-labeled frames we're using include the bodyparts listed below.
 # - Number of frames to extract/label as `frames_per_video`. A true project might
@@ -171,14 +171,14 @@ sgp.DLCProject.import_labeled_frames(
 #     This step and beyond should be run on a GPU-enabled machine.
 # </div>
 
-# #### [DLCModelTraining](#ToC)<a id='DLCModelTraining1'></a> 
+# #### [DLCModelTraining](#ToC)<a id='DLCModelTraining1'></a>
 #
 # Please make sure you're running this notebook on a GPU-enabled machine.
 #
 # Now that we've imported existing frames, we can get ready to train our model.
 #
 # First, we'll need to define a set of parameters for `DLCModelTrainingParams`, which will get used by DeepLabCut during training. Let's start with `gputouse`,
-# which determines which GPU core to use. 
+# which determines which GPU core to use.
 #
 # The cell below determines which core has space and set the `gputouse` variable
 # accordingly.
@@ -298,7 +298,7 @@ sgp.DLCModel() & model_key
 
 # ### Next Steps
 #
-# With our trained model in place, we're ready to move on to 
+# With our trained model in place, we're ready to move on to
 # [pose estimation](./23_Position_DLC_3.ipynb).
 
 # ### [Return To Table of Contents](#TableOfContents)<br>

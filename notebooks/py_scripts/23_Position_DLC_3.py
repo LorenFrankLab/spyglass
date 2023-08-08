@@ -24,7 +24,7 @@
 #   inserts, see
 #   [the Insert Data notebook](./01_Insert_Data.ipynb)
 #
-# This tutorial will extract position via DeepLabCut (DLC). It will walk through... 
+# This tutorial will extract position via DeepLabCut (DLC). It will walk through...
 # - executing pose estimation
 # - processing the pose estimation output to extract a centroid and orientation
 # - inserting the resulting information into the `IntervalPositionInfo` table
@@ -287,7 +287,7 @@ sgp.DLCCentroid.populate(centroid_key)
 
 # #### [DLCOrientation](#TableOfContents) <a id='DLCOrientation1'></a>
 
-# We'll go through a similar process for orientation. 
+# We'll go through a similar process for orientation.
 
 pprint(sgp.DLCOrientationParams.get_default())
 dlc_orientation_params_name = "default"
@@ -311,7 +311,7 @@ sgp.DLCOrientation().populate(orient_key)
 
 # #### [DLCPos](#TableOfContents) <a id='DLCPos1'></a>
 
-# After processing the position data, we have to do a few table manipulations to standardize various outputs. 
+# After processing the position data, we have to do a few table manipulations to standardize various outputs.
 #
 # To summarize, we brought in a pretrained DLC project, used that model to run pose estimation on a new behavioral video, smoothed and interpolated the result, formed a cohort of bodyparts, and determined the centroid and orientation of this cohort.
 #

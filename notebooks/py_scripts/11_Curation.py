@@ -50,6 +50,7 @@ if os.path.basename(os.getcwd()) == "notebooks":
 dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 from spyglass.spikesorting import SpikeSorting
+
 # -
 
 # ## Spikes Sorted
@@ -80,21 +81,29 @@ print(
     f"https://sortingview.vercel.app/workspace?workspace={workspace_uri}&channel=franklab"
 )
 
-# This will take you to a workspace on the `sortingview` app. The workspace, which you can think of as a list of recording and associated sorting objects, was created at the end of spike sorting. On the workspace view, you will see a set of recordings that have been added to the workspace.
+# This will take you to a workspace on the `sortingview` app. The workspace, which
+# you can think of as a list of recording and associated sorting objects, was
+# created at the end of spike sorting. On the workspace view, you will see a set
+# of recordings that have been added to the workspace.
 #
 # ![Workspace view](./../notebook-images/workspace.png)
 #
-# Clicking on a recording then takes you to a page that gives you information about the recording as well as the associated sorting objects.
+# Clicking on a recording then takes you to a page that gives you information
+# about the recording as well as the associated sorting objects.
 #
 # ![Recording view](./../notebook-images/recording.png)
 #
-# Click on a sorting to see the curation view. Try exploring the many visualization widgets.
+# Click on a sorting to see the curation view. Try exploring the many
+# visualization widgets.
 #
 # ![Unit table](./../notebook-images/unittable.png)
 #
-# The most important is the `Units Table` and the `Curation` menu, which allows you to give labels to the units. The curation labels will persist even if you suddenly lose connection to the app; this is because the curaiton actions are appended to the workspace as soon as they are created. Note that if you are not logged in with your Google account, `Curation` menu may not be visible. Log in and refresh the page to access this feature.
+# The most important is the `Units Table` and the `Curation` menu, which allows
+# you to give labels to the units. The curation labels will persist even if you
+# suddenly lose connection to the app; this is because the curation actions are
+# appended to the workspace as soon as they are created. Note that if you are not
+# logged in with your Google account, `Curation` menu may not be visible. Log in
+# and refresh the page to access this feature.
 #
 # ![Curation](./../notebook-images/curation.png)
 #
-
-

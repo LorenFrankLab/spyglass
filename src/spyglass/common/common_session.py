@@ -1,4 +1,3 @@
-import os
 import datajoint as dj
 
 from .common_device import CameraDevice, DataAcquisitionDevice, Probe
@@ -6,6 +5,7 @@ from .common_lab import Institution, Lab, LabMember
 from .common_nwbfile import Nwbfile
 from .common_subject import Subject
 from ..utils.nwb_helper_fn import get_nwb_file, get_config
+from ..settings import config
 
 schema = dj.schema("common_session")
 
@@ -243,11 +243,17 @@ class SessionGroup(dj.Manual):
     def create_spyglass_view(session_group_name: str):
         import figurl as fig
 
-        FIGURL_CHANNEL = os.getenv("FIGURL_CHANNEL")
-        assert FIGURL_CHANNEL, "Environment variable not set: FIGURL_CHANNEL"
-        data = {"type": "spyglassview", "sessionGroupName": session_group_name}
-        F = fig.Figure(view_url="gs://figurl/spyglassview-1", data=data)
-        return F
+        FIGURL_CHANNEL = config.get("FIGURL_CHANNEL")
+        if not FIGURL_CHANNEL:
+            raise ValueError("FIGURL_CHANNEL conifg/env variagle not set")
+
+        return fig.Figure(
+            view_url="gs://figurl/spyglassview-1",
+            data={
+                "type": "spyglassview",
+                "sessionGroupName": session_group_name,
+            },
+        )
 
 
 # The reason this is not implemented as a dj.Part is that

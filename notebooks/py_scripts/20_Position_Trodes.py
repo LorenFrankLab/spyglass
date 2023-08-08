@@ -76,22 +76,22 @@ nwb_file_name = "chimi20200216_new.nwb"
 nwb_copy_file_name = sgu.nwb_helper_fn.get_nwb_copy_filename(nwb_file_name)
 sgc.common_behav.RawPosition() & {"nwb_file_name": nwb_copy_file_name}
 
-# ## Setting parameters 
+# ## Setting parameters
 #
 # Parameters are set by the `TrodesPosParams` table, with a `default` set
 # available. To adjust the default, insert a new set into this table. The
 # parameters are...
 #
-# - `max_separation`, default 9 cm: maxmium acceptable distance between red and
-#   green LEDs. 
-#     - If exceeded, the times are marked as NaNs and inferred by interpolation. 
+# - `max_separation`, default 9 cm: maximium acceptable distance between red and
+#   green LEDs.
+#     - If exceeded, the times are marked as NaNs and inferred by interpolation.
 #     - Useful when the inferred LED position tracks a reflection instead of the
 #       true position.
-# - `max_speed`, default 300.0 cm/s: maximum speed the animal can move. 
-#     - If exceeded, times are marked as NaNs and inferred by interpolation. 
-#     - Useful to prevent big jumps in position. 
+# - `max_speed`, default 300.0 cm/s: maximum speed the animal can move.
+#     - If exceeded, times are marked as NaNs and inferred by interpolation.
+#     - Useful to prevent big jumps in position.
 # - `position_smoothing_duration`, default 0.100 s: LED position smoothing before
-#   computing average position to get head position. 
+#   computing average position to get head position.
 # - `speed_smoothing_std_dev`, default 0.100 s: standard deviation of the Gaussian
 #   kernel used to smooth the head speed.
 # - `front_led1`, default 1 (True), use `xloc`/`yloc`: Which LED is the front LED
@@ -120,7 +120,7 @@ sgp.v1.TrodesPosParams()
 # ## Select interval
 
 # Later, we'll pair the above parameters with an interval from our NWB file and
-# insert into `TrodesPosSelection`. 
+# insert into `TrodesPosSelection`.
 #
 # First, let's select an interval from the `IntervalList` table.
 #
@@ -133,7 +133,7 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # the video itself.
 #
 # `fetch1_dataframe` returns the position of the LEDs as a pandas dataframe where
-# time is the index. 
+# time is the index.
 
 interval_list_name = "pos 0 valid times"  # pos # is epoch # minus 1
 raw_position_df = (
@@ -263,7 +263,7 @@ PositionVideo().make(
 
 # ## Upsampling position
 #
-# Sometimes we need the position data in smaller in time bins, which can be 
+# Sometimes we need the position data in smaller in time bins, which can be
 # achieved with upsampling using the following parameters.
 #
 # - `is_upsampled`, default 0 (False): If 1, perform upsampling.
@@ -361,5 +361,3 @@ axes[1].set_xlabel("x-velocity [cm/s]", fontsize=18)
 axes[1].set_ylabel("y-velocity [cm/s]", fontsize=18)
 axes[1].set_title("Upsampled Head Velocity", fontsize=28)
 # -
-
-

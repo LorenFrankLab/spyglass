@@ -48,4 +48,7 @@ root Spyglass directory
 pip install jupytext
 jupytext --to py notebooks/*ipynb
 mv notebooks/*py notebooks/py_scripts
+black .
 ```
+
+Unfortunately, jupytext-generated py script are not black-compliant by default.

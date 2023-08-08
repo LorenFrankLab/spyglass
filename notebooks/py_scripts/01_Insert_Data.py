@@ -53,6 +53,7 @@ import spyglass.common as sgc
 
 # spyglass.data_import has tools for inserting NWB files into the database
 import spyglass.data_import as sgi
+
 # -
 
 # ## Visualizing the database
@@ -91,7 +92,7 @@ dj.Diagram(sgc.Session) - 1 + 2
 # By adding diagrams together, of adding and subtracting levels, we can visualize
 # key parts of Spyglass.
 #
-# _Note:_ Notice the *Selection* tables. This is a design pattern that selects a 
+# _Note:_ Notice the *Selection* tables. This is a design pattern that selects a
 # subset of upstream items for further processing. In some cases, these also pair
 # the selected data with processing parameters.
 

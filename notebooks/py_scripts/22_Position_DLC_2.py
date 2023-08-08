@@ -31,7 +31,7 @@
 #
 # This is a tutorial will cover how to extract position given a pre-trained DeepLabCut (DLC) model. It will walk through adding your DLC model to Spyglass.
 #
-# If you already have a model in the database, skip to the 
+# If you already have a model in the database, skip to the
 # [next tutorial](./23_Position_DLC_3.ipynb).
 
 # ## Imports
@@ -86,7 +86,7 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # <div class="alert alert-block alert-info">
 #     <b>Notes:</b><ul>
 #     <li>
-#         Please do not add to the <code>BodyPart</code> table in the production 
+#         Please do not add to the <code>BodyPart</code> table in the production
 #         database unless necessary.
 #     </li>
 #     </ul>
@@ -119,7 +119,7 @@ sgp.DLCProject() & {"project_name": project_name}
 
 # #### [DLCModel](#ToC) <a id='DLCModel'></a>
 
-# The `DLCModelInput` table has `dlc_model_name` and `project_name` as primary keys and `project_path` as a secondary key. 
+# The `DLCModelInput` table has `dlc_model_name` and `project_name` as primary keys and `project_path` as a secondary key.
 
 sgp.DLCModelInput()
 
@@ -186,7 +186,7 @@ sgp.DLCModel() & model_key
 
 # ### Next Steps
 #
-# With our trained model in place, we're ready to move on to 
+# With our trained model in place, we're ready to move on to
 # [pose estimation](./23_Position_DLC_3.ipynb).
 
 # ### [`Return To Table of Contents`](#ToC)<br>

@@ -1,4 +1,4 @@
-from .settings import load_config
+from .settings import config
 
 try:
     import ndx_franklab_novela
@@ -11,5 +11,3 @@ except ImportError:
     pass
 
 __all__ = ["ndx_franklab_novela", "__version__", "config"]
-
-config = load_config()

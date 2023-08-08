@@ -252,7 +252,7 @@ sgc.common_position.IntervalLinearizedPosition()
 
 # Running `fetch1_dataframe` will retrieve the linear position data, including...
 #
-# - `time`: datafame index
+# - `time`: dataframe index
 # - `linear_position`: 1D linearized position
 # - `track_segment_id`: index number of the edges given to track graph
 # - `projected_{x,y}_position`: 2D position projected to the track graph

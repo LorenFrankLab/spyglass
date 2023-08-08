@@ -20,7 +20,7 @@
 # _Developer Note:_ if you may make a PR in the future, be sure to copy this
 # notebook, and use the `gitignore` prefix `temp` to avoid future conflicts.
 #
-# This is one notebook in a multi-part series on clusterless decoding in Spyglass 
+# This is one notebook in a multi-part series on clusterless decoding in Spyglass
 #
 # - To set up your Spyglass environment and database, see
 #   [the Setup notebook](./00_Setup.ipynb)

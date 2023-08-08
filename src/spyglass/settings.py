@@ -20,17 +20,18 @@ relative_dirs = dict(
         sorting="spikesorting",  # "SPYGLASS_SORTING_DIR"
         waveforms="waveforms",
         temp="tmp",
+        video="video",
     ),
     kachery=dict(
-        cloud="kachery-storage",
-        storage="kachery-storage",
+        cloud="kachery_storage",
+        storage="kachery_storage",
         temp="tmp",
     ),
 )
 
 
 def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
-    """Gets syglass dirs from dj.config or environment variables.
+    """Gets Spyglass dirs from dj.config or environment variables.
 
     Uses a relative_dirs dict defined in settings.py to (a) gather user
     settings from dj.config or os environment variables or defaults relative to
@@ -72,6 +73,7 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
         raise ValueError(
             "SPYGLASS_BASE_DIR not defined in dj.config or os env vars"
         )
+
     config_dirs = {"SPYGLASS_BASE_DIR": resolved_base}
     for prefix, dirs in relative_dirs.items():
         for dir, dir_str in dirs.items():
@@ -94,47 +96,29 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
         )
     }
 
-    _set_env_with_dict({**config_dirs, **kachery_zone_dict})
+    loaded_env = _load_env_vars(env_defaults)
+    _set_env_with_dict({**config_dirs, **kachery_zone_dict, **loaded_env})
     _mkdirs_from_dict_vals(config_dirs)
     _set_dj_config_stores(config_dirs)
 
-    config = dict(**config_defaults, **config_dirs, **kachery_zone_dict)
+    config = dict(
+        **config_defaults, **config_dirs, **kachery_zone_dict, **loaded_env
+    )
     config_loaded = True
     return config
 
 
-def base_dir() -> str:
-    """Retrieve the base directory from the configuration.
-
-    Returns
-    -------
-    str
-        The base directory path.
-    """
-    global config
-    if not config_loaded or not config:
-        config = load_config()
-    return config.get("SPYGLASS_BASE_DIR")
-
-
-def raw_dir() -> str:
-    """Retrieve the base directory from the configuration.
-
-    Returns
-    -------
-    str
-        The base directory path.
-    """
-    global config
-    if not config_loaded or not config:
-        config = load_config()
-    return config.get("SPYGLASS_RAW_DIR")
+def _load_env_vars(env_dict: dict) -> dict:
+    """Loads env vars from dict {str: Any}."""
+    loaded_dict = {}
+    for var, val in env_dict.items():
+        loaded_dict[var] = os.getenv(var, val)
+    return loaded_dict
 
 
 def _set_env_with_dict(env_dict: dict):
     """Sets env vars from dict {str: Any} where Any is convertible to str."""
-    env_to_set = {**env_defaults, **env_dict}
-    for var, val in env_to_set.items():
+    for var, val in env_dict.items():
         os.environ[var] = str(val)
 
 
@@ -159,3 +143,109 @@ def _set_dj_config_stores(dir_dict: dict):
             "stage": str(analysis_dir),
         },
     }
+
+
+def load_base_dir() -> str:
+    """Retrieve the base directory from the configuration.
+
+    Returns
+    -------
+    str
+        The base directory path.
+    """
+    global config
+    if not config_loaded or not config:
+        config = load_config()
+    return config.get("SPYGLASS_BASE_DIR")
+
+
+def load_raw_dir() -> str:
+    """Retrieve the raw directory from the configuration.
+
+    Returns
+    -------
+    str
+        The raw directory path.
+    """
+    global config
+    if not config_loaded or not config:
+        config = load_config()
+    return config.get("SPYGLASS_RAW_DIR")
+
+
+def load_analysis_dir() -> str:
+    """Retrieve the analysis directory from the configuration.
+
+    Returns
+    -------
+    str
+        The recording directory path.
+    """
+    global config
+    if not config_loaded or not config:
+        config = load_config()
+    return config.get("SPYGLASS_ANALYSIS_DIR")
+
+
+def load_recording_dir() -> str:
+    """Retrieve the recording directory from the configuration.
+
+    Returns
+    -------
+    str
+        The recording directory path.
+    """
+    global config
+    if not config_loaded or not config:
+        config = load_config()
+    return config.get("SPYGLASS_RECORDING_DIR")
+
+
+def load_sorting_dir() -> str:
+    """Retrieve the sorting directory from the configuration.
+
+    Returns
+    -------
+    str
+        The sorting directory path.
+    """
+    global config
+    if not config_loaded or not config:
+        config = load_config()
+    return config.get("SPYGLASS_SORTING_DIR")
+
+
+def load_temp_dir() -> str:
+    """Retrieve the temp directory from the configuration.
+
+    Returns
+    -------
+    str
+        The temp directory path.
+    """
+    global config
+    if not config_loaded or not config:
+        config = load_config()
+    return config.get("SPYGLASS_TEMP_DIR")
+
+
+def load_waveform_dir() -> str:
+    """Retrieve the temp directory from the configuration.
+
+    Returns
+    -------
+    str
+        The temp directory path.
+    """
+    global config
+    if not config_loaded or not config:
+        config = load_config()
+    return config.get("SPYGLASS_TEMP_DIR")
+
+
+base_dir = load_base_dir()
+raw_dir = load_raw_dir()
+recording_dir = load_recording_dir()
+temp_dir = load_temp_dir()
+analysis_dir = load_analysis_dir()
+sorting_dir = load_sorting_dir()

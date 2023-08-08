@@ -27,9 +27,9 @@
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
 #   [the Insert Data notebook](./01_Insert_Data.ipynb)
-# - To run this notebook, you should have already completed the 
-#   [LFP](./12_LFP.ipynb) notebook and populated the `LFPBand` table. 
-#   
+# - To run this notebook, you should have already completed the
+#   [LFP](./12_LFP.ipynb) notebook and populated the `LFPBand` table.
+#
 # In this tutorial, we demonstrate how to generate analytic signals from the LFP
 # data, as well as how to compute theta phases and power.
 
@@ -55,7 +55,6 @@ import warnings
 
 warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
-
 # -
 
 # ## Acquire Signal
@@ -76,7 +75,7 @@ lfp_band.LFPBandV1() & lfp_key
 
 # We do not need all electrodes for theta phase/power, so we define a list for
 # analyses. When working with full data, this list might limit to hippocampal
-# reference electrodes. 
+# reference electrodes.
 #
 # Make sure that the chosen electrodes already exist in the LFPBand data; if not,
 # go to the LFP tutorial to generate them.
@@ -84,25 +83,25 @@ lfp_band.LFPBandV1() & lfp_key
 # +
 electrode_list = [0]
 
-all_electrodes = ( # All available electrode ids
+all_electrodes = (  # All available electrode ids
     (lfp_band.LFPBandV1() & lfp_key).fetch_nwb()[0]["lfp_band"]
 ).electrodes.data[:]
 
-np.isin(electrode_list, all_electrodes) # Check if our list is in 'all'
+np.isin(electrode_list, all_electrodes)  # Check if our list is in 'all'
 # -
 
 # Next, we'll compute the theta analytic signal.
 
 # +
-theta_analytic_signal = (lfp_band.LFPBandV1() & lfp_key).compute_analytic_signal(
-    electrode_list=electrode_list
-)
+theta_analytic_signal = (
+    lfp_band.LFPBandV1() & lfp_key
+).compute_analytic_signal(electrode_list=electrode_list)
 
 theta_analytic_signal
 # -
 
 # In the dataframe above, the index is the timestamps, and the columns are the
-# analytic sinals of theta band (complex numbers) for each electrode.
+# analytic signals of theta band (complex numbers) for each electrode.
 
 # ## Compute phase and power
 #
@@ -162,9 +161,9 @@ ax2.axhline(y=0, color="r", linestyle="-")
 
 fig.tight_layout()
 ax1.set_title(
-    f"Theta band amplitude and phase, electode {electrode_id}",
+    f"Theta band amplitude and phase, electrode {electrode_id}",
     fontsize=20,
-);
+)
 # -
 
 # We can also plot the theta power.
@@ -184,9 +183,7 @@ ax.plot(
 )
 ax.tick_params(axis="y", labelcolor="k")
 ax.set_title(
-    f"Theta band power, electode {electrode_id}",
+    f"Theta band power, electrode {electrode_id}",
     fontsize=20,
-);
+)
 # -
-
-
