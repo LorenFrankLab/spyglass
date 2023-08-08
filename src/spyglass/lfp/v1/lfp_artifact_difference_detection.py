@@ -111,9 +111,7 @@ def difference_artifact_detector(
         diff_array = np.pad(
             diff_array, pad_width=((width, width), (0, 0)), mode="constant"
         )
-        diff_array_5 = scipy.signal.convolve(
-            diff_array, window, mode="valid", axis=0
-        )
+        diff_array_5 = scipy.signal.convolve(diff_array, window, mode="valid")
 
         artifact_times_all_5 = np.sum(
             (np.abs(diff_array_5) > amplitude_thresh_1st), axis=1
