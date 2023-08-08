@@ -26,7 +26,7 @@ from track_linearization import (
 from ..settings import raw_dir
 from ..utils.dj_helper_fn import fetch_nwb
 from .common_behav import RawPosition, VideoFile
-from .common_interval import IntervalList
+from .common_interval import IntervalList  # noqa: F401
 from .common_nwbfile import AnalysisNwbfile
 
 schema = dj.schema("common_position")
@@ -42,13 +42,14 @@ class PositionInfoParameters(dj.Lookup):
     ---
     max_separation = 9.0  : float   # max distance (in cm) between head LEDs
     max_speed = 300.0     : float   # max speed (in cm / s) of animal
-    position_smoothing_duration = 0.125 : float # size of moving window (in seconds)
-    speed_smoothing_std_dev = 0.100 : float # smoothing standard deviation (in seconds)
-    head_orient_smoothing_std_dev = 0.001 : float # smoothing std deviation (in seconds)
-    led1_is_front = 1 : int # first LED is front LED and second is back LED, else first LED is back
+    position_smoothing_duration = 0.125 : float # size of moving window in s
+    speed_smoothing_std_dev = 0.100 : float # smoothing standard deviation in s
+    head_orient_smoothing_std_dev = 0.001 : float # smoothing std deviation in s
+    led1_is_front = 1 : int # 1 = first LED is front LED and second is back LED
     is_upsampled = 0 : int # upsample the position to higher sampling rate
     upsampling_sampling_rate = NULL : float # The rate to be upsampled to
-    upsampling_interpolation_method = linear : varchar(80) # see pandas.DataFrame.interpolation for list of methods
+    upsampling_interpolation_method = linear : varchar(80)
+        # see pandas.DataFrame.interpolation for list of methods
     """
 
 
@@ -106,16 +107,8 @@ class IntervalPositionInfo(dj.Computed):
             # calculate the processed position
             spatial_series = raw_position["raw_position"]
             position_info = self.calculate_position_info_from_spatial_series(
-                spatial_series,
-                position_info_parameters["max_separation"],
-                position_info_parameters["max_speed"],
-                position_info_parameters["speed_smoothing_std_dev"],
-                position_info_parameters["position_smoothing_duration"],
-                position_info_parameters["head_orient_smoothing_std_dev"],
-                position_info_parameters["led1_is_front"],
-                position_info_parameters["is_upsampled"],
-                position_info_parameters["upsampling_sampling_rate"],
-                position_info_parameters["upsampling_interpolation_method"],
+                spatial_series=spatial_series,
+                **position_info_parameters,
             )
 
             # create nwb objects for insertion into analysis nwb file
@@ -389,14 +382,19 @@ class IntervalPositionInfo(dj.Computed):
 class LinearizationParameters(dj.Lookup):
     """Choose whether to use an HMM to linearize position. This can help when
     the eucledian distances between separate arms are too close and the previous
-    position has some information about which arm the animal is on."""
+    position has some information about which arm the animal is on.
+
+    route_euclidean_distance_scaling : float
+        How much to prefer route distances between successive time points that
+        are closer to the euclidean distance. Smaller numbers mean the route
+        distance is more likely to be close to the euclidean distance.
+    """
 
     definition = """
     linearization_param_name : varchar(80)   # name for this set of parameters
     ---
     use_hmm = 0 : int   # use HMM to determine linearization
-    # How much to prefer route distances between successive time points that are closer to the euclidean distance. Smaller numbers mean the route distance is more likely to be close to the euclidean distance.
-    route_euclidean_distance_scaling = 1.0 : float
+    route_euclidean_distance_scaling = 1.0 : float # see docstring
     sensor_std_dev = 5.0 : float   # Uncertainty of position sensor (in cm).
     # Biases the transition matrix to prefer the current track segment.
     diagonal_bias = 0.5 : float
@@ -411,11 +409,11 @@ class TrackGraph(dj.Manual):
     definition = """
     track_graph_name : varchar(80)
     ----
-    environment : varchar(80)    # Type of Environment
-    node_positions : blob  # 2D position of track_graph nodes, shape (n_nodes, 2)
-    edges: blob                  # shape (n_edges, 2)
-    linear_edge_order : blob  # order of track graph edges in the linear space, shape (n_edges, 2)
-    linear_edge_spacing : blob  # amount of space between edges in the linear space, shape (n_edges,)
+    environment : varchar(80)   # Type of Environment
+    node_positions : blob       # 2D position of graph nodes (n_nodes, 2)
+    edges: blob                 # shape (n_edges, 2)
+    linear_edge_order : blob    # order of edges in linspace (n_edges, 2)
+    linear_edge_spacing : blob  # space between edges in the linspace (n_edges,)
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):
@@ -581,7 +579,8 @@ class NodePicker:
             ax.imshow(frame, picker=True)
             ax.set_title(
                 "Left click to place node.\nRight click to remove node."
-                "\nShift+Left click to clear nodes.\nCntrl+Left click two nodes to place an edge"
+                "\nShift+Left click to clear nodes.\nCntrl+Left click two nodes"
+                " to place an edge"
             )
 
         self.connect()
@@ -696,20 +695,18 @@ class PositionVideo(dj.Computed):
         M_TO_CM = 100
 
         print("Loading position data...")
+        this_file = {"nwb_file_name": key["nwb_file_name"]}
+        this_interval = {"interval_list_name": key["interval_list_name"]}
+        this_param = {
+            "position_info_param_name": key["position_info_param_name"]
+        }
+
         raw_position_df = (
-            RawPosition()
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["interval_list_name"],
-            }
+            RawPosition() & this_file & this_interval
         ).fetch1_dataframe()
+
         position_info_df = (
-            IntervalPositionInfo()
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["interval_list_name"],
-                "position_info_param_name": key["position_info_param_name"],
-            }
+            IntervalPositionInfo() & this_file & this_interval & this_param
         ).fetch1_dataframe()
 
         print("Loading video data...")
@@ -721,11 +718,10 @@ class PositionVideo(dj.Computed):
             )
             + 1
         )
-        video_info = (
-            VideoFile()
-            & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
-        ).fetch1()
+        video_info = (VideoFile() & this_file & {"epoch": epoch}).fetch1()
+
         io = pynwb.NWBHDF5IO(raw_dir() + video_info["nwb_file_name"], "r")
+
         nwb_file = io.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
         video_filename = nwb_video.external_file.value[0]
@@ -740,6 +736,7 @@ class PositionVideo(dj.Computed):
             "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
             "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
         }
+
         head_position_mean = np.asarray(
             position_info_df[["head_position_x", "head_position_y"]]
         )
@@ -779,7 +776,32 @@ class PositionVideo(dj.Computed):
         return data / cm_to_pixels
 
     @staticmethod
-    def fill_nan(variable, video_time, variable_time):
+    def fill_nan(
+        variable: np.ndarray, video_time: np.ndarray, variable_time: np.ndarray
+    ) -> np.ndarray:
+        """
+        Fills missing vals in variable with NaN based on the video_time array.
+
+        Parameters
+        ----------
+        variable : np.ndarray
+            The variable array with missing values.
+        video_time : np.ndarray
+            The array of video times.
+        variable_time : np.ndarray
+            The array of variable times.
+
+        Returns
+        -------
+        filled_variable : np.ndarray
+            The variable array with NaN values filled based on video time.
+
+        Raises
+        ------
+        IndexError
+            If the variable array does not have more than one dimension.
+        """
+
         video_ind = np.digitize(variable_time, video_time[1:])
 
         n_video_time = len(video_time)

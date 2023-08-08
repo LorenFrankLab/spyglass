@@ -21,7 +21,9 @@ invalid_electrode_index = 99999999
 
 def get_nwb_file(nwb_file_path):
     """Return an NWBFile object with the given file path in read mode.
-       If the file is not found locally, this will check if it has been shared with kachery and if so, download it and open it.
+
+    If the file is not found locally, this will check if it has been shared with
+    kachery and if so, download it and open it.
 
     Parameters
     ----------
@@ -40,7 +42,8 @@ def get_nwb_file(nwb_file_path):
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
             print(
-                f"NWB file {nwb_file_path} does not exist locally; checking kachery"
+                f"NWB file {nwb_file_path} does not exist locally; "
+                + "checking kachery"
             )
             # first try the analysis files
             from ..sharing.sharing_kachery import AnalysisNwbfileKachery
@@ -98,7 +101,9 @@ def close_nwb_files():
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
-    """Search for a specified NWBDataInterface or DynamicTable in the processing modules of an NWB file.
+    """
+    Search for a specified NWBDataInterface or DynamicTable in the processing
+    modules of an NWB file.
 
     Parameters
     ----------
@@ -107,13 +112,15 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
     data_interface_name : str
         The name of the NWBDataInterface or DynamicTable to search for.
     data_interface_class : type, optional
-        The class (or superclass) to search for. This argument helps to prevent accessing an object with the same
-        name but the incorrect type. Default: no restriction.
+        The class (or superclass) to search for. This argument helps to prevent
+        accessing an object with the same name but the incorrect type. Default:
+        no restriction.
 
     Warns
     -----
     UserWarning
-        If multiple NWBDataInterface and DynamicTable objects with the matching name are found.
+        If multiple NWBDataInterface and DynamicTable objects with the matching
+        name are found.
 
     Returns
     -------
@@ -132,8 +139,9 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
     if len(ret) > 1:
         warnings.warn(
             f"Multiple data interfaces with name '{data_interface_name}' "
-            f"found in NWBFile with identifier {nwbfile.identifier}. Using the first one found. "
-            "Use the data_interface_class argument to restrict the search."
+            f"found in NWBFile with identifier {nwbfile.identifier}. "
+            "Using the first one found. Use the data_interface_class argument "
+            "to restrict the search."
         )
     if len(ret) >= 1:
         return ret[0]
@@ -168,8 +176,9 @@ def get_raw_eseries(nwbfile):
 def estimate_sampling_rate(timestamps, multiplier):
     """Estimate the sampling rate given a list of timestamps.
 
-    Assumes that the most common temporal differences between timestamps approximate the sampling rate. Note that this
-    can fail for very high sampling rates and irregular timestamps.
+    Assumes that the most common temporal differences between timestamps
+    approximate the sampling rate. Note that this can fail for very high
+    sampling rates and irregular timestamps.
 
     Parameters
     ----------
@@ -185,7 +194,8 @@ def estimate_sampling_rate(timestamps, multiplier):
 
     # approach:
     # 1. use a box car smoother and a histogram to get the modal value
-    # 2. identify adjacent samples as those that have a time difference < the multiplier * the modal value
+    # 2. identify adjacent samples as those that have a
+    #       time difference < the multiplier * the modal value
     # 3. average the time differences between adjacent samples
     sample_diff = np.diff(timestamps[~np.isnan(timestamps)])
     if len(sample_diff) < 10:
@@ -196,7 +206,8 @@ def estimate_sampling_rate(timestamps, multiplier):
     smoother = np.ones(nsmooth) / nsmooth
     smooth_diff = np.convolve(sample_diff, smoother, mode="same")
 
-    # we histogram with 100 bins out to 3 * mean, which should be fine for any reasonable number of samples
+    # we histogram with 100 bins out to 3 * mean, which should be fine for any
+    # reasonable number of samples
     hist, bins = np.histogram(
         smooth_diff, bins=100, range=[0, 3 * np.mean(smooth_diff)]
     )

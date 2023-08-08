@@ -7,6 +7,7 @@ import ndx_franklab_novela
 import pandas as pd
 import pynwb
 
+from ..settings import config
 from ..utils.dj_helper_fn import fetch_nwb
 from ..utils.nwb_helper_fn import (
     get_all_spatial_series,
@@ -48,23 +49,24 @@ class PositionSource(dj.Manual):
 
         pos_dict = get_all_spatial_series(nwbf, verbose=True)
         if pos_dict is not None:
-            for epoch in pos_dict:
-                pdict = pos_dict[epoch]
+            for epoch, pdict in pos_dict.items():
                 pos_interval_list_name = cls.get_pos_interval_name(epoch)
 
                 # create the interval list and insert it
-                interval_dict = dict()
-                interval_dict["nwb_file_name"] = nwb_file_name
-                interval_dict["interval_list_name"] = pos_interval_list_name
-                interval_dict["valid_times"] = pdict["valid_times"]
+                interval_dict = {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": pos_interval_list_name,
+                    "valid_times": pdict["valid_times"],
+                }
                 IntervalList().insert1(interval_dict, skip_duplicates=True)
 
                 # add this interval list to the table
-                key = dict()
-                key["nwb_file_name"] = nwb_file_name
-                key["interval_list_name"] = pos_interval_list_name
-                key["source"] = "trodes"
-                key["import_file_name"] = ""
+                key = {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": pos_interval_list_name,
+                    "source": "trodes",
+                    "import_file_name": "",
+                }
                 cls.insert1(key)
 
     @staticmethod
@@ -95,16 +97,14 @@ class RawPosition(dj.Imported):
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
-        # TODO refactor this. this calculates sampling rate (unused here) and is expensive to do twice
+        pos_interval_name = PositionSource.get_pos_interval_name(
+            key["interval_list_name"]
+        )
         pos_dict = get_all_spatial_series(nwbf)
-        for epoch in pos_dict:
-            if key[
-                "interval_list_name"
-            ] == PositionSource.get_pos_interval_name(epoch):
-                pdict = pos_dict[epoch]
-                key["raw_position_object_id"] = pdict["raw_position_object_id"]
-                self.insert1(key)
-                break
+        if pos_interval_name in pos_dict:
+            pdict = pos_dict[pos_interval_name]
+            key["raw_position_object_id"] = pdict["raw_position_object_id"]
+            self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
@@ -157,12 +157,9 @@ class StateScriptFile(dj.Imported):
             epoch_list = associated_file_obj.task_epochs.split(",")
             # only insert if this is the statescript file
             print(associated_file_obj.description)
-            if (
-                "statescript".upper() in associated_file_obj.description.upper()
-                or "state_script".upper()
-                in associated_file_obj.description.upper()
-                or "state script".upper()
-                in associated_file_obj.description.upper()
+            if any(
+                word.upper() in associated_file_obj.description.upper()
+                for word in ["statescript", "state_script", "state script"]
             ):
                 # find the file associated with this epoch
                 if str(key["epoch"]) in epoch_list:
@@ -205,8 +202,8 @@ class VideoFile(dj.Imported):
         if videos is None:
             print(f"No video data interface found in {nwb_file_name}\n")
             return
-        else:
-            videos = videos.time_series
+
+        videos = videos.time_series
 
         # get the interval for the current TaskEpoch
         interval_list_name = (TaskEpoch() & key).fetch1("interval_list_name")
@@ -261,38 +258,35 @@ class VideoFile(dj.Imported):
             cls.update1(row=row)
 
     @classmethod
-    def get_abs_path(cls, key: Dict):
-        """Return the absolute path for a stored video file given a key with the nwb_file_name and epoch number
+    def get_abs_path(cls, key: dict) -> str:
+        """Return absolute path for a stored video in SPYGLASS_VIDEO_DIR
 
-        The SPYGLASS_VIDEO_DIR environment variable must be set.
+        file given a key with the
+            nwb_file_name and epoch number
 
         Parameters
         ----------
         key : dict
-            dictionary with nwb_file_name and epoch as keys
+            dict w/nwb_file_name, referring to an entry with video_file_object_id
 
         Returns
         -------
         nwb_video_file_abspath : str
             The absolute path for the given file name.
         """
-        video_dir = pathlib.Path(os.getenv("SPYGLASS_VIDEO_DIR", None))
-        assert video_dir is not None, "You must set SPYGLASS_VIDEO_DIR"
-        if not video_dir.exists():
-            raise OSError("SPYGLASS_VIDEO_DIR does not exist")
-        video_info = (cls & key).fetch1()
-        nwb_path = Nwbfile.get_abs_path(key["nwb_file_name"])
-        nwbf = get_nwb_file(nwb_path)
-        nwb_video = nwbf.objects[video_info["video_file_object_id"]]
-        video_filename = nwb_video.name
-        # see if the file exists and is stored in the base analysis dir
-        nwb_video_file_abspath = pathlib.Path(
-            f"{video_dir}/{pathlib.Path(video_filename)}"
+        video_filename = (
+            get_nwb_file(Nwbfile.get_abs_path(key["nwb_file_name"]))
+            .objects[(cls & key).fetch1("video_file_object_id")]
+            .name
         )
+
+        nwb_video_file_abspath = (
+            pathlib.Path(config["SPYGLASS_VIDEO_DIR"]) / video_filename
+        )
+
         if nwb_video_file_abspath.exists():
             return nwb_video_file_abspath.as_posix()
-        else:
-            raise FileNotFoundError(
-                f"video file with filename: {video_filename} "
-                f"does not exist in {video_dir}/"
-            )
+
+        raise FileNotFoundError(
+            f"Video file does not exist: {nwb_video_file_abspath}"
+        )
