@@ -39,7 +39,7 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         if len(Nwbfile() & {"nwb_file_name": out_nwb_file_name}):
             warnings.warn(
                 f"Cannot insert data from {nwb_file_name}: {out_nwb_file_name}"
-                + "is already in Nwbfile table."
+                + " is already in Nwbfile table."
             )
             continue
 

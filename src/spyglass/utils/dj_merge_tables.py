@@ -6,7 +6,7 @@ import datajoint as dj
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
-from datajoint.utils import from_camel_case, to_camel_case
+from datajoint.utils import from_camel_case, to_camel_case, get_master
 from IPython.core.display import HTML
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -701,20 +701,7 @@ def delete_downstream_merge(
         )
 
     descendants = _unique_descendants(table, recurse_level)
-
-    # Adapted from Spyglass PR 535
-    # dj.utils.get_master could maybe help here, but it uses names, not objs
-    merge_table_pairs = [  # get each merge/part table
-        (master, descendant.restrict(restriction))
-        for descendant in descendants
-        for master in descendant.parents(as_objects=True)  # and those parents
-        # if is a part table (using a dunder not immediately after schema name)
-        if "__" in descendant.full_table_name.replace("`.`__", "")
-        # and it is not in not in direct descendants
-        and master.full_table_name not in descendants
-        # and it uses our reserved primary key in attributes
-        and RESERVED_PRIMARY_KEY in master.heading.attributes.keys()
-    ]
+    merge_table_pairs = _master_table_pairs(descendants, restriction)
 
     # restrict the merge table based on uuids in part
     merge_pairs = [
@@ -742,11 +729,11 @@ def _unique_descendants(
     recurse_level: int
         The maximum level of descendants to find.
     return_names: bool
-        If True, return names of descendants found.
+        If True, return names of descendants found. Else return Table objects.
 
     Returns
     -------
-    List[dj.Table]
+    List[dj.Table, str]
         List descendants found when recurisively called to recurse_level
     """
 
@@ -764,7 +751,55 @@ def _unique_descendants(
 
     recurse_descendants(table, recurse_level)
 
-    if return_names:
-        return list(descendants.keys())
+    return (
+        list(descendants.keys()) if return_names else list(descendants.values())
+    )
 
-    return list(descendants.values())
+
+def _master_table_pairs(
+    table_list: list,
+    restriction: str = True,
+    connection: dj.connection.Connection = None,
+) -> list:
+    """
+    Given list of tables, return a list of master table pairs.
+
+    Returns a list of tuples, with master and part. Part will have restriction
+    applied. If restriction yield empty list, skip.
+
+    Parameters
+    ----------
+    table_list : List[dj.Table]
+        A list of datajoint tables.
+    restriction : str
+        A restriction string. Defalt True, no restriction.
+    connection : datajoint.connection.Connection
+        A database connection. Default None, use connection from first table.
+
+    Returns
+    -------
+    List[Tuple[dj.Table, dj.Table]]
+        A list of master table pairs.
+    """
+    conn = connection or table_list[0].connection
+
+    master_table_pairs = []
+    # Adapted from Spyglass PR 535
+    for table in table_list:
+        master_name = get_master(table.full_table_name)
+        if not master_name:  # then it's not a part table
+            continue
+
+        master = dj.FreeTable(conn, master_name)
+
+        if RESERVED_PRIMARY_KEY not in master.heading.attributes.keys():
+            continue
+
+        restricted_table = table.restrict(restriction)
+
+        if not restricted_table:
+            continue
+
+        master_table_pairs.append((master, restricted_table))
+
+    return master_table_pairs

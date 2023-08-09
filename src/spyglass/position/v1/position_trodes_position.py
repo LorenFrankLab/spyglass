@@ -132,15 +132,7 @@ class TrodesPosV1(dj.Computed):
             spatial_series = raw_position["raw_position"]
             position_info = self.calculate_position_info_from_spatial_series(
                 spatial_series,
-                position_info_parameters["max_separation"],
-                position_info_parameters["max_speed"],
-                position_info_parameters["speed_smoothing_std_dev"],
-                position_info_parameters["position_smoothing_duration"],
-                position_info_parameters["orient_smoothing_std_dev"],
-                position_info_parameters["led1_is_front"],
-                position_info_parameters["is_upsampled"],
-                position_info_parameters["upsampling_sampling_rate"],
-                position_info_parameters["upsampling_interpolation_method"],
+                **position_info_parameters,
             )
             # create nwb objects for insertion into analysis nwb file
             position.create_spatial_series(
@@ -230,8 +222,8 @@ class TrodesPosV1(dj.Computed):
     @staticmethod
     def calculate_position_info_from_spatial_series(
         spatial_series,
-        max_LED_separation,
-        max_plausible_speed,
+        max_separation,
+        max_speed,
         speed_smoothing_std_dev,
         position_smoothing_duration,
         orient_smoothing_std_dev,
@@ -274,7 +266,7 @@ class TrodesPosV1(dj.Computed):
 
         # Set points to NaN where the front and back LEDs are too separated
         dist_between_LEDs = get_distance(back_LED, front_LED)
-        is_too_separated = dist_between_LEDs >= max_LED_separation
+        is_too_separated = dist_between_LEDs >= max_separation
 
         back_LED[is_too_separated] = np.nan
         front_LED[is_too_separated] = np.nan
@@ -294,8 +286,8 @@ class TrodesPosV1(dj.Computed):
         )
 
         # Set to points to NaN where the speed is too fast
-        is_too_fast = (front_LED_speed > max_plausible_speed) | (
-            back_LED_speed > max_plausible_speed
+        is_too_fast = (front_LED_speed > max_speed) | (
+            back_LED_speed > max_speed
         )
         back_LED[is_too_fast] = np.nan
         front_LED[is_too_fast] = np.nan

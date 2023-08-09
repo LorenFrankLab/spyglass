@@ -53,7 +53,6 @@ import warnings
 
 warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
-
 # -
 
 # ## Select data
@@ -64,7 +63,6 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 
 nwb_file_name = "minirec20230622_.nwb"
 
-
 # ## Create Filters
 #
 
@@ -73,7 +71,6 @@ nwb_file_name = "minirec20230622_.nwb"
 
 sgc.FirFilterParameters().create_standard_filters()
 sgc.FirFilterParameters()
-
 
 # ## Electrode Group
 #
@@ -92,7 +89,6 @@ electrodes_df = (
     .sort_values(by="electrode_id")
 )
 electrodes_df
-
 
 # For a larger dataset, we might want to filter by region, but our example
 # data only has one electrode.
@@ -117,7 +113,6 @@ lfp.lfp_electrode.LFPElectrodeGroup.create_lfp_electrode_group(
     group_name=lfp_electrode_group_name,
     electrode_list=lfp_electrode_ids,
 )
-
 # -
 
 # We can verify the electrode list as follows
@@ -126,7 +121,6 @@ lfp.lfp_electrode.LFPElectrodeGroup.create_lfp_electrode_group(
 lfp.lfp_electrode.LFPElectrodeGroup.LFPElectrode() & {
     "nwb_file_name": nwb_file_name
 }
-
 
 # ## `IntervalList`
 #
@@ -137,7 +131,6 @@ lfp.lfp_electrode.LFPElectrodeGroup.LFPElectrode() & {
 #
 
 sgc.IntervalList & {"nwb_file_name": nwb_file_name}
-
 
 # +
 n = 9
@@ -162,14 +155,12 @@ sgc.IntervalList.insert1(
     interval_key,
     skip_duplicates=True,
 )
-
 # -
 
 sgc.IntervalList() & {
     "nwb_file_name": nwb_file_name,
     "interval_list_name": interval_list_name,
 }
-
 
 # ## `LFPSelection`
 #
@@ -189,11 +180,9 @@ lfp_s_key.update(
 )
 
 lfp.v1.LFPSelection.insert1(lfp_s_key, skip_duplicates=True)
-
 # -
 
 lfp.v1.LFPSelection() & lfp_s_key
-
 
 # ## Populate LFP
 #
@@ -210,26 +199,21 @@ lfp.v1.LFPSelection() & lfp_s_key
 
 lfp.v1.LFPV1().populate(lfp_s_key)
 
-
 # We can now look at the LFP table to see the data we've extracted
 #
 
 lfp.LFPOutput.LFPV1() & lfp_s_key
 
-
 lfp_key = {"merge_id": (lfp.LFPOutput.LFPV1() & lfp_s_key).fetch1("merge_id")}
 lfp_key
 
-
 lfp.LFPOutput & lfp_key
-
 
 # From the Merge Table, we can get the keys for the LFP data we want to see
 #
 
 lfp_df = (lfp.LFPOutput & lfp_key).fetch1_dataframe()
 lfp_df
-
 
 # ## LFP Band
 #
@@ -255,11 +239,9 @@ sgc.common_filter.FirFilterParameters() & {
     "filter_name": filter_name,
     "filter_sampling_rate": lfp_sampling_rate,
 }
-
 # -
 
 sgc.IntervalList()
-
 
 # We can specify electrodes of interest, and desired sampling rate.
 #
@@ -281,7 +263,6 @@ lfp_band.LFPBandSelection().set_lfp_band_electrodes(
 )
 
 lfp_band.LFPBandSelection()
-
 # -
 
 # Next we add an entry for the LFP Band and the electrodes we want to filter
@@ -297,16 +278,13 @@ lfp_band_key = (
 ).fetch1("KEY")
 lfp_band_key
 
-
 # Check to make sure it worked
 #
 
 lfp_band.LFPBandSelection() & lfp_band_key
 
-
 lfp_band.LFPBandV1().populate(lfp_band.LFPBandSelection() & lfp_band_key)
 lfp_band.LFPBandV1()
-
 
 # ## Plotting
 #
@@ -327,13 +305,11 @@ orig_elect_indices = sgc.get_electrode_indices(
 )
 orig_timestamps = np.asarray(orig_eseries.timestamps)
 
-
 lfp_eseries = lfp.LFPOutput.fetch_nwb(lfp_key)[0]["lfp"]
 lfp_elect_indices = sgc.get_electrode_indices(
     lfp_eseries, lfp_band_electrode_ids
 )
 lfp_timestamps = np.asarray(lfp_eseries.timestamps)
-
 
 lfp_band_eseries = (lfp_band.LFPBandV1 & lfp_band_key).fetch_nwb()[0][
     "lfp_band"
@@ -343,12 +319,11 @@ lfp_band_elect_indices = sgc.get_electrode_indices(
 )
 lfp_band_timestamps = np.asarray(lfp_band_eseries.timestamps)
 
-
-# Get a list of times for the first run epoch and then select a 2 second interval 100 seconds from the beginning
+# Get a list of times for the first run epoch and then select a 2 second interval
+# 100 seconds from the beginning
 #
 
 plottimes = [valid_times[0][0] + 1, valid_times[0][0] + 8]
-
 
 # +
 # get the time indices for each dataset
@@ -367,7 +342,6 @@ lfp_band_time_ind = np.where(
         lfp_band_timestamps < plottimes[1],
     )
 )[0]
-
 
 # +
 import matplotlib.pyplot as plt
@@ -390,8 +364,8 @@ plt.plot(
 plt.xlabel("Time (sec)")
 plt.ylabel("Amplitude (AD units)")
 
-plt.show()
-
+# Uncomment to see plot
+# plt.show()
 # -
 
 # ## Next Steps

@@ -92,9 +92,10 @@ dj.Diagram(sgc.Session) - 1 + 2
 # By adding diagrams together, of adding and subtracting levels, we can visualize
 # key parts of Spyglass.
 #
-# _Note:_ Notice the *Selection* tables. This is a design pattern that selects a
+# _Note:_ Notice the _Selection_ tables. This is a design pattern that selects a
 # subset of upstream items for further processing. In some cases, these also pair
 # the selected data with processing parameters.
+#
 
 # ## Example data
 #
@@ -307,10 +308,12 @@ session_entry = sgc.Session & {"nwb_file_name": nwb_copy_file_name}
 session_entry
 
 # By default, DataJoint is cautious about deletes and will prompt before deleting.
-# To delete, respond `yes` in the prompt.
+# To delete, uncomment the cell below and respond `yes` in the prompt.
 #
 
-session_entry.delete()
+# +
+# session_entry.delete()
+# -
 
 # We can check that delete worked, both for `Session` and `IntervalList`
 #
@@ -332,16 +335,22 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # _Note:_ this also applies to deleting files from `AnalysisNwbfile` table.
 #
 
-# Let's delete the entry
-(sgc.Nwbfile & {"nwb_file_name": nwb_copy_file_name}).delete()
+# +
+# Uncomment to delete
+# (sgc.Nwbfile & {"nwb_file_name": nwb_copy_file_name}).delete()
+# -
 
-# Note that the file (ends with _.nwb) has not been deleted, even though the entry is
+# Note that the file (ends with `_.nwb`) has not been deleted, even if the entry
+# was deleted above.
+#
+
 # !ls $SPYGLASS_BASE_DIR/raw
 
-# We clean it up
+# We can clean these files with the `cleanup` method
+#
+
 sgc.Nwbfile().cleanup(delete_files=True)
 
-# Now the file is gone as well
 # !ls $SPYGLASS_BASE_DIR/raw
 
 # In the [next notebook](./02_Spike_Sorting.ipynb), we'll dive into the Spike

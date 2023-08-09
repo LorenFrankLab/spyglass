@@ -13,6 +13,7 @@
 # ---
 
 # # Trodes Position
+#
 
 # ## Overview
 #
@@ -70,38 +71,43 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 
 # ## Loading the data
 #
-# First, we'll grab let us make sure that the session we want to analyze is inserted into the `RawPosition` table
 
-nwb_file_name = "chimi20200216_new.nwb"
-nwb_copy_file_name = sgu.nwb_helper_fn.get_nwb_copy_filename(nwb_file_name)
+# First, we'll grab let us make sure that the session we want to analyze is inserted into the `RawPosition` table
+#
+
+nwb_copy_file_name = (sgc.Nwbfile & 'nwb_file_name LIKE "mid%"').fetch1(
+    "nwb_file_name"
+)
 sgc.common_behav.RawPosition() & {"nwb_file_name": nwb_copy_file_name}
 
 # ## Setting parameters
 #
+
 # Parameters are set by the `TrodesPosParams` table, with a `default` set
 # available. To adjust the default, insert a new set into this table. The
 # parameters are...
 #
 # - `max_separation`, default 9 cm: maximium acceptable distance between red and
 #   green LEDs.
-#     - If exceeded, the times are marked as NaNs and inferred by interpolation.
-#     - Useful when the inferred LED position tracks a reflection instead of the
-#       true position.
+#   - If exceeded, the times are marked as NaNs and inferred by interpolation.
+#   - Useful when the inferred LED position tracks a reflection instead of the
+#     true position.
 # - `max_speed`, default 300.0 cm/s: maximum speed the animal can move.
-#     - If exceeded, times are marked as NaNs and inferred by interpolation.
-#     - Useful to prevent big jumps in position.
+#   - If exceeded, times are marked as NaNs and inferred by interpolation.
+#   - Useful to prevent big jumps in position.
 # - `position_smoothing_duration`, default 0.100 s: LED position smoothing before
 #   computing average position to get head position.
 # - `speed_smoothing_std_dev`, default 0.100 s: standard deviation of the Gaussian
 #   kernel used to smooth the head speed.
 # - `front_led1`, default 1 (True), use `xloc`/`yloc`: Which LED is the front LED
 #   for calculating the head direction.
-#     - 1: LED corresponding to `xloc`, `yloc` in the `RawPosition` table is the
-#       front, `xloc2`, `yloc2` as the back.
-#     - 0: LED corresponding to `xloc2`, `yloc2` in the `RawPosition` table is the
-#       front, `xloc`, `yloc` as the back.
+#   - 1: LED corresponding to `xloc`, `yloc` in the `RawPosition` table is the
+#     front, `xloc2`, `yloc2` as the back.
+#   - 0: LED corresponding to `xloc2`, `yloc2` in the `RawPosition` table is the
+#     front, `xloc`, `yloc` as the back.
 #
 # We can see these defaults with `TrodesPosParams.get_default`.
+#
 
 # +
 from pprint import pprint
@@ -118,6 +124,7 @@ sgp.v1.TrodesPosParams.insert1(
 sgp.v1.TrodesPosParams()
 
 # ## Select interval
+#
 
 # Later, we'll pair the above parameters with an interval from our NWB file and
 # insert into `TrodesPosSelection`.
@@ -134,6 +141,7 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 #
 # `fetch1_dataframe` returns the position of the LEDs as a pandas dataframe where
 # time is the index.
+#
 
 interval_list_name = "pos 0 valid times"  # pos # is epoch # minus 1
 raw_position_df = (
@@ -146,20 +154,24 @@ raw_position_df = (
 raw_position_df
 
 # Let's just quickly plot the two LEDs to get a sense of the inputs to the pipeline:
+#
 
 fig, ax = plt.subplots(1, 1, figsize=(10, 10))
 ax.plot(raw_position_df.xloc, raw_position_df.yloc, color="green")
-ax.plot(raw_position_df.xloc2, raw_position_df.yloc2, color="red")
+# Uncomment for multiple LEDs
+# ax.plot(raw_position_df.xloc2, raw_position_df.yloc2, color="red")
 ax.set_xlabel("x-position [pixels]", fontsize=18)
 ax.set_ylabel("y-position [pixels]", fontsize=18)
 ax.set_title("Raw Position", fontsize=28)
 
 # ## Pairing interval and parameters
+#
 
 # To associate a set of parameters with a given interval, insert them into the
 # `TrodesPosSelection` table.
+#
 
-sgp.TrodesPosSelection.insert1(
+sgp.v1.TrodesPosSelection.insert1(
     {
         "nwb_file_name": nwb_copy_file_name,
         "interval_list_name": interval_list_name,
@@ -169,10 +181,11 @@ sgp.TrodesPosSelection.insert1(
 )
 
 # Now let's check to see if we've inserted the parameters correctly:
+#
 
-sgp.TrodesPosSelection()
+sgp.v1.TrodesPosSelection()
 trodes_key = (
-    sgp.TrodesPosSelection()
+    sgp.v1.TrodesPosSelection()
     & {
         "nwb_file_name": nwb_copy_file_name,
         "interval_list_name": interval_list_name,
@@ -185,8 +198,9 @@ trodes_key = (
 
 # We can run the pipeline for our chosen interval/parameters by using the
 # `TrodesPos.populate`.
+#
 
-sgp.TrodesPos.populate(trodes_key)
+sgp.v1.TrodesPosV1.populate(trodes_key)
 
 # Each NWB file, interval, and parameter set is now associated with a new analysis file and object ID.
 #
@@ -196,11 +210,13 @@ sgp.TrodesPos()
 # To retrieve the results as a pandas DataFrame with time as the index, we use `IntervalPositionInfo.fetch1_dataframe`.
 #
 # This dataframe has the following columns:
+#
 # - `head_position_{x,y}`: X or Y position of the head in cm.
 # - `head_orientation`: Direction of the head relative to the bottom left corner
 #   in radians
 # - `head_velocity_{x,y}`: Directional change in head position over time in cm/s
 # - `head_speed`: the magnitude of the change in head position over time in cm/s
+#
 
 position_info = (
     sgc.IntervalPositionInfo()
@@ -213,6 +229,7 @@ position_info = (
 position_info
 
 # `.index` on the pandas dataframe gives us timestamps.
+#
 
 position_info.index
 
@@ -224,6 +241,7 @@ position_info.index
 # ### Plots
 #
 # Let's plot some of the variables first:
+#
 
 fig, ax = plt.subplots(1, 1, figsize=(10, 10))
 ax.plot(position_info.head_position_x, position_info.head_position_y)
@@ -247,7 +265,8 @@ ax.set_xlim((position_info.index.min(), position_info.index.max()))
 # ### Video
 #
 # These look reasonable but we can visualize further by plotting the results on
-#  the video, which will appear in the current working directory.
+# the video, which will appear in the current working directory.
+#
 
 # +
 from spyglass.common.common_position import PositionVideo
@@ -272,6 +291,7 @@ PositionVideo().make(
 # - `upsampling_interpolation_method`, default linear: interpolation method. See
 #   [pandas.DataFrame.interpolate](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.interpolate.html)
 #   for alternate methods.
+#
 
 # +
 sgc.PositionInfoParameters.insert1(
