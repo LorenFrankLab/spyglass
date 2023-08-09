@@ -20,7 +20,6 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         File names in raw directory ($SPYGLASS_RAW_DIR) pointing to
         existing .nwb files. Each file represents a session.
     """
-    _ = load_config()
 
     if not isinstance(nwb_file_names, list):
         nwb_file_names = [nwb_file_names]

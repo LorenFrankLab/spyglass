@@ -33,10 +33,9 @@ class PositionOutput(_Merge):
     """
 
     definition = """
-    merge_id : uuid
+    merge_id: uuid
     ---
     source: varchar(32)
-    ---
     """
 
     class DLCPosV1(dj.Part):

@@ -18,6 +18,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
+from ...settings import raw_dir
+
 
 def _set_permissions(directory, mode, username: str, groupname: str = None):
     """
@@ -325,9 +327,8 @@ def get_video_path(key):
         VideoFile()
         & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
     ).fetch1()
-    nwb_path = (
-        f"{os.getenv('SPYGLASS_BASE_DIR')}/raw/{video_info['nwb_file_name']}"
-    )
+    nwb_path = f"{raw_dir}/{video_info['nwb_file_name']}"
+
     with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
         nwb_file = in_out.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
@@ -338,6 +339,7 @@ def get_video_path(key):
         video_filename = video_filepath.split(video_dir)[-1]
         meters_per_pixel = nwb_video.device.meters_per_pixel
         timestamps = np.asarray(nwb_video.timestamps)
+
     return video_dir, video_filename, meters_per_pixel, timestamps
 
 

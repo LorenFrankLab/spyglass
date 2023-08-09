@@ -3,7 +3,7 @@ from itertools import chain as iter_chain
 from pprint import pprint
 
 import datajoint as dj
-from datajoint.condition import AndList, make_condition
+from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, to_camel_case
@@ -39,16 +39,16 @@ class Merge(dj.Manual):
         if not self.is_declared:
             if self.definition != merge_def:
                 print(
-                    "WARNING: merge table declared with non-default definition\n\t"
+                    "WARNING: merge table with non-default definition\n\t"
                     + f"Expected: {merge_def.strip()}\n\t"
                     + f"Actual  : {self.definition.strip()}"
                 )
             for part in self.parts(as_objects=True):
                 if part.primary_key != self.primary_key:
                     print(
-                        f"WARNING: unexpected primary key for {part.table_name}\n\t"
-                        + f"Expected: {self.primary_key}\n\t"
-                        + f"Actual  : {part.primary_key}"
+                        f"WARNING: unexpected primary key in {part.table_name}"
+                        + f"\n\tExpected: {self.primary_key}"
+                        + f"\n\tActual  : {part.primary_key}"
                     )
 
     @classmethod
@@ -187,7 +187,7 @@ class Merge(dj.Manual):
 
     @classmethod
     def _merge_repr(cls, restriction: str = True) -> dj.expression.Union:
-        """Merged view, including null entries for columns unique to one part table.
+        """Merged view, including null entries for columns unique to one part.
 
         Parameters
         ---------
@@ -237,7 +237,7 @@ class Merge(dj.Manual):
     def _merge_insert(
         cls, rows: list, part_name: str = None, mutual_exclusvity=True, **kwargs
     ) -> None:
-        """Insert rows into merge table, ensuring db integrity and mutual exclusivity
+        """Insert rows into merge, ensuring db integrity and mutual exclusivity
 
         Parameters
         ---------
@@ -433,8 +433,8 @@ class Merge(dj.Manual):
             Optional restriction to apply before deletion from parents. If not
             provided, delete all entries present in Merge Table.
         dry_run: bool
-            Default True. If true, return list of tables with entries that would be
-            deleted. Otherwise, table entries.
+            Default True. If true, return list of tables with entries that would
+            be deleted. Otherwise, table entries.
         kwargs: dict
             Additional keyword arguments for DataJoint delete.
         """
@@ -541,7 +541,7 @@ class Merge(dj.Manual):
 
         if not multi_source and len(sources) != 1:
             raise ValueError(
-                f"Found multiple potential parts: {sources}\n\t"
+                f"Found {len(sources)} potential parts: {sources}\n\t"
                 + "Try adding a restriction before invoking `get_part`.\n\t"
                 + "Or permitting multiple sources with `multi_source=True`."
             )
@@ -593,9 +593,10 @@ class Merge(dj.Manual):
 
         if not multi_source and len(part_parents) != 1:
             raise ValueError(
-                f"Found multiple potential parents: {part_parents}\n\t"
-                + "Try adding a string restriction when invoking `get_parent`."
-                + "Or permitting multiple sources with `multi_source=True`."
+                f"Found  {len(part_parents)} potential parents: {part_parents}"
+                + "\n\tTry adding a string restriction when invoking "
+                + "`get_parent`. Or permitting multiple sources with "
+                + "`multi_source=True`."
             )
 
         if join_master:
@@ -644,7 +645,7 @@ class Merge(dj.Manual):
         if not results:
             print(
                 "No merge_fetch results.\n\t"
-                + "If not restriction, try: `M.merge_fetch(True,'attr')\n\t"
+                + "If not restricting, try: `M.merge_fetch(True,'attr')\n\t"
                 + "If restricting by source, use dict: "
                 + "`M.merge_fetch({'source':'X'})"
             )
@@ -664,14 +665,12 @@ _Merge = Merge
 # Aliased because underscore otherwise excludes from API docs.
 
 
-_Merge = Merge
-
-# Underscore as class name avoids errors when this included in a Diagram
-# Aliased because underscore otherwise excludes from API docs.
-
-
 def delete_downstream_merge(
-    table: dj.Table, restriction: str = True, dry_run=True, **kwargs
+    table: dj.Table,
+    restriction: str = True,
+    dry_run=True,
+    recurse_level=2,
+    **kwargs,
 ) -> list:
     """Given a table/restriction, id or delete relevant downstream merge entries
 
@@ -685,6 +684,8 @@ def delete_downstream_merge(
     dry_run: bool
         Default True. If true, return list of tuples, merge/part tables
         downstream of table input. Otherwise, delete merge/part table entries.
+    recurse_level: int
+        Default 2. Depth to recurse into table descendants.
     kwargs: dict
         Additional keyword arguments for DataJoint delete.
 
@@ -693,21 +694,24 @@ def delete_downstream_merge(
     List[Tuple[dj.Table, dj.Table]]
         Entries in merge/part tables downstream of table input.
     """
-    restriction = AndList((table.restriction, restriction))
+    if table.restriction:
+        print(
+            f"Warning: ignoring table restriction: {table.restriction}.\n\t"
+            + "Please pass restrictions as an arg"
+        )
 
-    if not restriction:
-        restriction = True
+    descendants = _unique_descendants(table, recurse_level)
 
     # Adapted from Spyglass PR 535
     # dj.utils.get_master could maybe help here, but it uses names, not objs
-    merge_pairs = [  # get each merge/part table
+    merge_table_pairs = [  # get each merge/part table
         (master, descendant.restrict(restriction))
-        for descendant in table.descendants(as_objects=True)  # given tbl desc
+        for descendant in descendants
         for master in descendant.parents(as_objects=True)  # and those parents
         # if is a part table (using a dunder not immediately after schema name)
         if "__" in descendant.full_table_name.replace("`.`__", "")
         # and it is not in not in direct descendants
-        and master.full_table_name not in table.descendants(as_objects=False)
+        and master.full_table_name not in descendants
         # and it uses our reserved primary key in attributes
         and RESERVED_PRIMARY_KEY in master.heading.attributes.keys()
     ]
@@ -715,7 +719,7 @@ def delete_downstream_merge(
     # restrict the merge table based on uuids in part
     merge_pairs = [
         (merge & uuids, part)  # don't need part for del, but show on dry_run
-        for merge, part in merge_pairs
+        for merge, part in merge_table_pairs
         for uuids in part.fetch(RESERVED_PRIMARY_KEY, as_dict=True)
     ]
 
@@ -724,3 +728,43 @@ def delete_downstream_merge(
 
     for merge_table, _ in merge_pairs:
         merge_table.delete(**kwargs)
+
+
+def _unique_descendants(
+    table: dj.Table, recurse_level: int, return_names: bool = False
+) -> list:
+    """Recurisively find unique descendants of a given table
+
+    Parameters
+    ----------
+    table: dj.Table
+        The node in the tree from which to find descendants.
+    recurse_level: int
+        The maximum level of descendants to find.
+    return_names: bool
+        If True, return names of descendants found.
+
+    Returns
+    -------
+    List[dj.Table]
+        List descendants found when recurisively called to recurse_level
+    """
+
+    if recurse_level == 0:
+        return []
+
+    descendants = {}
+
+    def recurse_descendants(sub_table, level):
+        for descendant in sub_table.descendants(as_objects=True):
+            if descendant.full_table_name not in descendants:
+                descendants[descendant.full_table_name] = descendant
+                if level > 1:
+                    recurse_descendants(descendant, level - 1)
+
+    recurse_descendants(table, recurse_level)
+
+    if return_names:
+        return list(descendants.keys())
+
+    return list(descendants.values())
