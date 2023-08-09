@@ -17,6 +17,7 @@ from .common_behav import (
     RawPosition,
     StateScriptFile,
     VideoFile,
+    PositionIntervalMap,
 )
 from .common_device import (
     CameraDevice,
