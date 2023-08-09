@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from spyglass.common.common_behav import RawPosition
+from spyglass.common.common_behav import RawPosition, PositionIntervalMap
 from spyglass.common.common_interval import (
     IntervalList,
     interval_list_intersect,
@@ -122,24 +122,6 @@ def get_valid_ephys_position_times_by_epoch(
         )
         for epoch in get_epoch_interval_names(nwb_file_name)
     }
-
-
-def convert_epoch_interval_name_to_position_interval_name(
-    epoch_interval_name: str,
-) -> str:
-    """Converts the epoch interval name to the position interval name.
-
-    Parameters
-    ----------
-    epoch_interval_name : str
-
-    Returns
-    -------
-    position_interval_name : str
-    """
-
-    pos_interval_number = int(epoch_interval_name.split("_")[0]) - 1
-    return f"pos {pos_interval_number} valid times"
 
 
 def convert_valid_times_to_slice(valid_times: np.ndarray) -> list[slice]:
