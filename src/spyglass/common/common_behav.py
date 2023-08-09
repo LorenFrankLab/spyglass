@@ -406,6 +406,12 @@ def convert_epoch_interval_name_to_position_interval_name(
     -------
     position_interval_name : str
     """
+    # get the interval list name if epoch given in key instead of interval list name
+    if "interval_list_name" not in key and "epoch" in key:
+        key["interval_list_name"] = get_interval_list_name_from_epoch(
+            key["nwb_file_name"], key["epoch"]
+        )
+
     pos_interval_names = (PositionIntervalMap & key).fetch(
         "position_interval_name"
     )
@@ -416,3 +422,36 @@ def convert_epoch_interval_name_to_position_interval_name(
         return []
     if len(pos_interval_names) == 1:
         return pos_interval_names[0]
+
+
+def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
+    """Returns the interval list name for the given epoch.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The name of the NWB file.
+    epoch : int
+        The epoch number.
+
+    Returns
+    -------
+    interval_list_name : str
+        The interval list name.
+    """
+    interval_names = [
+        x
+        for x in (IntervalList() & {"nwb_file_name": nwb_file_name}).fetch(
+            "interval_list_name"
+        )
+        if (x.split("_")[0] == f"{epoch:02}")
+    ]
+    if len(interval_names) == 0:
+        print(f"No interval list name found for {nwb_file_name} epoch {epoch}")
+        return None
+    if len(interval_names) > 1:
+        print(
+            f"Multiple interval list names found for {nwb_file_name} epoch {epoch}"
+        )
+        return None
+    return interval_names[0]
