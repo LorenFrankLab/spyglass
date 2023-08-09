@@ -124,31 +124,6 @@ def get_valid_ephys_position_times_by_epoch(
     }
 
 
-def convert_epoch_interval_name_to_position_interval_name(
-    key: dict,
-) -> str:
-    """Converts a primary key for IntervalList to the corresponding position interval name.
-
-    Parameters
-    ----------
-    key : dict
-
-    Returns
-    -------
-    position_interval_name : str
-    """
-    pos_interval_names = (PositionIntervalMap & key).fetch(
-        "position_interval_name"
-    )
-    if len(pos_interval_names) == 0:
-        PositionIntervalMap.populate(key)
-    if len(pos_interval_names) == 0:
-        print(f"No position intervals found for {key}")
-        return []
-    if len(pos_interval_names) == 1:
-        return pos_interval_names[0]
-
-
 def convert_valid_times_to_slice(valid_times: np.ndarray) -> list[slice]:
     """Converts the valid times to a list of slices so that arrays can be indexed easily.
 
