@@ -1,5 +1,7 @@
 # FIRST: INSTALL CORRECT DRIVER for GPU, see https://stackoverflow.com/questions/30820513/what-is-the-correct-version-of-cuda-for-my-nvidia-driver/30820690
 #
+# NOTE: Perform install on a GPU-equipped machine
+#
 # install: mamba env create -f environment_position.yml
 # update:  mamba env update -f environment_position.yml
 # after installing do the following:
