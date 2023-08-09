@@ -5,7 +5,10 @@ import pandas as pd
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
 
-from spyglass.common import IntervalList  # noqa
+from spyglass.common.common_interval import (
+    IntervalList,
+    interval_list_intersect,
+)
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.analysis.v1.lfp_band import (
     LFPBandSelection,
@@ -251,17 +254,26 @@ class RippleTimesV1(dj.Computed):
         position_info = (
             PositionOutput() & {"merge_id": key["pos_merge_id"]}
         ).fetch1_dataframe()
+
+        # restrict valid times to position time
+        pos_interval_valid_times = np.array(
+            [position_info.index[0], position_info.index[-1]]
+        )
+        position_valid_times_2 = interval_list_intersect(
+            position_valid_times, pos_interval_valid_times
+        )
+
         position_info = pd.concat(
             [
                 position_info.loc[slice(valid_time[0], valid_time[1])]
-                for valid_time in position_valid_times
+                for valid_time in position_valid_times_2
             ],
             axis=0,
         )
         interval_ripple_lfps = pd.concat(
             [
                 ripple_lfp.loc[slice(valid_time[0], valid_time[1])]
-                for valid_time in position_valid_times
+                for valid_time in position_valid_times_2
             ],
             axis=0,
         )
