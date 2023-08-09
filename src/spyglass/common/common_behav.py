@@ -417,6 +417,9 @@ def convert_epoch_interval_name_to_position_interval_name(
     )
     if len(pos_interval_names) == 0:
         PositionIntervalMap.populate(key)
+        pos_interval_names = (PositionIntervalMap & key).fetch(
+            "position_interval_name"
+        )
     if len(pos_interval_names) == 0:
         print(f"No position intervals found for {key}")
         return []
