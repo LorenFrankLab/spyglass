@@ -339,7 +339,10 @@ def get_decoding_data_for_epoch(
     # position interval
     position_interval_name = (
         convert_epoch_interval_name_to_position_interval_name(
-            interval_list_name
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_list_name,
+            }
         )
     )
 

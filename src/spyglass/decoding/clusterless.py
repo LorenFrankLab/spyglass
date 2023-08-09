@@ -733,7 +733,10 @@ def get_decoding_data_for_epoch(
     valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
     position_interval_name = (
         convert_epoch_interval_name_to_position_interval_name(
-            interval_list_name
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_list_name,
+            }
         )
     )
 
