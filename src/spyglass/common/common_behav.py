@@ -311,7 +311,7 @@ class PositionIntervalMap(dj.Computed):
         # Use epsilon to tolerate small differences in epoch boundaries across epoch/pos intervals
 
         # *** HARD CODED VALUES ***
-        epsilon = 0.11  # tolerated time difference in epoch boundaries across epoch/pos intervals
+        EPSILON = 0.11  # tolerated time difference in epoch boundaries across epoch/pos intervals
         # *************************
 
         # Unpack key
@@ -330,8 +330,8 @@ class PositionIntervalMap(dj.Computed):
         # Get the interval times
         valid_times = (IntervalList & key).fetch1("valid_times")
         time_interval = [
-            valid_times[0][0] - epsilon,
-            valid_times[-1][-1] + epsilon,
+            valid_times[0][0] - EPSILON,
+            valid_times[-1][-1] + EPSILON,
         ]  # [start, end], widen to tolerate small differences in epoch boundaries across epoch/pos intervals
 
         # compare the position intervals against our interval
