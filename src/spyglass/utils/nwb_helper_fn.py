@@ -21,26 +21,37 @@ invalid_electrode_index = 99999999
 
 def get_nwb_file(nwb_file_path):
     """Return an NWBFile object with the given file path in read mode.
-       If the file is not found locally, this will check if it has been shared with kachery and if so, download it and open it.
+
+    If the file is not found locally, this will check if it has been shared
+    with kachery and if so, download it and open it.
+
 
     Parameters
     ----------
     nwb_file_path : str
-        Path to the NWB file.
+        Path to the NWB file or NWB file name. If it does not start with a "/",
+        get path with Nwbfile.get_abs_path
 
     Returns
     -------
     nwbfile : pynwb.NWBFile
         NWB file object for the given path opened in read mode.
     """
+    if not nwb_file_path.startswith("/"):
+        from ..common import Nwbfile
+
+        nwb_file_path = Nwbfile.get_abs_path(nwb_file_path)
+
     _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
     nwb_uri = None
     nwb_raw_uri = None
+
     if nwbfile is None:
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
             print(
-                f"NWB file {nwb_file_path} does not exist locally; checking kachery"
+                f"NWB file not found locally; checking kachery for "
+                + f"{nwb_file_path}"
             )
             # first try the analysis files
             from ..sharing.sharing_kachery import AnalysisNwbfileKachery
@@ -165,49 +176,73 @@ def get_raw_eseries(nwbfile):
     return ret
 
 
-def estimate_sampling_rate(timestamps, multiplier):
+def estimate_sampling_rate(
+    timestamps, multiplier=1.75, verbose=False, filename="file"
+):
     """Estimate the sampling rate given a list of timestamps.
 
-    Assumes that the most common temporal differences between timestamps approximate the sampling rate. Note that this
-    can fail for very high sampling rates and irregular timestamps.
+    Assumes that the most common temporal differences between timestamps
+    approximate the sampling rate. Note that this can fail for very high
+    sampling rates and irregular timestamps.
 
     Parameters
     ----------
     timestamps : numpy.ndarray
         1D numpy array of timestamp values.
-    multiplier : float or int
+    multiplier : float or int, optional
+        Deft
+    verbose : bool, optional
+        Print sampling rate to stdout. Default, False
+    filename : str, optional
+        Filename to reference when printing or err. Default, "file"
 
     Returns
     -------
     estimated_rate : float
         The estimated sampling rate.
+
+    Raises
+    ------
+    ValueError
+        If estimated rate is less than 0.
     """
 
     # approach:
     # 1. use a box car smoother and a histogram to get the modal value
-    # 2. identify adjacent samples as those that have a time difference < the multiplier * the modal value
+    # 2. identify adjacent samples as those that have a
+    #    time difference < the multiplier * the modal value
     # 3. average the time differences between adjacent samples
+
     sample_diff = np.diff(timestamps[~np.isnan(timestamps)])
+
     if len(sample_diff) < 10:
         raise ValueError(
             f"Only {len(sample_diff)} timestamps are valid. Check the data."
         )
-    nsmooth = 10
-    smoother = np.ones(nsmooth) / nsmooth
-    smooth_diff = np.convolve(sample_diff, smoother, mode="same")
 
-    # we histogram with 100 bins out to 3 * mean, which should be fine for any reasonable number of samples
+    smooth_diff = np.convolve(sample_diff, np.ones(10) / 10, mode="same")
+
+    # we histogram with 100 bins out to 3 * mean, which should be fine for any
+    # reasonable number of samples
     hist, bins = np.histogram(
         smooth_diff, bins=100, range=[0, 3 * np.mean(smooth_diff)]
     )
-    mode = bins[np.where(hist == np.max(hist))]
+    mode = bins[np.where(hist == np.max(hist))][0]
 
-    adjacent = sample_diff < mode[0] * multiplier
-    return np.round(1.0 / np.mean(sample_diff[adjacent]))
+    adjacent = sample_diff < mode * multiplier
+
+    sampling_rate = np.round(1.0 / np.mean(sample_diff[adjacent]))
+
+    if sampling_rate < 0:
+        raise ValueError(f"Error calculating sampling rate. For {filename}")
+    if verbose:
+        print(f"Estimated sampling rate for {filename}: {sampling_rate} Hz")
+
+    return sampling_rate
 
 
 def get_valid_intervals(
-    timestamps, sampling_rate, gap_proportion, min_valid_len
+    timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=None
 ):
     """Finds the set of all valid intervals in a list of timestamps.
     Valid interval: (start time, stop time) during which there are
@@ -219,13 +254,13 @@ def get_valid_intervals(
         1D numpy array of timestamp values.
     sampling_rate : float
         Sampling rate of the data.
-    gap_proportion : float, greater than 1; unit: samples
-        Threshold for detecting a gap;
-        i.e. if the difference (in samples) between
-        consecutive timestamps exceeds gap_proportion,
-        it is considered a gap
-    min_valid_len : float
-        Length of smallest valid interval.
+    gap_proportion : float, optional
+        Threshold for detecting a gap; i.e. if the difference (in samples)
+        between consecutive timestamps exceeds gap_proportion, it is considered
+        a gap. Must be > 1. Default to 2.5
+    min_valid_len : float, optional
+        Length of smallest valid interval. Default to sampling_rate. If greater
+        than interval duration, print warning and use half the total time.
 
     Returns
     -------
@@ -234,6 +269,15 @@ def get_valid_intervals(
     """
 
     eps = 0.0000001
+
+    if not min_valid_len:
+        min_valid_len = int(sampling_rate)
+
+    total_time = timestamps[-1] - timestamps[0]
+    if total_time < min_valid_len:
+        half_total_time = total_time / 2
+        print(f"WARNING: Setting minimum valid interval to {half_total_time}")
+        min_valid_len = half_total_time
 
     # get rid of NaN elements
     timestamps = timestamps[~np.isnan(timestamps)]
@@ -308,7 +352,79 @@ def get_electrode_indices(nwb_object, electrode_ids):
     ]
 
 
-def get_all_spatial_series(nwbf, verbose=False):
+def _get_epoch_groups(position: pynwb.behavior.Position, old_format=True):
+    if old_format:
+        epoch_start_time = np.zeros(len(position.spatial_series.values()))
+        for pos_epoch, spatial_series in enumerate(
+            position.spatial_series.values()
+        ):
+            epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
+
+        return np.argsort(epoch_start_time)
+
+    from itertools import groupby
+
+    epoch_start_time = {}
+    for pos_epoch, spatial_series in enumerate(
+        position.spatial_series.values()
+    ):
+        epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
+
+    return {
+        i: [j[0] for j in j]
+        for i, j in groupby(
+            sorted(epoch_start_time.items(), key=lambda x: x[1]), lambda x: x[1]
+        )
+    }
+
+
+def _get_pos_dict(position, epoch_groups, nwbf, verbose=False, old_format=True):
+    # prev, this was just a list. now, we need to gen mult dict per epoch
+    pos_data_dict = dict()
+    all_spatial_series = list(position.spatial_series.values())
+    if old_format:
+        # for index, orig_epoch in enumerate(sorted_order):
+        for index, orig_epoch in enumerate(epoch_groups):
+            spatial_series = all_spatial_series[orig_epoch]
+            # get the valid intervals for the position data
+            timestamps = np.asarray(spatial_series.timestamps)
+            sampling_rate = estimate_sampling_rate(
+                timestamps, verbose=verbose, filename=nwbf.session_id
+            )
+            # add the valid intervals to the Interval list
+            pos_data_dict[index] = {
+                "valid_times": get_valid_intervals(
+                    timestamps=timestamps,
+                    sampling_rate=sampling_rate,
+                ),
+                "raw_position_object_id": spatial_series.object_id,
+            }
+
+    else:
+        for epoch, index_list in enumerate(epoch_groups.values()):
+            pos_data_dict[epoch] = []
+            for index in index_list:
+                spatial_series = all_spatial_series[index]
+                # get the valid intervals for the position data
+                timestamps = np.asarray(spatial_series.timestamps)
+                sampling_rate = estimate_sampling_rate(
+                    timestamps, verbose=verbose, filename=nwbf.session_id
+                )
+                # add the valid intervals to the Interval list
+                pos_data_dict[epoch].append(
+                    {
+                        "valid_times": get_valid_intervals(
+                            timestamps=timestamps,
+                            sampling_rate=sampling_rate,
+                        ),
+                        "raw_position_object_id": spatial_series.object_id,
+                    }
+                )
+
+    return pos_data_dict
+
+
+def get_all_spatial_series(nwbf, verbose=False, old_format=True):
     """Given an NWBFile, get the spatial series and interval lists from the file and return a dictionary by epoch.
 
     Parameters
@@ -325,56 +441,26 @@ def get_all_spatial_series(nwbf, verbose=False):
         is no position data in the file. The 'raw_position_object_id' is the object ID of the SpatialSeries object.
     """
     position = get_data_interface(nwbf, "position", pynwb.behavior.Position)
+
     if position is None:
         return None
 
-    # for some reason the spatial_series do not necessarily come out in order, so we need to figure out the right order
-    epoch_start_time = np.zeros(len(position.spatial_series.values()))
-    for pos_epoch, spatial_series in enumerate(
-        position.spatial_series.values()
-    ):
-        epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
-
-    sorted_order = np.argsort(epoch_start_time)
-    pos_data_dict = dict()
-
-    for index, orig_epoch in enumerate(sorted_order):
-        spatial_series = list(position.spatial_series.values())[orig_epoch]
-        pos_data_dict[index] = dict()
-        # get the valid intervals for the position data
-        timestamps = np.asarray(spatial_series.timestamps)
-
-        # estimate the sampling rate
-        timestamps = np.asarray(spatial_series.timestamps)
-        sampling_rate = estimate_sampling_rate(timestamps, 1.75)
-        if sampling_rate < 0:
-            raise ValueError(
-                f"Error adding position data for position epoch {index}"
-            )
-        if verbose:
-            print(
-                "Processing raw position data. Estimated sampling rate: {} Hz".format(
-                    sampling_rate
-                )
-            )
-        # add the valid intervals to the Interval list
-        pos_data_dict[index]["valid_times"] = get_valid_intervals(
-            timestamps,
-            sampling_rate,
-            gap_proportion=2.5,
-            min_valid_len=int(sampling_rate),
-        )
-        pos_data_dict[index][
-            "raw_position_object_id"
-        ] = spatial_series.object_id
-
-    return pos_data_dict
+    return _get_pos_dict(
+        position=position,
+        epoch_groups=_get_epoch_groups(position, old_format=old_format),
+        nwbf=nwbf,
+        verbose=verbose,
+        old_format=old_format,
+    )
 
 
 def get_nwb_copy_filename(nwb_file_name):
     """Get file name of copy of nwb file without the electrophys data"""
 
     filename, file_extension = os.path.splitext(nwb_file_name)
+
+    if filename.endswith("_"):
+        print(f"WARNING: File may already be a copy: {nwb_file_name}")
 
     return f"{filename}_{file_extension}"
 

@@ -27,11 +27,16 @@ schema = dj.schema("common_behav")
 class PositionSource(dj.Manual):
     definition = """
     -> Session
-    -> IntervalList
     ---
-    source: varchar(200)            # source of data; current options are "trodes" and "dlc" (deep lab cut)
-    import_file_name: varchar(2000)  # path to import file if importing position data
+    source: varchar(200)             # source of data (e.g., trodes, dlc)
+    import_file_name: varchar(2000)  # path to import file if importing 
     """
+
+    class IntervalList(dj.Part):
+        definition = """
+        -> master
+        -> IntervalList
+        """
 
     @classmethod
     def insert_from_nwbfile(cls, nwb_file_name):
@@ -43,32 +48,50 @@ class PositionSource(dj.Manual):
         nwb_file_name : str
             The name of the NWB file.
         """
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
+        nwbf = get_nwb_file(nwb_file_name)
+        all_pos = get_all_spatial_series(nwbf, verbose=True, old_format=False)
+        sess_key = dict(nwb_file_name=nwb_file_name)
+        pos_source_key = dict(**sess_key, source="trodes", import_file_name="")
 
-        pos_dict = get_all_spatial_series(nwbf, verbose=True)
-        if pos_dict is not None:
-            for epoch in pos_dict:
-                pdict = pos_dict[epoch]
-                pos_interval_list_name = cls.get_pos_interval_name(epoch)
+        if all_pos is None:
+            return
 
-                # create the interval list and insert it
-                interval_dict = dict()
-                interval_dict["nwb_file_name"] = nwb_file_name
-                interval_dict["interval_list_name"] = pos_interval_list_name
-                interval_dict["valid_times"] = pdict["valid_times"]
-                IntervalList().insert1(interval_dict, skip_duplicates=True)
+        intervals = []
+        pos_intervals = []
 
-                # add this interval list to the table
-                key = dict()
-                key["nwb_file_name"] = nwb_file_name
-                key["interval_list_name"] = pos_interval_list_name
-                key["source"] = "trodes"
-                key["import_file_name"] = ""
-                cls.insert1(key)
+        for epoch, epoch_list in enumerate(all_pos.values()):
+            for index, pdict in enumerate(epoch_list):
+                pos_interval_name = cls.get_pos_interval_name([epoch, index])
+
+                intervals.append(
+                    dict(
+                        **sess_key,
+                        interval_list_name=pos_interval_name,
+                        valid_times=pos_dict["valid_times"],
+                    )
+                )
+
+        # UNTESTED
+        IntervalList.insert(intervals, skip_duplicates=True)
+        cls.IntervalList.insert(intervals, skip_duplicates=True)
+        cls.insert1(key)
 
     @staticmethod
     def get_pos_interval_name(pos_epoch_num):
+        """Retun string of the interval name from the epoch number.
+
+        Parameters
+        ----------
+        pos_epoch_num : int or str or list
+            If list of length 2, then a string of the form "epoch 1 index 2"
+
+        Returns
+        -------
+        str
+            Position interval name (e.g., pos epoch 1 index 2 valid times)
+        """
+        if isinstance(pos_epoch_num, list) and len(pos_epoch_num) == 2:
+            pos_epoch_num = f"epoch {pos_epoch_num[0]} index {pos_epoch_num[1]}"
         return f"pos {pos_epoch_num} valid times"
 
 
@@ -100,11 +123,13 @@ class RawPosition(dj.Imported):
         for epoch in pos_dict:
             if key[
                 "interval_list_name"
-            ] == PositionSource.get_pos_interval_name(epoch):
-                pdict = pos_dict[epoch]
-                key["raw_position_object_id"] = pdict["raw_position_object_id"]
-                self.insert1(key)
-                break
+            ] != PositionSource.get_pos_interval_name(epoch):
+                continue
+
+            pdict = pos_dict[epoch]
+            key["raw_position_object_id"] = pdict["raw_position_object_id"]
+            self.insert1(key)
+            break
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)

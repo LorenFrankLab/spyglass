@@ -12,7 +12,7 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
-from ..settings import load_config
+from ..settings import raw_dir
 from ..utils.dj_helper_fn import get_child_tables
 from ..utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
@@ -73,12 +73,14 @@ class Nwbfile(dj.Manual):
     def get_abs_path(nwb_file_name):
         """Return absolute path for a stored raw NWB file given file name.
 
-        The SPYGLASS_BASE_DIR environment variable must be set.
+        The SPYGLASS_BASE_DIR must be set, either as an environment or part of
+        dj.config['custom']. See spyglass.settings.load_config
 
         Parameters
         ----------
         nwb_file_name : str
-            The name of an NWB file that has been inserted into the Nwbfile() schema.
+            The name of an NWB file that has been inserted into the Nwbfile()
+            schema.
 
         Returns
         -------
@@ -86,7 +88,7 @@ class Nwbfile(dj.Manual):
             The absolute path for the given file name.
         """
 
-        return load_config()["SPYGLASS_RAW_DIR"] + "/" + nwb_file_name
+        return raw_dir + "/" + nwb_file_name
 
     @staticmethod
     def add_to_lock(nwb_file_name):
