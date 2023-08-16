@@ -91,7 +91,7 @@ class PoseEstimation:
             "date": self.yml["date"],
             "iteration": self.pkl["iteration (active-learning)"],
             "shuffle": int(
-                re.search("shuffle(\d+)", self.pkl["Scorer"]).groups()[0]
+                re.search(r"shuffle(\d+)", self.pkl["Scorer"]).groups()[0]
             ),
             "snapshotindex": self.yml["snapshotindex"],
             "trainingsetindex": train_idx,

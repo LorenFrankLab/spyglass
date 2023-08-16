@@ -1,12 +1,15 @@
 # FIRST: INSTALL CORRECT DRIVER for GPU, see https://stackoverflow.com/questions/30820513/what-is-the-correct-version-of-cuda-for-my-nvidia-driver/30820690
 #
-# install: mamba env create -f environment_position.yaml
-# update:  mamba env update -f environment_position.yaml
+# NOTE: Perform install on a GPU-equipped machine
+#
+# install: mamba env create -f environment_position.yml
+# update:  mamba env update -f environment_position.yml
 # after installing do the following:
-# conda activate spyglass-position
-# mamba env config vars set LD_LIBRARY_PATH=~/path/to/anaconda3/envs/spyglass-position/lib/
-# run mamba install -c conda-forge wxpython
-# cd into spyglass and run pip install -e .[position]
+# run: conda activate spyglass-position
+# run: mamba env config vars set LD_LIBRARY_PATH=~/path/to/<anaconda3 or mambaforge>/envs/spyglass-position/lib/
+# run: mamba install -c conda-forge wxpython
+# cd into spyglass and run: pip install -e .[position]
+
 name: spyglass-position
 channels:
   - conda-forge
@@ -15,7 +18,7 @@ channels:
   - franklab
   - edeno
 dependencies:
-  - python>=3.8, <3.10
+  - python>=3.9, <3.10
   - jupyterlab>=3.*
   - pydotplus>=2.0.*
   - libgcc
@@ -31,11 +34,9 @@ dependencies:
   - ipython
   - matplotlib>=3.3
   - seaborn
-  - skan
   - bottleneck
   - ipympl
   - tqdm
-  - nb_conda
   - ffmpeg
   - pytorch<1.12.0
   - torchvision
@@ -43,21 +44,22 @@ dependencies:
   - cudatoolkit=11.3
   - tensorflow>=2.0
   - numba>=0.48.0
-  - pyfftw<=0.12.0  # used by ghostipy. install from conda-forge so that it works on Mac ARM processors
+  - pyfftw<=0.12.0 # used by ghostipy. install from conda-forge so that it works on Mac ARM processors
   - pybind11 #To avoid isosplit5 build error
   - pip:
-    - pubnub<6.4.0
-    - mountainsort4
-    - spikeinterface>0.94,<0.98
-    - pynwb>=2.2.0,<3
-    - hdmf>=3.4.6
-    - datajoint>=0.13.6
-    - ghostipy
-    - pymysql>=1.0.*
-    - sortingview>=0.11
-    - figurl-jupyter
-    - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
-    - pyyaml
-    - click
-    - "black[jupyter]"
-    - deeplabcut<2.3.0
+      - pubnub<6.4.0
+      - mountainsort4
+      - spikeinterface>=0.98.2,<0.99
+      - pynwb>=2.2.0,<3
+      - hdmf>=3.4.6
+      - datajoint>=0.13.6
+      - ghostipy
+      - pymysql>=1.0.*
+      - sortingview>=0.11
+      - figurl-jupyter
+      - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
+      - pyyaml
+      - click
+      - "black[jupyter]"
+      - deeplabcut<2.3.0
+      - .[position]

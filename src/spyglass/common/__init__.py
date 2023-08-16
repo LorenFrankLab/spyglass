@@ -1,18 +1,30 @@
 import os
+
 import spyglass as sg
 
+from ..utils.nwb_helper_fn import (
+    close_nwb_files,
+    estimate_sampling_rate,
+    get_data_interface,
+    get_electrode_indices,
+    get_nwb_file,
+    get_raw_eseries,
+    get_valid_intervals,
+)
 from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import (
     PositionSource,
     RawPosition,
     StateScriptFile,
     VideoFile,
+    PositionIntervalMap,
+    convert_epoch_interval_name_to_position_interval_name,
 )
 from .common_device import (
     CameraDevice,
     DataAcquisitionDevice,
-    DataAcquisitionDeviceSystem,
     DataAcquisitionDeviceAmplifier,
+    DataAcquisitionDeviceSystem,
     Probe,
     ProbeType,
 )
@@ -61,18 +73,8 @@ from .common_sensors import SensorData
 from .common_session import Session, SessionGroup
 from .common_subject import Subject
 from .common_task import Task, TaskEpoch
-from ..utils.nwb_helper_fn import (
-    close_nwb_files,
-    estimate_sampling_rate,
-    get_data_interface,
-    get_electrode_indices,
-    get_nwb_file,
-    get_raw_eseries,
-    get_valid_intervals,
-)
 from .populate_all_common import populate_all_common
+from .prepopulate import populate_from_yaml, prepopulate_default
 
-from .prepopulate import prepopulate_default, populate_from_yaml
-
-if sg.config["prepopulate"] == True:
+if sg.config["prepopulate"]:
     prepopulate_default()

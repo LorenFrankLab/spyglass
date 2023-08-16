@@ -159,7 +159,6 @@ dmypy.json
 temp_nwb/*s
 
 *.mp4
-dj_local_conf.json
 *.png
 *.npy
 *.nc
@@ -168,6 +167,8 @@ dj_local_conf.json
 *.json
 *.gz
 *.pdf
+dj_local_conf.json
+!dj_local_conf_example.json
 
 !/.vscode/extensions.json
 !/.vscode/settings.json

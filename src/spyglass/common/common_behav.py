@@ -1,22 +1,24 @@
 import os
+import pathlib
+from typing import Dict
+
 import datajoint as dj
 import ndx_franklab_novela
 import pandas as pd
 import pynwb
-import pathlib
-from typing import Dict
 
-from .common_ephys import Raw  # noqa: F401
-from .common_interval import IntervalList, interval_list_contains
-from .common_nwbfile import Nwbfile
-from .common_session import Session  # noqa: F401
-from .common_task import TaskEpoch
 from ..utils.dj_helper_fn import fetch_nwb
 from ..utils.nwb_helper_fn import (
     get_all_spatial_series,
     get_data_interface,
     get_nwb_file,
 )
+from .common_device import CameraDevice
+from .common_ephys import Raw  # noqa: F401
+from .common_interval import IntervalList, interval_list_contains
+from .common_nwbfile import Nwbfile
+from .common_session import Session  # noqa: F401
+from .common_task import TaskEpoch
 
 schema = dj.schema("common_behav")
 
@@ -188,6 +190,7 @@ class VideoFile(dj.Imported):
     -> TaskEpoch
     video_file_num = 0: int
     ---
+    camera_name: varchar(80)
     video_file_object_id: varchar(40)  # the object id of the file object
     """
 
@@ -195,13 +198,15 @@ class VideoFile(dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        video = get_data_interface(
+        videos = get_data_interface(
             nwbf, "video", pynwb.behavior.BehavioralEvents
         )
 
-        if video is None:
+        if videos is None:
             print(f"No video data interface found in {nwb_file_name}\n")
             return
+        else:
+            videos = videos.time_series
 
         # get the interval for the current TaskEpoch
         interval_list_name = (TaskEpoch() & key).fetch1("interval_list_name")
@@ -214,21 +219,46 @@ class VideoFile(dj.Imported):
         ).fetch1("valid_times")
 
         is_found = False
-        for video_obj in video.time_series.values():
-            # check to see if the times for this video_object are largely overlapping with the task epoch times
-            if len(
-                interval_list_contains(valid_times, video_obj.timestamps)
-                > 0.9 * len(video_obj.timestamps)
-            ):
-                key["video_file_object_id"] = video_obj.object_id
-                self.insert1(key)
-                is_found = True
+        for ind, video in enumerate(videos.values()):
+            if isinstance(video, pynwb.image.ImageSeries):
+                video = [video]
+            for video_obj in video:
+                # check to see if the times for this video_object are largely overlapping with the task epoch times
+                if len(
+                    interval_list_contains(valid_times, video_obj.timestamps)
+                    > 0.9 * len(video_obj.timestamps)
+                ):
+                    key["video_file_num"] = ind
+                    camera_name = video_obj.device.camera_name
+                    if CameraDevice & {"camera_name": camera_name}:
+                        key["camera_name"] = video_obj.device.camera_name
+                    else:
+                        raise KeyError(
+                            f"No camera with camera_name: {camera_name} found in CameraDevice table."
+                        )
+                    key["video_file_object_id"] = video_obj.object_id
+                    self.insert1(key)
+                    is_found = True
 
         if not is_found:
             print(f"No video found corresponding to epoch {interval_list_name}")
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
+
+    @classmethod
+    def update_entries(cls, restrict={}):
+        existing_entries = (cls & restrict).fetch("KEY")
+        for row in existing_entries:
+            if (cls & row).fetch1("camera_name"):
+                continue
+            video_nwb = (cls & row).fetch_nwb()[0]
+            if len(video_nwb) != 1:
+                raise ValueError(
+                    f"expecting 1 video file per entry, but {len(video_nwb)} files found"
+                )
+            row["camera_name"] = video_nwb[0]["video_file"].device.camera_name
+            cls.update1(row=row)
 
     @classmethod
     def get_abs_path(cls, key: Dict):
@@ -266,3 +296,165 @@ class VideoFile(dj.Imported):
                 f"video file with filename: {video_filename} "
                 f"does not exist in {video_dir}/"
             )
+
+
+@schema
+class PositionIntervalMap(dj.Computed):
+    definition = """
+    -> IntervalList
+    ---
+    position_interval_name: varchar(200)  # name of the corresponding position interval
+    """
+
+    def make(self, key):
+        # Find correspondence between pos valid times names and epochs
+        # Use epsilon to tolerate small differences in epoch boundaries across epoch/pos intervals
+
+        # *** HARD CODED VALUES ***
+        EPSILON = 0.11  # tolerated time difference in epoch boundaries across epoch/pos intervals
+        # *************************
+
+        # Unpack key
+        nwb_file_name = key["nwb_file_name"]
+
+        # Get pos interval list names
+        pos_interval_list_names = get_pos_interval_list_names(nwb_file_name)
+
+        # Skip populating if no pos interval list names
+        if len(pos_interval_list_names) == 0:
+            print(
+                f"NO POS INTERVALS FOR {key}; CANNOT POPULATE PositionIntervalMap"
+            )
+            return
+
+        # Get the interval times
+        valid_times = (IntervalList & key).fetch1("valid_times")
+        time_interval = [
+            valid_times[0][0] - EPSILON,
+            valid_times[-1][-1] + EPSILON,
+        ]  # [start, end], widen to tolerate small differences in epoch boundaries across epoch/pos intervals
+
+        # compare the position intervals against our interval
+        matching_pos_interval_list_names = []
+        for (
+            pos_interval_list_name
+        ) in pos_interval_list_names:  # for each pos valid time interval list
+            pos_valid_times = (
+                IntervalList
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": pos_interval_list_name,
+                }
+            ).fetch1(
+                "valid_times"
+            )  # get interval valid times
+            pos_time_interval = [
+                pos_valid_times[0][0],
+                pos_valid_times[-1][-1],
+            ]  # [pos valid time interval start, pos valid time interval end]
+            if (time_interval[0] < pos_time_interval[0]) and (
+                time_interval[1] > pos_time_interval[1]
+            ):  # if pos valid time interval within epoch interval
+                matching_pos_interval_list_names.append(
+                    pos_interval_list_name
+                )  # add pos interval list name to list of matching pos interval list names
+
+        # Check that each pos interval was matched to only one epoch
+        if len(matching_pos_interval_list_names) > 1:
+            print(
+                f"MULTIPLE POS INTERVALS MATCHED TO EPOCH {key}; CANNOT POPULATE PositionIntervalMap"
+            )
+            print(matching_pos_interval_list_names)
+            return
+        # Check that at least one pos interval was matched to an epoch
+        if len(matching_pos_interval_list_names) == 0:
+            print(
+                f"No pos intervals matched to epoch {key}; CANNOT POPULATE PositionIntervalMap"
+            )
+            return
+        # Insert into table
+        key["position_interval_name"] = matching_pos_interval_list_names[0]
+        self.insert1(key)
+        print(
+            f'Populated PosIntervalMap for {nwb_file_name}, {key["interval_list_name"]}'
+        )
+
+
+def get_pos_interval_list_names(nwb_file_name):
+    return [
+        interval_list_name
+        for interval_list_name in (
+            IntervalList & {"nwb_file_name": nwb_file_name}
+        ).fetch("interval_list_name")
+        if (
+            (interval_list_name.split(" ")[0] == "pos")
+            and (" ".join(interval_list_name.split(" ")[2:]) == "valid times")
+        )
+    ]
+
+
+def convert_epoch_interval_name_to_position_interval_name(
+    key: dict,
+) -> str:
+    """Converts a primary key for IntervalList to the corresponding position interval name.
+
+    Parameters
+    ----------
+    key : dict
+
+    Returns
+    -------
+    position_interval_name : str
+    """
+    # get the interval list name if epoch given in key instead of interval list name
+    if "interval_list_name" not in key and "epoch" in key:
+        key["interval_list_name"] = get_interval_list_name_from_epoch(
+            key["nwb_file_name"], key["epoch"]
+        )
+
+    pos_interval_names = (PositionIntervalMap & key).fetch(
+        "position_interval_name"
+    )
+    if len(pos_interval_names) == 0:
+        PositionIntervalMap.populate(key)
+        pos_interval_names = (PositionIntervalMap & key).fetch(
+            "position_interval_name"
+        )
+    if len(pos_interval_names) == 0:
+        print(f"No position intervals found for {key}")
+        return []
+    if len(pos_interval_names) == 1:
+        return pos_interval_names[0]
+
+
+def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
+    """Returns the interval list name for the given epoch.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The name of the NWB file.
+    epoch : int
+        The epoch number.
+
+    Returns
+    -------
+    interval_list_name : str
+        The interval list name.
+    """
+    interval_names = [
+        x
+        for x in (IntervalList() & {"nwb_file_name": nwb_file_name}).fetch(
+            "interval_list_name"
+        )
+        if (x.split("_")[0] == f"{epoch:02}")
+    ]
+    if len(interval_names) == 0:
+        print(f"No interval list name found for {nwb_file_name} epoch {epoch}")
+        return None
+    if len(interval_names) > 1:
+        print(
+            f"Multiple interval list names found for {nwb_file_name} epoch {epoch}"
+        )
+        return None
+    return interval_names[0]

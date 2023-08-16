@@ -11,7 +11,7 @@ def main():
 
     os.environ["SPYGLASS_BASE_DIR"] = str(data_dir)
     os.environ["KACHERY_STORAGE_DIR"] = str(data_dir / "kachery-storage")
-    os.environ["SPIKE_SORTING_STORAGE_DIR"] = str(data_dir / "spikesorting")
+    os.environ["SPYGLASS_SORTING_DIR"] = str(data_dir / "spikesorting")
 
     # session_id = 'jaq_01'
     # nwb_file_name = (sg.common.Session() & {'session_id': session_id}).fetch1('nwb_file_name')

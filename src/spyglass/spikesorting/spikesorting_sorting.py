@@ -14,6 +14,7 @@ from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
 from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import AnalysisNwbfile
+from ..settings import load_config
 from ..utils.dj_helper_fn import fetch_nwb
 from .spikesorting_artifact import ArtifactRemovedIntervalList
 from .spikesorting_recording import (
@@ -134,7 +135,7 @@ class SpikeSorting(dj.Computed):
            (this is redundant with 2; will change in the future)
 
         """
-
+        # CBroz: does this not work w/o arg? as .populate() ?
         recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
         recording = si.load_extractor(recording_path)
 
@@ -201,6 +202,7 @@ class SpikeSorting(dj.Computed):
             # need to remove tempdir and whiten from sorter_params
             sorter_params.pop("tempdir", None)
             sorter_params.pop("whiten", None)
+            sorter_params.pop("outputs", None)
 
             # Detect peaks for clusterless decoding
             detected_spikes = detect_peaks(recording, **sorter_params)
@@ -210,12 +212,12 @@ class SpikeSorting(dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
         else:
-            # whiten recording; make sure dtype is float16
-            recording = sip.whiten(recording, dtype="float16")
-            if sorter_params["whiten"] == True:
-                print(
-                    "Warning: the recording is whitened prior to sorting but the sorter param includes whitening"
-                )
+            if "whiten" in sorter_params.keys():
+                if sorter_params["whiten"]:
+                    sorter_params["whiten"] = False  # set whiten to False
+            # whiten recording separately; make sure dtype is float32
+            # to avoid downstream error with svd
+            recording = sip.whiten(recording, dtype="float32")
             sorting = sis.run_sorter(
                 sorter,
                 recording,
@@ -226,7 +228,9 @@ class SpikeSorting(dj.Computed):
         key["time_of_sort"] = int(time.time())
 
         print("Saving sorting results...")
-        sorting_folder = Path(os.getenv("SPYGLASS_SORTING_DIR"))
+
+        sorting_folder = Path(load_config().get("SPYGLASS_SORTING_DIR"))
+
         sorting_name = self._get_sorting_name(key)
         key["sorting_path"] = str(sorting_folder / Path(sorting_name))
         if os.path.exists(key["sorting_path"]):
