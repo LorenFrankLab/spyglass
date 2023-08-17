@@ -331,7 +331,8 @@ class DLCPosVideo(dj.Computed):
                 {
                     "nwb_file_name": key["nwb_file_name"],
                     "epoch": key["epoch"],
-                }
+                },
+                populate_missing=False,
             )
         )
         key["interval_list_name"] = interval_list_name
