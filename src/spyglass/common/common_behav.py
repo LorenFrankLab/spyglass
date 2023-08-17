@@ -67,6 +67,9 @@ class PositionSource(dj.Manual):
                 key["import_file_name"] = ""
                 cls.insert1(key)
 
+        # make map from epoch intervals to position intervals
+        populate_position_interval_map_session(nwb_file_name)
+
     @staticmethod
     def get_pos_interval_name(pos_epoch_num):
         return f"pos {pos_epoch_num} valid times"
@@ -348,6 +351,8 @@ class PositionIntervalMap(dj.Computed):
             ).fetch1(
                 "valid_times"
             )  # get interval valid times
+            if len(pos_valid_times) == 0:
+                continue
             pos_time_interval = [
                 pos_valid_times[0][0],
                 pos_valid_times[-1][-1],
@@ -394,13 +399,16 @@ def get_pos_interval_list_names(nwb_file_name):
 
 
 def convert_epoch_interval_name_to_position_interval_name(
-    key: dict,
+    key: dict, populate_missing: bool = True
 ) -> str:
     """Converts a primary key for IntervalList to the corresponding position interval name.
 
     Parameters
     ----------
     key : dict
+        Lookup key
+    populate_missing: bool
+        whether to populate PositionIntervalMap for the key if missing. Should be False if this function is used inside of another populate call
 
     Returns
     -------
@@ -416,10 +424,15 @@ def convert_epoch_interval_name_to_position_interval_name(
         "position_interval_name"
     )
     if len(pos_interval_names) == 0:
-        PositionIntervalMap.populate(key)
-        pos_interval_names = (PositionIntervalMap & key).fetch(
-            "position_interval_name"
-        )
+        if populate_missing:
+            PositionIntervalMap.populate(key)
+            pos_interval_names = (PositionIntervalMap & key).fetch(
+                "position_interval_name"
+            )
+        else:
+            raise KeyError(
+                f"{key} must be populated in the PositionIntervalMap table prior to your current populate call"
+            )
     if len(pos_interval_names) == 0:
         print(f"No position intervals found for {key}")
         return []
@@ -458,3 +471,15 @@ def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
         )
         return None
     return interval_names[0]
+
+
+def populate_position_interval_map_session(nwb_file_name: str):
+    for interval_name in (TaskEpoch() & {"nwb_file_name": nwb_file_name}).fetch(
+        "interval_list_name"
+    ):
+        PositionIntervalMap.populate(
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_name,
+            }
+        )
