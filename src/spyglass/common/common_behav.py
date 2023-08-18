@@ -310,8 +310,16 @@ class PositionIntervalMap(dj.Computed):
     """
 
     def make(self, key):
+        self._no_transaction_make(key)
+
+    def _no_transaction_make(self, key):
         # Find correspondence between pos valid times names and epochs
         # Use epsilon to tolerate small differences in epoch boundaries across epoch/pos intervals
+
+        if not self.connection.in_transaction:
+            # if not called in the context of a make function, call its own make function
+            self.populate(key)
+            return
 
         # *** HARD CODED VALUES ***
         EPSILON = 0.11  # tolerated time difference in epoch boundaries across epoch/pos intervals
@@ -379,7 +387,7 @@ class PositionIntervalMap(dj.Computed):
             return
         # Insert into table
         key["position_interval_name"] = matching_pos_interval_list_names[0]
-        self.insert1(key)
+        self.insert1(key, allow_direct_insert=True)
         print(
             f'Populated PosIntervalMap for {nwb_file_name}, {key["interval_list_name"]}'
         )
@@ -425,7 +433,7 @@ def convert_epoch_interval_name_to_position_interval_name(
     )
     if len(pos_interval_names) == 0:
         if populate_missing:
-            PositionIntervalMap.populate(key)
+            PositionIntervalMap()._no_transaction_make(key)
             pos_interval_names = (PositionIntervalMap & key).fetch(
                 "position_interval_name"
             )
