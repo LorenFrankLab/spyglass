@@ -69,8 +69,25 @@ class Nwbfile(dj.Manual):
         key["nwb_file_abs_path"] = nwb_file_abs_path
         cls.insert1(key, skip_duplicates=True)
 
-    @staticmethod
-    def get_abs_path(nwb_file_name):
+    @classmethod
+    def _get_file_name(cls, nwb_file_name: str) -> str:
+        """Get valid nwb file name given substring."""
+        query = cls & f'nwb_file_name LIKE "%{nwb_file_name}%"'
+
+        if len(query) == 1:
+            return query.fetch1("nwb_file_name")
+
+        raise ValueError(
+            f"Found {len(query)} matches for {nwb_file_name}: \n{query}"
+        )
+
+    @classmethod
+    def get_file_key(cls, nwb_file_name: str) -> dict:
+        """Return primary key using nwb_file_name substring."""
+        return {"nwb_file_name": cls._get_file_name(nwb_file_name)}
+
+    @classmethod
+    def get_abs_path(cls, nwb_file_name) -> str:
         """Return absolute path for a stored raw NWB file given file name.
 
         The SPYGLASS_BASE_DIR must be set, either as an environment or part of
@@ -80,15 +97,14 @@ class Nwbfile(dj.Manual):
         ----------
         nwb_file_name : str
             The name of an NWB file that has been inserted into the Nwbfile()
-            schema.
+            table. May be file substring. May include % wildcard(s).
 
         Returns
         -------
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-
-        return raw_dir + "/" + nwb_file_name
+        return raw_dir + "/" + cls._get_file_name(nwb_file_name)
 
     @staticmethod
     def add_to_lock(nwb_file_name):

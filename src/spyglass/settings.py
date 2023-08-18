@@ -67,7 +67,7 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
     resolved_base = (
         base_dir
         or dj_spyglass.get("base")
-        or os.environ.get("SPYGLASS_BASE_DIR", ".")
+        or os.environ.get("SPYGLASS_BASE_DIR")
     )
     if not resolved_base:
         raise ValueError(

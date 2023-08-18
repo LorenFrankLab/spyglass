@@ -6,7 +6,7 @@ import datajoint as dj
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
-from datajoint.utils import from_camel_case, to_camel_case, get_master
+from datajoint.utils import from_camel_case, get_master, to_camel_case
 from IPython.core.display import HTML
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -772,7 +772,7 @@ def _master_table_pairs(
     table_list : List[dj.Table]
         A list of datajoint tables.
     restriction : str
-        A restriction string. Defalt True, no restriction.
+        A restriction string. Default True, no restriction.
     connection : datajoint.connection.Connection
         A database connection. Default None, use connection from first table.
 

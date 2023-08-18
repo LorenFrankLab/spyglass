@@ -67,10 +67,9 @@ class TrodesPosParams(dj.Manual):
         query = cls & {"trodes_pos_params_name": "default"}
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
-            default = (cls & {"trodes_pos_params_name": "default"}).fetch1()
-        else:
-            default = query.fetch1()
-        return default
+            return (cls & {"trodes_pos_params_name": "default"}).fetch1()
+
+        return query.fetch1()
 
     @classmethod
     def get_accepted_params(cls):
@@ -88,8 +87,39 @@ class TrodesPosSelection(dj.Manual):
     definition = """
     -> RawPosition
     -> TrodesPosParams
-    ---
     """
+
+    @classmethod
+    def insert_with_default(
+        cls, key: dict, skip_duplicates: bool = False
+    ) -> None:
+        """Insert key with default parameters.
+
+        Parameters
+        ----------
+        key: Union[dict, str]
+            Restriction uniquely identifying entr(y/ies) in RawPosition.
+        skip_duplicates: bool, optional
+            Skip duplicate entries.
+
+        Raises
+        ------
+        ValueError
+            Key does not identify any entries in RawPosition.
+        """
+        query = RawPosition & key
+        if not query:
+            raise ValueError(f"Found no entries found for {key}")
+
+        _ = TrodesPosParams.get_default()
+
+        cls.insert(
+            [
+                dict(**k, trodes_pos_params_name="default")
+                for k in query.fetch("KEY", as_dict=True)
+            ],
+            skip_duplicates=skip_duplicates,
+        )
 
 
 @schema
@@ -108,103 +138,112 @@ class TrodesPosV1(dj.Computed):
     """
 
     def make(self, key):
-        orig_key = copy.deepcopy(key)
+        METERS_PER_CM = 0.01
+
         print(f"Computing position for: {key}")
+
+        orig_key = copy.deepcopy(key)
         key["analysis_file_name"] = AnalysisNwbfile().create(
             key["nwb_file_name"]
         )
-        raw_position = (RawPosition() & key).fetch_nwb()[0]
+
         position_info_parameters = (TrodesPosParams() & key).fetch1("params")
+        spatial_series = (RawPosition.Object & key).fetch_nwb()[0][
+            "raw_position"
+        ]
+        spatial_df = (RawPosition.Object & key).fetch1_dataframe()
+        video_frame_ind = getattr(spatial_df, "video_frame_ind", None)
+
         position = pynwb.behavior.Position()
         orientation = pynwb.behavior.CompassDirection()
         velocity = pynwb.behavior.BehavioralTimeSeries()
 
-        METERS_PER_CM = 0.01
-        raw_pos_df = pd.DataFrame(
-            data=raw_position["raw_position"].data,
-            index=pd.Index(
-                raw_position["raw_position"].timestamps, name="time"
-            ),
-            columns=raw_position["raw_position"].description.split(", "),
+        # NOTE: CBroz1 removed a try/except ValueError that surrounded all
+        #       .create_X_series methods. dpeg22 could not recall purpose
+
+        position_info = self.calculate_position_info_from_spatial_series(
+            spatial_df=spatial_df,
+            meters_to_pixels=spatial_series.conversion,
+            **position_info_parameters,
         )
-        try:
-            # calculate the processed position
-            spatial_series = raw_position["raw_position"]
-            position_info = self.calculate_position_info_from_spatial_series(
-                spatial_series,
-                **position_info_parameters,
-            )
-            # create nwb objects for insertion into analysis nwb file
-            position.create_spatial_series(
-                name="position",
-                timestamps=position_info["time"],
-                conversion=METERS_PER_CM,
-                data=position_info["position"],
-                reference_frame=spatial_series.reference_frame,
-                comments=spatial_series.comments,
-                description="x_position, y_position",
-            )
 
-            orientation.create_spatial_series(
-                name="orientation",
-                timestamps=position_info["time"],
-                conversion=1.0,
-                data=position_info["orientation"],
-                reference_frame=spatial_series.reference_frame,
-                comments=spatial_series.comments,
-                description="orientation",
-            )
+        time_comments = dict(
+            comments=spatial_series.comments,
+            timestamps=position_info["time"],
+        )
+        time_comments_ref = dict(
+            **time_comments,
+            reference_frame=spatial_series.reference_frame,
+        )
 
-            velocity.create_timeseries(
-                name="velocity",
-                timestamps=position_info["time"],
-                conversion=METERS_PER_CM,
-                unit="m/s",
-                data=np.concatenate(
-                    (
-                        position_info["velocity"],
-                        position_info["speed"][:, np.newaxis],
-                    ),
-                    axis=1,
+        # create nwb objects for insertion into analysis nwb file
+        position.create_spatial_series(
+            name="position",
+            conversion=METERS_PER_CM,
+            data=position_info["position"],
+            description="x_position, y_position",
+            **time_comments_ref,
+        )
+
+        orientation.create_spatial_series(
+            name="orientation",
+            conversion=1.0,
+            data=position_info["orientation"],
+            description="orientation",
+            **time_comments_ref,
+        )
+
+        velocity.create_timeseries(
+            name="velocity",
+            conversion=METERS_PER_CM,
+            unit="m/s",
+            data=np.concatenate(
+                (
+                    position_info["velocity"],
+                    position_info["speed"][:, np.newaxis],
                 ),
-                comments=spatial_series.comments,
-                description="x_velocity, y_velocity, speed",
+                axis=1,
+            ),
+            description="x_velocity, y_velocity, speed",
+            **time_comments,
+        )
+
+        if video_frame_ind:
+            velocity.create_timeseries(
+                name="video_frame_ind",
+                unit="index",
+                data=spatial_df.video_frame_ind.to_numpy(),
+                description="video_frame_ind",
+                **time_comments,
             )
-            try:
-                velocity.create_timeseries(
-                    name="video_frame_ind",
-                    unit="index",
-                    timestamps=position_info["time"],
-                    data=raw_pos_df.video_frame_ind.to_numpy(),
-                    description="video_frame_ind",
-                    comments=spatial_series.comments,
-                )
-            except AttributeError:
-                print(
-                    "No video frame index found. Assuming all camera frames are present."
-                )
-                velocity.create_timeseries(
-                    name="video_frame_ind",
-                    unit="index",
-                    timestamps=position_info["time"],
-                    data=np.arange(len(position_info["time"])),
-                    description="video_frame_ind",
-                    comments=spatial_series.comments,
-                )
-        except ValueError:
-            pass
+        else:
+            print(
+                "No video frame index found. Assuming all camera frames "
+                + "are present."
+            )
+            velocity.create_timeseries(
+                name="video_frame_ind",
+                unit="index",
+                data=np.arange(len(position_info["time"])),
+                description="video_frame_ind",
+                **time_comments,
+            )
 
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
 
-        key["position_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], position
-        )
-        key["orientation_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], orientation
-        )
-        key["velocity_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], velocity
+        key.update(
+            dict(
+                position_object_id=nwb_analysis_file.add_nwb_object(
+                    key["analysis_file_name"], position
+                ),
+                orientation_object_id=nwb_analysis_file.add_nwb_object(
+                    key["analysis_file_name"], orientation
+                ),
+                velocity_object_id=nwb_analysis_file.add_nwb_object(
+                    key["analysis_file_name"], velocity
+                ),
+            )
         )
 
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
@@ -214,6 +253,7 @@ class TrodesPosV1(dj.Computed):
         from ..position_merge import PositionOutput
 
         part_name = to_camel_case(self.table_name.split("__")[-1])
+
         # TODO: The next line belongs in a merge table function
         PositionOutput._merge_insert(
             [orig_key], part_name=part_name, skip_duplicates=True
@@ -221,7 +261,8 @@ class TrodesPosV1(dj.Computed):
 
     @staticmethod
     def calculate_position_info_from_spatial_series(
-        spatial_series,
+        spatial_df: pd.DataFrame,
+        meters_to_pixels: float,
         max_separation,
         max_speed,
         speed_smoothing_std_dev,
@@ -232,16 +273,25 @@ class TrodesPosV1(dj.Computed):
         upsampling_sampling_rate,
         upsampling_interpolation_method,
     ):
+        """Calculate position info from 2D spatial series."""
         CM_TO_METERS = 100
+        # Accepts x/y 'loc' or 'loc1' format for first pos. Renames to 'loc'
+        DEFAULT_COLS = ["xloc", "yloc", "xloc2", "yloc2", "xloc1", "yloc1"]
+
+        cols = list(spatial_df.columns)
+        if len(cols) != 4 or not all([c in DEFAULT_COLS for c in cols]):
+            choice = dj.utils.user_choice(
+                f"Unexpected columns in raw position. Assume "
+                + f"{DEFAULT_COLS[:4]}?\n{spatial_df}\n"
+            )
+            if choice.lower() not in ["yes", "y"]:
+                raise ValueError(f"Unexpected columns in raw position: {cols}")
+        # rename first 4 columns, keep rest. Rest dropped below
+        spatial_df.columns = DEFAULT_COLS[:4] + cols[4:]
 
         # Get spatial series properties
-        time = np.asarray(spatial_series.timestamps)  # seconds
-        position = np.asarray(
-            pd.DataFrame(
-                spatial_series.data,
-                columns=spatial_series.description.split(", "),
-            ).loc[:, ["xloc", "yloc", "xloc2", "yloc2"]]
-        )  # meters
+        time = np.asarray(spatial_df.index)  # seconds
+        position = np.asarray(spatial_df.iloc[:, :4])  # meters
 
         # remove NaN times
         is_nan_time = np.isnan(time)
@@ -250,7 +300,6 @@ class TrodesPosV1(dj.Computed):
 
         dt = np.median(np.diff(time))
         sampling_rate = 1 / dt
-        meters_to_pixels = spatial_series.conversion
 
         # Define LEDs
         if led1_is_front:
@@ -438,7 +487,6 @@ class TrodesPosVideo(dj.Computed):
 
     definition = """
     -> TrodesPosV1
-    ---
     """
 
     def make(self, key):
@@ -446,7 +494,7 @@ class TrodesPosVideo(dj.Computed):
 
         print("Loading position data...")
         raw_position_df = (
-            RawPosition()
+            RawPosition.Object
             & {
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],

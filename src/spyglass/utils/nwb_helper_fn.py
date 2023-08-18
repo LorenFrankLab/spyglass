@@ -143,13 +143,14 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
     if len(ret) > 1:
         warnings.warn(
             f"Multiple data interfaces with name '{data_interface_name}' "
-            f"found in NWBFile with identifier {nwbfile.identifier}. Using the first one found. "
+            f"found in NWBFile with identifier {nwbfile.identifier}. "
+            + "Using the first one found. "
             "Use the data_interface_class argument to restrict the search."
         )
     if len(ret) >= 1:
         return ret[0]
-    else:
-        return None
+
+    return None
 
 
 def get_raw_eseries(nwbfile):
@@ -378,25 +379,53 @@ def _get_epoch_groups(position: pynwb.behavior.Position, old_format=True):
     }
 
 
-def _get_pos_dict(position, epoch_groups, nwbf, verbose=False, old_format=True):
+def _get_pos_dict(
+    position: dict,
+    epoch_groups: dict,
+    session_id: str = None,
+    verbose: bool = False,
+    old_format: bool = True,  # TODO: remove after changing prod database
+    incl_times: bool = True,
+):
+    """Return dict with obj ids and valid intervals for each epoch.
+
+    Parameters
+    ----------
+    position : hdmf.utils.LabeledDict
+        pynwb.behavior.Position.spatial_series
+    epoch_groups : dict
+        Epoch start times as keys, spatial series indices as values
+    session_id : str, optional
+        Optional session ID for verbose print during sampling rate estimation
+    verbose : bool, optional
+        Default to False. Print estimated sampling rate
+    incl_times : bool, optional
+        Default to True. Include valid intervals. Requires additional
+        computation not needed for RawPosition
+    """
     # prev, this was just a list. now, we need to gen mult dict per epoch
     pos_data_dict = dict()
-    all_spatial_series = list(position.spatial_series.values())
+    all_spatial_series = list(position.values())
     if old_format:
         # for index, orig_epoch in enumerate(sorted_order):
         for index, orig_epoch in enumerate(epoch_groups):
             spatial_series = all_spatial_series[orig_epoch]
+
             # get the valid intervals for the position data
-            timestamps = np.asarray(spatial_series.timestamps)
-            sampling_rate = estimate_sampling_rate(
-                timestamps, verbose=verbose, filename=nwbf.session_id
-            )
-            # add the valid intervals to the Interval list
-            pos_data_dict[index] = {
-                "valid_times": get_valid_intervals(
+            valid_times = None
+            if incl_times:
+                timestamps = np.asarray(spatial_series.timestamps)
+                sampling_rate = estimate_sampling_rate(
+                    timestamps, verbose=verbose, filename=session_id
+                )
+                valid_times = get_valid_intervals(
                     timestamps=timestamps,
                     sampling_rate=sampling_rate,
-                ),
+                )
+
+            # add the valid intervals to the Interval list
+            pos_data_dict[index] = {
+                "valid_times": valid_times,
                 "raw_position_object_id": spatial_series.object_id,
             }
 
@@ -406,26 +435,35 @@ def _get_pos_dict(position, epoch_groups, nwbf, verbose=False, old_format=True):
             for index in index_list:
                 spatial_series = all_spatial_series[index]
                 # get the valid intervals for the position data
-                timestamps = np.asarray(spatial_series.timestamps)
-                sampling_rate = estimate_sampling_rate(
-                    timestamps, verbose=verbose, filename=nwbf.session_id
-                )
+                valid_times = None
+                if incl_times:
+                    timestamps = np.asarray(spatial_series.timestamps)
+                    sampling_rate = estimate_sampling_rate(
+                        timestamps, verbose=verbose, filename=session_id
+                    )
+                    valid_times = get_valid_intervals(
+                        timestamps=timestamps,
+                        sampling_rate=sampling_rate,
+                    )
                 # add the valid intervals to the Interval list
                 pos_data_dict[epoch].append(
                     {
-                        "valid_times": get_valid_intervals(
-                            timestamps=timestamps,
-                            sampling_rate=sampling_rate,
-                        ),
+                        "valid_times": valid_times,
                         "raw_position_object_id": spatial_series.object_id,
+                        "name": spatial_series.name,
                     }
                 )
 
     return pos_data_dict
 
 
-def get_all_spatial_series(nwbf, verbose=False, old_format=True):
-    """Given an NWBFile, get the spatial series and interval lists from the file and return a dictionary by epoch.
+def get_all_spatial_series(
+    nwbf, verbose=False, old_format=True, incl_times=True
+) -> dict:
+    """
+    Given an NWB, get the spatial series and return a dictionary by epoch.
+
+    If incl_times is True, then the valid intervals are included in the output.
 
     Parameters
     ----------
@@ -433,24 +471,32 @@ def get_all_spatial_series(nwbf, verbose=False, old_format=True):
         The source NWB file object.
     verbose : bool
         Flag representing whether to print the sampling rate.
+    incl_times : bool
+        Include valid times in the output. Default, True. Set to False for only
+        spatial series object IDs.
 
     Returns
     -------
     pos_data_dict : dict
-        Dict mapping indices to a dict with keys 'valid_times' and 'raw_position_object_id'. Returns None if there
-        is no position data in the file. The 'raw_position_object_id' is the object ID of the SpatialSeries object.
+        Dict mapping indices to a dict with keys 'valid_times' and
+        'raw_position_object_id'. Returns None if there is no position data in
+        the file. The 'raw_position_object_id' is the object ID of the
+        SpatialSeries object.
     """
-    position = get_data_interface(nwbf, "position", pynwb.behavior.Position)
+    pos_interface = get_data_interface(
+        nwbf, "position", pynwb.behavior.Position
+    )
 
-    if position is None:
+    if pos_interface is None:
         return None
 
     return _get_pos_dict(
-        position=position,
-        epoch_groups=_get_epoch_groups(position, old_format=old_format),
-        nwbf=nwbf,
+        position=pos_interface.spatial_series,
+        epoch_groups=_get_epoch_groups(pos_interface, old_format=old_format),
+        session_id=nwbf.session_id,
         verbose=verbose,
         old_format=old_format,
+        incl_times=incl_times,
     )
 
 
