@@ -12,7 +12,7 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
-from ..settings import load_config
+from ..settings import raw_dir
 from ..utils.dj_helper_fn import get_child_tables
 from ..utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
@@ -69,24 +69,47 @@ class Nwbfile(dj.Manual):
         key["nwb_file_abs_path"] = nwb_file_abs_path
         cls.insert1(key, skip_duplicates=True)
 
-    @staticmethod
-    def get_abs_path(nwb_file_name):
+    @classmethod
+    def _get_file_name(cls, nwb_file_name: str) -> str:
+        """Get valid nwb file name given substring."""
+        query = cls & f'nwb_file_name LIKE "%{nwb_file_name}%"'
+
+        if len(query) == 1:
+            return query.fetch1("nwb_file_name")
+
+        raise ValueError(
+            f"Found {len(query)} matches for {nwb_file_name}: \n{query}"
+        )
+
+    @classmethod
+    def get_file_key(cls, nwb_file_name: str) -> dict:
+        """Return primary key using nwb_file_name substring."""
+        return {"nwb_file_name": cls._get_file_name(nwb_file_name)}
+
+    @classmethod
+    def get_abs_path(cls, nwb_file_name, new_file=False) -> str:
         """Return absolute path for a stored raw NWB file given file name.
 
-        The SPYGLASS_BASE_DIR environment variable must be set.
+        The SPYGLASS_BASE_DIR must be set, either as an environment or part of
+        dj.config['custom']. See spyglass.settings.load_config
 
         Parameters
         ----------
         nwb_file_name : str
-            The name of an NWB file that has been inserted into the Nwbfile() schema.
+            The name of an NWB file that has been inserted into the Nwbfile()
+            table. May be file substring. May include % wildcard(s).
+        new_file : bool, optional
+            Adding a new file to Nwbfile table. Defaults to False.
 
         Returns
         -------
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
+        if new_file:
+            return raw_dir + "/" + nwb_file_name
 
-        return load_config()["SPYGLASS_RAW_DIR"] + "/" + nwb_file_name
+        return raw_dir + "/" + cls._get_file_name(nwb_file_name)
 
     @staticmethod
     def add_to_lock(nwb_file_name):

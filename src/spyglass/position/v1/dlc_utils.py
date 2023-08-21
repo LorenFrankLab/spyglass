@@ -18,6 +18,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
+from ...settings import raw_dir
+
 
 def _set_permissions(directory, mode, username: str, groupname: str = None):
     """
@@ -321,13 +323,17 @@ def get_video_path(key):
 
     from ...common.common_behav import VideoFile
 
-    video_info = (
-        VideoFile()
-        & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
-    ).fetch1()
-    nwb_path = (
-        f"{os.getenv('SPYGLASS_BASE_DIR')}/raw/{video_info['nwb_file_name']}"
-    )
+    vf_key = {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
+    VideoFile()._no_transaction_make(vf_key, verbose=False)
+    video_query = VideoFile & vf_key
+
+    if len(video_query) != 1:
+        print(f"Found {len(video_query)} videos for {vf_key}")
+        return None, None, None, None
+
+    video_info = video_query.fetch1()
+    nwb_path = f"{raw_dir}/{video_info['nwb_file_name']}"
+
     with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
         nwb_file = in_out.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
@@ -338,6 +344,7 @@ def get_video_path(key):
         video_filename = video_filepath.split(video_dir)[-1]
         meters_per_pixel = nwb_video.device.meters_per_pixel
         timestamps = np.asarray(nwb_video.timestamps)
+
     return video_dir, video_filename, meters_per_pixel, timestamps
 
 
@@ -526,7 +533,9 @@ def get_gpu_memory():
         if subproccess command errors.
     """
 
-    output_to_list = lambda x: x.decode("ascii").split("\n")[:-1]
+    def output_to_list(x):
+        return x.decode("ascii").split("\n")[:-1]
+
     query_cmd = "nvidia-smi --query-gpu=memory.used --format=csv"
     try:
         memory_use_info = output_to_list(
@@ -534,7 +543,8 @@ def get_gpu_memory():
         )[1:]
     except subprocess.CalledProcessError as err:
         raise RuntimeError(
-            f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+            f"command {err.cmd} return with error (code {err.returncode}): "
+            + f"{err.output}"
         ) from err
     memory_use_values = {
         i: int(x.split()[0]) for i, x in enumerate(memory_use_info)

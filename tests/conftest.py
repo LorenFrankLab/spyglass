@@ -71,10 +71,7 @@ def _set_env():
     """Set environment variables."""
     print("Setting datajoint and kachery environment variables.")
 
-    spyglass_base_dir = pathlib.Path(tempfile.mkdtemp())
-    from spyglass.settings import load_config
-
-    _ = load_config(str(spyglass_base_dir), force_reload=True)
+    os.environ["SPYGLASS_BASE_DIR"] = str(tempfile.mkdtemp())
 
     dj.config["database.host"] = "localhost"
     dj.config["database.port"] = DATAJOINT_SERVER_PORT

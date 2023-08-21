@@ -1,5 +1,6 @@
 import os
 import pathlib
+from functools import reduce
 from typing import Dict
 
 import datajoint as dj
@@ -29,50 +30,110 @@ class PositionSource(dj.Manual):
     -> Session
     -> IntervalList
     ---
-    source: varchar(200)            # source of data; current options are "trodes" and "dlc" (deep lab cut)
-    import_file_name: varchar(2000)  # path to import file if importing position data
+    source: varchar(200)             # source of data (e.g., trodes, dlc)
+    import_file_name: varchar(2000)  # path to import file if importing
     """
+
+    class SpatialSeries(dj.Part):
+        definition = """
+        -> master
+        id : int unsigned            # index of spatial series
+        ---
+        name=null: varchar(32)       # name of spatial series
+        """
 
     @classmethod
     def insert_from_nwbfile(cls, nwb_file_name):
-        """Given an NWB file name, get the spatial series and interval lists from the file, add the interval
-        lists to the IntervalList table, and populate the RawPosition table if possible.
+        """Add intervals to ItervalList and PositionSource.
+
+        Given an NWB file name, get the spatial series and interval lists from
+        the file, add the interval lists to the IntervalList table, and
+        populate the RawPosition table if possible.
 
         Parameters
         ----------
         nwb_file_name : str
             The name of the NWB file.
         """
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
+        nwbf = get_nwb_file(nwb_file_name)
+        all_pos = get_all_spatial_series(nwbf, verbose=True)
+        sess_key = dict(nwb_file_name=nwb_file_name)
+        src_key = dict(**sess_key, source="trodes", import_file_name="")
 
-        pos_dict = get_all_spatial_series(nwbf, verbose=True)
-        if pos_dict is not None:
-            for epoch in pos_dict:
-                pdict = pos_dict[epoch]
-                pos_interval_list_name = cls.get_pos_interval_name(epoch)
+        if all_pos is None:
+            return
 
-                # create the interval list and insert it
-                interval_dict = dict()
-                interval_dict["nwb_file_name"] = nwb_file_name
-                interval_dict["interval_list_name"] = pos_interval_list_name
-                interval_dict["valid_times"] = pdict["valid_times"]
-                IntervalList().insert1(interval_dict, skip_duplicates=True)
+        sources = []
+        intervals = []
+        spat_series = []
 
-                # add this interval list to the table
-                key = dict()
-                key["nwb_file_name"] = nwb_file_name
-                key["interval_list_name"] = pos_interval_list_name
-                key["source"] = "trodes"
-                key["import_file_name"] = ""
-                cls.insert1(key)
+        for epoch, epoch_list in all_pos.items():
+            ind_key = dict(interval_list_name=cls.get_pos_interval_name(epoch))
+
+            sources.append(dict(**src_key, **ind_key))
+            intervals.append(
+                dict(
+                    **sess_key,
+                    **ind_key,
+                    valid_times=epoch_list[0]["valid_times"],
+                )
+            )
+
+            for index, pdict in enumerate(epoch_list):
+                spat_series.append(
+                    dict(
+                        **sess_key,
+                        **ind_key,
+                        id=index,
+                        name=pdict.get("name"),
+                    )
+                )
+
+        with cls.connection.transaction:
+            IntervalList.insert(intervals)
+            cls.insert(sources)
+            cls.SpatialSeries.insert(spat_series)
 
         # make map from epoch intervals to position intervals
         populate_position_interval_map_session(nwb_file_name)
 
     @staticmethod
-    def get_pos_interval_name(pos_epoch_num):
-        return f"pos {pos_epoch_num} valid times"
+    def get_pos_interval_name(epoch_num: int) -> str:
+        """Return string of the interval name from the epoch number.
+
+        Parameters
+        ----------
+        pos_epoch_num : int
+            Input epoch number
+
+        Returns
+        -------
+        str
+            Position interval name (e.g., pos 2 valid times)
+        """
+        try:
+            int(epoch_num)
+        except ValueError:
+            raise ValueError(
+                f"Epoch number must must be an integer. Received: {epoch_num}"
+            )
+        return f"pos {epoch_num} valid times"
+
+    @staticmethod
+    def get_epoch_num(name: str) -> int:
+        """Return the epoch number from the interval name.
+
+        Parameters
+        ----------
+        name : str
+            Name of position interval (e.g., pos epoch 1 index 2 valid times)
+
+        Returns
+        -------
+        int
+            epoch number
+        """
+        return int(name.replace("pos ", "").replace(" valid times", ""))
 
 
 @schema
@@ -89,35 +150,77 @@ class RawPosition(dj.Imported):
 
     definition = """
     -> PositionSource
-    ---
-    raw_position_object_id: varchar(40)    # the object id of the spatial series for this epoch in the NWB file
     """
+
+    class Object(dj.Part):
+        definition = """
+        -> master
+        -> PositionSource.SpatialSeries.proj('id')
+        ---
+        raw_position_object_id: varchar(40) # id of spatial series in NWB file
+        """
+
+        def fetch_nwb(self, *attrs, **kwargs):
+            return fetch_nwb(
+                self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs
+            )
+
+        def fetch1_dataframe(self):
+            INDEX_ADJUST = 1  # adjust 0-index to 1-index (e.g., xloc0 -> xloc1)
+
+            id_rp = [(n["id"], n["raw_position"]) for n in self.fetch_nwb()]
+
+            df_list = [
+                pd.DataFrame(
+                    data=rp.data,
+                    index=pd.Index(rp.timestamps, name="time"),
+                    columns=[
+                        col  # use existing columns if already numbered
+                        if "1" in rp.description or "2" in rp.description
+                        # else number them by id
+                        else col + str(id + INDEX_ADJUST)
+                        for col in rp.description.split(", ")
+                    ],
+                )
+                for id, rp in id_rp
+            ]
+
+            return reduce(lambda x, y: pd.merge(x, y, on="time"), df_list)
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
+        interval_list_name = key["interval_list_name"]
 
-        # TODO refactor this. this calculates sampling rate (unused here) and is expensive to do twice
-        pos_dict = get_all_spatial_series(nwbf)
-        for epoch in pos_dict:
-            if key[
-                "interval_list_name"
-            ] == PositionSource.get_pos_interval_name(epoch):
-                pdict = pos_dict[epoch]
-                key["raw_position_object_id"] = pdict["raw_position_object_id"]
-                self.insert1(key)
-                break
+        nwbf = get_nwb_file(nwb_file_name)
+        indices = (PositionSource.SpatialSeries & key).fetch("id")
+
+        # incl_times = False -> don't do extra processing for valid_times
+        spat_objs = get_all_spatial_series(nwbf, incl_times=False)[
+            PositionSource.get_epoch_num(interval_list_name)
+        ]
+
+        self.insert1(key)
+        self.Object.insert(
+            [
+                dict(
+                    nwb_file_name=nwb_file_name,
+                    interval_list_name=interval_list_name,
+                    id=index,
+                    raw_position_object_id=obj["raw_position_object_id"],
+                )
+                for index, obj in enumerate(spat_objs)
+                if index in indices
+            ]
+        )
 
     def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
+        raise NotImplementedError(
+            "fetch_nwb now operates on RawPosition.Object"
+        )
 
     def fetch1_dataframe(self):
-        raw_position_nwb = self.fetch_nwb()[0]["raw_position"]
-        return pd.DataFrame(
-            data=raw_position_nwb.data,
-            index=pd.Index(raw_position_nwb.timestamps, name="time"),
-            columns=raw_position_nwb.description.split(", "),
+        raise NotImplementedError(
+            "fetch1_dataframe now operates on RawPosition.Object"
         )
 
 
@@ -130,7 +233,7 @@ class StateScriptFile(dj.Imported):
     """
 
     def make(self, key):
-        """Add a new row to the StateScriptFile table. Requires keys "nwb_file_name", "file_object_id"."""
+        """Add a new row to the StateScriptFile table."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -140,8 +243,8 @@ class StateScriptFile(dj.Imported):
         ) or nwbf.processing.get("associated files")
         if associated_files is None:
             print(
-                f'Unable to import StateScriptFile: no processing module named "associated_files" '
-                f"found in {nwb_file_name}."
+                "Unable to import StateScriptFile: no processing module named "
+                + '"associated_files" found in {nwb_file_name}.'
             )
             return
 
@@ -150,13 +253,16 @@ class StateScriptFile(dj.Imported):
                 associated_file_obj, ndx_franklab_novela.AssociatedFiles
             ):
                 print(
-                    f'Data interface {associated_file_obj.name} within "associated_files" processing module is not '
-                    f"of expected type ndx_franklab_novela.AssociatedFiles\n"
+                    f"Data interface {associated_file_obj.name} within "
+                    + '"associated_files" processing module is not '
+                    + "of expected type ndx_franklab_novela.AssociatedFiles\n"
                 )
                 return
+
             # parse the task_epochs string
-            # TODO update associated_file_obj.task_epochs to be an array of 1-based ints,
-            # not a comma-separated string of ints
+            # TODO: update associated_file_obj.task_epochs to be an array of
+            # 1-based ints, not a comma-separated string of ints
+
             epoch_list = associated_file_obj.task_epochs.split(",")
             # only insert if this is the statescript file
             print(associated_file_obj.description)
@@ -184,8 +290,9 @@ class VideoFile(dj.Imported):
 
     Notes
     -----
-    The video timestamps come from: videoTimeStamps.cameraHWSync if PTP is used.
-    If PTP is not used, the video timestamps come from videoTimeStamps.cameraHWFrameCount .
+    The video timestamps come from: videoTimeStamps.cameraHWSync if PTP is
+    used. If PTP is not used, the video timestamps come from
+    videoTimeStamps.cameraHWFrameCount .
 
     """
 
@@ -198,6 +305,13 @@ class VideoFile(dj.Imported):
     """
 
     def make(self, key):
+        self._no_transaction_make(key)
+
+    def _no_transaction_make(self, key, verbose=True):
+        if not self.connection.in_transaction:
+            self.populate(key)
+            return
+
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -226,7 +340,9 @@ class VideoFile(dj.Imported):
             if isinstance(video, pynwb.image.ImageSeries):
                 video = [video]
             for video_obj in video:
-                # check to see if the times for this video_object are largely overlapping with the task epoch times
+                # check to see if the times for this video_object are largely
+                # overlapping with the task epoch times
+
                 if len(
                     interval_list_contains(valid_times, video_obj.timestamps)
                     > 0.9 * len(video_obj.timestamps)
@@ -237,14 +353,18 @@ class VideoFile(dj.Imported):
                         key["camera_name"] = video_obj.device.camera_name
                     else:
                         raise KeyError(
-                            f"No camera with camera_name: {camera_name} found in CameraDevice table."
+                            f"No camera with camera_name: {camera_name} found "
+                            + "in CameraDevice table."
                         )
                     key["video_file_object_id"] = video_obj.object_id
                     self.insert1(key)
                     is_found = True
 
-        if not is_found:
-            print(f"No video found corresponding to epoch {interval_list_name}")
+        if not is_found and verbose:
+            print(
+                f"No video found corresponding to file {nwb_file_name}, "
+                + f"epoch {interval_list_name}"
+            )
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
@@ -258,16 +378,17 @@ class VideoFile(dj.Imported):
             video_nwb = (cls & row).fetch_nwb()[0]
             if len(video_nwb) != 1:
                 raise ValueError(
-                    f"expecting 1 video file per entry, but {len(video_nwb)} files found"
+                    f"Expecting 1 video file per entry. {len(video_nwb)} found"
                 )
             row["camera_name"] = video_nwb[0]["video_file"].device.camera_name
             cls.update1(row=row)
 
     @classmethod
     def get_abs_path(cls, key: Dict):
-        """Return the absolute path for a stored video file given a key with the nwb_file_name and epoch number
+        """Return the absolute path for a stored video file given a key.
 
-        The SPYGLASS_VIDEO_DIR environment variable must be set.
+        Key must include the nwb_file_name and epoch number. The
+        SPYGLASS_VIDEO_DIR environment variable must be set.
 
         Parameters
         ----------
