@@ -41,12 +41,13 @@ class TrodesPosParams(dj.Manual):
     params: longblob
     """
 
-    @classmethod
-    def insert_default(cls, **kwargs):
-        """
-        Insert default parameter set for position determination
-        """
-        params = {
+    @property
+    def default_pk(self):
+        return {"trodes_pos_params_name": "default"}
+
+    @property
+    def default_params(self):
+        return {
             "max_separation": 9.0,
             "max_speed": 300.0,
             "position_smoothing_duration": 0.125,
@@ -57,24 +58,29 @@ class TrodesPosParams(dj.Manual):
             "upsampling_sampling_rate": None,
             "upsampling_interpolation_method": "linear",
         }
+
+    @classmethod
+    def insert_default(cls, **kwargs):
+        """
+        Insert default parameter set for position determination
+        """
         cls.insert1(
-            {"trodes_pos_params_name": "default", "params": params},
+            {**cls().default_pk, "params": cls().default_params},
             skip_duplicates=True,
         )
 
     @classmethod
     def get_default(cls):
-        query = cls & {"trodes_pos_params_name": "default"}
+        query = cls & cls().default_pk
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
-            return (cls & {"trodes_pos_params_name": "default"}).fetch1()
+            return (cls & cls().default_pk).fetch1()
 
         return query.fetch1()
 
     @classmethod
     def get_accepted_params(cls):
-        default = cls.get_default()
-        return list(default["params"].keys())
+        return [k for k in cls().default_params.keys()]
 
 
 @schema
@@ -91,9 +97,16 @@ class TrodesPosSelection(dj.Manual):
 
     @classmethod
     def insert_with_default(
-        cls, key: dict, skip_duplicates: bool = False
+        cls,
+        key: dict,
+        skip_duplicates: bool = False,
+        edit_defaults: dict = {},
+        edit_name: str = None,
     ) -> None:
         """Insert key with default parameters.
+
+        To change defaults, supply a dict as edit_defaults with a name for
+        the new paramset as edit_name.
 
         Parameters
         ----------
@@ -101,6 +114,10 @@ class TrodesPosSelection(dj.Manual):
             Restriction uniquely identifying entr(y/ies) in RawPosition.
         skip_duplicates: bool, optional
             Skip duplicate entries.
+        edit_defauts: dict, optional
+            Dictionary of overrides to default parameters.
+        edit_name: str, optional
+            If edit_defauts is passed, the name of the new entry
 
         Raises
         ------
@@ -111,11 +128,26 @@ class TrodesPosSelection(dj.Manual):
         if not query:
             raise ValueError(f"Found no entries found for {key}")
 
-        _ = TrodesPosParams.get_default()
+        param_pk, param_name = list(TrodesPosParams().default_pk.items())[0]
+
+        if bool(edit_defaults) ^ bool(edit_name):  # XOR: only one of them
+            raise ValueError("Must specify both edit_defauts and edit_name")
+
+        elif edit_defaults and edit_name:
+            TrodesPosParams.insert1(
+                {
+                    param_pk: edit_name,
+                    "params": {
+                        **TrodesPosParams().default_params,
+                        **edit_defaults,
+                    },
+                },
+                skip_duplicates=skip_duplicates,
+            )
 
         cls.insert(
             [
-                dict(**k, trodes_pos_params_name="default")
+                {**k, param_pk: edit_name or param_name}
                 for k in query.fetch("KEY", as_dict=True)
             ],
             skip_duplicates=skip_duplicates,
@@ -487,6 +519,8 @@ class TrodesPosVideo(dj.Computed):
 
     definition = """
     -> TrodesPosV1
+    --- 
+    has_video : bool
     """
 
     def make(self, key):
@@ -520,6 +554,11 @@ class TrodesPosVideo(dj.Computed):
         ) = get_video_path(
             {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         )
+
+        if not video_path:
+            self.insert1(dict(**key, has_video=False))
+            return
+
         video_dir = os.path.dirname(video_path) + "/"
         video_path = check_videofile(
             video_path=video_dir, video_filename=video_filename
@@ -553,6 +592,7 @@ class TrodesPosVideo(dj.Computed):
             cm_to_pixels=cm_per_pixel,
             disable_progressbar=False,
         )
+        self.insert1(dict(**key, has_video=True))
 
     @staticmethod
     def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):

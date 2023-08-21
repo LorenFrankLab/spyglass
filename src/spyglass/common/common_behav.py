@@ -295,6 +295,13 @@ class VideoFile(dj.Imported):
     """
 
     def make(self, key):
+        self._no_transaction_make(key)
+
+    def _no_transaction_make(self, key, verbose=True):
+        if not self.connection.in_transaction:
+            self.populate(key)
+            return
+
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -340,8 +347,11 @@ class VideoFile(dj.Imported):
                     self.insert1(key)
                     is_found = True
 
-        if not is_found:
-            print(f"No video found corresponding to epoch {interval_list_name}")
+        if not is_found and verbose:
+            print(
+                f"No video found corresponding to file {nwb_file_name}, "
+                + f"epoch {interval_list_name}"
+            )
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)

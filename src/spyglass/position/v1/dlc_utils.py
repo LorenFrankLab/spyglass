@@ -323,10 +323,15 @@ def get_video_path(key):
 
     from ...common.common_behav import VideoFile
 
-    video_info = (
-        VideoFile()
-        & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
-    ).fetch1()
+    vf_key = {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
+    VideoFile()._no_transaction_make(vf_key, verbose=False)
+    video_query = VideoFile & vf_key
+
+    if len(video_query) != 1:
+        print(f"Found {len(video_query)} videos for {vf_key}")
+        return None, None, None, None
+
+    video_info = video_query.fetch1()
     nwb_path = f"{raw_dir}/{video_info['nwb_file_name']}"
 
     with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
