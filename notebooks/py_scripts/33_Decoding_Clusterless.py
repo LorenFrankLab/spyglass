@@ -28,8 +28,8 @@
 #   [extracted marks](./31_Extract_Mark_Indicators.ipynb), as well as loaded
 #   position data. If 1D decoding, this data should also be
 #   [linearized](./24_Linearization.ipynb).
-# - Ths tutorial also assumes you're familiar with how to run processes on GPU, as
-#   presented in [this notebook](./32_Decoding_with_GPUs.ipynb)
+# - This tutorial also assumes you're familiar with how to run processes on GPU,
+#   as presented in [this notebook](./32_Decoding_with_GPUs.ipynb)
 #
 # Clusterless decoding can be performed on either 1D or 2D data. A few steps in
 # this notebook will refer to a `decode_1d` variable set in
@@ -87,10 +87,10 @@ decode_1d = True
 
 # First, we'll fetch marks with `fetch_xarray`, which provides a labeled array of
 # shape (n_time, n_mark_features, n_electrodes). Time is in 2 ms bins with either
-# `NaN` if no spike occured or the value of the spike features.
+# `NaN` if no spike occurred or the value of the spike features.
 #
 # If there is >1 spike per time bin per tetrode, we take an an average of the
-# marks. Ideally, we would use all the marks, this is a rare occurance and
+# marks. Ideally, we would use all the marks, this is a rare occurrence and
 # decoding is generally robust to the averaging.
 
 # +

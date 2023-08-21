@@ -87,7 +87,7 @@ sgc.common_behav.RawPosition() & {"nwb_file_name": nwb_copy_file_name}
 # available. To adjust the default, insert a new set into this table. The
 # parameters are...
 #
-# - `max_separation`, default 9 cm: maximium acceptable distance between red and
+# - `max_separation`, default 9 cm: maximum acceptable distance between red and
 #   green LEDs.
 #   - If exceeded, the times are marked as NaNs and inferred by interpolation.
 #   - Useful when the inferred LED position tracks a reflection instead of the

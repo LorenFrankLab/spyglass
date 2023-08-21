@@ -445,10 +445,19 @@ class Merge(dj.Manual):
         if dry_run:
             return part_parents
 
-        with cls._safe_context():
-            super().delete(cls(), **kwargs)
-            for part_parent in part_parents:
-                super().delete(part_parent, **kwargs)
+        merge_ids = cls.merge_restrict(restriction).fetch(
+            RESERVED_PRIMARY_KEY, as_dict=True
+        )
+
+        # CB: Removed transaction protection here bc 'no' confirmation resp
+        # still resulted in deletes. If re-add, consider transaction=False
+        super().delete((cls & merge_ids), **kwargs)
+
+        if cls & merge_ids:  # If 'no' on del prompt from above, skip below
+            return  # User can still abort del below, but yes/no is unlikly
+
+        for part_parent in part_parents:
+            super().delete(part_parent, **kwargs)  # add safemode=False?
 
     @classmethod
     def fetch_nwb(

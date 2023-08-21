@@ -3,6 +3,7 @@
 import os
 import os.path
 import warnings
+from itertools import groupby
 from pathlib import Path
 
 import numpy as np
@@ -43,20 +44,19 @@ def get_nwb_file(nwb_file_path):
         nwb_file_path = Nwbfile.get_abs_path(nwb_file_path)
 
     _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
-    nwb_uri = None
-    nwb_raw_uri = None
 
     if nwbfile is None:
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
             print(
-                f"NWB file not found locally; checking kachery for "
+                "NWB file not found locally; checking kachery for "
                 + f"{nwb_file_path}"
             )
             # first try the analysis files
             from ..sharing.sharing_kachery import AnalysisNwbfileKachery
 
-            # the download functions assume just the filename, so we need to get that from the path
+            # the download functions assume just the filename, so we need to
+            # get that from the path
             if not AnalysisNwbfileKachery.download_file(
                 os.path.basename(nwb_file_path)
             ):
@@ -109,7 +109,8 @@ def close_nwb_files():
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
-    """Search for a specified NWBDataInterface or DynamicTable in the processing modules of an NWB file.
+    """
+    Search for NWBDataInterface or DynamicTable in processing modules of an NWB.
 
     Parameters
     ----------
@@ -118,13 +119,15 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
     data_interface_name : str
         The name of the NWBDataInterface or DynamicTable to search for.
     data_interface_class : type, optional
-        The class (or superclass) to search for. This argument helps to prevent accessing an object with the same
-        name but the incorrect type. Default: no restriction.
+        The class (or superclass) to search for. This argument helps to prevent
+        accessing an object with the same name but the incorrect type. Default:
+        no restriction.
 
     Warns
     -----
     UserWarning
-        If multiple NWBDataInterface and DynamicTable objects with the matching name are found.
+        If multiple NWBDataInterface and DynamicTable objects with the matching
+        name are found.
 
     Returns
     -------
@@ -156,7 +159,8 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
 def get_raw_eseries(nwbfile):
     """Return all ElectricalSeries in the acquisition group of an NWB file.
 
-    ElectricalSeries found within LFP objects in the acquisition will also be returned.
+    ElectricalSeries found within LFP objects in the acquisition will also be
+    returned.
 
     Parameters
     ----------
@@ -306,16 +310,20 @@ def get_valid_intervals(
 
 
 def get_electrode_indices(nwb_object, electrode_ids):
-    """Given an NWB file or electrical series object, return the indices of the specified electrode_ids.
+    """Return indices of the specified electrode_ids given an NWB file.
 
-    If an ElectricalSeries is given, then the indices returned are relative to the selected rows in
-    ElectricalSeries.electrodes. For example, if electricalseries.electrodes = [5], and row index 5 of
-    nwbfile.electrodes has ID 10, then calling get_electrode_indices(electricalseries, 10) will return 0, the
-    index of the matching electrode in electricalseries.electrodes.
+    Also accepts electrical series object. If an ElectricalSeries is given,
+    then the indices returned are relative to the selected rows in
+    ElectricalSeries.electrodes. For example, if electricalseries.electrodes =
+    [5], and row index 5 of nwbfile.electrodes has ID 10, then calling
+    get_electrode_indices(electricalseries, 10) will return 0, the index of the
+    matching electrode in electricalseries.electrodes.
 
-    Indices for electrode_ids that are not in the electrical series are returned as np.nan
+    Indices for electrode_ids that are not in the electrical series are
+    returned as np.nan
 
-    If an NWBFile is given, then the row indices with the matching IDs in the file's electrodes table are returned.
+    If an NWBFile is given, then the row indices with the matching IDs in the
+    file's electrodes table are returned.
 
     Parameters
     ----------
@@ -330,8 +338,9 @@ def get_electrode_indices(nwb_object, electrode_ids):
         Array of indices of the specified electrode IDs.
     """
     if isinstance(nwb_object, pynwb.ecephys.ElectricalSeries):
-        # electrodes is a DynamicTableRegion which may contain a subset of the rows in NWBFile.electrodes
-        # match against only the subset of electrodes referenced by this ElectricalSeries
+        # electrodes is a DynamicTableRegion which may contain a subset of the
+        # rows in NWBFile.electrodes match against only the subset of
+        # electrodes referenced by this ElectricalSeries
         electrode_table_indices = nwb_object.electrodes.data[:]
         selected_elect_ids = [
             nwb_object.electrodes.table.id[x] for x in electrode_table_indices
@@ -344,7 +353,9 @@ def get_electrode_indices(nwb_object, electrode_ids):
             "nwb_object must be of type ElectricalSeries or NWBFile"
         )
 
-    # for each electrode_id, find its index in selected_elect_ids and return that if it's there and invalid_electrode_index if not.
+    # for each electrode_id, find its index in selected_elect_ids and return
+    # that if it's there and invalid_electrode_index if not.
+
     return [
         selected_elect_ids.index(elect_id)
         if elect_id in selected_elect_ids
@@ -353,18 +364,7 @@ def get_electrode_indices(nwb_object, electrode_ids):
     ]
 
 
-def _get_epoch_groups(position: pynwb.behavior.Position, old_format=True):
-    if old_format:
-        epoch_start_time = np.zeros(len(position.spatial_series.values()))
-        for pos_epoch, spatial_series in enumerate(
-            position.spatial_series.values()
-        ):
-            epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
-
-        return np.argsort(epoch_start_time)
-
-    from itertools import groupby
-
+def _get_epoch_groups(position: pynwb.behavior.Position):
     epoch_start_time = {}
     for pos_epoch, spatial_series in enumerate(
         position.spatial_series.values()
@@ -384,7 +384,6 @@ def _get_pos_dict(
     epoch_groups: dict,
     session_id: str = None,
     verbose: bool = False,
-    old_format: bool = True,  # TODO: remove after changing prod database
     incl_times: bool = True,
 ):
     """Return dict with obj ids and valid intervals for each epoch.
@@ -406,14 +405,13 @@ def _get_pos_dict(
     # prev, this was just a list. now, we need to gen mult dict per epoch
     pos_data_dict = dict()
     all_spatial_series = list(position.values())
-    if old_format:
-        # for index, orig_epoch in enumerate(sorted_order):
-        for index, orig_epoch in enumerate(epoch_groups):
-            spatial_series = all_spatial_series[orig_epoch]
 
-            # get the valid intervals for the position data
+    for epoch, index_list in enumerate(epoch_groups.values()):
+        pos_data_dict[epoch] = []
+        for index in index_list:
+            spatial_series = all_spatial_series[index]
             valid_times = None
-            if incl_times:
+            if incl_times:  # get the valid intervals for the position data
                 timestamps = np.asarray(spatial_series.timestamps)
                 sampling_rate = estimate_sampling_rate(
                     timestamps, verbose=verbose, filename=session_id
@@ -422,44 +420,19 @@ def _get_pos_dict(
                     timestamps=timestamps,
                     sampling_rate=sampling_rate,
                 )
-
             # add the valid intervals to the Interval list
-            pos_data_dict[index] = {
-                "valid_times": valid_times,
-                "raw_position_object_id": spatial_series.object_id,
-            }
-
-    else:
-        for epoch, index_list in enumerate(epoch_groups.values()):
-            pos_data_dict[epoch] = []
-            for index in index_list:
-                spatial_series = all_spatial_series[index]
-                # get the valid intervals for the position data
-                valid_times = None
-                if incl_times:
-                    timestamps = np.asarray(spatial_series.timestamps)
-                    sampling_rate = estimate_sampling_rate(
-                        timestamps, verbose=verbose, filename=session_id
-                    )
-                    valid_times = get_valid_intervals(
-                        timestamps=timestamps,
-                        sampling_rate=sampling_rate,
-                    )
-                # add the valid intervals to the Interval list
-                pos_data_dict[epoch].append(
-                    {
-                        "valid_times": valid_times,
-                        "raw_position_object_id": spatial_series.object_id,
-                        "name": spatial_series.name,
-                    }
-                )
+            pos_data_dict[epoch].append(
+                {
+                    "valid_times": valid_times,
+                    "raw_position_object_id": spatial_series.object_id,
+                    "name": spatial_series.name,
+                }
+            )
 
     return pos_data_dict
 
 
-def get_all_spatial_series(
-    nwbf, verbose=False, old_format=True, incl_times=True
-) -> dict:
+def get_all_spatial_series(nwbf, verbose=False, incl_times=True) -> dict:
     """
     Given an NWB, get the spatial series and return a dictionary by epoch.
 
@@ -492,10 +465,9 @@ def get_all_spatial_series(
 
     return _get_pos_dict(
         position=pos_interface.spatial_series,
-        epoch_groups=_get_epoch_groups(pos_interface, old_format=old_format),
+        epoch_groups=_get_epoch_groups(pos_interface),
         session_id=nwbf.session_id,
         verbose=verbose,
-        old_format=old_format,
         incl_times=incl_times,
     )
 
@@ -525,7 +497,8 @@ def change_group_permissions(
     # Loop through nwb file directories and change group permissions
     for target_content in target_contents:
         print(
-            f"For {target_content}, changing group to {set_group_name} and giving read/write/execute permissions"
+            f"For {target_content}, changing group to {set_group_name} "
+            + "and giving read/write/execute permissions"
         )
         # Change group
         os.system(f"chgrp -R {set_group_name} {target_content}")

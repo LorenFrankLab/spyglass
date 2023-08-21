@@ -54,7 +54,6 @@ dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 import spyglass.common as sgc
 import spyglass.position.v1 as sgp
-import spyglass as nd
 
 # ignore datajoint+jupyter async warnings
 import warnings
@@ -335,7 +334,7 @@ epoch = (
     + 1
 )
 video_info = (
-    nd.common.common_behav.VideoFile()
+    sgc.common_behav.VideoFile()
     & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
 ).fetch1()
 

@@ -533,7 +533,9 @@ def get_gpu_memory():
         if subproccess command errors.
     """
 
-    output_to_list = lambda x: x.decode("ascii").split("\n")[:-1]
+    def output_to_list(x):
+        return x.decode("ascii").split("\n")[:-1]
+
     query_cmd = "nvidia-smi --query-gpu=memory.used --format=csv"
     try:
         memory_use_info = output_to_list(
@@ -541,7 +543,8 @@ def get_gpu_memory():
         )[1:]
     except subprocess.CalledProcessError as err:
         raise RuntimeError(
-            f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+            f"command {err.cmd} return with error (code {err.returncode}): "
+            + f"{err.output}"
         ) from err
     memory_use_values = {
         i: int(x.split()[0]) for i, x in enumerate(memory_use_info)
