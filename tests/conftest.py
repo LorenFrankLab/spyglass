@@ -8,7 +8,10 @@ import tempfile
 import datajoint as dj
 
 from .datajoint._config import DATAJOINT_SERVER_PORT
-from .datajoint._datajoint_server import kill_datajoint_server, run_datajoint_server
+from .datajoint._datajoint_server import (
+    kill_datajoint_server,
+    run_datajoint_server,
+)
 
 thisdir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(thisdir)

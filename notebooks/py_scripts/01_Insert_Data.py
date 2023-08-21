@@ -109,7 +109,7 @@ dj.Diagram(sgc.Session) - 1 + 2
 # - `minirec20230622.nwb`, .3 GB: minimal recording, on
 #   [Box](https://ucsf.box.com/s/k3sgql6z475oia848q1rgms4zdh4rkjn)
 # - `montague20200802.nwb`, 8 GB: full recording, on
-#   [DropBox](https://www.dropbox.com/scl/fo/4i5b1z4iapetzxfps0grf/h?dl=0&preview=montague20200802_tutorial_.nwb&rlkey=ctahes9v0r7bxes8yceh86gzg)
+#   DropBox (link coming soon)
 # - For those in the UCSF network, these and many others on `/stelmo/nwb/raw`
 #
 # If you are connected to the Frank lab database, please rename any downloaded
