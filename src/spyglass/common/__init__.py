@@ -17,6 +17,8 @@ from .common_behav import (
     RawPosition,
     StateScriptFile,
     VideoFile,
+    PositionIntervalMap,
+    convert_epoch_interval_name_to_position_interval_name,
 )
 from .common_device import (
     CameraDevice,

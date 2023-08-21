@@ -94,6 +94,9 @@ class PositionSource(dj.Manual):
             cls.insert(sources)
             cls.SpatialSeries.insert(spat_series)
 
+        # make map from epoch intervals to position intervals
+        populate_position_interval_map_session(nwb_file_name)
+
     @staticmethod
     def get_pos_interval_name(epoch_num: int) -> str:
         """Return string of the interval name from the epoch number.
@@ -417,3 +420,195 @@ class VideoFile(dj.Imported):
                 f"video file with filename: {video_filename} "
                 f"does not exist in {video_dir}/"
             )
+
+
+@schema
+class PositionIntervalMap(dj.Computed):
+    definition = """
+    -> IntervalList
+    ---
+    position_interval_name: varchar(200)  # name of the corresponding position interval
+    """
+
+    def make(self, key):
+        self._no_transaction_make(key)
+
+    def _no_transaction_make(self, key):
+        # Find correspondence between pos valid times names and epochs
+        # Use epsilon to tolerate small differences in epoch boundaries across epoch/pos intervals
+
+        if not self.connection.in_transaction:
+            # if not called in the context of a make function, call its own make function
+            self.populate(key)
+            return
+
+        # *** HARD CODED VALUES ***
+        EPSILON = 0.11  # tolerated time difference in epoch boundaries across epoch/pos intervals
+        # *************************
+
+        # Unpack key
+        nwb_file_name = key["nwb_file_name"]
+
+        # Get pos interval list names
+        pos_interval_list_names = get_pos_interval_list_names(nwb_file_name)
+
+        # Skip populating if no pos interval list names
+        if len(pos_interval_list_names) == 0:
+            print(
+                f"NO POS INTERVALS FOR {key}; CANNOT POPULATE PositionIntervalMap"
+            )
+            return
+
+        # Get the interval times
+        valid_times = (IntervalList & key).fetch1("valid_times")
+        time_interval = [
+            valid_times[0][0] - EPSILON,
+            valid_times[-1][-1] + EPSILON,
+        ]  # [start, end], widen to tolerate small differences in epoch boundaries across epoch/pos intervals
+
+        # compare the position intervals against our interval
+        matching_pos_interval_list_names = []
+        for (
+            pos_interval_list_name
+        ) in pos_interval_list_names:  # for each pos valid time interval list
+            pos_valid_times = (
+                IntervalList
+                & {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": pos_interval_list_name,
+                }
+            ).fetch1(
+                "valid_times"
+            )  # get interval valid times
+            if len(pos_valid_times) == 0:
+                continue
+            pos_time_interval = [
+                pos_valid_times[0][0],
+                pos_valid_times[-1][-1],
+            ]  # [pos valid time interval start, pos valid time interval end]
+            if (time_interval[0] < pos_time_interval[0]) and (
+                time_interval[1] > pos_time_interval[1]
+            ):  # if pos valid time interval within epoch interval
+                matching_pos_interval_list_names.append(
+                    pos_interval_list_name
+                )  # add pos interval list name to list of matching pos interval list names
+
+        # Check that each pos interval was matched to only one epoch
+        if len(matching_pos_interval_list_names) > 1:
+            print(
+                f"MULTIPLE POS INTERVALS MATCHED TO EPOCH {key}; CANNOT POPULATE PositionIntervalMap"
+            )
+            print(matching_pos_interval_list_names)
+            return
+        # Check that at least one pos interval was matched to an epoch
+        if len(matching_pos_interval_list_names) == 0:
+            print(
+                f"No pos intervals matched to epoch {key}; CANNOT POPULATE PositionIntervalMap"
+            )
+            return
+        # Insert into table
+        key["position_interval_name"] = matching_pos_interval_list_names[0]
+        self.insert1(key, allow_direct_insert=True)
+        print(
+            f'Populated PosIntervalMap for {nwb_file_name}, {key["interval_list_name"]}'
+        )
+
+
+def get_pos_interval_list_names(nwb_file_name):
+    return [
+        interval_list_name
+        for interval_list_name in (
+            IntervalList & {"nwb_file_name": nwb_file_name}
+        ).fetch("interval_list_name")
+        if (
+            (interval_list_name.split(" ")[0] == "pos")
+            and (" ".join(interval_list_name.split(" ")[2:]) == "valid times")
+        )
+    ]
+
+
+def convert_epoch_interval_name_to_position_interval_name(
+    key: dict, populate_missing: bool = True
+) -> str:
+    """Converts a primary key for IntervalList to the corresponding position interval name.
+
+    Parameters
+    ----------
+    key : dict
+        Lookup key
+    populate_missing: bool
+        whether to populate PositionIntervalMap for the key if missing. Should be False if this function is used inside of another populate call
+
+    Returns
+    -------
+    position_interval_name : str
+    """
+    # get the interval list name if epoch given in key instead of interval list name
+    if "interval_list_name" not in key and "epoch" in key:
+        key["interval_list_name"] = get_interval_list_name_from_epoch(
+            key["nwb_file_name"], key["epoch"]
+        )
+
+    pos_interval_names = (PositionIntervalMap & key).fetch(
+        "position_interval_name"
+    )
+    if len(pos_interval_names) == 0:
+        if populate_missing:
+            PositionIntervalMap()._no_transaction_make(key)
+            pos_interval_names = (PositionIntervalMap & key).fetch(
+                "position_interval_name"
+            )
+        else:
+            raise KeyError(
+                f"{key} must be populated in the PositionIntervalMap table prior to your current populate call"
+            )
+    if len(pos_interval_names) == 0:
+        print(f"No position intervals found for {key}")
+        return []
+    if len(pos_interval_names) == 1:
+        return pos_interval_names[0]
+
+
+def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
+    """Returns the interval list name for the given epoch.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The name of the NWB file.
+    epoch : int
+        The epoch number.
+
+    Returns
+    -------
+    interval_list_name : str
+        The interval list name.
+    """
+    interval_names = [
+        x
+        for x in (IntervalList() & {"nwb_file_name": nwb_file_name}).fetch(
+            "interval_list_name"
+        )
+        if (x.split("_")[0] == f"{epoch:02}")
+    ]
+    if len(interval_names) == 0:
+        print(f"No interval list name found for {nwb_file_name} epoch {epoch}")
+        return None
+    if len(interval_names) > 1:
+        print(
+            f"Multiple interval list names found for {nwb_file_name} epoch {epoch}"
+        )
+        return None
+    return interval_names[0]
+
+
+def populate_position_interval_map_session(nwb_file_name: str):
+    for interval_name in (TaskEpoch() & {"nwb_file_name": nwb_file_name}).fetch(
+        "interval_list_name"
+    ):
+        PositionIntervalMap.populate(
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_name,
+            }
+        )
