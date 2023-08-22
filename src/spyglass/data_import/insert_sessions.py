@@ -7,7 +7,8 @@ from typing import List, Union
 import pynwb
 
 from ..common import Nwbfile, get_raw_eseries, populate_all_common
-from ..settings import load_config
+from ..settings import raw_dir
+from ..utils.nwb_helper_fn import get_nwb_copy_filename
 
 
 def insert_sessions(nwb_file_names: Union[str, List[str]]):
@@ -18,9 +19,10 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
     ----------
     nwb_file_names : str or List of str
         File names in raw directory ($SPYGLASS_RAW_DIR) pointing to
-        existing .nwb files. Each file represents a session.
+        existing .nwb files. Each file represents a session. Also accepts
+        strings with glob wildcards (e.g., *) so long as the wildcard specifies
+        exactly one file.
     """
-    _ = load_config()
 
     if not isinstance(nwb_file_names, list):
         nwb_file_names = [nwb_file_names]
@@ -29,18 +31,32 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         if "/" in nwb_file_name:
             nwb_file_name = nwb_file_name.split("/")[-1]
 
-        nwb_file_abs_path = Path(Nwbfile.get_abs_path(nwb_file_name))
+        nwb_file_abs_path = Path(
+            Nwbfile.get_abs_path(nwb_file_name, new_file=True)
+        )
+
         if not nwb_file_abs_path.exists():
-            raise FileNotFoundError(f"File not found: {nwb_file_abs_path}")
+            possible_matches = sorted(Path(raw_dir).glob(f"*{nwb_file_name}*"))
+
+            if len(possible_matches) == 1:
+                nwb_file_abs_path = possible_matches[0]
+                nwb_file_name = nwb_file_abs_path.name
+
+            else:
+                raise FileNotFoundError(
+                    f"File not found: {nwb_file_abs_path}\n\t"
+                    + f"{len(possible_matches)} possible matches:"
+                    + f"{possible_matches}"
+                )
 
         # file name for the copied raw data
-        out_nwb_file_name = nwb_file_abs_path.stem + "_.nwb"
+        out_nwb_file_name = get_nwb_copy_filename(nwb_file_abs_path.stem)
 
         # Check whether the file already exists in the Nwbfile table
         if len(Nwbfile() & {"nwb_file_name": out_nwb_file_name}):
             warnings.warn(
                 f"Cannot insert data from {nwb_file_name}: {out_nwb_file_name}"
-                + "is already in Nwbfile table."
+                + " is already in Nwbfile table."
             )
             continue
 
@@ -72,12 +88,15 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
         + f"with link to raw ephys data: {out_nwb_file_name}"
     )
 
-    nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
-    assert os.path.exists(
-        nwb_file_abs_path
-    ), f"File does not exist: {nwb_file_abs_path}"
+    nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name, new_file=True)
 
-    out_nwb_file_abs_path = Nwbfile.get_abs_path(out_nwb_file_name)
+    if not os.path.exists(nwb_file_abs_path):
+        raise FileNotFoundError(f"Could not find raw file: {nwb_file_abs_path}")
+
+    out_nwb_file_abs_path = Nwbfile.get_abs_path(
+        out_nwb_file_name, new_file=True
+    )
+
     if os.path.exists(out_nwb_file_name):
         warnings.warn(
             f"Output file {out_nwb_file_abs_path} exists and will be "
