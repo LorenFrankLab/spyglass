@@ -27,34 +27,38 @@ def difference_artifact_detector(
 ):
     """Detects times during which artifacts do and do not occur.
 
-    Artifacts are defined as periods where the absolute value of the change in LFP exceeds
-    amplitude change thresholds on the proportion of channels specified,
-    with the period extended by the removal_window_ms/2 on each side. amplitude change
-    threshold values of None are ignored.
+    Artifacts are defined as periods where the absolute value of the change in
+    LFP exceeds amplitude change thresholds on the proportion of channels
+    specified, with the period extended by the removal_window_ms/2 on each side.
+    amplitude change threshold values of None are ignored.
 
     Parameters
     ----------
-    recording : lfp eseries
-    zscore_thresh : float, optional
+    recording : lfp eseries zscore_thresh : float, optional
         Stdev threshold for exclusion, should be >=0, defaults to None
     amplitude_thresh : float, optional
-        Amplitude (ad units) threshold for exclusion, should be >=0, defaults to None
+        Amplitude (ad units) threshold for exclusion, should be >=0, defaults to
+        None
     proportion_above_thresh : float, optional, should be>0 and <=1
-        Proportion of electrodes that need to have threshold crossings, defaults to 1
+        Proportion of electrodes that need to have threshold crossings, defaults
+        to 1
     removal_window_ms : float, optional
-        Width of the window in milliseconds to mask out per artifact
-        (window/2 removed on each side of threshold crossing), defaults to 1 ms
+        Width of the window in milliseconds to mask out per artifact (window/2
+        removed on each side of threshold crossing), defaults to 1 ms
 
     Returns
     -------
     artifact_removed_valid_times : np.ndarray
-        Intervals of valid times where artifacts were not detected, unit: seconds
+        Intervals of valid times where artifacts were not detected, unit:
+        seconds
     artifact_intervals : np.ndarray
-        Intervals in which artifacts are detected (including removal windows), unit: seconds
+        Intervals in which artifacts are detected (including removal windows),
+        unit: seconds
     """
 
-    # NOTE: 7-17-23 updated to remove recording.data, since it will converted to numpy array before referencing
-    # check for referencing flag
+    # NOTE: 7-17-23 updated to remove recording.data, since it will converted to
+    # numpy array before referencing check for referencing flag
+
     if referencing == 1:
         print("referencing activated. may be set to -1")
 
@@ -92,24 +96,21 @@ def difference_artifact_detector(
     print("num tets 1", nelect_above_1st, "num tets 2", nelect_above_2nd)
     print("data shape", recording.shape)
 
-    # find the artifact occurrences using one or both thresholds, across channels
+    # find the artifact occurrences using one or both thresholds, across
+    # channels
 
     if amplitude_thresh_1st is not None:
         # first find times with large amp change: sum diff over several timebins
 
         diff_array = np.diff(recording, axis=0)
-        print("updated script")
-        if referencing == 0:
-            print("referencing off")
-            window = np.ones((15, 1))
+        window = np.ones((3, 1)) if referencing else np.ones((15, 1))
 
-        elif referencing == 1:
-            print("referencing on")
-            window = np.ones((3, 1))
         # sum differences over bins using convolution for speed
         width = int((window.size - 1) / 2)
         diff_array = np.pad(
-            diff_array, pad_width=((width, width), (0, 0)), mode="constant"
+            diff_array,
+            pad_width=((width, width), (0, 0)),
+            mode="constant",
         )
         diff_array_5 = scipy.signal.convolve(diff_array, window, mode="valid")
 
@@ -159,7 +160,7 @@ def difference_artifact_detector(
     artifact_frames = above_thresh.copy()
     print("detected ", artifact_frames.shape[0], " artifacts")
 
-    # turn ms to remove total into s to remove from either side of each detected artifact
+    # Convert to s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms / 1000 * 0.5
 
     if len(artifact_frames) == 0:
@@ -175,6 +176,7 @@ def difference_artifact_detector(
     artifact_intervals_s = np.zeros(
         (len(artifact_intervals), 2), dtype=np.float64
     )
+
     for interval_idx, interval in enumerate(artifact_intervals):
         artifact_intervals_s[interval_idx] = [
             valid_timestamps[interval[0]] - half_removal_window_s,
@@ -218,7 +220,7 @@ def _check_artifact_thresholds(
     proportion_above_thresh_1st,
     proportion_above_thresh_2nd,
 ):
-    """Alerts user to likely unintended parameters. Not an exhaustive verification.
+    """Alerts user to likely unintended parameters. Not exhaustive verification.
 
     Parameters
     ----------
@@ -238,40 +240,32 @@ def _check_artifact_thresholds(
     ------
     ValueError: if signal thresholds are negative
     """
-    # amplitude or zscore thresholds should be not negative, as they are applied to an absolute signal
-    signal_thresholds = [
+    signal_thresholds = [  # amplitude or zscore thresh should be not negative
         t for t in [amplitude_thresh_1st, amplitude_thresh_1st] if t is not None
     ]
+
     for t in signal_thresholds:
         if t < 0:
-            raise ValueError("Amplitude  thresholds must be >= 0, or None")
+            raise ValueError(
+                f"Amplitude thresholds must be >= 0, or None. Recieved {t}"
+            )
 
-    # proportion_above_threshold should be in [0:1] inclusive
-    if proportion_above_thresh_1st < 0:
-        warnings.warn(
-            "Warning: proportion_above_thresh must be a proportion >0 and <=1."
-            f" Using proportion_above_thresh = 0.01 instead of {str(proportion_above_thresh_1st)}"
-        )
-        proportion_above_thresh_1st = 0.01
-    elif proportion_above_thresh_1st > 1:
-        warnings.warn(
-            "Warning: proportion_above_thresh must be a proportion >0 and <=1. "
-            f"Using proportion_above_thresh = 1 instead of {str(proportion_above_thresh_1st)}"
-        )
-        proportion_above_thresh_1st = 1
-    # proportion_above_threshold should be in [0:1] inclusive
-    if proportion_above_thresh_2nd < 0:
-        warnings.warn(
-            "Warning: proportion_above_thresh must be a proportion >0 and <=1."
-            f" Using proportion_above_thresh = 0.01 instead of {str(proportion_above_thresh_2nd)}"
-        )
-        proportion_above_thresh_2nd = 0.01
-    elif proportion_above_thresh_2nd > 1:
-        warnings.warn(
-            "Warning: proportion_above_thresh must be a proportion >0 and <=1. "
-            f"Using proportion_above_thresh = 1 instead of {str(proportion_above_thresh_2nd)}"
-        )
-        proportion_above_thresh_2nd = 1
+    bound_warn = (
+        "Warning: proportion_above_thresh must be a proportion >0 and <=1.\n"
+        + "Replacing {} with {}"
+    )
+
+    def clamp(n, min_n=0.01, max_n=1):  # replace n outside bounds with bound
+        if n < 0:
+            warnings.warn(bound_warn.format(n, min_n))
+        elif n < min_n:  # handle case where n is btwn 0 and low bound
+            return n
+        elif n > max_n:
+            warnings.warn(bound_warn.format(n, max_n))
+        return max(min(n, max_n), min_n)
+
+    proportion_above_thresh_1st = clamp(proportion_above_thresh_1st)
+    proportion_above_thresh_2nd = clamp(proportion_above_thresh_2nd)
 
     return (
         amplitude_thresh_1st,
