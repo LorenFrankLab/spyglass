@@ -152,7 +152,7 @@ class RawPosition(dj.Imported):
     -> PositionSource
     """
 
-    class Object(dj.Part):
+    class PosObject(dj.Part):
         definition = """
         -> master
         -> PositionSource.SpatialSeries.proj('id')
@@ -169,6 +169,9 @@ class RawPosition(dj.Imported):
             INDEX_ADJUST = 1  # adjust 0-index to 1-index (e.g., xloc0 -> xloc1)
 
             id_rp = [(n["id"], n["raw_position"]) for n in self.fetch_nwb()]
+
+            if len(set(rp.interval for _, rp in id_rp)) > 1:
+                print("WARNING: loading DataFrame with multiple intervals.")
 
             df_list = [
                 pd.DataFrame(
@@ -200,7 +203,7 @@ class RawPosition(dj.Imported):
         ]
 
         self.insert1(key)
-        self.Object.insert(
+        self.PosObject.insert(
             [
                 dict(
                     nwb_file_name=nwb_file_name,
@@ -213,15 +216,34 @@ class RawPosition(dj.Imported):
             ]
         )
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        raise NotImplementedError(
-            "fetch_nwb now operates on RawPosition.Object"
-        )
+    def fetch_nwb(self, *attrs, **kwargs) -> list:
+        """
+        Returns a condatenated list of nwb objects from RawPosition.PosObject
+        """
+        ret = []
+        for pos_obj in self.PosObject:
+            ret.append([nwb for nwb in pos_obj.fetch_nwb(*attrs, **kwargs)])
+        return ret
 
     def fetch1_dataframe(self):
-        raise NotImplementedError(
-            "fetch1_dataframe now operates on RawPosition.Object"
-        )
+        """Returns a dataframe with all RawPosition.PosObject items.
+
+        Uses interval_list_name as column index.
+        """
+        ret = {}
+
+        pos_obj_set = self.PosObject & self.restriction
+        unique_intervals = set(pos_obj_set.fetch("interval_list_name"))
+
+        for interval in unique_intervals:
+            ret[interval] = (
+                pos_obj_set & {"interval_list_name": interval}
+            ).fetch1_dataframe()
+
+        if len(unique_intervals) == 1:
+            return next(iter(ret.values()))
+
+        return pd.concat(ret, axis=1)
 
 
 @schema
