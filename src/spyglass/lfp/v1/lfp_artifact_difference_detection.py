@@ -247,7 +247,7 @@ def _check_artifact_thresholds(
     for t in signal_thresholds:
         if t < 0:
             raise ValueError(
-                f"Amplitude thresholds must be >= 0, or None. Recieved {t}"
+                f"Amplitude thresholds must be >= 0, or None. Received {t}"
             )
 
     bound_warn = (
