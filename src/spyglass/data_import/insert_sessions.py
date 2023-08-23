@@ -31,7 +31,9 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         if "/" in nwb_file_name:
             nwb_file_name = nwb_file_name.split("/")[-1]
 
-        nwb_file_abs_path = Path(Nwbfile.get_abs_path(nwb_file_name))
+        nwb_file_abs_path = Path(
+            Nwbfile.get_abs_path(nwb_file_name, new_file=True)
+        )
 
         if not nwb_file_abs_path.exists():
             possible_matches = sorted(Path(raw_dir).glob(f"*{nwb_file_name}*"))
@@ -86,12 +88,14 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
         + f"with link to raw ephys data: {out_nwb_file_name}"
     )
 
-    nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+    nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name, new_file=True)
 
     if not os.path.exists(nwb_file_abs_path):
         raise FileNotFoundError(f"Could not find raw file: {nwb_file_abs_path}")
 
-    out_nwb_file_abs_path = Nwbfile.get_abs_path(out_nwb_file_name)
+    out_nwb_file_abs_path = Nwbfile.get_abs_path(
+        out_nwb_file_name, new_file=True
+    )
 
     if os.path.exists(out_nwb_file_name):
         warnings.warn(

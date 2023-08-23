@@ -180,10 +180,10 @@ class TrodesPosV1(dj.Computed):
         )
 
         position_info_parameters = (TrodesPosParams() & key).fetch1("params")
-        spatial_series = (RawPosition.Object & key).fetch_nwb()[0][
+        spatial_series = (RawPosition.PosObject & key).fetch_nwb()[0][
             "raw_position"
         ]
-        spatial_df = (RawPosition.Object & key).fetch1_dataframe()
+        spatial_df = (RawPosition.PosObject & key).fetch1_dataframe()
         video_frame_ind = getattr(spatial_df, "video_frame_ind", None)
 
         position = pynwb.behavior.Position()
@@ -295,8 +295,8 @@ class TrodesPosV1(dj.Computed):
     def calculate_position_info_from_spatial_series(
         spatial_df: pd.DataFrame,
         meters_to_pixels: float,
-        max_separation,
-        max_speed,
+        max_LED_separation,
+        max_plausible_speed,
         speed_smoothing_std_dev,
         position_smoothing_duration,
         orient_smoothing_std_dev,
@@ -528,7 +528,7 @@ class TrodesPosVideo(dj.Computed):
 
         print("Loading position data...")
         raw_position_df = (
-            RawPosition.Object
+            RawPosition.PosObject
             & {
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],

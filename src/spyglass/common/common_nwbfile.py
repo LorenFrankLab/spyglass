@@ -87,7 +87,7 @@ class Nwbfile(dj.Manual):
         return {"nwb_file_name": cls._get_file_name(nwb_file_name)}
 
     @classmethod
-    def get_abs_path(cls, nwb_file_name) -> str:
+    def get_abs_path(cls, nwb_file_name, new_file=False) -> str:
         """Return absolute path for a stored raw NWB file given file name.
 
         The SPYGLASS_BASE_DIR must be set, either as an environment or part of
@@ -98,12 +98,17 @@ class Nwbfile(dj.Manual):
         nwb_file_name : str
             The name of an NWB file that has been inserted into the Nwbfile()
             table. May be file substring. May include % wildcard(s).
+        new_file : bool, optional
+            Adding a new file to Nwbfile table. Defaults to False.
 
         Returns
         -------
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
+        if new_file:
+            return raw_dir + "/" + nwb_file_name
+
         return raw_dir + "/" + cls._get_file_name(nwb_file_name)
 
     @staticmethod

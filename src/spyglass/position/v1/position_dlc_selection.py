@@ -9,6 +9,9 @@ from datajoint.utils import to_camel_case
 from tqdm import tqdm as tqdm
 
 from ...common.common_nwbfile import AnalysisNwbfile
+from ...common.common_behav import (
+    convert_epoch_interval_name_to_position_interval_name,
+)
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import get_video_path, make_video
 from .position_dlc_centroid import DLCCentroid
@@ -323,7 +326,16 @@ class DLCPosVideo(dj.Computed):
         if "video_params" not in params:
             params["video_params"] = {}
         M_TO_CM = 100
-        key["interval_list_name"] = f"pos {key['epoch']-1} valid times"
+        interval_list_name = (
+            convert_epoch_interval_name_to_position_interval_name(
+                {
+                    "nwb_file_name": key["nwb_file_name"],
+                    "epoch": key["epoch"],
+                },
+                populate_missing=False,
+            )
+        )
+        key["interval_list_name"] = interval_list_name
         epoch = (
             int(
                 key["interval_list_name"]
