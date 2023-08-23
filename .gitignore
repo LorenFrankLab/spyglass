@@ -167,7 +167,7 @@ temp_nwb/*s
 *.json
 *.gz
 *.pdf
-dj_local_conf.json
+dj_local_con*.json
 !dj_local_conf_example.json
 
 !/.vscode/extensions.json

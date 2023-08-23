@@ -143,7 +143,7 @@ class PositionSource(dj.Manual):
 
 
 @schema
-class PosObject(dj.Imported):
+class RawPosition(dj.Imported):
     """
 
     Notes
