@@ -128,7 +128,7 @@ theta_band_selected = theta_band.data[:, electrode_index]
 #
 # We can overlay theta and detected phase for each electrode.
 #
-# _Note:_ The red horizontal line indicates phase 0, corresponding to the trough
+# _Note:_ The red horizontal line indicates phase 0, corresponding to the through
 # of theta.
 
 # +
