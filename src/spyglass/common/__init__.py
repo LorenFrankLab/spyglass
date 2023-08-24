@@ -11,7 +11,6 @@ from ..utils.nwb_helper_fn import (
     get_raw_eseries,
     get_valid_intervals,
 )
-from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import (
     PositionSource,
     RawPosition,
