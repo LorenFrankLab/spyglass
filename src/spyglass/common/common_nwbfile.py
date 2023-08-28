@@ -59,7 +59,7 @@ class Nwbfile(dj.Manual):
         nwb_file_name : str
             The relative path to the NWB file.
         """
-        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name, new_file=True)
         assert os.path.exists(
             nwb_file_abs_path
         ), f"File does not exist: {nwb_file_abs_path}"

@@ -48,8 +48,8 @@ class TrodesPosParams(dj.Manual):
     @property
     def default_params(self):
         return {
-            "max_separation": 9.0,
-            "max_speed": 300.0,
+            "max_LED_separation": 9.0,
+            "max_plausible_speed": 300.0,
             "position_smoothing_duration": 0.125,
             "speed_smoothing_std_dev": 0.100,
             "orient_smoothing_std_dev": 0.001,

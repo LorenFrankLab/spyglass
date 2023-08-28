@@ -57,7 +57,7 @@ class PositionSource(dj.Manual):
         """
         nwbf = get_nwb_file(nwb_file_name)
         all_pos = get_all_spatial_series(nwbf, verbose=True)
-        sess_key = dict(nwb_file_name=nwb_file_name)
+        sess_key = Nwbfile.get_file_key(nwb_file_name)
         src_key = dict(**sess_key, source="trodes", import_file_name="")
 
         if all_pos is None:
@@ -119,9 +119,9 @@ class PositionSource(dj.Manual):
             )
         return f"pos {epoch_num} valid times"
 
-    @classmethod
-    def _is_valid_name(self, name) -> bool:
-        return name.startswith("pos ") and not name.endswith(" valid times")
+    @staticmethod
+    def _is_valid_name(name) -> bool:
+        return name.startswith("pos ") and name.endswith(" valid times")
 
     @staticmethod
     def get_epoch_num(name: str) -> int:
@@ -137,7 +137,7 @@ class PositionSource(dj.Manual):
         int
             epoch number
         """
-        if not self._is_valid_name(name):
+        if not PositionSource._is_valid_name(name):
             raise ValueError(f"Invalid interval name: {name}")
         return int(name.replace("pos ", "").replace(" valid times", ""))
 
@@ -226,10 +226,7 @@ class RawPosition(dj.Imported):
         """
         Returns a condatenated list of nwb objects from RawPosition.PosObject
         """
-        ret = []
-        for pos_obj in self.PosObject:
-            ret.append([nwb for nwb in pos_obj.fetch_nwb(*attrs, **kwargs)])
-        return ret
+        return self.PosObject().fetch_nwb(*attrs, **kwargs)
 
     def fetch1_dataframe(self):
         """Returns a dataframe with all RawPosition.PosObject items.
@@ -501,6 +498,8 @@ class PositionIntervalMap(dj.Computed):
 
             if len(pos_times) == 0:
                 continue
+
+            pos_times = pos_times[0]
 
             if all(
                 [
