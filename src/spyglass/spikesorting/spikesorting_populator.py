@@ -29,7 +29,7 @@ def spikesorting_pipeline_populator(
     nwb_file_name: str,
     team_name: str,
     fig_url_repo: str,
-    interval_list_name: str = None,
+    interval_list_name: str,
     sort_interval_name: str = None,
     artifact_parameters: str = "ampl_2000_prop_75",
     preproc_params_name: str = "franklab_tetrode_hippocampus",
@@ -49,8 +49,8 @@ def spikesorting_pipeline_populator(
         Which team to assign the spike sorting to
     fig_url_repo : str
         Whewre to store the curation figurl json files (e.x. 'gh://LorenFrankLab/sorting-curations/main/sambray/')
-    interval_list_name : str, default None
-        if provided, will create a sort interval for the given interval with the same name
+    interval_list_name : str,
+        if sort_interval_name not provided, will create a sort interval for the given interval with the same name
     sort_interval_name : str, default None
         if provided, will use the given sort interval, requires making this interval yourself
 
@@ -87,10 +87,7 @@ def spikesorting_pipeline_populator(
 
     # Define sort interval
     if sort_interval_name is not None:
-        if interval_list_name is not None:
-            print(
-                f"Warning: interval_list_name will be ignored, using sort interval {sort_interval_name}"
-            )
+        print(f"Using sort interval {sort_interval_name}")
         if (
             len(
                 SortInterval()
@@ -101,8 +98,8 @@ def spikesorting_pipeline_populator(
             )
             == 0
         ):
-            raise ValueError(f"Sort interval {sort_interval_name} not found")
-    elif interval_list_name is not None:
+            raise KeyError(f"Sort interval {sort_interval_name} not found")
+    else:
         print(f"Generating sort interval from {interval_list_name}")
         interval_list = (
             IntervalList
@@ -120,10 +117,6 @@ def spikesorting_pipeline_populator(
                 "sort_interval": sort_interval,
             },
             skip_duplicates=True,
-        )
-    else:
-        raise ValueError(
-            "Must provide either interval_list_name or sort_interval_name"
         )
 
     # make spike sorting recording
