@@ -1,3 +1,4 @@
+import datajoint as dj
 from ..common import IntervalList
 from .spikesorting_recording import (
     SortGroup,
@@ -24,6 +25,23 @@ from .spikesorting_curation import (
 )
 from .curation_figurl import CurationFigurlSelection, CurationFigurl
 
+schema = dj.schema("spikesorting_sorting")
+
+
+@schema
+class SpikeSortingPipelineParameters(dj.Manual):
+    definition = """
+    pipeline_parameters_name: varchar(200)
+    ---
+    preproc_params_name: varchar(200)
+    artifact_parameters: varchar(200)
+    sorter: varchar(200)
+    sorter_params_name: varchar(200)
+    waveform_params_name: varchar(200)
+    metric_params_name: varchar(200)
+    auto_curation_params_name: varchar(200)
+    """
+
 
 def spikesorting_pipeline_populator(
     nwb_file_name: str,
@@ -31,6 +49,7 @@ def spikesorting_pipeline_populator(
     fig_url_repo: str,
     interval_list_name: str,
     sort_interval_name: str = None,
+    pipeline_parameters_name: str = None,
     artifact_parameters: str = "ampl_2000_prop_75",
     preproc_params_name: str = "franklab_tetrode_hippocampus",
     sorter: str = "mountainsort4",
@@ -48,12 +67,13 @@ def spikesorting_pipeline_populator(
     team_name : str
         Which team to assign the spike sorting to
     fig_url_repo : str
-        Whewre to store the curation figurl json files (e.x. 'gh://LorenFrankLab/sorting-curations/main/sambray/')
+        Whewre to store the curation figurl json files (e.x. 'gh://LorenFrankLab/sorting-curations/main/sambray/'), leave empty string to skip figurl
     interval_list_name : str,
         if sort_interval_name not provided, will create a sort interval for the given interval with the same name
     sort_interval_name : str, default None
         if provided, will use the given sort interval, requires making this interval yourself
-
+    pipeline_parameters_name : str, optional
+        If provided, will lookup pipeline parameters from the SpikeSortingPipelineParameters table, superceeds other values provided, by default None
     artifact_parameters : str, optional
         parameter set for artifact detection, by default "ampl_2000_prop_75"
     preproc_params_name : str, optional
@@ -63,12 +83,44 @@ def spikesorting_pipeline_populator(
     sorter_params_name : str, optional
         parameters for the spike sorting algorithm, by default "franklab_tetrode_hippocampus_30KHz_tmp"
     waveform_params_name : str, optional
-        Parameters for spike waveform extraction, by default "default_whitened"
+        Parameters for spike waveform extraction. If empty string, will skip automatic curation steps, by default "default_whitened"
     metric_params_name : str, optional
-        Parameters defining which QualityMetrics to calculate and how, by default "peak_offest_num_spikes_2"
+        Parameters defining which QualityMetrics to calculate and how. If empty string, will skip automatic curation steps, by default "peak_offest_num_spikes_2"
     auto_curation_params_name : str, optional
-        Thresholds applied to Quality metrics for automatic unit curation, by default "mike_noise_03_offset_2_isi_0025_mua"
+        Thresholds applied to Quality metrics for automatic unit curation. If empty string, will skip automatic curation steps, by default "mike_noise_03_offset_2_isi_0025_mua"
     """
+
+    # Define pipeline parameters
+    if pipeline_parameters_name is not None:
+        print(f"Using pipeline parameters {pipeline_parameters_name}")
+        artifact_parameters = (
+            SpikeSortingPipelineParameters
+            & {"pipeline_parameters_name": pipeline_parameters_name}
+        ).fetch1("artifact_parameters")
+        preproc_params_name = (
+            SpikeSortingPipelineParameters
+            & {"pipeline_parameters_name": pipeline_parameters_name}
+        ).fetch1("preproc_params_name")
+        sorter = (
+            SpikeSortingPipelineParameters
+            & {"pipeline_parameters_name": pipeline_parameters_name}
+        ).fetch1("sorter")
+        sorter_params_name = (
+            SpikeSortingPipelineParameters
+            & {"pipeline_parameters_name": pipeline_parameters_name}
+        ).fetch1("sorter_params_name")
+        waveform_params_name = (
+            SpikeSortingPipelineParameters
+            & {"pipeline_parameters_name": pipeline_parameters_name}
+        ).fetch1("waveform_params_name")
+        metric_params_name = (
+            SpikeSortingPipelineParameters
+            & {"pipeline_parameters_name": pipeline_parameters_name}
+        ).fetch1("metric_params_name")
+        auto_curation_params_name = (
+            SpikeSortingPipelineParameters
+            & {"pipeline_parameters_name": pipeline_parameters_name}
+        ).fetch1("auto_curation_params_name")
 
     ## Sorting
     ## Sort groups
@@ -185,7 +237,7 @@ def spikesorting_pipeline_populator(
     ## Curation Figurl
 
     # initial curation
-    print("Begginning curation")
+    print("Beginning curation")
     sorting_key_list = (
         SpikeSorting()
         & {
@@ -196,111 +248,138 @@ def spikesorting_pipeline_populator(
     for sorting_key in sorting_key_list:
         Curation.insert_curation(sorting_key)
 
-    # Extract waveforms
-    print("Extracting waveforms")
-    curation_key_list = (
-        Curation()
-        & {
-            "nwb_file_name": nwb_file_name,
-            "sort_interval_name": sort_interval_name,
-        }
-    ).fetch("KEY")
-    for curation_key in curation_key_list:
-        curation_key["waveform_params_name"] = waveform_params_name
-        WaveformSelection.insert1(curation_key, skip_duplicates=True)
-    wave_pj = (
-        WaveformSelection()
-        & {
-            "nwb_file_name": nwb_file_name,
-            "sort_interval_name": sort_interval_name,
-        }
-    ).proj()
-    Waveforms.populate([wave_pj])
+    # Calculate quality metrics and perform automatic curation if specified
+    if (
+        len(waveform_params_name) > 0
+        and len(metric_params_name) > 0
+        and len(auto_curation_params_name) > 0
+    ):
+        # Extract waveforms
+        print("Extracting waveforms")
+        curation_key_list = (
+            Curation()
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_interval_name": sort_interval_name,
+            }
+        ).fetch("KEY")
+        for curation_key in curation_key_list:
+            curation_key["waveform_params_name"] = waveform_params_name
+            WaveformSelection.insert1(curation_key, skip_duplicates=True)
+        wave_pj = (
+            WaveformSelection()
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_interval_name": sort_interval_name,
+            }
+        ).proj()
+        Waveforms.populate([wave_pj])
 
-    # Quality Metrics
-    print("Calculating quality metrics")
-    waveform_key_list = (
-        Waveforms()
-        & {
-            "nwb_file_name": nwb_file_name,
-            "sort_interval_name": sort_interval_name,
-        }
-    ).fetch("KEY")
-    for waveform_key in waveform_key_list:
-        waveform_key["metric_params_name"] = metric_params_name
-        MetricSelection.insert1(waveform_key, skip_duplicates=True)
-    metrics_pj = (
-        MetricSelection()
-        & {
-            "nwb_file_name": nwb_file_name,
-            "sort_interval_name": sort_interval_name,
-        }
-    ).proj()
-    QualityMetrics().populate([metrics_pj])
+        # Quality Metrics
+        print("Calculating quality metrics")
+        waveform_key_list = (
+            Waveforms()
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_interval_name": sort_interval_name,
+            }
+        ).fetch("KEY")
+        for waveform_key in waveform_key_list:
+            waveform_key["metric_params_name"] = metric_params_name
+            MetricSelection.insert1(waveform_key, skip_duplicates=True)
+        metrics_pj = (
+            MetricSelection()
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_interval_name": sort_interval_name,
+            }
+        ).proj()
+        QualityMetrics().populate([metrics_pj])
 
-    # Automatic Curation
-    print("Creating automatic curation")
-    metric_key_list = (
-        QualityMetrics()
-        & {
-            "nwb_file_name": nwb_file_name,
-            "sort_interval_name": sort_interval_name,
-        }
-    ).fetch("KEY")
-    for metric_key in metric_key_list:
-        metric_key["auto_curation_params_name"] = auto_curation_params_name
-        AutomaticCurationSelection.insert1(metric_key, skip_duplicates=True)
-    auto_pj = (
-        AutomaticCurationSelection
-        & {
-            "nwb_file_name": nwb_file_name,
-            "sort_interval_name": sort_interval_name,
-        }
-    ).proj()
-    AutomaticCuration().populate([auto_pj])
+        # Automatic Curation
+        print("Creating automatic curation")
+        metric_key_list = (
+            QualityMetrics()
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_interval_name": sort_interval_name,
+            }
+        ).fetch("KEY")
+        for metric_key in metric_key_list:
+            metric_key["auto_curation_params_name"] = auto_curation_params_name
+            AutomaticCurationSelection.insert1(metric_key, skip_duplicates=True)
+        auto_pj = (
+            AutomaticCurationSelection
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_interval_name": sort_interval_name,
+            }
+        ).proj()
+        AutomaticCuration().populate([auto_pj])
 
-    # Curated Spike Sorting
-    print("Creating curated spike sorting")
-    auto_key_list = (
-        AutomaticCuration()
-        & {
-            "nwb_file_name": nwb_file_name,
-            "sort_interval_name": sort_interval_name,
-        }
-    ).fetch("auto_curation_key")
-    for auto_key in auto_key_list:
-        curation_auto_key = (Curation() & auto_key).fetch1("KEY")
-        CuratedSpikeSortingSelection.insert1(
-            curation_auto_key, skip_duplicates=True
-        )
+        # get curation keys of the automatic curation to populate into curated spike sorting selection
+        # Curated Spike Sorting
+        print("Creating curated spike sorting")
+        auto_key_list = (
+            AutomaticCuration()
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_interval_name": sort_interval_name,
+            }
+        ).fetch("auto_curation_key")
+        for auto_key in auto_key_list:
+            curation_auto_key = (Curation() & auto_key).fetch1("KEY")
+            CuratedSpikeSortingSelection.insert1(
+                curation_auto_key, skip_duplicates=True
+            )
+
+    else:
+        # Perform no automatic curation, just populate curated spike sorting selection with the initial curation.
+        # Used in case of clusterless decoding
+        print("Creating curated spike sorting")
+        # list of just initial curations
+        curation_key_list = (
+            Curation()
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_interval_name": sort_interval_name,
+            }
+        ).fetch("KEY")
+        for curation_key in curation_key_list:
+            CuratedSpikeSortingSelection.insert1(
+                curation_auto_key, skip_duplicates=True
+            )
+
+    # Populate curated spike sorting
     cur_proj = CuratedSpikeSortingSelection() & {
         "nwb_file_name": nwb_file_name,
         "sort_interval_name": sort_interval_name,
     }
     CuratedSpikeSorting.populate([cur_proj])
 
-    # Curation Figurl
-    print("Creating curation figurl")
-    sort_interval_name = interval_list_name + f"_entire"
-    for auto_id in (
-        AutomaticCuration()
-        & {
-            "nwb_file_name": nwb_file_name,
-            "sort_interval_name": sort_interval_name,
-        }
-    ).fetch("auto_curation_key"):
-        tetrode = auto_id["sort_group_id"]
-        session_id = nwb_file_name + "_" + sort_interval_name
-        github_url = (
-            fig_url_repo
-            + str(session_id)
-            + "/"
-            + str(tetrode)
-            + "/curation.json"
-        )
-        auto_curation_out_key = (Curation() & auto_id).fetch1("KEY")
-        auto_curation_out_key["new_curation_uri"] = github_url
-        CurationFigurlSelection.insert1(
-            auto_curation_out_key, skip_duplicates=True
-        )
-        CurationFigurl.populate(auto_curation_out_key)
+    if len(fig_url_repo) > 0:
+        # Curation Figurl
+        print("Creating curation figurl")
+        sort_interval_name = interval_list_name + f"_entire"
+        for auto_id in (
+            AutomaticCuration()
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_interval_name": sort_interval_name,
+            }
+        ).fetch("auto_curation_key"):
+            tetrode = auto_id["sort_group_id"]
+            session_id = nwb_file_name + "_" + sort_interval_name
+            github_url = (
+                fig_url_repo
+                + str(session_id)
+                + "/"
+                + str(tetrode)
+                + "/curation.json"
+            )
+            auto_curation_out_key = (Curation() & auto_id).fetch1("KEY")
+            auto_curation_out_key["new_curation_uri"] = github_url
+            CurationFigurlSelection.insert1(
+                auto_curation_out_key, skip_duplicates=True
+            )
+            CurationFigurl.populate(auto_curation_out_key)
