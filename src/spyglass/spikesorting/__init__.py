@@ -34,3 +34,5 @@ from .spikesorting_sorting import (
 )
 
 from .curation_figurl import CurationFigurlSelection, CurationFigurl
+
+from .spikesorting_populator import spikesorting_pipeline_populator
