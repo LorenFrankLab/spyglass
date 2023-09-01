@@ -282,6 +282,13 @@ def _get_artifact_times(
         )
 
     # compute set difference between intervals (of indices)
+    try:
+        # if artifact_intervals_new is a list of lists then len(artifact_intervals_new[0]) is the number of intervals
+        # otherwise artifact_intervals_new is a list of ints and len(artifact_intervals_new[0]) is not defined
+        len(artifact_intervals_new[0])
+    except TypeError:
+        # convert to list of lists
+        artifact_intervals_new = [artifact_intervals_new]
     artifact_removed_valid_times_ind = interval_set_difference_inds(
         [(0, len(valid_timestamps) - 1)], artifact_intervals_new
     )

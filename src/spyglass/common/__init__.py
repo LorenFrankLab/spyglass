@@ -11,12 +11,13 @@ from ..utils.nwb_helper_fn import (
     get_raw_eseries,
     get_valid_intervals,
 )
-from .common_backup import CuratedSpikeSortingBackUp, SpikeSortingBackUp
 from .common_behav import (
     PositionSource,
     RawPosition,
     StateScriptFile,
     VideoFile,
+    PositionIntervalMap,
+    convert_epoch_interval_name_to_position_interval_name,
 )
 from .common_device import (
     CameraDevice,

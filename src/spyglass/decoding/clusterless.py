@@ -41,8 +41,10 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.utils.dj_helper_fn import fetch_nwb
-from spyglass.decoding.core import (
+from spyglass.common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
+)
+from spyglass.decoding.core import (
     convert_valid_times_to_slice,
     get_valid_ephys_position_times_by_epoch,
 )
@@ -733,7 +735,10 @@ def get_decoding_data_for_epoch(
     valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
     position_interval_name = (
         convert_epoch_interval_name_to_position_interval_name(
-            interval_list_name
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_list_name,
+            }
         )
     )
 

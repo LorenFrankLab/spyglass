@@ -9,6 +9,8 @@ def mad_artifact_detector(
     proportion_above_thresh: float = 0.1,
     removal_window_ms: float = 10.0,
     sampling_frequency: float = 1000.0,
+    *args,
+    **kwargs,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Detect LFP artifacts using the median absolute deviation method.
 
