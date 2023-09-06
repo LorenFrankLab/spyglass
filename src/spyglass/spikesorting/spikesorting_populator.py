@@ -1,5 +1,5 @@
 import datajoint as dj
-from ..common import IntervalList
+from ..common import IntervalList, ElectrodeGroup
 from .spikesorting_recording import (
     SortGroup,
     SortInterval,
@@ -50,6 +50,7 @@ def spikesorting_pipeline_populator(
     interval_list_name: str,
     sort_interval_name: str = None,
     pipeline_parameters_name: str = None,
+    probe_restriction: dict = {},
     artifact_parameters: str = "ampl_2000_prop_75",
     preproc_params_name: str = "franklab_tetrode_hippocampus",
     sorter: str = "mountainsort4",
@@ -74,6 +75,8 @@ def spikesorting_pipeline_populator(
         if provided, will use the given sort interval, requires making this interval yourself
     pipeline_parameters_name : str, optional
         If provided, will lookup pipeline parameters from the SpikeSortingPipelineParameters table, superceeds other values provided, by default None
+    restrict_probe_type : dict, optional
+        Restricts analysis to sort groups with matching keys. Can use keys from the SortGroup and ElectrodeGroup Tables (e.g. electrode_group_name, probe_id, target_hemisphere), by default {}
     artifact_parameters : str, optional
         parameter set for artifact detection, by default "ampl_2000_prop_75"
     preproc_params_name : str, optional
@@ -133,9 +136,12 @@ def spikesorting_pipeline_populator(
     if len(SortGroup() & {"nwb_file_name": nwb_file_name}) == 0:
         print("Generating sort groups")
         SortGroup().set_group_by_shank(nwb_file_name)
-    sort_group_id_list = (SortGroup & {"nwb_file_name": nwb_file_name}).fetch(
-        "sort_group_id"
-    )
+    # find desired sort group(s) for these settings
+    sort_group_id_list = (
+        (SortGroup.SortGroupElectrode * ElectrodeGroup)
+        & {"nwb_file_name": nwb_file_name}
+        & probe_restriction
+    ).fetch("sort_group_id")
 
     # Define sort interval
     if sort_interval_name is not None:
