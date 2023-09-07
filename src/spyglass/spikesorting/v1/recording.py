@@ -71,7 +71,7 @@ class SortGroup(dj.Manual):
         """
         # get the electrodes from this NWB file
         electrodes = (
-            Electrode()
+            Electrode
             & {"nwb_file_name": nwb_file_name}
             & {"bad_channel": "False"}
         ).fetch()
@@ -157,10 +157,10 @@ class SortGroup(dj.Manual):
                         f"Omitting electrode group {e_group}, shank {shank} from sort groups because unitrode."
                     )
                     continue
-                cls.insert1(sg_key)
+                cls.insert1(sg_key, skip_duplicates=True)
                 for elect in shank_elect:
                     sge_key["electrode_id"] = elect
-                    cls.SortGroupElectrode.insert1(sge_key)
+                    cls.SortGroupElectrode.insert1(sge_key, skip_duplicates=True)
                 sort_group += 1
 
     def set_group_by_electrode_group(self, nwb_file_name: str):
@@ -309,7 +309,7 @@ class SortGroup(dj.Manual):
 
 
 @schema
-class SpikeSortingPreprocessingParameter(dj.Manual):
+class SpikeSortingPreprocessingParameter(dj.Lookup):
     definition = """
     # Parameter for denoising (filtering and referencing/whitening) recording
     # prior to spike sorting
@@ -317,23 +317,18 @@ class SpikeSortingPreprocessingParameter(dj.Manual):
     ---
     preproc_param: blob
     """
-
-    def insert_default(self):
-        # set up the default filter parameters
-        freq_min = 300  # high pass filter value
-        freq_max = 6000  # low pass filter value
-        margin_ms = 5  # margin in ms on border to avoid border effect
-        seed = 0  # random seed for whitening
-
-        key = dict()
-        key["preproc_params_name"] = "default"
-        key["preproc_params"] = {
+    default_param_name = 'default'
+    default_param = {
             "frequency_min": freq_min,
             "frequency_max": freq_max,
             "margin_ms": margin_ms,
             "seed": seed,
         }
-        self.insert1(key, skip_duplicates=True)
+    contents = [
+        [default_param_name, default_param]
+    ]
+    def insert_default(self):
+        self.insert1([default_param_name, default_param], skip_duplicates=True)
 
 
 @schema
