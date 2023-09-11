@@ -562,8 +562,8 @@ def create_interactive_1D_decoding_figurl(
 
 
 def create_interactive_2D_decoding_figurl(
-    track_bin_centers: np.ndarray,
-    track_bin_dimensions: np.ndarray,
+    interior_place_bin_centers: np.ndarray,
+    place_bin_size: np.ndarray,
     position_info: pd.DataFrame,
     marks: xr.DataArray,
     results: xr.Dataset,
@@ -577,8 +577,8 @@ def create_interactive_2D_decoding_figurl(
     decode_view = create_2D_decode_view(
         position_time=position_info.index,
         position=position_info[position_name],
-        track_bin_centers=track_bin_centers,
-        track_bin_dimensions=track_bin_dimensions,
+        interior_place_bin_centers=interior_place_bin_centers,
+        place_bin_size=place_bin_size,
         posterior=results[posterior_type].sum("state"),
         head_dir=position_info[head_direction_name],
     )

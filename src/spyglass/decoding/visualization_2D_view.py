@@ -269,8 +269,8 @@ def get_ul_corners(width: float, height: float, centers):
 def create_2D_decode_view(
     position_time: np.ndarray,
     position: np.ndarray,
-    track_bin_centers: np.ndarray,
-    track_bin_dimensions: np.ndarray,
+    interior_place_bin_centers: np.ndarray,
+    place_bin_size: np.ndarray,
     posterior: xr.DataArray,
     head_dir: np.ndarray = None,
 ) -> vvf.TrackPositionAnimationV1:
@@ -280,8 +280,8 @@ def create_2D_decode_view(
     ----------
     position_time : np.ndarray, shape (n_time,)
     position : np.ndarray, shape (n_time, 2)
-    track_bin_centers: np.ndarray, shape (n_track_bins, 2)
-    track_bin_dimensions : np.ndarray, shape (2, 1)
+    interior_place_bin_centers: np.ndarray, shape (n_track_bins, 2)
+    place_bin_size : np.ndarray, shape (2, 1)
     posterior : xr.DataArray, shape (n_time, n_position_bins)
     head_dir : np.ndarray, optional
 
@@ -302,11 +302,11 @@ def create_2D_decode_view(
     if head_dir is not None:
         head_dir = np.squeeze(np.asarray(head_dir))
 
-    track_bin_width = track_bin_dimensions[0]
-    track_bin_height = track_bin_dimensions[1]
+    track_bin_width = place_bin_size[0]
+    track_bin_height = place_bin_size[1]
     # NOTE: We expect caller to have converted from fortran ordering already
     # i.e. somewhere upstream, centers = env.place_bin_centers_[env.is_track_interior_.ravel(oder="F")]
-    upper_left_points = get_ul_corners(track_bin_width, track_bin_height, track_bin_centers)
+    upper_left_points = get_ul_corners(track_bin_width, track_bin_height, interior_place_bin_centers)
 
     data = create_static_track_animation(
         ul_corners=upper_left_points,
