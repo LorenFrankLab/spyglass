@@ -306,7 +306,9 @@ def create_2D_decode_view(
     track_bin_height = place_bin_size[1]
     # NOTE: We expect caller to have converted from fortran ordering already
     # i.e. somewhere upstream, centers = env.place_bin_centers_[env.is_track_interior_.ravel(order="F")]
-    upper_left_points = get_ul_corners(track_bin_width, track_bin_height, interior_place_bin_centers)
+    upper_left_points = get_ul_corners(
+        track_bin_width, track_bin_height, interior_place_bin_centers
+    )
 
     data = create_static_track_animation(
         ul_corners=upper_left_points,
