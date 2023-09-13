@@ -1,3 +1,4 @@
+from .curation_figurl import CurationFigurl, CurationFigurlSelection
 from .sortingview import SortingviewWorkspace, SortingviewWorkspaceSelection
 from .spikesorting_artifact import (
     ArtifactDetection,
@@ -20,6 +21,10 @@ from .spikesorting_curation import (
     Waveforms,
     WaveformSelection,
 )
+from .spikesorting_populator import (
+    SpikeSortingPipelineParameters,
+    spikesorting_pipeline_populator,
+)
 from .spikesorting_recording import (
     SortGroup,
     SortInterval,
@@ -32,5 +37,3 @@ from .spikesorting_sorting import (
     SpikeSorting,
     SpikeSortingSelection,
 )
-
-from .curation_figurl import CurationFigurlSelection, CurationFigurl
