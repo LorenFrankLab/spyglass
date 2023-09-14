@@ -243,7 +243,7 @@ def spikesorting_pipeline_populator(
         # Automatic Curation
         print("Creating automatic curation")
         metric_keys = [
-            {**k, "auto_curation_name": auto_curation_params_name}
+            {**k, "auto_curation_params_name": auto_curation_params_name}
             for k in (QualityMetrics() & sort_dict).fetch("KEY")
         ]
         AutomaticCurationSelection.insert(metric_keys, skip_duplicates=True)
