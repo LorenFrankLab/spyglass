@@ -109,6 +109,7 @@ class ArtifactInterval(dj.Computed):
         recording_analysis_nwb_file = (SpikeSortingRecording & key).fetch1(
             "analysis_nwb_file"
         )
+
         # DO:
         # - load recording
         # - detect artifacts
