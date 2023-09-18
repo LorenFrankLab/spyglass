@@ -36,4 +36,5 @@ dependencies:
       - pyyaml
       - click
       - "black[jupyter]"
+      - neuroconv
       - .

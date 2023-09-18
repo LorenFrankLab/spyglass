@@ -21,28 +21,53 @@ schema = dj.schema("spikesorting_v1_artifact")
 
 
 @schema
-class ArtifactDetectionParameter(dj.Manual):
+class ArtifactDetectionParameter(dj.Lookup):
     definition = """
-    # Parameter for detecting artifacts (high amplitude events)
-    artifact_param_name: varchar(200)
+    # Parameter for detecting artifacts (non-neural high amplitude events)
+    artifact_param_name : varchar(200)
     ---
-    artifact_param: blob  # dictionary
+    artifact_param : blob
     """
 
-    def insert_default(self):
+    zscore_thresh = None  # must be None or >= 0
+    amplitude_thresh = 3000  # must be None or >= 0
+    proportion_above_thresh = (
+        1.0  # margin in ms on border to avoid border effect
+    )
+    removal_window_ms = 1.0  # in milliseconds
+
+    contents = [
+        [
+            "default",
+            {
+                "zscore_thresh": zscore_thresh,
+                "amplitude_thresh": amplitude_thresh,
+                "proportion_above_thresh": proportion_above_thresh,
+                "removal_window_ms": removal_window_ms,
+            },
+            "none",
+            {
+                "zscore_thresh": None,
+                "amplitude_thresh": None,
+            },
+        ]
+    ]
+
+    @classmethod
+    def insert_default(cls):
         """Insert the default artifact parameters with an appropriate parameter dict."""
         artifact_params = {}
         artifact_params["zscore_thresh"] = None  # must be None or >= 0
         artifact_params["amplitude_thresh"] = 3000  # must be None or >= 0
-        # all electrodes of sort group
         artifact_params["proportion_above_thresh"] = 1.0
         artifact_params["removal_window_ms"] = 1.0  # in milliseconds
-        self.insert1(["default", artifact_params], skip_duplicates=True)
 
         artifact_params_none = {}
         artifact_params_none["zscore_thresh"] = None
         artifact_params_none["amplitude_thresh"] = None
-        self.insert1(["none", artifact_params_none], skip_duplicates=True)
+
+        cls.insert1(["default", artifact_params], skip_duplicates=True)
+        cls.insert1(["none", artifact_params_none], skip_duplicates=True)
 
 
 @schema
@@ -65,71 +90,66 @@ class ArtifactIntervalV1(dj.Computed):
     """
 
     def make(self, key):
-        if not (ArtifactDetectionSelection & key).fetch1(
-            "custom_artifact_detection"
-        ):
-            # get the dict of artifact params associated with this artifact_params_name
-            artifact_params = (ArtifactDetectionParameters & key).fetch1(
-                "artifact_params"
-            )
+        # FETCH:
+        # - artifact parameters
+        artifact_params = (ArtifactDetectionParameter & key).fetch1(
+            "artifact_params"
+        )
+        recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
+        recording_name = SpikeSortingRecording._get_recording_name(key)
+        recording = si.load_extractor(recording_path)
 
-            recording_path = (SpikeSortingRecording & key).fetch1(
-                "recording_path"
-            )
-            recording_name = SpikeSortingRecording._get_recording_name(key)
-            recording = si.load_extractor(recording_path)
+        job_kwargs = {
+            "chunk_duration": "10s",
+            "n_jobs": 4,
+            "progress_bar": "True",
+        }
 
-            job_kwargs = {
-                "chunk_duration": "10s",
-                "n_jobs": 4,
-                "progress_bar": "True",
-            }
+        artifact_removed_valid_times, artifact_times = _get_artifact_times(
+            recording, **artifact_params, **job_kwargs
+        )
 
-            artifact_removed_valid_times, artifact_times = _get_artifact_times(
-                recording, **artifact_params, **job_kwargs
-            )
+        # NOTE: decided not to do this but to just create a single long segment; keep for now
+        # get artifact times by segment
+        # if AppendSegmentRecording, get artifact times for each segment
+        # if isinstance(recording, AppendSegmentRecording):
+        #     artifact_removed_valid_times = []
+        #     artifact_times = []
+        #     for rec in recording.recording_list:
+        #         rec_valid_times, rec_artifact_times = _get_artifact_times(rec, **artifact_params)
+        #         for valid_times in rec_valid_times:
+        #             artifact_removed_valid_times.append(valid_times)
+        #         for artifact_times in rec_artifact_times:
+        #             artifact_times.append(artifact_times)
+        #     artifact_removed_valid_times = np.asarray(artifact_removed_valid_times)
+        #     artifact_times = np.asarray(artifact_times)
+        # else:
+        #     artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
 
-            # NOTE: decided not to do this but to just create a single long segment; keep for now
-            # get artifact times by segment
-            # if AppendSegmentRecording, get artifact times for each segment
-            # if isinstance(recording, AppendSegmentRecording):
-            #     artifact_removed_valid_times = []
-            #     artifact_times = []
-            #     for rec in recording.recording_list:
-            #         rec_valid_times, rec_artifact_times = _get_artifact_times(rec, **artifact_params)
-            #         for valid_times in rec_valid_times:
-            #             artifact_removed_valid_times.append(valid_times)
-            #         for artifact_times in rec_artifact_times:
-            #             artifact_times.append(artifact_times)
-            #     artifact_removed_valid_times = np.asarray(artifact_removed_valid_times)
-            #     artifact_times = np.asarray(artifact_times)
-            # else:
-            #     artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
+        key["artifact_times"] = artifact_times
+        key["artifact_removed_valid_times"] = artifact_removed_valid_times
 
-            key["artifact_times"] = artifact_times
-            key["artifact_removed_valid_times"] = artifact_removed_valid_times
+        # set up a name for no-artifact times using recording id
+        key["artifact_removed_interval_list_name"] = (
+            recording_name
+            + "_"
+            + key["artifact_params_name"]
+            + "_artifact_removed_valid_times"
+        )
 
-            # set up a name for no-artifact times using recording id
-            key["artifact_removed_interval_list_name"] = (
-                recording_name
-                + "_"
-                + key["artifact_params_name"]
-                + "_artifact_removed_valid_times"
-            )
+        ArtifactRemovedIntervalList.insert1(key, replace=True)
 
-            ArtifactRemovedIntervalList.insert1(key, replace=True)
+        # also insert into IntervalList
+        tmp_key = {}
+        tmp_key["nwb_file_name"] = key["nwb_file_name"]
+        tmp_key["interval_list_name"] = key[
+            "artifact_removed_interval_list_name"
+        ]
+        tmp_key["valid_times"] = key["artifact_removed_valid_times"]
+        IntervalList.insert1(tmp_key, replace=True)
 
-            # also insert into IntervalList
-            tmp_key = {}
-            tmp_key["nwb_file_name"] = key["nwb_file_name"]
-            tmp_key["interval_list_name"] = key[
-                "artifact_removed_interval_list_name"
-            ]
-            tmp_key["valid_times"] = key["artifact_removed_valid_times"]
-            IntervalList.insert1(tmp_key, replace=True)
-
-            # insert into computed table
-            self.insert1(key)
+        # insert into computed table
+        self.insert1(key)
 
 
 def _get_artifact_times(

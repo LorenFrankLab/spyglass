@@ -58,6 +58,7 @@ dependencies = [
     "click",
     "spikeinterface>=0.98.2,<0.99",
     "ndx_franklab_novela>=0.1.0",
+    "neuroconv",
 ]
 dynamic = ["version"]
 
@@ -78,7 +79,7 @@ test = [
     "kachery-cloud",
 ]
 docs = [
-    "hatch",                 # Get version from env 
+    "hatch",                 # Get version from env
     "mike",                  # Docs versioning
     "mkdocs",                # Docs core
     "mkdocs-exclude",        # Docs exclude files

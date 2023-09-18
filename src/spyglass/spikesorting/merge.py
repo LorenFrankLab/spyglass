@@ -10,22 +10,6 @@ schema = dj.schema("spikesorting_merge")
 
 
 @schema
-class ArtifactOutput(_Merge):
-    definition = """
-    merge_id: uuid
-    ---
-    source: varchar(32)
-    """
-
-    class ArtifactIntervalV1(dj.Part):
-        definition = """
-        -> master
-        ---
-        -> ArtifactIntervalV1
-        """
-
-
-@schema
 class SpikeSortingOutput(_Merge):
     definition = """
     merge_id: uuid
@@ -46,11 +30,3 @@ class SpikeSortingOutput(_Merge):
         ---
         -> ImportedLFPV1
         """
-
-    def fetch1_dataframe(self, *attrs, **kwargs):
-        # Note: `proj` below facilitates operator syntax eg Table & restrict
-        nwb_lfp = self.fetch_nwb(self.proj())[0]
-        return pd.DataFrame(
-            nwb_lfp["lfp"].data,
-            index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
-        )
