@@ -586,7 +586,8 @@ def _write_recording_to_nwb(
     return analysis_nwb_file
 
 
-# For writing timestamps to NWB file
+### For writing timestamps to NWB file
+
 
 class TimestampsExtractor(si.BaseRecording):
     def __init__(
