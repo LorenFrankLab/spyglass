@@ -78,7 +78,8 @@ class Nwbfile(dj.Manual):
             return query.fetch1("nwb_file_name")
 
         raise ValueError(
-            f"Found {len(query)} matches for {nwb_file_name}: \n{query}"
+            f"Found {len(query)} matches for {nwb_file_name} in Nwbfile table:"
+            + f" \n{query}"
         )
 
     @classmethod

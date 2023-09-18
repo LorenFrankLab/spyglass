@@ -507,7 +507,10 @@ class PositionIntervalMap(dj.Computed):
                     for time in [pos_times[0][0], pos_times[-1][-1]]
                 ]
             ):
-                matching_pos_intervals.append(pos_intervals)
+                matching_pos_intervals.append(pos_interval)
+
+            if len(matching_pos_intervals) > 1:
+                break
 
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
