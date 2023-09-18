@@ -13,7 +13,7 @@ from neuroconv.tools.spikeinterface.spikeinterfacerecordingdatachunkiterator imp
 from hdmf.data_utils import GenericDataChunkIterator
 
 from spyglass.common import Session
-from spyglass.common.common_ephys import Electrode, ElectrodeGroup, Raw
+from spyglass.common.common_ephys import Electrode, Raw
 from spyglass.common.common_device import Probe
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_interval import (
@@ -21,7 +21,7 @@ from spyglass.common.common_interval import (
     interval_list_intersect,
 )
 from spyglass.common.common_lab import LabTeam
-from spyglass.utils.dj_helper_fn import dj_replace
+from spyglass.utils.misc import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_recording")
 
@@ -52,11 +52,11 @@ class SortGroup(dj.Manual):
         omit_unitrode=True,
     ):
         """Create sort group for each shank.
-        * Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
+        - Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
           single group
-        * Electrodes from probes with multiple shanks (e.g. polymer probes) are
+        - Electrodes from probes with multiple shanks (e.g. polymer probes) are
           placed in one group per shank
-        * Bad channels are omitted
+        - Bad channels are omitted
 
         Parameters
         ----------
@@ -229,13 +229,18 @@ class SpikeSortingRecording(dj.Computed):
     """
 
     def make(self, key):
+        # DO:
+        # - get valid times for sort interval
+        # - proprocess recording
+        # - write recording to NWB file
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
-        recording, timestamps = self._get_filtered_recording(key)
+        recording, timestamps = self._get_preprocessed_recording(key)
         recording_nwb_file_name = _write_recording_to_nwb(
             recording, timestamps, key["nwb_file_name"]
         )
-        key["recording_id"] = self._get_recording_id(key)
+        key["recording_id"] = generate_nwb_uuid(key["nwb_file_name"], "R", 6)
         key["analysis_nwb_file"] = recording_nwb_file_name
+
         # INSERT:
         # - valid times into IntervalList
         # - referenced and filtered recording into SpikeSortingRecording
@@ -247,12 +252,6 @@ class SpikeSortingRecording(dj.Computed):
             }
         )
         self.insert1(key)
-
-    @staticmethod
-    def _get_recording_id(key):
-        uuid4 = uuid.uuid4()
-        recording_id = key["nwb_file_name"] + "_R_" + uuid4[:6]
-        return recording_id
 
     @staticmethod
     def _get_recording_timestamps(recording):
@@ -322,7 +321,7 @@ class SpikeSortingRecording(dj.Computed):
 
         return valid_sort_times
 
-    def _get_filtered_recording(self, key: dict):
+    def _get_preprocessed_recording(self, key: dict):
         """Filters and references a recording
         - Loads the NWB file created during insertion as a spikeinterface Recording
         - Slices recording in time (interval) and space (channels);
@@ -342,6 +341,8 @@ class SpikeSortingRecording(dj.Computed):
         # - full path to NWB file
         # - channels to be included in the sort
         # - the reference channel
+        # - probe type
+        # - filter parameters
         nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
         channel_ids = (
             SortGroup.SortGroupElectrode
@@ -384,6 +385,7 @@ class SpikeSortingRecording(dj.Computed):
         filter_params = (SpikeSortingPreprocessingParameter & key).fetch1(
             "preproc_params"
         )
+
         # DO:
         # - load NWB file as a spikeinterface Recording
         # - slice the recording object in time and channels
@@ -454,7 +456,7 @@ class SpikeSortingRecording(dj.Computed):
         )
 
         # if the sort group is a tetrode, change the channel location
-        # note that this is a workaround that would be deprecated when spikeinterface uses 3D probe locations
+        # (necessary because the channel location for tetrodes are not set properly)
         if (
             len(probe_type) == 1
             and probe_type[0] == "tetrode_12.5"
@@ -476,7 +478,7 @@ class SpikeSortingRecording(dj.Computed):
 def _consolidate_intervals(intervals, timestamps):
     """Convert a list of intervals (start_time, stop_time)
     to a list of intervals (start_index, stop_index) by comparing to a list of timestamps;
-    also consolidates overlapping intervals of (start_index, stop_index)
+    then consolidates overlapping or adjacent intervals
 
     Parameters
     ----------
@@ -535,15 +537,15 @@ def _consolidate_intervals(intervals, timestamps):
 
 def _write_recording_to_nwb(
     recording: si.BaseRecording,
-    timestamps,
-    nwb_file_name,
+    timestamps: Iterable,
+    nwb_file_name: str,
 ):
     """Write a recording in NWB format
 
     Parameters
     ----------
     recording : si.Recording
-        _description_
+    timestamps : iterable
     nwb_file_name : str
         name of NWB file the recording originates
 
@@ -583,6 +585,8 @@ def _write_recording_to_nwb(
         nwbf.add_acquisition(processed_electrical_series)
     return analysis_nwb_file
 
+
+# For writing timestamps to NWB file
 
 class TimestampsExtractor(si.BaseRecording):
     def __init__(

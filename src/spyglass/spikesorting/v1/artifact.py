@@ -6,8 +6,10 @@ import datajoint as dj
 import numpy as np
 import scipy.stats as stats
 import spikeinterface as si
+import spikeinterface.extractors as se
 from spikeinterface.core.job_tools import ChunkRecordingExecutor, ensure_n_jobs
 
+from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_interval import (
     IntervalList,
     _union_concat,
@@ -15,6 +17,7 @@ from spyglass.common.common_interval import (
     interval_set_difference_inds,
 )
 from spyglass.utils.nwb_helper_fn import get_valid_intervals
+from spyglass.utils.misc import generate_nwb_uuid
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 
 schema = dj.schema("spikesorting_v1_artifact")
@@ -35,7 +38,11 @@ class ArtifactDetectionParameter(dj.Lookup):
         1.0  # margin in ms on border to avoid border effect
     )
     removal_window_ms = 1.0  # in milliseconds
-
+    job_kwargs = {
+        "chunk_duration": "10s",
+        "n_jobs": 4,
+        "progress_bar": "True",
+    }
     contents = [
         [
             "default",
@@ -44,11 +51,13 @@ class ArtifactDetectionParameter(dj.Lookup):
                 "amplitude_thresh": amplitude_thresh,
                 "proportion_above_thresh": proportion_above_thresh,
                 "removal_window_ms": removal_window_ms,
+                "job_kwargs": job_kwargs,
             },
             "none",
             {
                 "zscore_thresh": None,
                 "amplitude_thresh": None,
+                "job_kwargs": job_kwargs,
             },
         ]
     ]
@@ -80,11 +89,12 @@ class ArtifactDetectionSelection(dj.Manual):
 
 
 @schema
-class ArtifactIntervalV1(dj.Computed):
+class ArtifactInterval(dj.Computed):
     definition = """
     # Interval during which artifact occur
-    -> ArtifactDetectionSelection
+    artifact_id: varchar(20)
     ---
+    -> ArtifactDetectionSelection
     artifact_times: longblob
     artifact_removed_valid_times: longblob
     """
@@ -92,39 +102,35 @@ class ArtifactIntervalV1(dj.Computed):
     def make(self, key):
         # FETCH:
         # - artifact parameters
+        # - recording analysis nwb file
         artifact_params = (ArtifactDetectionParameter & key).fetch1(
             "artifact_params"
         )
-        recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
-        recording_name = SpikeSortingRecording._get_recording_name(key)
-        recording = si.load_extractor(recording_path)
-
-        job_kwargs = {
-            "chunk_duration": "10s",
-            "n_jobs": 4,
-            "progress_bar": "True",
-        }
-
-        artifact_removed_valid_times, artifact_times = _get_artifact_times(
-            recording, **artifact_params, **job_kwargs
+        recording_analysis_nwb_file = (SpikeSortingRecording & key).fetch1(
+            "analysis_nwb_file"
         )
-
-        # NOTE: decided not to do this but to just create a single long segment; keep for now
-        # get artifact times by segment
-        # if AppendSegmentRecording, get artifact times for each segment
-        # if isinstance(recording, AppendSegmentRecording):
-        #     artifact_removed_valid_times = []
-        #     artifact_times = []
-        #     for rec in recording.recording_list:
-        #         rec_valid_times, rec_artifact_times = _get_artifact_times(rec, **artifact_params)
-        #         for valid_times in rec_valid_times:
-        #             artifact_removed_valid_times.append(valid_times)
-        #         for artifact_times in rec_artifact_times:
-        #             artifact_times.append(artifact_times)
-        #     artifact_removed_valid_times = np.asarray(artifact_removed_valid_times)
-        #     artifact_times = np.asarray(artifact_times)
-        # else:
-        #     artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
+        # DO:
+        # - load recording
+        # - detect artifacts
+        # - save as NWB and insert into ArtifactInterval
+        # - insert into IntervalList
+        recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
+            recording_analysis_nwb_file
+        )
+        recording = se.read_nwb_recording(
+            recording_analysis_nwb_file_abs_path, load_time_vector=True
+        )
+        if not artifact_params["job_kwargs"]:
+            artifact_params["job_kwargs"] = {
+                "chunk_duration": "10s",
+                "n_jobs": 4,
+                "progress_bar": "True",
+            }
+        key["artifact_id"] = generate_nwb_uuid(key["nwb_file_name"], "A", 6)
+        artifact_removed_valid_times, artifact_times = _get_artifact_times(
+            recording,
+            **artifact_params,
+        )
 
         key["artifact_times"] = artifact_times
         key["artifact_removed_valid_times"] = artifact_removed_valid_times
