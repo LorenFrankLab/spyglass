@@ -225,7 +225,8 @@ class SpikeSortingRecording(dj.Computed):
     recording_id: varchar(50)
     ---
     -> SpikeSortingRecordingSelection
-    analysis_nwb_file: varchar(1000)
+    -> AnalysisNwbfile
+    object_id: varchar(40) # Object ID for the processed recording in NWB file
     """
 
     def make(self, key):
@@ -235,15 +236,17 @@ class SpikeSortingRecording(dj.Computed):
         # - write recording to NWB file
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         recording, timestamps = self._get_preprocessed_recording(key)
-        recording_nwb_file_name = _write_recording_to_nwb(
+        recording_nwb_file_name, recording_object_id = _write_recording_to_nwb(
             recording, timestamps, key["nwb_file_name"]
         )
+        key["object_id"] = recording_object_id
         key["recording_id"] = generate_nwb_uuid(key["nwb_file_name"], "R", 6)
-        key["analysis_nwb_file"] = recording_nwb_file_name
+        key["analysis_file_name"] = recording_nwb_file_name
 
         # INSERT:
         # - valid times into IntervalList
-        # - referenced and filtered recording into SpikeSortingRecording
+        # - analysis NWB file holding processed recording into AnalysisNwbfile
+        # - entry into SpikeSortingRecording
         IntervalList.insert1(
             {
                 "nwb_file_name": key["nwb_file_name"],
@@ -251,6 +254,7 @@ class SpikeSortingRecording(dj.Computed):
                 "valid_times": sort_interval_valid_times,
             }
         )
+        AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
         self.insert1(key)
 
     @staticmethod
@@ -395,11 +399,12 @@ class SpikeSortingRecording(dj.Computed):
         recording = se.read_nwb_recording(
             nwb_file_abs_path, load_time_vector=True
         )
+        # TODO: make sure the following works for recordings that don't have explicit timestamps
         valid_sort_times = self._get_sort_interval_valid_times(key)
         valid_sort_times_indices = _consolidate_intervals(
             valid_sort_times, recording.get_times()
         )
-        # slice in time; create an AppendRecording if there is more than one disjoint sort interval
+        # slice in time; concatenate disjoint sort intervals
         if len(valid_sort_times_indices) > 1:
             recordings_list = []
             timestamps = []
@@ -414,7 +419,7 @@ class SpikeSortingRecording(dj.Computed):
                         interval_indices[0] : interval_indices[1]
                     ]
                 )
-            recording = si.append_recordings(recordings_list)
+            recording = si.concatenate_recordings(recordings_list)
         else:
             recording = recording.frame_slice(
                 start_frame=valid_sort_times_indices[0][0],
@@ -472,7 +477,7 @@ class SpikeSortingRecording(dj.Computed):
             tetrode.set_device_channel_indices(np.arange(4))
             recording = recording.set_probe(tetrode, in_place=True)
 
-        return recording, timestamps
+        return recording, np.asarray(timestamps)
 
 
 def _consolidate_intervals(intervals, timestamps):
@@ -583,7 +588,10 @@ def _write_recording_to_nwb(
             conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
         )
         nwbf.add_acquisition(processed_electrical_series)
-    return analysis_nwb_file
+        recording_object_id = nwbf.acquisition[
+            "ProcessedElectricalSeries"
+        ].object_id
+    return analysis_nwb_file, recording_object_id
 
 
 ### For writing timestamps to NWB file

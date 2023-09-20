@@ -16,7 +16,6 @@ from spyglass.common.common_interval import (
     interval_from_inds,
     interval_set_difference_inds,
 )
-from spyglass.utils.nwb_helper_fn import get_valid_intervals
 from spyglass.utils.misc import generate_nwb_uuid
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 
@@ -53,13 +52,15 @@ class ArtifactDetectionParameter(dj.Lookup):
                 "removal_window_ms": removal_window_ms,
                 "job_kwargs": job_kwargs,
             },
+        ],
+        [
             "none",
             {
                 "zscore_thresh": None,
                 "amplitude_thresh": None,
                 "job_kwargs": job_kwargs,
             },
-        ]
+        ],
     ]
 
     @classmethod
@@ -89,14 +90,12 @@ class ArtifactDetectionSelection(dj.Manual):
 
 
 @schema
-class ArtifactInterval(dj.Computed):
+class ArtifactRemovedInterval(dj.Computed):
     definition = """
     # Interval during which artifact occur
-    artifact_id: varchar(20)
+    artifact_id: varchar(30)
     ---
     -> ArtifactDetectionSelection
-    artifact_times: longblob
-    artifact_removed_valid_times: longblob
     """
 
     def make(self, key):
@@ -128,32 +127,17 @@ class ArtifactInterval(dj.Computed):
                 "progress_bar": "True",
             }
         key["artifact_id"] = generate_nwb_uuid(key["nwb_file_name"], "A", 6)
-        artifact_removed_valid_times, artifact_times = _get_artifact_times(
+        artifact_removed_valid_times, _ = _get_artifact_times(
             recording,
             **artifact_params,
         )
 
-        key["artifact_times"] = artifact_times
-        key["artifact_removed_valid_times"] = artifact_removed_valid_times
-
-        # set up a name for no-artifact times using recording id
-        key["artifact_removed_interval_list_name"] = (
-            recording_name
-            + "_"
-            + key["artifact_params_name"]
-            + "_artifact_removed_valid_times"
-        )
-
-        ArtifactRemovedIntervalList.insert1(key, replace=True)
-
-        # also insert into IntervalList
+        # insert into IntervalList
         tmp_key = {}
         tmp_key["nwb_file_name"] = key["nwb_file_name"]
-        tmp_key["interval_list_name"] = key[
-            "artifact_removed_interval_list_name"
-        ]
-        tmp_key["valid_times"] = key["artifact_removed_valid_times"]
-        IntervalList.insert1(tmp_key, replace=True)
+        tmp_key["interval_list_name"] = key["artifact_id"]
+        tmp_key["valid_times"] = artifact_removed_valid_times
+        IntervalList.insert1(tmp_key, skip_duplicates=True)
 
         # insert into computed table
         self.insert1(key)
@@ -195,15 +179,7 @@ def _get_artifact_times(
         Intervals in which artifacts are detected (including removal windows), unit: seconds
     """
 
-    if recording.get_num_segments() > 1:
-        valid_timestamps = np.array([])
-        for segment in range(recording.get_num_segments()):
-            valid_timestamps = np.concatenate(
-                (valid_timestamps, recording.get_times(segment_index=segment))
-            )
-        recording = si.concatenate_recordings([recording])
-    elif recording.get_num_segments() == 1:
-        valid_timestamps = recording.get_times(0)
+    valid_timestamps = recording.get_times()
 
     # if both thresholds are None, we skip artifract detection
     if (amplitude_thresh is None) and (zscore_thresh is None):
@@ -227,7 +203,7 @@ def _get_artifact_times(
 
     # detect frames that are above threshold in parallel
     n_jobs = ensure_n_jobs(recording, n_jobs=job_kwargs.get("n_jobs", 1))
-    print(f"using {n_jobs} jobs...")
+    print(f"Using {n_jobs} jobs...")
 
     func = _compute_artifact_chunk
     init_func = _init_artifact_worker
@@ -260,7 +236,7 @@ def _get_artifact_times(
     artifact_frames = np.concatenate(artifact_frames)
 
     # turn ms to remove total into s to remove from either side of each detected artifact
-    half_removal_window_s = removal_window_ms / 1000 * 0.5
+    half_removal_window_s = removal_window_ms / 2 / 1000
 
     if len(artifact_frames) == 0:
         recording_interval = np.asarray(
@@ -278,31 +254,28 @@ def _get_artifact_times(
         (len(artifact_intervals), 2), dtype=np.float64
     )
     for interval_idx, interval in enumerate(artifact_intervals):
-        artifact_intervals_s[interval_idx] = [
-            valid_timestamps[interval[0]] - half_removal_window_s,
-            valid_timestamps[interval[1]] + half_removal_window_s,
+        interv_ind = [
+            np.searchsorted(
+                valid_timestamps,
+                valid_timestamps[interval[0]] - half_removal_window_s,
+            ),
+            np.searchsorted(
+                valid_timestamps,
+                valid_timestamps[interval[1]] + half_removal_window_s,
+            ),
         ]
+        artifact_intervals_s[interval_idx] = [
+            valid_timestamps[interv_ind[0]],
+            valid_timestamps[interv_ind[1]],
+        ]
+
     # make the artifact intervals disjoint
     artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
 
-    # convert seconds back to indices
-    artifact_intervals_new = []
-    for artifact_interval_s in artifact_intervals_s:
-        artifact_intervals_new.append(
-            np.searchsorted(valid_timestamps, artifact_interval_s)
-        )
-
-    # compute set difference between intervals (of indices)
-    artifact_removed_valid_times_ind = interval_set_difference_inds(
-        [(0, len(valid_timestamps) - 1)], artifact_intervals_new
+    # find non-artifact intervals in timestamps
+    artifact_removed_valid_times = find_missing_intervals(
+        artifact_intervals_s, valid_timestamps
     )
-
-    # convert back to seconds
-    artifact_removed_valid_times = []
-    for i in artifact_removed_valid_times_ind:
-        artifact_removed_valid_times.append(
-            (valid_timestamps[i[0]], valid_timestamps[i[1]])
-        )
 
     return artifact_removed_valid_times, artifact_intervals_s
 
@@ -417,3 +390,108 @@ def _check_artifact_thresholds(
         )
         proportion_above_thresh = 1
     return amplitude_thresh, zscore_thresh, proportion_above_thresh
+
+
+def find_missing_intervals(intervals, timestamps):
+    """Given a list of intervals each of which is [start_time, end_time] and an array of timestamps, find intervals are not contained in the input list of intervals but contained in the array of timestamps. Note that the start and stop times of such intervals must be explicitly contained in the array of timestamps
+
+    Parameters
+    ----------
+    intervals : _type_
+        _description_
+    timestamps : _type_
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    # Sort the list of intervals and timestamps
+    intervals.sort()
+    timestamps.sort()
+
+    missing_intervals = []
+    timestamp_idx = 0
+
+    # Initialize an empty interval
+    new_interval = []
+
+    for start, end in intervals:
+        # Look for potential missing intervals
+        while (
+            timestamp_idx < len(timestamps)
+            and timestamps[timestamp_idx] < start
+        ):
+            new_interval.append(timestamps[timestamp_idx])
+            timestamp_idx += 1
+
+            if len(new_interval) == 1:
+                continue
+
+            if timestamps[timestamp_idx] > new_interval[-1]:
+                new_interval.append(timestamps[timestamp_idx - 1])
+                missing_intervals.append(new_interval)
+                new_interval = []
+
+        # Move the index to the point after the end of the current interval
+        while (
+            timestamp_idx < len(timestamps) and timestamps[timestamp_idx] <= end
+        ):
+            timestamp_idx += 1
+
+    # Check for any remaining missing intervals
+    while timestamp_idx < len(timestamps):
+        new_interval.append(timestamps[timestamp_idx])
+        timestamp_idx += 1
+
+        if len(new_interval) == 1:
+            continue
+
+        if (
+            timestamp_idx == len(timestamps)
+            or timestamps[timestamp_idx] > new_interval[-1]
+        ):
+            new_interval.append(timestamps[timestamp_idx - 1])
+            missing_intervals.append(new_interval)
+            new_interval = []
+
+    return np.asarray(missing_intervals)
+
+
+def merge_intervals(intervals):
+    """takes a list of intervals each of which is [start_time, stop_time] and takes union over intervals that are intersecting
+
+    Parameters
+    ----------
+    intervals : _type_
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    if len(intervals) == 0:
+        return []
+
+    # Sort the intervals based on their start times
+    intervals.sort(key=lambda x: x[0])
+
+    merged = [intervals[0]]
+
+    for i in range(1, len(intervals)):
+        current_start, current_stop = intervals[i]
+        last_merged_start, last_merged_stop = merged[-1]
+
+        if current_start <= last_merged_stop:
+            # Overlapping intervals, merge them
+            merged[-1] = [
+                last_merged_start,
+                max(last_merged_stop, current_stop),
+            ]
+        else:
+            # Non-overlapping intervals, add the current one to the list
+            merged.append([current_start, current_stop])
+
+    return np.asarray(merged)

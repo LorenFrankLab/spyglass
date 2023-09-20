@@ -1,3 +1,5 @@
+from typing import Iterable
+
 import os
 import shutil
 import tempfile
@@ -8,30 +10,90 @@ from pathlib import Path
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
+import spikeinterface.extractors as se
 import spikeinterface.preprocessing as sip
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
 from spyglass.common.common_lab import LabMember, LabTeam
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.utils.dj_helper_fn import fetch_nwb
-from spyglass.spikesorting.merge import ArtifactOutput
 from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
+from .recording import _consolidate_intervals
 
 schema = dj.schema("spikesorting_v1_sorting")
 
 
 @schema
-class SpikeSorterParameter(dj.Manual):
+class SpikeSorterParameter(dj.Lookup):
     definition = """
     sorter: varchar(200)
     sorter_param_name: varchar(200)
     ---
     sorter_param: blob
     """
+    contents = [
+        [
+            "mountainsort4",
+            "franklab_tetrode_hippocampus_30KHz",
+            {
+                "detect_sign": -1,
+                "adjacency_radius": 100,
+                "freq_min": 600,
+                "freq_max": 6000,
+                "filter": False,
+                "whiten": True,
+                "num_workers": 1,
+                "clip_size": 40,
+                "detect_threshold": 3,
+                "detect_interval": 10,
+            },
+        ],
+        [
+            "mountainsort4",
+            "franklab_probe_ctx_30KHz",
+            {
+                "detect_sign": -1,
+                "adjacency_radius": 100,
+                "freq_min": 300,
+                "freq_max": 6000,
+                "filter": False,
+                "whiten": True,
+                "num_workers": 1,
+                "clip_size": 40,
+                "detect_threshold": 3,
+                "detect_interval": 10,
+            },
+        ],
+        [
+            "clusterless_thresholder",
+            "default_clusterless",
+            {
+                "detect_threshold": 100.0,  # uV
+                # Locally exclusive means one unit per spike detected
+                "method": "locally_exclusive",
+                "peak_sign": "neg",
+                "exclude_sweep_ms": 0.1,
+                "local_radius_um": 100,
+                # noise levels needs to be 1.0 so the units are in uV and not MAD
+                "noise_levels": np.asarray([1.0]),
+                "random_chunk_kwargs": {},
+                # output needs to be set to sorting for the rest of the pipeline
+                "outputs": "sorting",
+            },
+        ],
+    ]
+    sorters = sis.available_sorters()
+    contents.extend(
+        [
+            [sorter, "default", sis.get_default_sorter_params(sorter)]
+            for sorter in sorters
+        ]
+    )
 
     def insert_default(self):
         """Default params from spike sorters available via spikeinterface"""
@@ -108,86 +170,65 @@ class SpikeSortingSelection(dj.Manual):
     # Processed recording and parameter
     -> SpikeSortingRecording
     -> SpikeSorterParameter
-    -> ArtifactOutput
+    -> IntervalList
     """
 
 
 @schema
-class SpikeSortingV1(dj.Computed):
+class SpikeSorting(dj.Computed):
     definition = """
-    -> SpikeSortingSelection
+    sorting_id: varchar(50)
     ---
-    sorting_path: varchar(1000)
+    -> SpikeSortingSelection
+    -> AnalysisNwbfile
+    object_id: varchar(40) # Object ID for the sorting in NWB file
     time_of_sort: int               # in Unix time, to the nearest second
     """
 
     def make(self, key: dict):
         """Runs spike sorting on the data and parameters specified by the
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
-
-        Specifically,
-        1. Loads saved recording and runs the sort on it with spikeinterface
-        2. Saves the sorting with spikeinterface
-        3. Creates an analysis NWB file and saves the sorting there
-           (this is redundant with 2; will change in the future)
-
         """
-
-        recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
-        recording = si.load_extractor(recording_path)
-
-        # first, get the timestamps
-        timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
-        fs = recording.get_sampling_frequency()
-        # then concatenate the recordings
-        # Note: the timestamps are lost upon concatenation,
-        # i.e. concat_recording.get_times() doesn't return true timestamps anymore.
-        # but concat_recording.recoring_list[i].get_times() will return correct
-        # timestamps for ith recording.
-        if recording.get_num_segments() > 1 and isinstance(
-            recording, si.AppendSegmentRecording
-        ):
-            recording = si.concatenate_recordings(recording.recording_list)
-        elif recording.get_num_segments() > 1 and isinstance(
-            recording, si.BinaryRecordingExtractor
-        ):
-            recording = si.concatenate_recordings([recording])
-
-        # load artifact intervals
-        artifact_times = (
-            ArtifactRemovedIntervalList
+        # FETCH:
+        # - information about the recording
+        # - artifact free intervals
+        # - spike sorter and sorter params
+        recording_key = (SpikeSortingRecording & key).fetch1()
+        artifact_removed_intervals = (
+            IntervalList
             & {
-                "artifact_removed_interval_list_name": key[
-                    "artifact_removed_interval_list_name"
-                ]
+                "nwb_file_name": recording_key["nwb_file_name"],
+                "interval_list_name": key["interval_list_name"],
             }
         ).fetch1("artifact_times")
-        if len(artifact_times):
-            if artifact_times.ndim == 1:
-                artifact_times = np.expand_dims(artifact_times, 0)
-
-            # convert artifact intervals to indices
-            list_triggers = []
-            for interval in artifact_times:
-                list_triggers.append(
-                    np.arange(
-                        np.searchsorted(timestamps, interval[0]),
-                        np.searchsorted(timestamps, interval[1]),
-                    )
-                )
-            list_triggers = [list(np.concatenate(list_triggers))]
-            recording = sip.remove_artifacts(
-                recording=recording,
-                list_triggers=list_triggers,
-                ms_before=None,
-                ms_after=None,
-                mode="zeros",
-            )
-
-        print(f"Running spike sorting on {key}...")
-        sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
+        sorter, sorter_params = (SpikeSorterParameter & key).fetch1(
             "sorter", "sorter_params"
         )
+
+        # DO:
+        # - load recording
+        # - remove artifacts
+        # - run spike sorting
+        # - save output to NWB file
+        recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
+            recording_key["analysis_file_name"]
+        )
+        recording = se.read_nwb_recording(
+            recording_analysis_nwb_file_abs_path, load_time_vector=True
+        )
+
+        timestamps = recording.get_times()
+
+        artifact_removed_intervals_ind = _consolidate_intervals(
+            artifact_removed_intervals, timestamps
+        )
+
+        recording_list = []
+        for interval in artifact_removed_intervals_ind:
+            recording_list.append(
+                recording.frame_slice(interval[0], interval[1])
+            )
+        recording = si.concatenate_recordings(recording_list)
 
         sorter_temp_dir = tempfile.TemporaryDirectory(
             dir=os.getenv("SPYGLASS_TEMP_DIR")
@@ -209,12 +250,11 @@ class SpikeSortingV1(dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
         else:
+            # turn off whitening by sorter (if that is an option) because
+            # recording will be whitened before feeding it to sorter
             if "whiten" in sorter_params.keys():
-                if sorter_params["whiten"]:
-                    sorter_params["whiten"] = False  # set whiten to False
-            # whiten recording separately; make sure dtype is float32
-            # to avoid downstream error with svd
-            recording = sip.whiten(recording, dtype="float32")
+                sorter_params["whiten"] = False
+            recording = sip.whiten(recording, dtype="float64")
             sorting = sis.run_sorter(
                 sorter,
                 recording,
@@ -225,12 +265,13 @@ class SpikeSortingV1(dj.Computed):
         key["time_of_sort"] = int(time.time())
 
         print("Saving sorting results...")
-        sorting_folder = Path(os.getenv("SPYGLASS_SORTING_DIR"))
-        sorting_name = self._get_sorting_name(key)
-        key["sorting_path"] = str(sorting_folder / Path(sorting_name))
-        if os.path.exists(key["sorting_path"]):
-            shutil.rmtree(key["sorting_path"])
-        sorting = sorting.save(folder=key["sorting_path"])
+        _write_sorting_to_nwb(sorting)
+        # sorting_folder = Path(os.getenv("SPYGLASS_SORTING_DIR"))
+        # sorting_name = self._get_sorting_name(key)
+        # key["sorting_path"] = str(sorting_folder / Path(sorting_name))
+        # if os.path.exists(key["sorting_path"]):
+        #     shutil.rmtree(key["sorting_path"])
+        # sorting = sorting.save(folder=key["sorting_path"])
         self.insert1(key)
 
     def delete(self):
@@ -303,3 +344,57 @@ class SpikeSortingV1(dj.Computed):
             recording_name + "_" + str(uuid.uuid4())[0:8] + "_spikesorting"
         )
         return sorting_name
+
+
+def _write_sorting_to_nwb(
+    sorting: si.BaseSorting,
+    timestamps: Iterable,
+    nwb_file_name: str,
+):
+    """Write a recording in NWB format
+
+    Parameters
+    ----------
+    recording : si.Recording
+    timestamps : iterable
+    nwb_file_name : str
+        name of NWB file the recording originates
+
+    Returns
+    -------
+    analysis_nwb_file : str
+        name of analysis NWB file containing the preprocessed recording
+    """
+
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
+    analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
+    with pynwb.NWBHDF5IO(
+        path=analysis_nwb_file_abs_path,
+        mode="a",
+        load_namespaces=True,
+    ) as io:
+        nwbf = io.read()
+        table_region = nwbf.create_electrode_table_region(
+            region=recording.get_channel_ids(),
+            description="Sort group",
+        )
+        data_iterator = SpikeInterfaceRecordingDataChunkIterator(
+            recording=recording, return_scaled=False, buffer_gb=7
+        )
+        timestamps_iterator = TimestampsDataChunkIterator(
+            recording=TimestampsExtractor(timestamps), buffer_gb=5
+        )
+        processed_electrical_series = pynwb.ElectricalSeries(
+            name="ProcessedElectricalSeries",
+            data=data_iterator,
+            electrodes=table_region,
+            timestamps=timestamps_iterator,
+            filtering="Bandpass filtered for spike band",
+            description=f"Referenced and filtered recording from {nwb_file_name} for spike sorting",
+            conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
+        )
+        nwbf.add_acquisition(processed_electrical_series)
+        recording_object_id = nwbf.acquisition[
+            "ProcessedElectricalSeries"
+        ].object_id
+    return analysis_nwb_file, recording_object_id
