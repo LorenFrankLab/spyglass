@@ -9,6 +9,7 @@ from pathlib import Path
 
 import datajoint as dj
 import numpy as np
+import pynwb
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.preprocessing as sip
@@ -374,25 +375,15 @@ def _write_sorting_to_nwb(
         load_namespaces=True,
     ) as io:
         nwbf = io.read()
-        table_region = nwbf.create_electrode_table_region(
-            region=recording.get_channel_ids(),
-            description="Sort group",
-        )
-        data_iterator = SpikeInterfaceRecordingDataChunkIterator(
-            recording=recording, return_scaled=False, buffer_gb=7
-        )
-        timestamps_iterator = TimestampsDataChunkIterator(
-            recording=TimestampsExtractor(timestamps), buffer_gb=5
-        )
-        processed_electrical_series = pynwb.ElectricalSeries(
-            name="ProcessedElectricalSeries",
-            data=data_iterator,
-            electrodes=table_region,
-            timestamps=timestamps_iterator,
-            filtering="Bandpass filtered for spike band",
-            description=f"Referenced and filtered recording from {nwb_file_name} for spike sorting",
-            conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
-        )
+        # processed_electrical_series = pynwb.ElectricalSeries(
+        #     name="ProcessedElectricalSeries",
+        #     data=data_iterator,
+        #     electrodes=table_region,
+        #     timestamps=timestamps_iterator,
+        #     filtering="Bandpass filtered for spike band",
+        #     description=f"Referenced and filtered recording from {nwb_file_name} for spike sorting",
+        #     conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
+        # )
         nwbf.add_acquisition(processed_electrical_series)
         recording_object_id = nwbf.acquisition[
             "ProcessedElectricalSeries"
