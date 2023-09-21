@@ -226,7 +226,11 @@ class RawPosition(dj.Imported):
         """
         Returns a condatenated list of nwb objects from RawPosition.PosObject
         """
-        return self.PosObject().fetch_nwb(*attrs, **kwargs)
+        return (
+            self.PosObject()
+            .restrict(self.restriction)  # Avoids fetch_nwb on whole table
+            .fetch_nwb(*attrs, **kwargs)
+        )
 
     def fetch1_dataframe(self):
         """Returns a dataframe with all RawPosition.PosObject items.
