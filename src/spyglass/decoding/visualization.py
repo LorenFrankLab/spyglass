@@ -562,10 +562,11 @@ def create_interactive_1D_decoding_figurl(
 
 
 def create_interactive_2D_decoding_figurl(
+    interior_place_bin_centers: np.ndarray,
+    place_bin_size: np.ndarray,
     position_info: pd.DataFrame,
     marks: xr.DataArray,
     results: xr.Dataset,
-    bin_size: float,
     position_name: list[str] = ["head_position_x", "head_position_y"],
     head_direction_name: str = "head_orientation",
     speed_name: str = "head_speed",
@@ -576,8 +577,9 @@ def create_interactive_2D_decoding_figurl(
     decode_view = create_2D_decode_view(
         position_time=position_info.index,
         position=position_info[position_name],
+        interior_place_bin_centers=interior_place_bin_centers,
+        place_bin_size=place_bin_size,
         posterior=results[posterior_type].sum("state"),
-        bin_size=bin_size,
         head_dir=position_info[head_direction_name],
     )
 
