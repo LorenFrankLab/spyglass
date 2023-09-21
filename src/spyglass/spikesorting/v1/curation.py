@@ -42,11 +42,11 @@ def apply_merge_groups_to_sorting(
 @schema
 class Curation(dj.Manual):
     definition = """
-    -> SpikeSortingOutput
+    -> SpikeSorting
     curation_id=0: int              # a number corresponding to the index of this curation
     ---
     parent_curation_id=-1: int
-    curation_labels: blob           # a dictionary of labels for the units
+    -> AnalysisNwbfile
     merge_groups: blob              # a list of merge groups for the units
     time_of_creation: int           # in Unix time, to the nearest second
     description='': varchar(300)    # optional description for this curated sort
@@ -54,20 +54,20 @@ class Curation(dj.Manual):
 
     @staticmethod
     def insert_curation(
-        sorting_key: dict,
+        sorting_id: str,
         parent_curation_id: int = -1,
         labels=None,
         merge_groups=None,
         metrics=None,
         description="",
     ):
-        """Given a SpikeSorting key and the parent_sorting_id (and optional
+        """Given a sorting_id and the parent_sorting_id (and optional
         arguments) insert an entry into Curation.
 
 
         Parameters
         ----------
-        sorting_key : dict
+        sorting_id : str
             The key for the original SpikeSorting
         parent_curation_id : int, optional
             The id of the parent sorting
@@ -83,9 +83,10 @@ class Curation(dj.Manual):
         curation_key : dict
 
         """
+        inserted_curation = (Curation & sorting_id).fetch("KEY")
         if parent_curation_id == -1:
             # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
-            inserted_curation = (Curation & sorting_key).fetch("KEY")
+            inserted_curation = (Curation & sorting_id).fetch("KEY")
             if len(inserted_curation) > 0:
                 Warning(
                     "Sorting has already been inserted, returning key to previously"
@@ -101,9 +102,9 @@ class Curation(dj.Manual):
             metrics = {}
 
         # generate a unique number for this curation
-        id = (Curation & sorting_key).fetch("curation_id")
-        if len(id) > 0:
-            curation_id = max(id) + 1
+        existing_curation_ids = (Curation & sorting_id).fetch("curation_id")
+        if len(existing_curation_ids) > 0:
+            curation_id = max(existing_curation_ids) + 1
         else:
             curation_id = 0
 
@@ -119,7 +120,10 @@ class Curation(dj.Manual):
         sorting_key["time_of_creation"] = int(time.time())
 
         # mike: added skip duplicates
-        Curation.insert1(sorting_key, skip_duplicates=True)
+        Curation.insert1(
+            [sorting_id, curation_id, parent_curation_id, analysis_file_name],
+            skip_duplicates=True,
+        )
 
         # get the primary key for this curation
         c_key = Curation.fetch("KEY")[0]
@@ -141,8 +145,17 @@ class Curation(dj.Manual):
         recording_extractor : spike interface recording extractor
 
         """
-        recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
-        return si.load_extractor(recording_path)
+
+        sorting_key = (SpikeSorting & key).fetch1()
+        analysis_file_name = (SpikeSortingRecording & sorting_key).fetch1('analysis_file_name')
+        recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
+            analysis_file_name
+        )
+        recording = se.read_nwb_recording(
+            recording_analysis_nwb_file_abs_path, load_time_vector=True
+        )
+
+        return recording
 
     @staticmethod
     def get_curated_sorting(key: dict):

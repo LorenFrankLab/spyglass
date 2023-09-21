@@ -14,18 +14,9 @@ schema = dj.schema("spikesorting_v1_figurl")
 
 
 @schema
-class SpikeSortingFigURL(dj.Computed):
+class CurationFigURL(dj.Computed):
     definition = """
-    -> SpikeSortingOutput
-    ---
-    url: varchar(2000)
-    """
-
-
-@schema
-class CurationFigurl(dj.Computed):
-    definition = """
-    -> CurationFigurlSelection
+    -> Curation
     ---
     url: varchar(2000)
     initial_curation_uri: varchar(2000)
@@ -95,15 +86,14 @@ class CurationFigurl(dj.Computed):
         self.insert1(key)
 
 
-def _generate_the_figurl(
-    *,
+def _generate_figurl(
     R: si.BaseRecording,
     S: si.BaseSorting,
-    unit_metrics: Union[List[Any], None] = None,
     initial_curation_uri: str,
     recording_label: str,
     sorting_label: str,
     new_curation_uri: str,
+    unit_metrics: Union[List[Any], None] = None,
 ):
     print("Preparing spikesortingview data")
     X = SpikeSortingView.create(
