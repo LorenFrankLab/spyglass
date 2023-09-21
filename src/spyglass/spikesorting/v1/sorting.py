@@ -201,14 +201,14 @@ class SpikeSorting(dj.Computed):
                 "nwb_file_name": recording_key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
             }
-        ).fetch1("artifact_times")
+        ).fetch1("valid_times")
         sorter, sorter_params = (SpikeSorterParameter & key).fetch1(
             "sorter", "sorter_params"
         )
 
         # DO:
         # - load recording
-        # - remove artifacts
+        # - concatenate artifact removed intervals
         # - run spike sorting
         # - save output to NWB file
         recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
@@ -231,12 +231,6 @@ class SpikeSorting(dj.Computed):
             )
         recording = si.concatenate_recordings(recording_list)
 
-        sorter_temp_dir = tempfile.TemporaryDirectory(
-            dir=os.getenv("SPYGLASS_TEMP_DIR")
-        )
-        # add tempdir option for mountainsort
-        sorter_params["tempdir"] = sorter_temp_dir.name
-
         if sorter == "clusterless_thresholder":
             # need to remove tempdir and whiten from sorter_params
             sorter_params.pop("tempdir", None)
@@ -251,28 +245,33 @@ class SpikeSorting(dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
         else:
-            # turn off whitening by sorter (if that is an option) because
+            sorter_temp_dir = tempfile.TemporaryDirectory(
+                dir=os.getenv("SPYGLASS_TEMP_DIR")
+            )
+            # add tempdir option for mountainsort
+            sorter_params["tempdir"] = sorter_temp_dir.name
+            # turn off whitening by sorter because
             # recording will be whitened before feeding it to sorter
-            if "whiten" in sorter_params.keys():
-                sorter_params["whiten"] = False
+            sorter_params["whiten"] = False
             recording = sip.whiten(recording, dtype="float64")
             sorting = sis.run_sorter(
                 sorter,
                 recording,
                 output_folder=sorter_temp_dir.name,
-                delete_output_folder=True,
                 **sorter_params,
             )
         key["time_of_sort"] = int(time.time())
 
-        print("Saving sorting results...")
-        _write_sorting_to_nwb(sorting)
-        # sorting_folder = Path(os.getenv("SPYGLASS_SORTING_DIR"))
-        # sorting_name = self._get_sorting_name(key)
-        # key["sorting_path"] = str(sorting_folder / Path(sorting_name))
-        # if os.path.exists(key["sorting_path"]):
-        #     shutil.rmtree(key["sorting_path"])
-        # sorting = sorting.save(folder=key["sorting_path"])
+        analysis_file_name, units_object_id = _write_sorting_to_nwb(
+            sorting, artifact_removed_intervals, key["nwb_file_name"]
+        )
+        key["object_id"] = units_object_id
+        key["analysis_file_name"] = analysis_file_name
+
+        # INSERT
+        # - new entry to AnalysisNwbfile
+        # - new entry to SpikeSorting
+        AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
         self.insert1(key)
 
     def delete(self):
@@ -322,42 +321,18 @@ class SpikeSorting(dj.Computed):
         return None
         # return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
-    def nightly_cleanup(self):
-        """Clean up spike sorting directories that are not in the SpikeSorting table.
-        This should be run after AnalysisNwbFile().nightly_cleanup()
-        """
-        # get a list of the files in the spike sorting storage directory
-        dir_names = next(os.walk(os.environ["SPYGLASS_SORTING_DIR"]))[1]
-        # now retrieve a list of the currently used analysis nwb files
-        analysis_file_names = self.fetch("analysis_file_name")
-        for dir in dir_names:
-            if dir not in analysis_file_names:
-                full_path = str(Path(os.environ["SPYGLASS_SORTING_DIR"]) / dir)
-                print(f"removing {full_path}")
-                shutil.rmtree(
-                    str(Path(os.environ["SPYGLASS_SORTING_DIR"]) / dir)
-                )
-
-    @staticmethod
-    def _get_sorting_name(key):
-        recording_name = SpikeSortingRecording._get_recording_name(key)
-        sorting_name = (
-            recording_name + "_" + str(uuid.uuid4())[0:8] + "_spikesorting"
-        )
-        return sorting_name
-
 
 def _write_sorting_to_nwb(
     sorting: si.BaseSorting,
-    timestamps: Iterable,
+    sort_interval: Iterable,
     nwb_file_name: str,
 ):
     """Write a recording in NWB format
 
     Parameters
     ----------
-    recording : si.Recording
-    timestamps : iterable
+    sorting : si.BaseSorting
+    sort_interval : Iterable
     nwb_file_name : str
         name of NWB file the recording originates
 
@@ -375,17 +350,18 @@ def _write_sorting_to_nwb(
         load_namespaces=True,
     ) as io:
         nwbf = io.read()
-        # processed_electrical_series = pynwb.ElectricalSeries(
-        #     name="ProcessedElectricalSeries",
-        #     data=data_iterator,
-        #     electrodes=table_region,
-        #     timestamps=timestamps_iterator,
-        #     filtering="Bandpass filtered for spike band",
-        #     description=f"Referenced and filtered recording from {nwb_file_name} for spike sorting",
-        #     conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
-        # )
-        nwbf.add_acquisition(processed_electrical_series)
-        recording_object_id = nwbf.acquisition[
-            "ProcessedElectricalSeries"
-        ].object_id
-    return analysis_nwb_file, recording_object_id
+        nwbf.add_unit_column(
+            name="quality",
+            description="quality of unit",
+        )
+        for unit_id in sorting.get_unit_ids():
+            spike_times = sorting.get_unit_spike_train(unit_id)
+            nwbf.add_unit(
+                spike_times=spike_times,
+                id=unit_id,
+                obs_intervals=sort_interval,
+                quality="uncurated",
+            )
+        units_object_id = nwbf.units.object_id
+        io.write(nwbf)
+    return analysis_nwb_file, units_object_id

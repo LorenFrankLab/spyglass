@@ -567,8 +567,8 @@ def _write_recording_to_nwb(
         mode="a",
         load_namespaces=True,
     ) as io:
-        nwbf = io.read()
-        table_region = nwbf.create_electrode_table_region(
+        nwbfile = io.read()
+        table_region = nwbfile.create_electrode_table_region(
             region=recording.get_channel_ids(),
             description="Sort group",
         )
@@ -587,10 +587,11 @@ def _write_recording_to_nwb(
             description=f"Referenced and filtered recording from {nwb_file_name} for spike sorting",
             conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
         )
-        nwbf.add_acquisition(processed_electrical_series)
-        recording_object_id = nwbf.acquisition[
+        nwbfile.add_acquisition(processed_electrical_series)
+        recording_object_id = nwbfile.acquisition[
             "ProcessedElectricalSeries"
         ].object_id
+        io.write(nwbfile)
     return analysis_nwb_file, recording_object_id
 
 
