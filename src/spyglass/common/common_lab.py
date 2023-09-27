@@ -39,7 +39,7 @@ class LabMember(dj.Manual):
             The NWB file with experimenter information.
         """
         if isinstance(nwbf, str):
-            nwb_file_abspath = Nwbfile.get_abs_path(nwbf)
+            nwb_file_abspath = Nwbfile.get_abs_path(nwbf, new_file=True)
             nwbf = get_nwb_file(nwb_file_abspath)
 
         if nwbf.experimenter is None:

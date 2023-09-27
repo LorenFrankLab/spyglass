@@ -1,6 +1,8 @@
+import os
+
 import datajoint as dj
 
-from ..settings import config
+from ..settings import config, debug_mode
 from ..utils.nwb_helper_fn import get_config, get_nwb_file
 from .common_device import CameraDevice, DataAcquisitionDevice, Probe
 from .common_lab import Institution, Lab, LabMember
@@ -79,9 +81,10 @@ class Session(dj.Imported):
         print("Subject...")
         Subject().insert_from_nwbfile(nwbf)
 
-        print("Populate DataAcquisitionDevice...")
-        DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
-        print()
+        if not debug_mode:  # TODO: remove when demo files agree on device
+            print("Populate DataAcquisitionDevice...")
+            DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
+            print()
 
         print("Populate CameraDevice...")
         CameraDevice.insert_from_nwbfile(nwbf)
@@ -260,6 +263,8 @@ class SessionGroup(dj.Manual):
 # datajoint prohibits deleting from a subtable without
 # also deleting the parent table.
 # See: https://docs.datajoint.org/python/computation/03-master-part.html
+
+
 @schema
 class SessionGroupSession(dj.Manual):
     definition = """

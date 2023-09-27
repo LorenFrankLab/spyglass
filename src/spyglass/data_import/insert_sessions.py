@@ -7,7 +7,7 @@ from typing import List, Union
 import pynwb
 
 from ..common import Nwbfile, get_raw_eseries, populate_all_common
-from ..settings import raw_dir
+from ..settings import debug_mode, raw_dir
 from ..utils.nwb_helper_fn import get_nwb_copy_filename
 
 
@@ -50,7 +50,7 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
                 )
 
         # file name for the copied raw data
-        out_nwb_file_name = get_nwb_copy_filename(nwb_file_abs_path.stem)
+        out_nwb_file_name = get_nwb_copy_filename(nwb_file_abs_path.name)
 
         # Check whether the file already exists in the Nwbfile table
         if len(Nwbfile() & {"nwb_file_name": out_nwb_file_name}):
@@ -97,7 +97,9 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
         out_nwb_file_name, new_file=True
     )
 
-    if os.path.exists(out_nwb_file_name):
+    if os.path.exists(out_nwb_file_abs_path):
+        if debug_mode:
+            return out_nwb_file_abs_path
         warnings.warn(
             f"Output file {out_nwb_file_abs_path} exists and will be "
             + "overwritten."

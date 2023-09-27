@@ -247,7 +247,7 @@ def estimate_sampling_rate(
 
 
 def get_valid_intervals(
-    timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=None
+    timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=0
 ):
     """Finds the set of all valid intervals in a list of timestamps.
     Valid interval: (start time, stop time) during which there are
@@ -264,7 +264,7 @@ def get_valid_intervals(
         between consecutive timestamps exceeds gap_proportion, it is considered
         a gap. Must be > 1. Default to 2.5
     min_valid_len : float, optional
-        Length of smallest valid interval. Default to sampling_rate. If greater
+        Length of smallest valid interval. Default to 0. If greater
         than interval duration, print warning and use half the total time.
 
     Returns
@@ -275,10 +275,8 @@ def get_valid_intervals(
 
     eps = 0.0000001
 
-    if not min_valid_len:
-        min_valid_len = int(sampling_rate)
-
     total_time = timestamps[-1] - timestamps[0]
+
     if total_time < min_valid_len:
         half_total_time = total_time / 2
         print(f"WARNING: Setting minimum valid interval to {half_total_time}")
@@ -419,6 +417,7 @@ def _get_pos_dict(
                 valid_times = get_valid_intervals(
                     timestamps=timestamps,
                     sampling_rate=sampling_rate,
+                    min_valid_len=int(sampling_rate),
                 )
             # add the valid intervals to the Interval list
             pos_data_dict[epoch].append(

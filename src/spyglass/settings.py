@@ -61,8 +61,9 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
     if config_loaded and not force_reload:
         return config
 
-    dj_spyglass = dj.config.get("custom", {}).get("spyglass_dirs", {})
-    dj_kachery = dj.config.get("custom", {}).get("kachery_dirs", {})
+    dj_custom = dj.config.get("custom", {})
+    dj_spyglass = dj_custom.get("spyglass_dirs", {})
+    dj_kachery = dj_custom.get("kachery_dirs", {})
 
     resolved_base = (
         base_dir
@@ -102,7 +103,11 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
     _set_dj_config_stores(config_dirs)
 
     config = dict(
-        **config_defaults, **config_dirs, **kachery_zone_dict, **loaded_env
+        debug_mode=dj_custom.get("debug_mode", False),
+        **config_defaults,
+        **config_dirs,
+        **kachery_zone_dict,
+        **loaded_env,
     )
     config_loaded = True
     return config
@@ -143,6 +148,9 @@ def _set_dj_config_stores(dir_dict: dict):
             "stage": str(analysis_dir),
         },
     }
+
+
+# TODO: Change redundancy here to class with @properties
 
 
 def load_base_dir() -> str:
@@ -235,12 +243,19 @@ def load_waveform_dir() -> str:
     Returns
     -------
     str
-        The temp directory path.
+        The waveform directory path.
     """
     global config
     if not config_loaded or not config:
         config = load_config()
-    return config.get("SPYGLASS_TEMP_DIR")
+    return config.get("SPYGLASS_WAVEFORM_DIR")
+
+
+def load_debug_mode() -> bool:
+    global config
+    if not config_loaded or not config:
+        config = load_config()
+    return config.get("debug_mode", False)
 
 
 base_dir = load_base_dir()
@@ -249,3 +264,5 @@ recording_dir = load_recording_dir()
 temp_dir = load_temp_dir()
 analysis_dir = load_analysis_dir()
 sorting_dir = load_sorting_dir()
+waveform_dir = load_waveform_dir()
+debug_mode = load_debug_mode()

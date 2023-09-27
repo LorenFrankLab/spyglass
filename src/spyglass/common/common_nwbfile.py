@@ -59,7 +59,7 @@ class Nwbfile(dj.Manual):
         nwb_file_name : str
             The relative path to the NWB file.
         """
-        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name, new_file=True)
         assert os.path.exists(
             nwb_file_abs_path
         ), f"File does not exist: {nwb_file_abs_path}"
@@ -78,7 +78,8 @@ class Nwbfile(dj.Manual):
             return query.fetch1("nwb_file_name")
 
         raise ValueError(
-            f"Found {len(query)} matches for {nwb_file_name}: \n{query}"
+            f"Found {len(query)} matches for {nwb_file_name} in Nwbfile table:"
+            + f" \n{query}"
         )
 
     @classmethod
