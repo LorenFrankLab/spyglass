@@ -180,9 +180,19 @@ class TrodesPosV1(dj.Computed):
         )
 
         position_info_parameters = (TrodesPosParams() & key).fetch1("params")
+
+        # Renamed per discussion on #628
+        position_info_parameters[
+            "max_LED_separation"
+        ] = position_info_parameters.get("max_separation", 9.0)
+        position_info_parameters[
+            "max_plausible_speed"
+        ] = position_info_parameters.get("max_speed", 300)
+
         spatial_series = (RawPosition.PosObject & key).fetch_nwb()[0][
             "raw_position"
         ]
+
         spatial_df = (RawPosition.PosObject & key).fetch1_dataframe()
         video_frame_ind = getattr(spatial_df, "video_frame_ind", None)
 
@@ -304,8 +314,10 @@ class TrodesPosV1(dj.Computed):
         is_upsampled,
         upsampling_sampling_rate,
         upsampling_interpolation_method,
+        **kwargs,
     ):
         """Calculate position info from 2D spatial series."""
+        # TODO: remove in favor of fetching the same from common?
         CM_TO_METERS = 100
         # Accepts x/y 'loc' or 'loc1' format for first pos. Renames to 'loc'
         DEFAULT_COLS = ["xloc", "yloc", "xloc2", "yloc2", "xloc1", "yloc1"]
@@ -347,7 +359,7 @@ class TrodesPosV1(dj.Computed):
 
         # Set points to NaN where the front and back LEDs are too separated
         dist_between_LEDs = get_distance(back_LED, front_LED)
-        is_too_separated = dist_between_LEDs >= max_separation
+        is_too_separated = dist_between_LEDs >= max_LED_separation
 
         back_LED[is_too_separated] = np.nan
         front_LED[is_too_separated] = np.nan
@@ -367,8 +379,8 @@ class TrodesPosV1(dj.Computed):
         )
 
         # Set to points to NaN where the speed is too fast
-        is_too_fast = (front_LED_speed > max_speed) | (
-            back_LED_speed > max_speed
+        is_too_fast = (front_LED_speed > max_plausible_speed) | (
+            back_LED_speed > max_plausible_speed
         )
         back_LED[is_too_fast] = np.nan
         front_LED[is_too_fast] = np.nan

@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: base
 #     language: python
@@ -50,7 +50,6 @@ if os.path.basename(os.getcwd()) == "notebooks":
 dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 from spyglass.spikesorting import SpikeSorting
-
 # -
 
 # ## Spikes Sorted
@@ -107,3 +106,7 @@ print(
 #
 # ![Curation](./../notebook-images/curation.png)
 #
+
+# ## Up Next
+#
+# Next, we'll turn our attention to [LFP data](./12_LFP.ipynb) data.

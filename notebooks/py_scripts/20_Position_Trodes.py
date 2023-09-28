@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -60,7 +60,6 @@ dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 import spyglass.common as sgc
 import spyglass.position as sgp
-import spyglass.utils as sgu
 
 # ignore datajoint+jupyter async warnings
 import warnings
@@ -75,9 +74,14 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # First, we'll grab let us make sure that the session we want to analyze is inserted into the `RawPosition` table
 #
 
-nwb_copy_file_name = (sgc.Nwbfile & 'nwb_file_name LIKE "mid%"').fetch1(
-    "nwb_file_name"
-)
+# +
+from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
+# Define the name of the file that you copied and renamed
+nwb_file_name = "minirec20230622.nwb"
+nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
+# -
+
 sgc.common_behav.RawPosition() & {"nwb_file_name": nwb_copy_file_name}
 
 # ## Setting parameters
@@ -106,19 +110,36 @@ sgc.common_behav.RawPosition() & {"nwb_file_name": nwb_copy_file_name}
 #   - 0: LED corresponding to `xloc2`, `yloc2` in the `RawPosition` table is the
 #     front, `xloc`, `yloc` as the back.
 #
-# We can see these defaults with `TrodesPosParams.get_default`.
+# We can see these defaults with `TrodesPosParams().default_params`.
 #
 
 # +
 from pprint import pprint
 
-parameters = sgp.v1.TrodesPosParams.get_default()["params"]
+parameters = sgp.v1.TrodesPosParams().default_params
 pprint(parameters)
 # -
 
-parameters["led1_is_front"] = 0
+# For the `minirec` demo file, only one LED is moving. The following paramset will
+# allow us to process this data.
+
+trodes_params_name = "single_led"
+trodes_params = {
+    "max_separation": 10000.0,
+    "max_speed": 300.0,
+    "position_smoothing_duration": 0.125,
+    "speed_smoothing_std_dev": 0.1,
+    "orient_smoothing_std_dev": 0.001,
+    "led1_is_front": 1,
+    "is_upsampled": 0,
+    "upsampling_sampling_rate": None,
+    "upsampling_interpolation_method": "linear",
+}
 sgp.v1.TrodesPosParams.insert1(
-    {"trodes_pos_params_name": "default_led0", "params": parameters},
+    {
+        "trodes_pos_params_name": trodes_params_name,
+        "params": trodes_params,
+    },
     skip_duplicates=True,
 )
 sgp.v1.TrodesPosParams()
@@ -157,7 +178,7 @@ raw_position_df
 #
 
 fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-ax.plot(raw_position_df.xloc, raw_position_df.yloc, color="green")
+ax.plot(raw_position_df.xloc1, raw_position_df.yloc1, color="green")
 # Uncomment for multiple LEDs
 # ax.plot(raw_position_df.xloc2, raw_position_df.yloc2, color="red")
 ax.set_xlabel("x-position [pixels]", fontsize=18)
@@ -171,27 +192,20 @@ ax.set_title("Raw Position", fontsize=28)
 # `TrodesPosSelection` table.
 #
 
+trodes_s_key = {
+    "nwb_file_name": nwb_copy_file_name,
+    "interval_list_name": interval_list_name,
+    "trodes_pos_params_name": trodes_params_name,
+}
 sgp.v1.TrodesPosSelection.insert1(
-    {
-        "nwb_file_name": nwb_copy_file_name,
-        "interval_list_name": interval_list_name,
-        "trodes_pos_params_name": "default",
-    },
+    trodes_s_key,
     skip_duplicates=True,
 )
 
 # Now let's check to see if we've inserted the parameters correctly:
 #
 
-sgp.v1.TrodesPosSelection()
-trodes_key = (
-    sgp.v1.TrodesPosSelection()
-    & {
-        "nwb_file_name": nwb_copy_file_name,
-        "interval_list_name": interval_list_name,
-        "trodes_pos_params_name": "default",
-    }
-).fetch1("KEY")
+trodes_key = (sgp.v1.TrodesPosSelection() & trodes_s_key).fetch1("KEY")
 
 # ## Running the pipeline
 #
@@ -205,7 +219,7 @@ sgp.v1.TrodesPosV1.populate(trodes_key)
 # Each NWB file, interval, and parameter set is now associated with a new analysis file and object ID.
 #
 
-sgp.TrodesPos()
+sgp.v1.TrodesPosV1 & trodes_key
 
 # To retrieve the results as a pandas DataFrame with time as the index, we use `IntervalPositionInfo.fetch1_dataframe`.
 #
@@ -219,11 +233,9 @@ sgp.TrodesPos()
 #
 
 position_info = (
-    sgc.IntervalPositionInfo()
+    sgp.v1.TrodesPosV1()
     & {
         "nwb_file_name": nwb_copy_file_name,
-        "interval_list_name": "pos 1 valid times",
-        "position_info_param_name": "default",
     }
 ).fetch1_dataframe()
 position_info
@@ -243,47 +255,45 @@ position_info.index
 # Let's plot some of the variables first:
 #
 
-fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-ax.plot(position_info.head_position_x, position_info.head_position_y)
-ax.set_xlabel("x-position [cm]", fontsize=18)
-ax.set_ylabel("y-position [cm]", fontsize=18)
-ax.set_title("Head Position", fontsize=28)
+fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+ax.plot(position_info.position_x, position_info.position_y)
+ax.set_xlabel("x-position [cm]", fontsize=16)
+ax.set_ylabel("y-position [cm]", fontsize=16)
+ax.set_title("Position", fontsize=20)
 
-fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-ax.plot(position_info.head_velocity_x, position_info.head_velocity_y)
-ax.set_xlabel("x-velocity [cm/s]", fontsize=18)
-ax.set_ylabel("y-velocity [cm/s]", fontsize=18)
-ax.set_title("Head Velocity", fontsize=28)
+fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+ax.plot(position_info.velocity_x, position_info.velocity_y)
+ax.set_xlabel("x-velocity [cm/s]", fontsize=16)
+ax.set_ylabel("y-velocity [cm/s]", fontsize=16)
+ax.set_title("Velocity", fontsize=20)
 
-fig, ax = plt.subplots(1, 1, figsize=(25, 3))
-ax.plot(position_info.index, position_info.head_speed)
-ax.set_xlabel("Time", fontsize=18)
-ax.set_ylabel("Speed [cm/s]", fontsize=18)
-ax.set_title("Head Speed", fontsize=28)
+fig, ax = plt.subplots(1, 1, figsize=(16, 3))
+ax.plot(position_info.index, position_info.speed)
+ax.set_xlabel("Time", fontsize=16)
+ax.set_ylabel("Speed [cm/s]", fontsize=16)
+ax.set_title("Head Speed", fontsize=20)
 ax.set_xlim((position_info.index.min(), position_info.index.max()))
 
 # ### Video
 #
-# These look reasonable but we can visualize further by plotting the results on
-# the video, which will appear in the current working directory.
+# To keep `minirec`, video is not included. Full datasets can be further 
+# visualized by plotting the results on the video, which will appear in the 
+# current working directory.
 #
 
-# +
-from spyglass.common.common_position import PositionVideo
-
-PositionVideo().make(
-    {
-        "nwb_file_name": nwb_copy_file_name,
-        "interval_list_name": "pos 1 valid times",
-        "position_info_param_name": "default",
-    }
-)
-# -
+if "mini" not in nwb_copy_file_name:
+    sgp.v1.TrodesPosVideo().make(
+        {
+            "nwb_file_name": nwb_copy_file_name,
+            "interval_list_name": "pos 1 valid times",
+            "position_info_param_name": "default",
+        }
+    )
 
 # ## Upsampling position
 #
-# Sometimes we need the position data in smaller in time bins, which can be
-# achieved with upsampling using the following parameters.
+# To get position data in smaller in time bins, we can upsample using the 
+# following parameters
 #
 # - `is_upsampled`, default 0 (False): If 1, perform upsampling.
 # - `upsampling_sampling_rate`, default None: the rate to upsample to (e.g.,
@@ -294,39 +304,40 @@ PositionVideo().make(
 #
 
 # +
-sgc.PositionInfoParameters.insert1(
+trodes_params_up_name = trodes_params_name + "_upsampled"
+trodes_params_up = {
+    **trodes_params,
+    "is_upsampled": 1,
+    "upsampling_sampling_rate": 500,
+}
+sgp.v1.TrodesPosParams.insert1(
     {
-        "position_info_param_name": "default_decoding",
-        "is_upsampled": 1,
-        "upsampling_sampling_rate": 500,
+        "trodes_pos_params_name": trodes_params_up_name,
+        "params": trodes_params_up,
     },
     skip_duplicates=True,
 )
 
-sgc.PositionInfoParameters()
-
-# +
-sgc.IntervalPositionInfoSelection.insert1(
-    {
-        "nwb_file_name": nwb_copy_file_name,
-        "interval_list_name": "pos 1 valid times",
-        "position_info_param_name": "default_decoding",
-    },
-    skip_duplicates=True,
-)
-
-sgc.IntervalPositionInfoSelection()
+sgp.v1.TrodesPosParams()
 # -
 
-sgc.IntervalPositionInfo.populate()
+trodes_s_up_key = {
+    "nwb_file_name": nwb_copy_file_name,
+    "interval_list_name": interval_list_name,
+    "trodes_pos_params_name": trodes_params_up_name,
+}
+sgp.v1.TrodesPosSelection.insert1(
+    trodes_s_up_key,
+    skip_duplicates=True,
+)
+sgp.v1.TrodesPosV1.populate(trodes_s_up_key)
 
 # +
 upsampled_position_info = (
-    sgc.IntervalPositionInfo()
+    sgp.v1.TrodesPosV1()
     & {
         "nwb_file_name": nwb_copy_file_name,
-        "interval_list_name": "pos 1 valid times",
-        "position_info_param_name": "default_decoding",
+        "position_info_param_name": trodes_params_up_name,
     }
 ).fetch1_dataframe()
 
@@ -334,50 +345,55 @@ upsampled_position_info
 
 # +
 fig, axes = plt.subplots(
-    1, 2, figsize=(20, 10), sharex=True, sharey=True, constrained_layout=True
+    1, 2, figsize=(16, 8), sharex=True, sharey=True, constrained_layout=True
 )
-axes[0].plot(position_info.head_position_x, position_info.head_position_y)
-axes[0].set_xlabel("x-position [cm]", fontsize=18)
-axes[0].set_ylabel("y-position [cm]", fontsize=18)
-axes[0].set_title("Head Position", fontsize=28)
+axes[0].plot(position_info.position_x, position_info.position_y)
+axes[0].set_xlabel("x-position [cm]", fontsize=16)
+axes[0].set_ylabel("y-position [cm]", fontsize=16)
+axes[0].set_title("Position", fontsize=20)
 
 axes[1].plot(
-    upsampled_position_info.head_position_x,
-    upsampled_position_info.head_position_y,
+    upsampled_position_info.position_x,
+    upsampled_position_info.position_y,
 )
-axes[1].set_xlabel("x-position [cm]", fontsize=18)
-axes[1].set_ylabel("y-position [cm]", fontsize=18)
-axes[1].set_title("Upsampled Head Position", fontsize=28)
+axes[1].set_xlabel("x-position [cm]", fontsize=16)
+axes[1].set_ylabel("y-position [cm]", fontsize=16)
+axes[1].set_title("Upsampled Position", fontsize=20)
 
 # +
 fig, axes = plt.subplots(
-    2, 1, figsize=(25, 6), sharex=True, sharey=True, constrained_layout=True
+    2, 1, figsize=(16, 6), sharex=True, sharey=True, constrained_layout=True
 )
-axes[0].plot(position_info.index, position_info.head_speed)
-axes[0].set_xlabel("Time", fontsize=18)
-axes[0].set_ylabel("Speed [cm/s]", fontsize=18)
-axes[0].set_title("Head Speed", fontsize=28)
+axes[0].plot(position_info.index, position_info.speed)
+axes[0].set_xlabel("Time", fontsize=16)
+axes[0].set_ylabel("Speed [cm/s]", fontsize=16)
+axes[0].set_title("Speed", fontsize=20)
 axes[0].set_xlim((position_info.index.min(), position_info.index.max()))
 
-axes[1].plot(upsampled_position_info.index, upsampled_position_info.head_speed)
-axes[1].set_xlabel("Time", fontsize=18)
-axes[1].set_ylabel("Speed [cm/s]", fontsize=18)
-axes[1].set_title("Upsampled Head Speed", fontsize=28)
+axes[1].plot(upsampled_position_info.index, upsampled_position_info.speed)
+axes[1].set_xlabel("Time", fontsize=16)
+axes[1].set_ylabel("Speed [cm/s]", fontsize=16)
+axes[1].set_title("Upsampled Speed", fontsize=20)
 
 # +
 fig, axes = plt.subplots(
-    1, 2, figsize=(20, 10), sharex=True, sharey=True, constrained_layout=True
+    1, 2, figsize=(16, 8), sharex=True, sharey=True, constrained_layout=True
 )
-axes[0].plot(position_info.head_velocity_x, position_info.head_velocity_y)
-axes[0].set_xlabel("x-velocity [cm/s]", fontsize=18)
-axes[0].set_ylabel("y-velocity [cm/s]", fontsize=18)
-axes[0].set_title("Head Velocity", fontsize=28)
+axes[0].plot(position_info.velocity_x, position_info.velocity_y)
+axes[0].set_xlabel("x-velocity [cm/s]", fontsize=16)
+axes[0].set_ylabel("y-velocity [cm/s]", fontsize=16)
+axes[0].set_title("Velocity", fontsize=20)
 
 axes[1].plot(
-    upsampled_position_info.head_velocity_x,
-    upsampled_position_info.head_velocity_y,
+    upsampled_position_info.velocity_x,
+    upsampled_position_info.velocity_y,
 )
-axes[1].set_xlabel("x-velocity [cm/s]", fontsize=18)
-axes[1].set_ylabel("y-velocity [cm/s]", fontsize=18)
-axes[1].set_title("Upsampled Head Velocity", fontsize=28)
+axes[1].set_xlabel("x-velocity [cm/s]", fontsize=16)
+axes[1].set_ylabel("y-velocity [cm/s]", fontsize=16)
+axes[1].set_title("Upsampled Velocity", fontsize=20)
 # -
+
+# ## Up Next
+
+# In the [next notebook](./21_Position_DLC_1.ipynb), we'll explore using DeepLabCut to generate position data from video.
+#

@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -27,9 +27,9 @@
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
 #   [the Insert Data notebook](./01_Insert_Data.ipynb)
-# - To run this notebook, you should have already completed the
-#   [LFP](./12_LFP.ipynb) notebook and populated the `LFPBand` table.
-#
+# - To run this notebook, you should have already completed the 
+#   [LFP](./12_LFP.ipynb) notebook and populated the `LFPBand` table. 
+#   
 # In this tutorial, we demonstrate how to generate analytic signals from the LFP
 # data, as well as how to compute theta phases and power.
 
@@ -75,7 +75,7 @@ lfp_band.LFPBandV1() & lfp_key
 
 # We do not need all electrodes for theta phase/power, so we define a list for
 # analyses. When working with full data, this list might limit to hippocampal
-# reference electrodes.
+# reference electrodes. 
 #
 # Make sure that the chosen electrodes already exist in the LFPBand data; if not,
 # go to the LFP tutorial to generate them.
@@ -187,3 +187,7 @@ ax.set_title(
     fontsize=20,
 )
 # -
+
+# ## Up Next
+#
+# Next, we'll turn our attention to [position data](./20_Position_Trodes.ipynb).

@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: Python 3.10.5 64-bit
 #     language: python
@@ -21,10 +21,10 @@
 # notebook, and use the `gitignore` prefix `temp` to avoid future conflicts.
 #
 # This is one notebook in a multi-part series on decoding in Spyglass. To set up
-# your Spyglass environment and database, see
+# your Spyglass environment and database, see 
 # [the Setup notebook](./00_Setup.ipynb).
 #
-# In this tutorial, we'll set up GPU access for subsequent decoding analyses. While this notebook doesn't have any direct prerequisites, you will need
+# In this tutorial, we'll set up GPU access for subsequent decoding analyses. While this notebook doesn't have any direct prerequisites, you will need 
 # [Spike Sorting](./02_Spike_Sorting.ipynb) data for the next step.
 #
 
@@ -32,7 +32,7 @@
 #
 
 # ### Connecting
-#
+#  
 # Members of the Frank Lab have access to two GPU cluster, `breeze` and `zephyr`.
 # To access them, specify the cluster when you `ssh`, with the default port:
 #
@@ -58,7 +58,7 @@
 # ### Which GPU?
 #
 # You can see which GPUs are occupied by running the command `nvidia-smi` in
-# a terminal (or `!nvidia-smi` in a notebook). Pick a GPU with low memory usage.
+# a terminal (or `!nvidia-smi` in a notebook). Pick a GPU with low memory usage. 
 #
 # In the output below, GPUs 1, 4, 6, and 7 have low memory use and power draw (~42W), are probably not in use.
 
@@ -70,7 +70,7 @@
 #
 # Other ways to monitor GPU usage are:
 #
-# - A
+# - A 
 #   [jupyter widget by nvidia](https://github.com/rapidsai/jupyterlab-nvdashboard)
 #   to monitor GPU usage in the notebook
 # - A [terminal program](https://github.com/peci1/nvidia-htop) like nvidia-smi
@@ -185,7 +185,7 @@ with cp.cuda.Device(GPU_ID):
 # conda install -c rapidsai -c nvidia -c conda-forge dask-cuda
 # ```
 #
-# We will set up a client to select GPUs. By default, this is all available
+# We will set up a client to select GPUs. By default, this is all available 
 # GPUs. Below, we select a subset using the `CUDA_VISIBLE_DEVICES`.
 
 # +
@@ -201,7 +201,6 @@ client
 # `dask.delayed` decorator.
 #
 # In the example below, we run `test_gpu` on each item of `data` where each item is processed on a different GPU.
-
 
 # +
 def setup_logger(name_logfile, path_logfile):
@@ -251,3 +250,5 @@ dask.compute(*results)
 # -
 
 # This example also shows how to create a log file for each item in data with the `setup_logger` function.
+
+

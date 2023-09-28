@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: Python 3.10.5 64-bit
 #     language: python
@@ -20,7 +20,7 @@
 # _Developer Note:_ if you may make a PR in the future, be sure to copy this
 # notebook, and use the `gitignore` prefix `temp` to avoid future conflicts.
 #
-# This is one notebook in a multi-part series on clusterless decoding in Spyglass
+# This is one notebook in a multi-part series on clusterless decoding in Spyglass 
 #
 # - To set up your Spyglass environment and database, see
 #   [the Setup notebook](./00_Setup.ipynb)
@@ -146,3 +146,9 @@ sgd.clusterless.populate_mark_indicators(spikesorting_selections)
 # We can verify that this worked:
 
 sgd.UnitMarksIndicator & spikesorting_selections
+
+# ## Up Next
+#
+# Next, we'll start the process of decoding representations of position with
+# ephys data. This can be done either with [GPUs](./32_Decoding_with_GPUs.ipynb) 
+# or [clusterless](./33_Decoding_Clusterless.ipynb).

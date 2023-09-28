@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: Python 3.10.5 64-bit
 #     language: python
@@ -62,7 +62,7 @@ warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
 # -
 
-# ## Retrieve 2D position
+# ## Retrieve 2D position 
 #
 
 # To retrieve 2D position data, we'll specify an nwb file, a position time
@@ -104,8 +104,8 @@ ax.set_title("Head Position", fontsize=28)
 #
 # - `node_positions` (cm): the 2D positions of the graph
 # - `edges`: how the nodes are connected, as pairs of node indices, labeled by
-#   their respective index in `node_positions`.
-# - `linear_edge_order`: layout of edges in linear space in *order*, as tuples.
+#   their respective index in `node_positions`. 
+# - `linear_edge_order`: layout of edges in linear space in *order*, as tuples. 
 # - `linear_edge_spacing`: spacing between each edge, as either a single number
 # for all gaps or an array with a number for each gap. Gaps may be important for
 # edges not connected in 2D space.
@@ -116,7 +116,7 @@ ax.set_title("Head Position", fontsize=28)
 # from node 0 to 1. Edge (1, 0) would connect from node 1 to 0, reversing the
 # linear positions for that edge.
 #
-# For more examples, see
+# For more examples, see 
 # [this notebook](https://github.com/LorenFrankLab/track_linearization/blob/master/notebooks/).
 
 # +
@@ -223,7 +223,7 @@ sgc.common_position.LinearizationParameters()
 
 # ## Linearization
 
-# With linearization parameters, we specify the position interval we wish to
+# With linearization parameters, we specify the position interval we wish to 
 # linearize.
 
 # +
@@ -368,3 +368,9 @@ print("Select points in the figure by enclosing them within a polygon.")
 print("Press the 'esc' key to start a new polygon.")
 print("Try holding the 'shift' key to move all of the vertices.")
 print("Try holding the 'ctrl' key to move a single vertex.")
+# -
+
+# ## Up Next
+#
+# Next, we'll combine ephys and position data in a process called 
+# [ripple detection](./30_Ripple_Detection.ipynb).

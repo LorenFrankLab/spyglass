@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -193,13 +193,21 @@
 
 # ### Loading the config
 #
-# We can check that the paths are correctly set up by loading the config.
+# We can check that the paths are correctly set up by loading the config from 
+# the main Spyglass directory.
 #
 
 # +
-from spyglass.settings import load_config
+import os
+import datajoint as dj
 
-load_config()
+if os.path.basename(os.getcwd()) == "notebooks":
+    os.chdir("..")
+dj.config.load("dj_local_conf.json")
+
+from spyglass.settings import config
+
+config
 # -
 
 # ### Connect
@@ -210,10 +218,12 @@ load_config()
 #
 
 # +
-from spyglass.common import SpikeSortingBackUp
+from spyglass.common import Nwbfile
 
-SpikeSortingBackUp()
+Nwbfile()
 # -
+
+# # Up Next
 
 # Next, we'll try [inserting data](./01_Insert_Data.ipynb)
 #

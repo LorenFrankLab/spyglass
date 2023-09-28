@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: Python 3.10.5 64-bit
 #     language: python
@@ -370,7 +370,5 @@ plt.ylabel("Amplitude (AD units)")
 
 # ## Next Steps
 #
-# In the next set of notebooks, we'll focus on animal position data, either
-# as measured by Trodes or DeepLabCut. Get started with
-# [this notebook](./04_Position_Trodes.ipynb).
+# Next, we'll use look at [Theta](./14_Theta.ipynb) bands within LFP data.
 #

@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -31,7 +31,7 @@
 #
 # This is a tutorial will cover how to extract position given a pre-trained DeepLabCut (DLC) model. It will walk through adding your DLC model to Spyglass.
 #
-# If you already have a model in the database, skip to the
+# If you already have a model in the database, skip to the 
 # [next tutorial](./23_Position_DLC_3.ipynb).
 
 # ## Imports
@@ -65,28 +65,29 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # #### Here is a schematic showing the tables used in this notebook.<br>
 # ![dlc_existing.png|2000x900](./../notebook-images/dlc_existing.png)
 
-# ### Table of Contents<a id='ToC'></a>
+# ## Table of Contents<a id='ToC'></a>
 #
 # - [`DLCProject`](#DLCProject)
 # - [`DLCModel`](#DLCModel)
+# <!-- 
 # - [`DLCPoseEstimation`](#DLCPoseEstimation)
 # - [`DLCSmoothInterp`](#DLCSmoothInterp)
 # - [`DLCCentroid`](#DLCCentroid)
 # - [`DLCOrientation`](#DLCOrientation)
 # - [`DLCPos`](#DLCPos)
 # - [`DLCPosVideo`](#DLCPosVideo)
-# - [`PositionOutput`](#PositionOutput)
+# - [`PositionOutput`](#PositionOutput) -->
 #
 # You can click on any header to return to the Table of Contents
 
-# #### [DLCProject](#ToC) <a id='DLCProject'></a>
+# ## [DLCProject](#ToC) <a id='DLCProject'></a>
 
 # We'll look at the BodyPart table, which stores standard names of body parts used within DLC models.
 
 # <div class="alert alert-block alert-info">
 #     <b>Notes:</b><ul>
 #     <li>
-#         Please do not add to the <code>BodyPart</code> table in the production
+#         Please do not add to the <code>BodyPart</code> table in the production 
 #         database unless necessary.
 #     </li>
 #     </ul>
@@ -117,9 +118,9 @@ project_key = sgp.DLCProject.insert_existing_project(
 
 sgp.DLCProject() & {"project_name": project_name}
 
-# #### [DLCModel](#ToC) <a id='DLCModel'></a>
+# ## [DLCModel](#ToC) <a id='DLCModel'></a>
 
-# The `DLCModelInput` table has `dlc_model_name` and `project_name` as primary keys and `project_path` as a secondary key.
+# The `DLCModelInput` table has `dlc_model_name` and `project_name` as primary keys and `project_path` as a secondary key. 
 
 sgp.DLCModelInput()
 
@@ -184,9 +185,10 @@ sgp.DLCModel.populate(model_key)
 
 sgp.DLCModel() & model_key
 
-# ### Next Steps
+# ## Next Steps
 #
-# With our trained model in place, we're ready to move on to
-# [pose estimation](./23_Position_DLC_3.ipynb).
+# With our trained model in place, we're ready to move on to 
+# pose estimation (notebook coming soon!).
+# <!-- [pose estimation](./23_Position_DLC_3.ipynb). -->
 
 # ### [`Return To Table of Contents`](#ToC)<br>

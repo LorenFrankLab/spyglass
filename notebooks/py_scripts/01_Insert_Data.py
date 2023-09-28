@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -53,7 +53,6 @@ import spyglass.common as sgc
 
 # spyglass.data_import has tools for inserting NWB files into the database
 import spyglass.data_import as sgi
-
 # -
 
 # ## Visualizing the database
@@ -106,10 +105,12 @@ dj.Diagram(sgc.Session) - 1 + 2
 #
 # We offer a few examples:
 #
-# - `minirec20230622.nwb`, .3 GB: minimal recording, on
-#   [Box](https://ucsf.box.com/s/k3sgql6z475oia848q1rgms4zdh4rkjn)
-# - `montague20200802.nwb`, 8 GB: full recording, on
-#   DropBox (link coming soon)
+# - `minirec20230622.nwb`, .3 GB: minimal recording,
+#   [Link](https://ucsf.box.com/s/k3sgql6z475oia848q1rgms4zdh4rkjn)
+# - `mediumnwb20230802.nwb`, 32 GB: full-featured dataset, 
+#   [Link](https://ucsf.box.com/s/2qbhxghzpttfam4b7q7j8eg0qkut0opa) 
+# - `montague20200802.nwb`, 8 GB: full experimintal recording, 
+#   [Link](https://ucsf.box.com/s/26je2eytjpqepyznwpm92020ztjuaomb)
 # - For those in the UCSF network, these and many others on `/stelmo/nwb/raw`
 #
 # If you are connected to the Frank lab database, please rename any downloaded
@@ -117,14 +118,17 @@ dj.Diagram(sgc.Session) - 1 + 2
 # file name acts as the primary key across key tables.
 #
 
+# +
+from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
 # Define the name of the file that you copied and renamed
 nwb_file_name = "minirec20230622.nwb"
-filename, file_extension = os.path.splitext(nwb_file_name)
-# By convention, Spyglass will add an underscore before the extension and copy
-# the file, removing raw data.
-nwb_copy_file_name = filename + "_" + file_extension
+nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
+# -
 
-nwb_file_name
+# Spyglass will create a copy with this name.
+
+nwb_copy_file_name
 
 # ## Basic Inserts: Lab Team
 #
@@ -181,6 +185,8 @@ sgc.LabTeam.LabTeamMember()
 
 # ## Inserting from NWB
 #
+
+#
 # `spyglass.data_import.insert_sessions` helps take the many fields of data
 # present in an NWB file and insert them into various tables across Spyglass. If
 # the NWB file is properly composed, this includes...
@@ -190,8 +196,8 @@ sgc.LabTeam.LabTeamMember()
 # - neural activity (extracellular recording of multiple brain areas)
 # - etc.
 #
-# _Note:_ this may take a while because it makes a copy of the NWB file.
-#
+# _Note:_ this may take time as Spyglass creates the copy. You may see a prompt 
+# about inserting device information.
 
 sgi.insert_sessions(nwb_file_name)
 
@@ -311,9 +317,7 @@ session_entry
 # To delete, uncomment the cell below and respond `yes` in the prompt.
 #
 
-# +
-# session_entry.delete()
-# -
+session_entry.delete()
 
 # We can check that delete worked, both for `Session` and `IntervalList`
 #
@@ -353,6 +357,7 @@ sgc.Nwbfile().cleanup(delete_files=True)
 
 # !ls $SPYGLASS_BASE_DIR/raw
 
-# In the [next notebook](./02_Spike_Sorting.ipynb), we'll dive into the Spike
-# Sorting pipeline.
+# ## Up Next
+
+# In the [next notebook](./02_Data_Sync.ipynb), we'll explore tools for syncing.
 #

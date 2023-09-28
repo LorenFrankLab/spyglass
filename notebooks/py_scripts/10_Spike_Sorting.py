@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: Python 3.10.5 64-bit
 #     language: python
@@ -109,9 +109,9 @@ my_team_members = (
 if name in my_team_members:
     print("You made it in!")
 
-# _Exercise_ code hidden here
+# <details>
+# <summary>Code hidden here</summary>
 #
-# <!--
 # ```python
 # members = sgc.LabTeam.LabTeamMember.fetch(as_dict=True)
 # teams_dict = {member["team_name"]: [] for member in members}
@@ -119,8 +119,7 @@ if name in my_team_members:
 #     teams_dict[member["team_name"]].append(member["lab_member_name"])
 # print(teams_dict)
 # ```
-# -->
-#
+# </details>
 
 # ## Adding an NWB file
 #
