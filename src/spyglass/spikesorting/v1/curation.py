@@ -10,16 +10,15 @@ from typing import List
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
+import spikeinterface.extractors as se
 import spikeinterface.preprocessing as sip
 import spikeinterface.qualitymetrics as sq
 
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.utils.dj_helper_fn import fetch_nwb
-
-# from .merged_sorting_extractor import MergedSortingExtractor
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
-from spyglass.spikesorting.v1.sorting import SpikeSortingV1
+from spyglass.spikesorting.v1.sorting import SpikeSorting
 from spyglass.spikesorting.merge import SpikeSortingOutput
 
 schema = dj.schema("spikesorting_v1_curation")
@@ -27,16 +26,16 @@ schema = dj.schema("spikesorting_v1_curation")
 valid_labels = ["reject", "noise", "artifact", "mua", "accept"]
 
 
-def apply_merge_groups_to_sorting(
-    sorting: si.BaseSorting, merge_groups: List[List[int]]
-):
-    # return a new sorting where the units are merged according to merge_groups
-    # merge_groups is a list of lists of unit_ids.
-    # for example: merge_groups = [[1, 2], [5, 8, 4]]]
+# def apply_merge_groups_to_sorting(
+#     sorting: si.BaseSorting, merge_groups: List[List[int]]
+# ):
+#     # return a new sorting where the units are merged according to merge_groups
+#     # merge_groups is a list of lists of unit_ids.
+#     # for example: merge_groups = [[1, 2], [5, 8, 4]]
 
-    return MergedSortingExtractor(
-        parent_sorting=sorting, merge_groups=merge_groups
-    )
+#     return MergedSortingExtractor(
+#         parent_sorting=sorting, merge_groups=merge_groups
+#     )
 
 
 @schema
@@ -47,19 +46,16 @@ class Curation(dj.Manual):
     ---
     parent_curation_id=-1: int
     -> AnalysisNwbfile
-    merge_groups: blob              # a list of merge groups for the units
-    time_of_creation: int           # in Unix time, to the nearest second
-    description='': varchar(300)    # optional description for this curated sort
     """
 
     @staticmethod
     def insert_curation(
         sorting_id: str,
         parent_curation_id: int = -1,
-        labels=None,
-        merge_groups=None,
-        metrics=None,
-        description="",
+        labels: Union[None, Dict[int, List[str]]] = None,
+        merge_groups: Union[None, Dict[int, List[int]]] = None,
+        metrics: Union[None, Dict[str, Dict[int, float]]] = None,
+        description: str = "",
     ):
         """Given a sorting_id and the parent_sorting_id (and optional
         arguments) insert an entry into Curation.
@@ -83,11 +79,10 @@ class Curation(dj.Manual):
         curation_key : dict
 
         """
-        inserted_curation = (Curation & sorting_id).fetch("KEY")
-        if parent_curation_id == -1:
+        if parent_curation_id <= -1:
+            parent_curation_id = -1
             # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
-            inserted_curation = (Curation & sorting_id).fetch("KEY")
-            if len(inserted_curation) > 0:
+            if len((Curation & [sorting_id, parent_curation_id]).fetch("KEY")) > 0:
                 Warning(
                     "Sorting has already been inserted, returning key to previously"
                     "inserted curation"
@@ -111,13 +106,7 @@ class Curation(dj.Manual):
         # convert unit_ids in labels to integers for labels from sortingview.
         new_labels = {int(unit_id): labels[unit_id] for unit_id in labels}
 
-        sorting_key["curation_id"] = curation_id
-        sorting_key["parent_curation_id"] = parent_curation_id
-        sorting_key["description"] = description
-        sorting_key["curation_labels"] = new_labels
-        sorting_key["merge_groups"] = merge_groups
-        sorting_key["quality_metrics"] = metrics
-        sorting_key["time_of_creation"] = int(time.time())
+        # TODO: write the curation labels, merge groups, and metrics as columns in the units table of NWB
 
         # mike: added skip duplicates
         Curation.insert1(
@@ -132,18 +121,33 @@ class Curation(dj.Manual):
         return curation_key
 
     @staticmethod
-    def get_recording(key: dict):
-        """Returns the recording extractor for the recording related to this curation
+    def get_recording(key: dict)->si.BaseRecording:
+        """Get recording related to this curation
 
         Parameters
         ----------
         key : dict
-            SpikeSortingRecording key
+            primary key of Curation table
+        """
 
-        Returns
-        -------
-        recording_extractor : spike interface recording extractor
+        analysis_file_name = (SpikeSorting & sorting_key).fetch1('analysis_file_name')
+        sorting_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
+            analysis_file_name
+        )
+        sorting = se.read_nwb_sorting(
+            sorting_analysis_nwb_file_abs_path
+        )
 
+        return recording
+
+    @staticmethod
+    def get_sorting(key: dict):
+        """Get sorting related to the curation
+
+        Parameters
+        ----------
+        key : dict
+            primary key of Curation table
         """
 
         sorting_key = (SpikeSorting & key).fetch1()

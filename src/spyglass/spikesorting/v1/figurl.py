@@ -1,10 +1,12 @@
 import datajoint as dj
-
 from typing import Any, Union, List, Dict
+
 
 from spyglass.spikesorting.merge import SpikeSortingOutput
 
 import spikeinterface as si
+
+from .curation import Curation
 
 from sortingview.SpikeSortingView import SpikeSortingView
 import kachery_cloud as kcl
@@ -12,15 +14,20 @@ import sortingview.views as vv
 
 schema = dj.schema("spikesorting_v1_figurl")
 
+@schema
+class CurationFigURLSelection(dj.Manual):
+    definition = """
+    -> Curation
+    initial_curation_uri: varchar(1000) = NULL
+    """
 
 @schema
 class CurationFigURL(dj.Computed):
     definition = """
-    -> Curation
+    -> CurationFigURLSelection
     ---
     url: varchar(2000)
-    initial_curation_uri: varchar(2000)
-    new_curation_uri: varchar(2000)
+    curation_uri: varchar(2000)
     """
 
     def make(self, key: dict):
@@ -28,16 +35,15 @@ class CurationFigURL(dj.Computed):
         Parameters
         ----------
         key : dict
-            primary key of an entry from CurationFigurlSelection table
         """
 
         # get new_curation_uri from selection table
-        new_curation_uri = (CurationFigurlSelection & key).fetch1(
+        new_curation_uri = (CurationFigURLSelection & key).fetch1(
             "new_curation_uri"
         )
 
         # fetch
-        recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
+        recording_path = Curation.get_recording(key)
         sorting_path = (SpikeSorting & key).fetch1("sorting_path")
         recording_label = SpikeSortingRecording._get_recording_name(key)
         sorting_label = SpikeSorting._get_sorting_name(key)

@@ -28,5 +28,5 @@ class SpikeSortingOutput(_Merge):
         definition = """
         -> master
         ---
-        -> ImportedLFPV1
+        -> ImportedSpikeSorting
         """
