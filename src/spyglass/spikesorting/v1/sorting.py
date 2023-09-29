@@ -339,7 +339,7 @@ def _write_sorting_to_nwb(
     Returns
     -------
     analysis_nwb_file : str
-        name of analysis NWB file containing the preprocessed recording
+        name of analysis NWB file containing the sorting
     """
 
     analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
