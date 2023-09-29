@@ -3,7 +3,15 @@ import os
 import sys
 import tempfile
 
-shared_modules = ["common\_%", "spikesorting\_%", "decoding\_%"]
+shared_modules = [
+    "common\_%",
+    "spikesorting\_%",
+    "decoding\_%",
+    "position\_%",
+    "position_linearization\_%",
+    "ripple\_%",
+    "lfp\_%",
+]
 
 
 def add_user(user_name):

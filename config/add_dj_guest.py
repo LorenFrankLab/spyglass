@@ -8,6 +8,8 @@ shared_modules = [
     "spikesorting\_%",
     "decoding\_%",
     "position\_%",
+    "position_linearization\_%",
+    "ripple\_%",
     "lfp\_%",
 ]
 
