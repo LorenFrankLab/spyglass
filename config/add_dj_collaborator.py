@@ -3,25 +3,24 @@ import os
 import sys
 import tempfile
 
-# shared_modules = [
-#     "common\_%",
-#     "spikesorting\_%",
-#     "decoding\_%",
-#     "position\_%",
-#     "lfp\_%",
-# ]
-
 
 def add_collab_user(user_name):
-    # create a tempoary file for the command
+    # create a temporary file for the command
     file = tempfile.NamedTemporaryFile(mode="w")
 
+    # Create the user (if not already created) and set the password
     file.write(
-        f"GRANT ALL PRIVILEGES ON `{user_name}\_%`.* TO `{user_name}`@'%' IDENTIFIED BY 'temppass';\n"
+        f"CREATE USER IF NOT EXISTS '{user_name}'@'%' IDENTIFIED BY 'temppass';\n"
     )
-    # for module in shared_modules:
-    #     file.write(f"GRANT ALL PRIVILEGES ON `{module}`.* TO `{user_name}`@'%';\n")
-    file.write(f"GRANT SELECT ON `%`.* TO `{user_name}`@'%';\n")
+
+    # Grant privileges to databases matching the user_name pattern
+    file.write(
+        f"GRANT ALL PRIVILEGES ON `{user_name}\_%`.* TO '{user_name}'@'%';\n"
+    )
+
+    # Grant SELECT privileges on all databases
+    file.write(f"GRANT SELECT ON `%`.* TO '{user_name}'@'%';\n")
+
     file.flush()
 
     # run those commands in sql

@@ -14,15 +14,18 @@ def add_user(user_name):
 
     # create a tempoary file for the command
     file = tempfile.NamedTemporaryFile(mode="w")
-
-    file.write(
-        f"GRANT ALL PRIVILEGES ON `{user_name}\_%`.* TO `{user_name}`@'%' IDENTIFIED BY 'temppass';\n"
+    create_user_query = f"CREATE USER IF NOT EXISTS '{user_name}'@'%' IDENTIFIED BY 'temppass';\n"
+    grant_privileges_query = (
+        f"GRANT ALL PRIVILEGES ON `{user_name}\_%`.* TO '{user_name}'@'%';"
     )
+
+    file.write(create_user_query + "\n")
+    file.write(grant_privileges_query + "\n")
     for module in shared_modules:
         file.write(
-            f"GRANT ALL PRIVILEGES ON `{module}`.* TO `{user_name}`@'%';\n"
+            f"GRANT ALL PRIVILEGES ON `{module}`.* TO '{user_name}'@'%';\n"
         )
-    file.write(f"GRANT SELECT ON `%`.* TO `{user_name}`@'%';\n")
+    file.write(f"GRANT SELECT ON `%`.* TO '{user_name}'@'%';\n")
     file.flush()
 
     # run those commands in sql
