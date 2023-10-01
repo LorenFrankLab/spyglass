@@ -21,6 +21,8 @@ from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.spikesorting.v1.sorting import SpikeSorting
 from spyglass.spikesorting.merge import SpikeSortingOutput
 
+schema = dj.schema("spikesorting_v1_metric_curation")
+
 
 @schema
 class WaveformParameters(dj.Manual):

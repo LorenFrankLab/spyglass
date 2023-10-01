@@ -12,17 +12,19 @@ from sortingview.SpikeSortingView import SpikeSortingView
 import kachery_cloud as kcl
 import sortingview.views as vv
 
-schema = dj.schema("spikesorting_v1_figurl")
+schema = dj.schema("spikesorting_v1_figurl_curation")
+
 
 @schema
-class CurationFigURLSelection(dj.Manual):
+class FigURLCurationSelection(dj.Manual):
     definition = """
     -> Curation
     initial_curation_uri: varchar(1000) = NULL
     """
 
+
 @schema
-class CurationFigURL(dj.Computed):
+class FigURLCuration(dj.Computed):
     definition = """
     -> CurationFigURLSelection
     ---
