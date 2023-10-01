@@ -7,11 +7,9 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.curation as sc
 
-from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.spikesorting.v1.sorting import SpikeSorting
-from spyglass.spikesorting.merge import SpikeSortingOutput
 
 schema = dj.schema("spikesorting_v1_curation")
 
