@@ -33,9 +33,9 @@ class Curation(dj.Manual):
         sorting_id: str,
         parent_curation_id: int = -1,
         labels: Union[None, Dict[str, List[str]]] = None,
-        merge_groups: Union[None, List[List[int]]] = None,
+        merge_groups: Union[None, List[List[str]]] = None,
         apply_merge: bool = False,
-        metrics: Union[None, Dict[str, Dict[int, float]]] = None,
+        metrics: Union[None, Dict[str, Dict[str, float]]] = None,
         description: str = "",
     ):
         """Given a sorting_id and the parent_sorting_id (and optional
@@ -186,7 +186,9 @@ class Curation(dj.Manual):
             nwb_sorting = nwbfile.objects[object_id]
             merge_groups = nwb_sorting["merge_groups"][:]
         if merge_groups:
-            units_to_merge = _union_intersecting_lists(_reverse_associations(merge_groups))
+            units_to_merge = _union_intersecting_lists(
+                _reverse_associations(merge_groups)
+            )
             units_to_merge = [lst for lst in units_to_merge if len(lst) >= 2]
             return sc.MergeUnitsSorting(
                 parent_sorting=si_sorting, units_to_merge=units_to_merge
@@ -194,11 +196,12 @@ class Curation(dj.Manual):
         else:
             return si_sorting
 
+
 def _write_sorting_to_nwb_with_curation(
     sorting_id: str,
     labels: Union[None, Dict[str, List[str]]] = None,
-    merge_groups: Union[None, List[List[int]]] = None,
-    metrics: Union[None, Dict[str, Dict[int, float]]] = None,
+    merge_groups: Union[None, List[List[str]]] = None,
+    metrics: Union[None, Dict[str, Dict[str, float]]] = None,
     apply_merge: bool = False,
 ):
     """Save sorting to NWB with curation information.
@@ -239,7 +242,7 @@ def _write_sorting_to_nwb_with_curation(
     sorting = se.read_nwb_sorting(sorting_analysis_file_abs_path)
     if apply_merge:
         sorting = sc.MergeUnitsSorting(
-            parent_sorting=sorting, parent_sorting=merge_groups
+            parent_sorting=sorting, units_to_merge=merge_groups
         )
         merge_groups = None
 
@@ -269,7 +272,7 @@ def _write_sorting_to_nwb_with_curation(
                 data=label_values,
             )
         if merge_groups is not None:
-            merge_groups_dict = _extract_associations(merge_groups,unit_ids)
+            merge_groups_dict = _extract_associations(merge_groups, unit_ids)
             nwbf.add_unit_column(
                 name="merge_groups",
                 description="merge groups",
@@ -323,6 +326,7 @@ def _union_intersecting_lists(lists):
 
     return result
 
+
 def _extract_associations(lists_of_strings, target_strings):
     lists_of_strings = _union_intersecting_lists(lists_of_strings)
     result = {string: [] for string in target_strings}
@@ -333,6 +337,7 @@ def _extract_associations(lists_of_strings, target_strings):
                 result[string].extend([item for item in lst if item != string])
 
     return result
+
 
 def _reverse_associations(assoc_dict):
     result = []
