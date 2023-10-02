@@ -176,34 +176,22 @@ class SpikeSortingPreprocessingParameter(dj.Lookup):
     ---
     preproc_param: blob
     """
-    freq_min = 300  # high pass filter value
-    freq_max = 6000  # low pass filter value
-    margin_ms = 5  # margin in ms on border to avoid border effect
-    seed = 0  # random seed for whitening
 
     contents = [
         [
             "default",
             {
-                "frequency_min": freq_min,
-                "frequency_max": freq_max,
-                "margin_ms": margin_ms,
-                "seed": seed,
+                "frequency_min": 300,  # high pass filter value
+                "frequency_max": 6000,  # low pass filter value
+                "margin_ms": 5,  # margin in ms on border to avoid border effect
+                "seed": 0,  # random seed for whitening
             },
         ]
     ]
 
     @classmethod
     def insert_default(cls):
-        key = dict()
-        key["preproc_params_name"] = "default"
-        key["preproc_params"] = {
-            "frequency_min": cls.freq_min,
-            "frequency_max": cls.freq_max,
-            "margin_ms": cls.margin_ms,
-            "seed": cls.seed,
-        }
-        cls.insert1(key, skip_duplicates=True)
+        cls.insert1(cls.contents, skip_duplicates=True)
 
 
 @schema

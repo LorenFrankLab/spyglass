@@ -102,7 +102,7 @@ class FigURLCuration(dj.Computed):
         unit_metrics = _reformat_metrics(metric_dict)
 
         # Generate the figURL
-        url = _generate_figurl(
+        key["url"] = _generate_figurl(
             R=recording,
             S=sorting,
             initial_curation_uri=curation_uri,
@@ -110,10 +110,9 @@ class FigURLCuration(dj.Computed):
             sorting_label=sorting_label,
             unit_metrics=unit_metrics,
         )
-        key["url"] = url
 
         # INSERT
-        self.insert1(key)
+        self.insert1(key, skip_duplicates=True)
 
 
 def _generate_figurl(
@@ -122,7 +121,6 @@ def _generate_figurl(
     initial_curation_uri: str,
     recording_label: str,
     sorting_label: str,
-    new_curation_uri: str,
     unit_metrics: Union[List[Any], None] = None,
     segment_duration_sec=1200,
     snippet_ms_before=1,

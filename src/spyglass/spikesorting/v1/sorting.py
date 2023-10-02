@@ -3,7 +3,6 @@ from typing import Iterable
 import os
 import tempfile
 import time
-from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -94,73 +93,9 @@ class SpikeSorterParameter(dj.Lookup):
         ]
     )
 
-    def insert_default(self):
-        """Default params from spike sorters available via spikeinterface"""
-        sorters = sis.available_sorters()
-        for sorter in sorters:
-            sorter_params = sis.get_default_sorter_params(sorter)
-            self.insert1(
-                [sorter, "default", sorter_params], skip_duplicates=True
-            )
-
-        # Insert Frank lab defaults
-        # Hippocampus tetrode default
-        sorter = "mountainsort4"
-        sorter_params_name = "franklab_tetrode_hippocampus_30KHz"
-        sorter_params = {
-            "detect_sign": -1,
-            "adjacency_radius": 100,
-            "freq_min": 600,
-            "freq_max": 6000,
-            "filter": False,
-            "whiten": True,
-            "num_workers": 1,
-            "clip_size": 40,
-            "detect_threshold": 3,
-            "detect_interval": 10,
-        }
-        self.insert1(
-            [sorter, sorter_params_name, sorter_params], skip_duplicates=True
-        )
-
-        # Cortical probe default
-        sorter = "mountainsort4"
-        sorter_params_name = "franklab_probe_ctx_30KHz"
-        sorter_params = {
-            "detect_sign": -1,
-            "adjacency_radius": 100,
-            "freq_min": 300,
-            "freq_max": 6000,
-            "filter": False,
-            "whiten": True,
-            "num_workers": 1,
-            "clip_size": 40,
-            "detect_threshold": 3,
-            "detect_interval": 10,
-        }
-        self.insert1(
-            [sorter, sorter_params_name, sorter_params], skip_duplicates=True
-        )
-
-        # clusterless defaults
-        sorter = "clusterless_thresholder"
-        sorter_params_name = "default_clusterless"
-        sorter_params = dict(
-            detect_threshold=100.0,  # uV
-            # Locally exclusive means one unit per spike detected
-            method="locally_exclusive",
-            peak_sign="neg",
-            exclude_sweep_ms=0.1,
-            local_radius_um=100,
-            # noise levels needs to be 1.0 so the units are in uV and not MAD
-            noise_levels=np.asarray([1.0]),
-            random_chunk_kwargs={},
-            # output needs to be set to sorting for the rest of the pipeline
-            outputs="sorting",
-        )
-        self.insert1(
-            [sorter, sorter_params_name, sorter_params], skip_duplicates=True
-        )
+    @classmethod
+    def insert_default(cls):
+        cls.insert1(cls.contents, skip_duplicates=True)
 
 
 @schema
@@ -251,7 +186,7 @@ class SpikeSorting(dj.Computed):
             # turn off whitening by sorter because
             # recording will be whitened before feeding it to sorter
             sorter_params["whiten"] = False
-            recording = sip.whiten(recording, dtype="float64")
+            recording = sip.whiten(recording, dtype=np.float64)
             sorting = sis.run_sorter(
                 sorter,
                 recording,
