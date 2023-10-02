@@ -1,7 +1,6 @@
 import json
 import os
 import shutil
-import time
 import uuid
 import warnings
 from pathlib import Path
@@ -16,6 +15,12 @@ import spikeinterface.qualitymetrics as sq
 
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.v1.metric_utils import (
+    get_num_spikes,
+    get_peak_channel,
+    get_peak_offset,
+    compute_isi_violation_fractions,
+)
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.spikesorting.v1.sorting import SpikeSorting
@@ -26,12 +31,20 @@ schema = dj.schema("spikesorting_v1_metric_curation")
 
 _metric_name_to_func = {
     "snr": sq.compute_snrs,
-    "isi_violation": _compute_isi_violation_fractions,
+    "isi_violation": compute_isi_violation_fractions,
     "nn_isolation": sq.nearest_neighbors_isolation,
     "nn_noise_overlap": sq.nearest_neighbors_noise_overlap,
-    "peak_offset": _get_peak_offset,
-    "peak_channel": _get_peak_channel,
-    "num_spikes": _get_num_spikes,
+    "peak_offset": get_peak_offset,
+    "peak_channel": get_peak_channel,
+    "num_spikes": get_num_spikes,
+}
+
+_comparison_to_function = {
+    "<": np.less,
+    "<=": np.less_equal,
+    ">": np.greater,
+    ">=": np.greater_equal,
+    "==": np.equal,
 }
 
 
@@ -42,6 +55,7 @@ class WaveformParameter(dj.Lookup):
     ---
     waveform_param: blob # a dict of waveform extraction parameters
     """
+
     contents = [
         [
             "default_not_whitened",
@@ -68,31 +82,8 @@ class WaveformParameter(dj.Lookup):
     ]
 
     @classmethod
-    def insert_default(cls, self):
-        waveform_params_name = "default_not_whitened"
-        waveform_params = {
-            "ms_before": 0.5,
-            "ms_after": 0.5,
-            "max_spikes_per_unit": 5000,
-            "n_jobs": 5,
-            "total_memory": "5G",
-            "whiten": False,
-        }
-        cls.insert1(
-            [waveform_params_name, waveform_params], skip_duplicates=True
-        )
-        waveform_params_name = "default_whitened"
-        waveform_params = {
-            "ms_before": 0.5,
-            "ms_after": 0.5,
-            "max_spikes_per_unit": 5000,
-            "n_jobs": 5,
-            "total_memory": "5G",
-            "whiten": True,
-        }
-        cls.insert1(
-            [waveform_params_name, waveform_params], skip_duplicates=True
-        )
+    def insert_default(cls):
+        cls.insert1(cls.contents, skip_duplicates=True)
 
 
 @schema
@@ -103,6 +94,16 @@ class MetricParameter(dj.Lookup):
     ---
     metric_param: blob
     """
+    available_metrics = [
+        "snr",
+        "isi_violation",
+        "nn_isolation",
+        "nn_noise_overlap",
+        "peak_offset",
+        "peak_channel",
+        "num_spikes",
+    ]
+
     metric_default_params = {
         "snr": {
             "peak_sign": "neg",
@@ -132,12 +133,12 @@ class MetricParameter(dj.Lookup):
         "peak_channel": {"peak_sign": "neg"},
         "num_spikes": {},
     }
-    contents = [["default", metric_default_params]]
+    contents = [["franklab_default", metric_default_params]]
 
     @classmethod
-    def insert_default(cls, self):
+    def insert_default(cls):
         cls.insert1(
-            ["franklab_default3", self.metric_default_params],
+            cls.contents,
             skip_duplicates=True,
         )
 
@@ -146,16 +147,6 @@ class MetricParameter(dj.Lookup):
         return self.metric_default_params(metric)
 
     def get_available_metrics(self):
-        available_metrics = [
-            "snr",
-            "isi_violation",
-            "nn_isolation",
-            "nn_noise_overlap",
-            "peak_offset",
-            "peak_channel",
-            "num_spikes",
-        ]
-
         for metric in _metric_name_to_func:
             if metric in self.available_metrics:
                 metric_doc = _metric_name_to_func[metric].__doc__.split("\n")[0]
@@ -174,9 +165,9 @@ class MetricParameter(dj.Lookup):
 
 
 @schema
-class AutomaticCurationParameters(dj.Manual):
+class AutomaticCurationParameter(dj.Lookup):
     definition = """
-    auto_curation_params_name: varchar(200)   # name of this parameter set
+    auto_curation_param_name: varchar(200)   # name of this parameter set
     ---
     merge_params: blob   # dictionary of params to merge units
     label_params: blob   # dictionary params to label units
@@ -228,6 +219,168 @@ class AutomaticCurationParameters(dj.Manual):
             "label_params": {},
         }
         self.insert1(no_label_params, skip_duplicates=True)
+
+
+@schema
+class MetricCurationSelection(dj.Manual):
+    definition = """
+    -> Curation
+    -> WaveformParameter
+    -> MetricParameter
+    -> AutomaticCurationParameter
+    """
+
+
+@schema
+class MetricCuration(dj.Computed):
+    definition = """
+    metric_curation_id: varchar(32)
+    ---
+    -> AutomaticCurationSelection
+    metrics: longblob
+    labels: longblob
+    merge_groups: longblob
+    """
+
+    def make(self, key):
+        metrics_path = (QualityMetrics & key).fetch1("quality_metrics_path")
+        with open(metrics_path) as f:
+            quality_metrics = json.load(f)
+
+        # get the curation information and the curated sorting
+        parent_curation = (Curation & key).fetch(as_dict=True)[0]
+        parent_merge_groups = parent_curation["merge_groups"]
+        parent_labels = parent_curation["curation_labels"]
+        parent_curation_id = parent_curation["curation_id"]
+        parent_sorting = Curation.get_curated_sorting(key)
+
+        merge_params = (AutomaticCurationParameters & key).fetch1(
+            "merge_params"
+        )
+        merge_groups, units_merged = self.get_merge_groups(
+            parent_sorting, parent_merge_groups, quality_metrics, merge_params
+        )
+
+        label_params = (AutomaticCurationParameters & key).fetch1(
+            "label_params"
+        )
+        labels = self.get_labels(
+            parent_sorting, parent_labels, quality_metrics, label_params
+        )
+
+        # keep the quality metrics only if no merging occurred.
+        metrics = quality_metrics if not units_merged else None
+
+        # insert this sorting into the CuratedSpikeSorting Table
+        # first remove keys that aren't part of the Sorting (the primary key of curation)
+        c_key = (SpikeSorting & key).fetch("KEY")[0]
+        curation_key = {item: key[item] for item in key if item in c_key}
+        key["auto_curation_key"] = Curation.insert_curation(
+            curation_key,
+            parent_curation_id=parent_curation_id,
+            labels=labels,
+            merge_groups=merge_groups,
+            metrics=metrics,
+            description="auto curated",
+        )
+
+        self.insert1(key)
+
+    @staticmethod
+    def get_merge_groups(
+        sorting, parent_merge_groups, quality_metrics, merge_params
+    ):
+        """Identifies units to be merged based on the quality_metrics and
+        merge parameters and returns an updated list of merges for the curation.
+
+        Parameters
+        ---------
+        sorting : spikeinterface.sorting
+        parent_merge_groups : list
+            Information about previous merges
+        quality_metrics : list
+        merge_params : dict
+
+        Returns
+        -------
+        merge_groups : list of lists
+        merge_occurred : bool
+
+        """
+
+        # overview:
+        # 1. Use quality metrics to determine merge groups for units
+        # 2. Combine merge groups with current merge groups to produce union of merges
+
+        if not merge_params:
+            return parent_merge_groups, False
+        else:
+            # TODO: use the metrics to identify clusters that should be merged
+            # new_merges should then reflect those merges and the line below should be deleted.
+            new_merges = []
+            # append these merges to the parent merge_groups
+            for new_merge in new_merges:
+                # check to see if the first cluster listed is in a current merge group
+                for previous_merge in parent_merge_groups:
+                    if new_merge[0] == previous_merge[0]:
+                        # add the additional units in new_merge to the identified merge group.
+                        previous_merge.extend(new_merge[1:])
+                        previous_merge.sort()
+                        break
+                else:
+                    # append this merge group to the list if no previous merge
+                    parent_merge_groups.append(new_merge)
+            return parent_merge_groups.sort(), True
+
+    @staticmethod
+    def get_labels(sorting, parent_labels, quality_metrics, label_params):
+        """Returns a dictionary of labels using quality_metrics and label
+        parameters.
+
+        Parameters
+        ---------
+        sorting : spikeinterface.sorting
+        parent_labels : list
+            Information about previous merges
+        quality_metrics : list
+        label_params : dict
+
+        Returns
+        -------
+        parent_labels : list
+
+        """
+        # overview:
+        # 1. Use quality metrics to determine labels for units
+        # 2. Append labels to current labels, checking for inconsistencies
+        if not label_params:
+            return parent_labels
+        else:
+            for metric in label_params:
+                if metric not in quality_metrics:
+                    Warning(f"{metric} not found in quality metrics; skipping")
+                else:
+                    compare = _comparison_to_function[label_params[metric][0]]
+
+                    for unit_id in quality_metrics[metric].keys():
+                        # compare the quality metric to the threshold with the specified operator
+                        # note that label_params[metric] is a three element list with a comparison operator as a string,
+                        # the threshold value, and a list of labels to be applied if the comparison is true
+                        if compare(
+                            quality_metrics[metric][unit_id],
+                            label_params[metric][1],
+                        ):
+                            if unit_id not in parent_labels:
+                                parent_labels[unit_id] = label_params[metric][2]
+                            # check if the label is already there, and if not, add it
+                            elif (
+                                label_params[metric][2]
+                                not in parent_labels[unit_id]
+                            ):
+                                parent_labels[unit_id].extend(
+                                    label_params[metric][2]
+                                )
+            return parent_labels
 
 
 @schema
@@ -415,401 +568,3 @@ class QualityMetrics(dj.Computed):
             new_qm[str(key)] = m
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(new_qm, f, ensure_ascii=False, indent=4)
-
-
-@schema
-class AutomaticCurationSelection(dj.Manual):
-    definition = """
-    -> QualityMetrics
-    -> AutomaticCurationParameters
-    """
-
-
-_comparison_to_function = {
-    "<": np.less,
-    "<=": np.less_equal,
-    ">": np.greater,
-    ">=": np.greater_equal,
-    "==": np.equal,
-}
-
-
-@schema
-class AutomaticCuration(dj.Computed):
-    definition = """
-    -> AutomaticCurationSelection
-    ---
-    auto_curation_key: blob # the key to the curation inserted by make
-    """
-
-    def make(self, key):
-        metrics_path = (QualityMetrics & key).fetch1("quality_metrics_path")
-        with open(metrics_path) as f:
-            quality_metrics = json.load(f)
-
-        # get the curation information and the curated sorting
-        parent_curation = (Curation & key).fetch(as_dict=True)[0]
-        parent_merge_groups = parent_curation["merge_groups"]
-        parent_labels = parent_curation["curation_labels"]
-        parent_curation_id = parent_curation["curation_id"]
-        parent_sorting = Curation.get_curated_sorting(key)
-
-        merge_params = (AutomaticCurationParameters & key).fetch1(
-            "merge_params"
-        )
-        merge_groups, units_merged = self.get_merge_groups(
-            parent_sorting, parent_merge_groups, quality_metrics, merge_params
-        )
-
-        label_params = (AutomaticCurationParameters & key).fetch1(
-            "label_params"
-        )
-        labels = self.get_labels(
-            parent_sorting, parent_labels, quality_metrics, label_params
-        )
-
-        # keep the quality metrics only if no merging occurred.
-        metrics = quality_metrics if not units_merged else None
-
-        # insert this sorting into the CuratedSpikeSorting Table
-        # first remove keys that aren't part of the Sorting (the primary key of curation)
-        c_key = (SpikeSorting & key).fetch("KEY")[0]
-        curation_key = {item: key[item] for item in key if item in c_key}
-        key["auto_curation_key"] = Curation.insert_curation(
-            curation_key,
-            parent_curation_id=parent_curation_id,
-            labels=labels,
-            merge_groups=merge_groups,
-            metrics=metrics,
-            description="auto curated",
-        )
-
-        self.insert1(key)
-
-    @staticmethod
-    def get_merge_groups(
-        sorting, parent_merge_groups, quality_metrics, merge_params
-    ):
-        """Identifies units to be merged based on the quality_metrics and
-        merge parameters and returns an updated list of merges for the curation.
-
-        Parameters
-        ---------
-        sorting : spikeinterface.sorting
-        parent_merge_groups : list
-            Information about previous merges
-        quality_metrics : list
-        merge_params : dict
-
-        Returns
-        -------
-        merge_groups : list of lists
-        merge_occurred : bool
-
-        """
-
-        # overview:
-        # 1. Use quality metrics to determine merge groups for units
-        # 2. Combine merge groups with current merge groups to produce union of merges
-
-        if not merge_params:
-            return parent_merge_groups, False
-        else:
-            # TODO: use the metrics to identify clusters that should be merged
-            # new_merges should then reflect those merges and the line below should be deleted.
-            new_merges = []
-            # append these merges to the parent merge_groups
-            for new_merge in new_merges:
-                # check to see if the first cluster listed is in a current merge group
-                for previous_merge in parent_merge_groups:
-                    if new_merge[0] == previous_merge[0]:
-                        # add the additional units in new_merge to the identified merge group.
-                        previous_merge.extend(new_merge[1:])
-                        previous_merge.sort()
-                        break
-                else:
-                    # append this merge group to the list if no previous merge
-                    parent_merge_groups.append(new_merge)
-            return parent_merge_groups.sort(), True
-
-    @staticmethod
-    def get_labels(sorting, parent_labels, quality_metrics, label_params):
-        """Returns a dictionary of labels using quality_metrics and label
-        parameters.
-
-        Parameters
-        ---------
-        sorting : spikeinterface.sorting
-        parent_labels : list
-            Information about previous merges
-        quality_metrics : list
-        label_params : dict
-
-        Returns
-        -------
-        parent_labels : list
-
-        """
-        # overview:
-        # 1. Use quality metrics to determine labels for units
-        # 2. Append labels to current labels, checking for inconsistencies
-        if not label_params:
-            return parent_labels
-        else:
-            for metric in label_params:
-                if metric not in quality_metrics:
-                    Warning(f"{metric} not found in quality metrics; skipping")
-                else:
-                    compare = _comparison_to_function[label_params[metric][0]]
-
-                    for unit_id in quality_metrics[metric].keys():
-                        # compare the quality metric to the threshold with the specified operator
-                        # note that label_params[metric] is a three element list with a comparison operator as a string,
-                        # the threshold value, and a list of labels to be applied if the comparison is true
-                        if compare(
-                            quality_metrics[metric][unit_id],
-                            label_params[metric][1],
-                        ):
-                            if unit_id not in parent_labels:
-                                parent_labels[unit_id] = label_params[metric][2]
-                            # check if the label is already there, and if not, add it
-                            elif (
-                                label_params[metric][2]
-                                not in parent_labels[unit_id]
-                            ):
-                                parent_labels[unit_id].extend(
-                                    label_params[metric][2]
-                                )
-            return parent_labels
-
-
-@schema
-class CuratedSpikeSortingSelection(dj.Manual):
-    definition = """
-    -> Curation
-    """
-
-
-@schema
-class CuratedSpikeSorting(dj.Computed):
-    definition = """
-    -> CuratedSpikeSortingSelection
-    ---
-    -> AnalysisNwbfile
-    units_object_id: varchar(40)
-    """
-
-    class Unit(dj.Part):
-        definition = """
-        # Table for holding sorted units
-        -> CuratedSpikeSorting
-        unit_id: int   # ID for each unit
-        ---
-        label='': varchar(200)   # optional set of labels for each unit
-        nn_noise_overlap=-1: float   # noise overlap metric for each unit
-        nn_isolation=-1: float   # isolation score metric for each unit
-        isi_violation=-1: float   # ISI violation score for each unit
-        snr=0: float            # SNR for each unit
-        firing_rate=-1: float   # firing rate
-        num_spikes=-1: int   # total number of spikes
-        peak_channel=null: int # channel of maximum amplitude for each unit
-        """
-
-    def make(self, key):
-        unit_labels_to_remove = ["reject"]
-        # check that the Curation has metrics
-        metrics = (Curation & key).fetch1("quality_metrics")
-        if metrics == {}:
-            Warning(
-                f"Metrics for Curation {key} should normally be calculated before insertion here"
-            )
-
-        sorting = Curation.get_curated_sorting(key)
-        unit_ids = sorting.get_unit_ids()
-        # Get the labels for the units, add only those units that do not have 'reject' or 'noise' labels
-        unit_labels = (Curation & key).fetch1("curation_labels")
-        accepted_units = []
-        for unit_id in unit_ids:
-            if unit_id in unit_labels:
-                if (
-                    len(set(unit_labels_to_remove) & set(unit_labels[unit_id]))
-                    == 0
-                ):
-                    accepted_units.append(unit_id)
-            else:
-                accepted_units.append(unit_id)
-
-        # get the labels for the accepted units
-        labels = {}
-        for unit_id in accepted_units:
-            if unit_id in unit_labels:
-                labels[unit_id] = ",".join(unit_labels[unit_id])
-
-        # convert unit_ids in metrics to integers, including only accepted units.
-        #  TODO: convert to int this somewhere else
-        final_metrics = {}
-        for metric in metrics:
-            final_metrics[metric] = {
-                int(unit_id): metrics[metric][unit_id]
-                for unit_id in metrics[metric]
-                if int(unit_id) in accepted_units
-            }
-
-        print(f"Found {len(accepted_units)} accepted units")
-
-        # get the sorting and save it in the NWB file
-        sorting = Curation.get_curated_sorting(key)
-        recording = Curation.get_recording(key)
-
-        # get the sort_interval and sorting interval list
-        sort_interval_name = (SpikeSortingRecording & key).fetch1(
-            "sort_interval_name"
-        )
-        sort_interval = (SortInterval & key).fetch1("sort_interval")
-        sort_interval_list_name = (SpikeSorting & key).fetch1(
-            "artifact_removed_interval_list_name"
-        )
-
-        timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
-
-        (
-            key["analysis_file_name"],
-            key["units_object_id"],
-        ) = Curation().save_sorting_nwb(
-            key,
-            sorting,
-            timestamps,
-            sort_interval_list_name,
-            sort_interval,
-            metrics=final_metrics,
-            unit_ids=accepted_units,
-            labels=labels,
-        )
-        self.insert1(key)
-
-        # now add the units
-        # Remove the non primary key entries.
-        del key["units_object_id"]
-        del key["analysis_file_name"]
-
-        metric_fields = self.metrics_fields()
-        for unit_id in accepted_units:
-            key["unit_id"] = unit_id
-            if unit_id in labels:
-                key["label"] = labels[unit_id]
-            for field in metric_fields:
-                if field in final_metrics:
-                    key[field] = final_metrics[field][unit_id]
-                else:
-                    Warning(
-                        f"No metric named {field} in computed unit quality metrics; skipping"
-                    )
-            CuratedSpikeSorting.Unit.insert1(key)
-
-    def metrics_fields(self):
-        """Returns a list of the metrics that are currently in the Units table."""
-        unit_info = self.Unit().fetch(limit=1, format="frame")
-        unit_fields = [column for column in unit_info.columns]
-        unit_fields.remove("label")
-        return unit_fields
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
-
-@schema
-class UnitInclusionParameters(dj.Manual):
-    definition = """
-    unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
-    ---
-    inclusion_param_dict: blob # the dictionary of inclusion / exclusion parameters
-    """
-
-    def insert1(self, key, **kwargs):
-        # check to see that the dictionary fits the specifications
-        # The inclusion parameter dict has the following form:
-        # param_dict['metric_name'] = (operator, value)
-        #    where operator is '<', '>', <=', '>=', or '==' and value is the comparison (float) value to be used ()
-        # param_dict['exclude_labels'] = [list of labels to exclude]
-        pdict = key["inclusion_param_dict"]
-        metrics_list = CuratedSpikeSorting().metrics_fields()
-
-        for k in pdict:
-            if k not in metrics_list and k != "exclude_labels":
-                raise Exception(
-                    f"key {k} is not a valid element of the inclusion_param_dict"
-                )
-            if k in metrics_list:
-                if pdict[k][0] not in _comparison_to_function:
-                    raise Exception(
-                        f"operator {pdict[k][0]} for metric {k} is not in the valid operators list: {_comparison_to_function.keys()}"
-                    )
-            if k == "exclude_labels":
-                for label in pdict[k]:
-                    if label not in valid_labels:
-                        raise Exception(
-                            f"exclude label {label} is not in the valid_labels list: {valid_labels}"
-                        )
-        super().insert1(key, **kwargs)
-
-    def get_included_units(
-        self, curated_sorting_key, unit_inclusion_param_name
-    ):
-        """given a reference to a set of curated sorting units and the name of a unit inclusion parameter list, returns
-
-        Parameters
-        ----------
-        curated_sorting_key : dict
-            key to select a set of curated sorting
-        unit_inclusion_param_name : str
-            name of a unit inclusion parameter entry
-
-        Returns
-        ------unit key
-        dict
-            key to select all of the included units
-        """
-        curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
-        inc_param_dict = (
-            UnitInclusionParameters
-            & {"unit_inclusion_param_name": unit_inclusion_param_name}
-        ).fetch1("inclusion_param_dict")
-        units = (CuratedSpikeSorting().Unit() & curated_sortings).fetch()
-        units_key = (CuratedSpikeSorting().Unit() & curated_sortings).fetch(
-            "KEY"
-        )
-        # get a list of the metrics in the units table
-        metrics_list = CuratedSpikeSorting().metrics_fields()
-        # get the list of labels to exclude if there is one
-        if "exclude_labels" in inc_param_dict:
-            exclude_labels = inc_param_dict["exclude_labels"]
-            del inc_param_dict["exclude_labels"]
-        else:
-            exclude_labels = []
-
-        # create a list of the units to kepp.
-        keep = np.asarray([True] * len(units))
-        for metric in inc_param_dict:
-            # for all units, go through each metric, compare it to the value specified, and update the list to be kept
-            keep = np.logical_and(
-                keep,
-                _comparison_to_function[inc_param_dict[metric][0]](
-                    units[metric], inc_param_dict[metric][1]
-                ),
-            )
-
-        # now exclude by label if it is specified
-        if len(exclude_labels):
-            included_units = []
-            for unit_ind in np.ravel(np.argwhere(keep)):
-                labels = units[unit_ind]["label"].split(",")
-                exclude = False
-                for label in labels:
-                    if label in exclude_labels:
-                        keep[unit_ind] = False
-                        break
-        # return units that passed all of the tests
-        # TODO: Make this more efficient
-        return {i: units_key[i] for i in np.ravel(np.argwhere(keep))}

@@ -2,10 +2,19 @@ import spikeinterface as si
 import spikeinterface.qualitymetrics as sq
 
 
-def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
-    """Computes the per unit fraction of interspike interval violations to total spikes."""
-    isi_threshold_ms = metric_params["isi_threshold_ms"]
-    min_isi_ms = metric_params["min_isi_ms"]
+def compute_isi_violation_fractions(
+    waveform_extractor: si.WaveformExtractor,
+    isi_threshold_ms: float = 2.0,
+    min_isi_ms: float = 0.0,
+):
+    """Computes the fraction of interspike interval violations.
+
+    Parameters
+    ----------
+    waveform_extractor: si.WaveformExtractor
+        The extractor object for the recording.
+
+    """
 
     # Extract the total number of spikes that violated the isi_threshold for each unit
     isi_violation_counts = sq.compute_isi_violations(
@@ -25,30 +34,36 @@ def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
     return isi_viol_frac_metric
 
 
-def _get_peak_offset(
+def get_peak_offset(
     waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params
 ):
-    """Computes the shift of the waveform peak from center of window."""
+    """Computes the shift of the waveform peak from center of window.
+
+    Parameters
+    ----------
+    waveform_extractor: si.WaveformExtractor
+        The extractor object for the recording.
+    peak_sign: str
+        The sign of the peak to compute. ('neg', 'pos', 'both')
+    """
     if "peak_sign" in metric_params:
         del metric_params["peak_sign"]
-    peak_offset_inds = (
-        si.postprocessing.get_template_extremum_channel_peak_shift(
-            waveform_extractor=waveform_extractor,
-            peak_sign=peak_sign,
-            **metric_params,
-        )
+    peak_offset_inds = si.get_template_extremum_channel_peak_shift(
+        waveform_extractor=waveform_extractor,
+        peak_sign=peak_sign,
+        **metric_params,
     )
     peak_offset = {key: int(abs(val)) for key, val in peak_offset_inds.items()}
     return peak_offset
 
 
-def _get_peak_channel(
+def get_peak_channel(
     waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params
 ):
     """Computes the electrode_id of the channel with the extremum peak for each unit."""
     if "peak_sign" in metric_params:
         del metric_params["peak_sign"]
-    peak_channel_dict = si.postprocessing.get_template_extremum_channel(
+    peak_channel_dict = si.get_template_extremum_channel(
         waveform_extractor=waveform_extractor,
         peak_sign=peak_sign,
         **metric_params,
@@ -57,9 +72,7 @@ def _get_peak_channel(
     return peak_channel
 
 
-def _get_num_spikes(
-    waveform_extractor: si.WaveformExtractor, this_unit_id: int
-):
+def get_num_spikes(waveform_extractor: si.WaveformExtractor, this_unit_id: int):
     """Computes the number of spikes for each unit."""
     all_spikes = sq.compute_num_spikes(waveform_extractor)
     cluster_spikes = all_spikes[this_unit_id]
