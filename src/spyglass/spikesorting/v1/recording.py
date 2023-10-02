@@ -257,6 +257,26 @@ class SpikeSortingRecording(dj.Computed):
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
         self.insert1(key)
 
+    @classmethod
+    def get_recording(cls, key: dict) -> si.BaseRecording:
+        """Get recording related to this curation as spikeinterface BaseRecording
+
+        Parameters
+        ----------
+        key : dict
+            primary key of Curation table
+        """
+
+        analysis_file_name = (cls & key).fetch1("analysis_file_name")
+        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+            analysis_file_name
+        )
+        recording = se.read_nwb_recording(
+            analysis_file_abs_path, load_time_vector=True
+        )
+
+        return recording
+
     @staticmethod
     def _get_recording_timestamps(recording):
         if recording.get_num_segments() > 1:

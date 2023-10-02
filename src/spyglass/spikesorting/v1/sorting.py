@@ -314,10 +314,28 @@ class SpikeSorting(dj.Computed):
                 "entries. Not deleting anything."
             )
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        raise NotImplementedError
-        return None
-        # return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
+    @classmethod
+    def get_sorting(cls, key: dict) -> si.BaseSorting:
+        """Get sorting in the analysis NWB file as spikeinterface BaseSorting
+
+        Parameters
+        ----------
+        key : dict
+            primary key of Curation table
+
+        Returns
+        -------
+        sorting : si.BaseSorting
+
+        """
+
+        analysis_file_name = (cls & key).fetch1("analysis_file_name")
+        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+            analysis_file_name
+        )
+        sorting = se.read_nwb_sorting(analysis_file_abs_path)
+
+        return sorting
 
 
 def _write_sorting_to_nwb(
