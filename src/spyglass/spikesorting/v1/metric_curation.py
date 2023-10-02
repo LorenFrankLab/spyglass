@@ -24,15 +24,51 @@ from spyglass.spikesorting.merge import SpikeSortingOutput
 schema = dj.schema("spikesorting_v1_metric_curation")
 
 
-@schema
-class WaveformParameters(dj.Manual):
-    definition = """
-    waveform_params_name: varchar(80) # name of waveform extraction parameters
-    ---
-    waveform_params: blob # a dict of waveform extraction parameters
-    """
+_metric_name_to_func = {
+    "snr": sq.compute_snrs,
+    "isi_violation": _compute_isi_violation_fractions,
+    "nn_isolation": sq.nearest_neighbors_isolation,
+    "nn_noise_overlap": sq.nearest_neighbors_noise_overlap,
+    "peak_offset": _get_peak_offset,
+    "peak_channel": _get_peak_channel,
+    "num_spikes": _get_num_spikes,
+}
 
-    def insert_default(self):
+
+@schema
+class WaveformParameter(dj.Lookup):
+    definition = """
+    waveform_param_name: varchar(80) # name of waveform extraction parameters
+    ---
+    waveform_param: blob # a dict of waveform extraction parameters
+    """
+    contents = [
+        [
+            "default_not_whitened",
+            {
+                "ms_before": 0.5,
+                "ms_after": 0.5,
+                "max_spikes_per_unit": 5000,
+                "n_jobs": 5,
+                "total_memory": "5G",
+                "whiten": False,
+            },
+        ],
+        [
+            "default_whitened",
+            {
+                "ms_before": 0.5,
+                "ms_after": 0.5,
+                "max_spikes_per_unit": 5000,
+                "n_jobs": 5,
+                "total_memory": "5G",
+                "whiten": True,
+            },
+        ],
+    ]
+
+    @classmethod
+    def insert_default(cls, self):
         waveform_params_name = "default_not_whitened"
         waveform_params = {
             "ms_before": 0.5,
@@ -42,7 +78,7 @@ class WaveformParameters(dj.Manual):
             "total_memory": "5G",
             "whiten": False,
         }
-        self.insert1(
+        cls.insert1(
             [waveform_params_name, waveform_params], skip_duplicates=True
         )
         waveform_params_name = "default_whitened"
@@ -54,18 +90,144 @@ class WaveformParameters(dj.Manual):
             "total_memory": "5G",
             "whiten": True,
         }
-        self.insert1(
+        cls.insert1(
             [waveform_params_name, waveform_params], skip_duplicates=True
         )
 
 
 @schema
-class WaveformSelection(dj.Manual):
+class MetricParameter(dj.Lookup):
     definition = """
-    -> Curation
-    -> WaveformParameters
+    # Parameters for computing quality metrics of sorted units
+    metric_param_name: varchar(200)
     ---
+    metric_param: blob
     """
+    metric_default_params = {
+        "snr": {
+            "peak_sign": "neg",
+            "random_chunk_kwargs_dict": {
+                "num_chunks_per_segment": 20,
+                "chunk_size": 10000,
+                "seed": 0,
+            },
+        },
+        "isi_violation": {"isi_threshold_ms": 1.5, "min_isi_ms": 0.0},
+        "nn_isolation": {
+            "max_spikes": 1000,
+            "min_spikes": 10,
+            "n_neighbors": 5,
+            "n_components": 7,
+            "radius_um": 100,
+            "seed": 0,
+        },
+        "nn_noise_overlap": {
+            "max_spikes": 1000,
+            "min_spikes": 10,
+            "n_neighbors": 5,
+            "n_components": 7,
+            "radius_um": 100,
+            "seed": 0,
+        },
+        "peak_channel": {"peak_sign": "neg"},
+        "num_spikes": {},
+    }
+    contents = [["default", metric_default_params]]
+
+    @classmethod
+    def insert_default(cls, self):
+        cls.insert1(
+            ["franklab_default3", self.metric_default_params],
+            skip_duplicates=True,
+        )
+
+    def get_metric_default_params(self, metric: str):
+        "Returns default params for the given metric"
+        return self.metric_default_params(metric)
+
+    def get_available_metrics(self):
+        available_metrics = [
+            "snr",
+            "isi_violation",
+            "nn_isolation",
+            "nn_noise_overlap",
+            "peak_offset",
+            "peak_channel",
+            "num_spikes",
+        ]
+
+        for metric in _metric_name_to_func:
+            if metric in self.available_metrics:
+                metric_doc = _metric_name_to_func[metric].__doc__.split("\n")[0]
+                metric_string = ("{metric_name} : {metric_doc}").format(
+                    metric_name=metric, metric_doc=metric_doc
+                )
+                print(metric_string + "\n")
+
+    # TODO
+    def _validate_metrics_list(self, key):
+        """Checks whether a row to be inserted contains only the available metrics"""
+        # get available metrics list
+        # get metric list from key
+        # compare
+        return NotImplementedError
+
+
+@schema
+class AutomaticCurationParameters(dj.Manual):
+    definition = """
+    auto_curation_params_name: varchar(200)   # name of this parameter set
+    ---
+    merge_params: blob   # dictionary of params to merge units
+    label_params: blob   # dictionary params to label units
+    """
+
+    def insert1(self, key, **kwargs):
+        # validate the labels and then insert
+        # TODO: add validation for merge_params
+        for metric in key["label_params"]:
+            if metric not in _metric_name_to_func:
+                raise Exception(f"{metric} not in list of available metrics")
+            comparison_list = key["label_params"][metric]
+            if comparison_list[0] not in _comparison_to_function:
+                raise Exception(
+                    f'{metric}: "{comparison_list[0]}" '
+                    f"not in list of available comparisons"
+                )
+            if not isinstance(comparison_list[1], (int, float)):
+                raise Exception(
+                    f"{metric}: {comparison_list[1]} is of type "
+                    f"{type(comparison_list[1])} and not a number"
+                )
+            for label in comparison_list[2]:
+                if label not in valid_labels:
+                    raise Exception(
+                        f'{metric}: "{label}" '
+                        f"not in list of valid labels: {valid_labels}"
+                    )
+        super().insert1(key, **kwargs)
+
+    def insert_default(self):
+        # label_params parsing: Each key is the name of a metric,
+        # the contents are a three value list with the comparison, a value,
+        # and a list of labels to apply if the comparison is true
+        default_params = {
+            "auto_curation_params_name": "default",
+            "merge_params": {},
+            "label_params": {
+                "nn_noise_overlap": [">", 0.1, ["noise", "reject"]]
+            },
+        }
+        self.insert1(default_params, skip_duplicates=True)
+
+        # Second default parameter set for not applying any labels,
+        # or merges, but adding metrics
+        no_label_params = {
+            "auto_curation_params_name": "none",
+            "merge_params": {},
+            "label_params": {},
+        }
+        self.insert1(no_label_params, skip_duplicates=True)
 
 
 @schema
@@ -146,82 +308,6 @@ class Waveforms(dj.Computed):
             f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
             f'{key["curation_id"]}_{waveform_params_name}_waveforms'
         )
-
-
-@schema
-class MetricParameters(dj.Manual):
-    definition = """
-    # Parameters for computing quality metrics of sorted units
-    metric_params_name: varchar(200)
-    ---
-    metric_params: blob
-    """
-    metric_default_params = {
-        "snr": {
-            "peak_sign": "neg",
-            "random_chunk_kwargs_dict": {
-                "num_chunks_per_segment": 20,
-                "chunk_size": 10000,
-                "seed": 0,
-            },
-        },
-        "isi_violation": {"isi_threshold_ms": 1.5, "min_isi_ms": 0.0},
-        "nn_isolation": {
-            "max_spikes": 1000,
-            "min_spikes": 10,
-            "n_neighbors": 5,
-            "n_components": 7,
-            "radius_um": 100,
-            "seed": 0,
-        },
-        "nn_noise_overlap": {
-            "max_spikes": 1000,
-            "min_spikes": 10,
-            "n_neighbors": 5,
-            "n_components": 7,
-            "radius_um": 100,
-            "seed": 0,
-        },
-        "peak_channel": {"peak_sign": "neg"},
-        "num_spikes": {},
-    }
-    # Example of peak_offset parameters 'peak_offset': {'peak_sign': 'neg'}
-    available_metrics = [
-        "snr",
-        "isi_violation",
-        "nn_isolation",
-        "nn_noise_overlap",
-        "peak_offset",
-        "peak_channel",
-        "num_spikes",
-    ]
-
-    def get_metric_default_params(self, metric: str):
-        "Returns default params for the given metric"
-        return self.metric_default_params(metric)
-
-    def insert_default(self):
-        self.insert1(
-            ["franklab_default3", self.metric_default_params],
-            skip_duplicates=True,
-        )
-
-    def get_available_metrics(self):
-        for metric in _metric_name_to_func:
-            if metric in self.available_metrics:
-                metric_doc = _metric_name_to_func[metric].__doc__.split("\n")[0]
-                metric_string = ("{metric_name} : {metric_doc}").format(
-                    metric_name=metric, metric_doc=metric_doc
-                )
-                print(metric_string + "\n")
-
-    # TODO
-    def _validate_metrics_list(self, key):
-        """Checks whether a row to be inserted contains only the available metrics"""
-        # get available metrics list
-        # get metric list from key
-        # compare
-        return NotImplementedError
 
 
 @schema
@@ -329,138 +415,6 @@ class QualityMetrics(dj.Computed):
             new_qm[str(key)] = m
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(new_qm, f, ensure_ascii=False, indent=4)
-
-
-def _compute_isi_violation_fractions(waveform_extractor, **metric_params):
-    """Computes the per unit fraction of interspike interval violations to total spikes."""
-    isi_threshold_ms = metric_params["isi_threshold_ms"]
-    min_isi_ms = metric_params["min_isi_ms"]
-
-    # Extract the total number of spikes that violated the isi_threshold for each unit
-    isi_violation_counts = sq.compute_isi_violations(
-        waveform_extractor,
-        isi_threshold_ms=isi_threshold_ms,
-        min_isi_ms=min_isi_ms,
-    ).isi_violations_count
-
-    # Extract the total number of spikes from each unit. The number of ISIs is one less than this
-    num_spikes = sq.compute_num_spikes(waveform_extractor)
-
-    # Calculate the fraction of ISIs that are violations
-    isi_viol_frac_metric = {
-        str(unit_id): isi_violation_counts[unit_id] / (num_spikes[unit_id] - 1)
-        for unit_id in waveform_extractor.sorting.get_unit_ids()
-    }
-    return isi_viol_frac_metric
-
-
-def _get_peak_offset(
-    waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params
-):
-    """Computes the shift of the waveform peak from center of window."""
-    if "peak_sign" in metric_params:
-        del metric_params["peak_sign"]
-    peak_offset_inds = (
-        si.postprocessing.get_template_extremum_channel_peak_shift(
-            waveform_extractor=waveform_extractor,
-            peak_sign=peak_sign,
-            **metric_params,
-        )
-    )
-    peak_offset = {key: int(abs(val)) for key, val in peak_offset_inds.items()}
-    return peak_offset
-
-
-def _get_peak_channel(
-    waveform_extractor: si.WaveformExtractor, peak_sign: str, **metric_params
-):
-    """Computes the electrode_id of the channel with the extremum peak for each unit."""
-    if "peak_sign" in metric_params:
-        del metric_params["peak_sign"]
-    peak_channel_dict = si.postprocessing.get_template_extremum_channel(
-        waveform_extractor=waveform_extractor,
-        peak_sign=peak_sign,
-        **metric_params,
-    )
-    peak_channel = {key: int(val) for key, val in peak_channel_dict.items()}
-    return peak_channel
-
-
-def _get_num_spikes(
-    waveform_extractor: si.WaveformExtractor, this_unit_id: int
-):
-    """Computes the number of spikes for each unit."""
-    all_spikes = sq.compute_num_spikes(waveform_extractor)
-    cluster_spikes = all_spikes[this_unit_id]
-    return cluster_spikes
-
-
-_metric_name_to_func = {
-    "snr": sq.compute_snrs,
-    "isi_violation": _compute_isi_violation_fractions,
-    "nn_isolation": sq.nearest_neighbors_isolation,
-    "nn_noise_overlap": sq.nearest_neighbors_noise_overlap,
-    "peak_offset": _get_peak_offset,
-    "peak_channel": _get_peak_channel,
-    "num_spikes": _get_num_spikes,
-}
-
-
-@schema
-class AutomaticCurationParameters(dj.Manual):
-    definition = """
-    auto_curation_params_name: varchar(200)   # name of this parameter set
-    ---
-    merge_params: blob   # dictionary of params to merge units
-    label_params: blob   # dictionary params to label units
-    """
-
-    def insert1(self, key, **kwargs):
-        # validate the labels and then insert
-        # TODO: add validation for merge_params
-        for metric in key["label_params"]:
-            if metric not in _metric_name_to_func:
-                raise Exception(f"{metric} not in list of available metrics")
-            comparison_list = key["label_params"][metric]
-            if comparison_list[0] not in _comparison_to_function:
-                raise Exception(
-                    f'{metric}: "{comparison_list[0]}" '
-                    f"not in list of available comparisons"
-                )
-            if not isinstance(comparison_list[1], (int, float)):
-                raise Exception(
-                    f"{metric}: {comparison_list[1]} is of type "
-                    f"{type(comparison_list[1])} and not a number"
-                )
-            for label in comparison_list[2]:
-                if label not in valid_labels:
-                    raise Exception(
-                        f'{metric}: "{label}" '
-                        f"not in list of valid labels: {valid_labels}"
-                    )
-        super().insert1(key, **kwargs)
-
-    def insert_default(self):
-        # label_params parsing: Each key is the name of a metric,
-        # the contents are a three value list with the comparison, a value,
-        # and a list of labels to apply if the comparison is true
-        default_params = {
-            "auto_curation_params_name": "default",
-            "merge_params": {},
-            "label_params": {
-                "nn_noise_overlap": [">", 0.1, ["noise", "reject"]]
-            },
-        }
-        self.insert1(default_params, skip_duplicates=True)
-
-        # Second default parameter set for not applying any labels,
-        # or merges, but adding metrics
-        no_label_params = {
-            "auto_curation_params_name": "none",
-            "merge_params": {},
-            "label_params": {},
-        }
-        self.insert1(no_label_params, skip_duplicates=True)
 
 
 @schema
