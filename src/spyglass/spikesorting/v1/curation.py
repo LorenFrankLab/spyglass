@@ -25,6 +25,7 @@ class Curation(dj.Manual):
     parent_curation_id=-1: int
     -> AnalysisNwbfile
     object_id: varchar(72)
+    merges_applied: enum("True", "False")
     description: varchar(100)
     """
 
@@ -59,7 +60,12 @@ class Curation(dj.Manual):
         Note
         ----
         Example curation.json (output of figurl):
-        {"labelsByUnit":{"1":["noise","reject"],"10":["noise","reject"]},"mergeGroups":[[11,12],[46,48],[51,54],[50,53]]}
+        {
+         "labelsByUnit":
+            {"1":["noise","reject"],"10":["noise","reject"]},
+         "mergeGroups":
+            [[11,12],[46,48],[51,54],[50,53]]
+        }
 
         Returns
         -------
@@ -86,8 +92,6 @@ class Curation(dj.Manual):
 
         if labels is None:
             labels = {}
-        else:
-            labels = {int(unit_id): labels[unit_id] for unit_id in labels}
         if merge_groups is None:
             merge_groups = []
         if metrics is None:
@@ -108,6 +112,7 @@ class Curation(dj.Manual):
             "parent_curation_id": parent_curation_id,
             "analysis_file_name": analysis_file_name,
             "object_id": object_id,
+            "merges_applied": str(apply_merge),
             "description": description,
         }
         Curation.insert1(key, skip_duplicates=True)
@@ -116,7 +121,7 @@ class Curation(dj.Manual):
 
     @staticmethod
     def get_recording(key: dict) -> si.BaseRecording:
-        """Get recording related to this curation
+        """Get recording related to this curation as spikeinterface BaseRecording
 
         Parameters
         ----------
@@ -138,8 +143,8 @@ class Curation(dj.Manual):
         return recording
 
     @staticmethod
-    def get_original_sorting(key: dict) -> si.BaseSorting:
-        """Get sorting prior to merging
+    def get_sorting(key: dict) -> si.BaseSorting:
+        """Get sorting in the analysis NWB file as spikeinterface BaseSorting
 
         Parameters
         ----------
@@ -149,9 +154,10 @@ class Curation(dj.Manual):
         Returns
         -------
         sorting : si.BaseSorting
+
         """
 
-        analysis_file_name = (SpikeSorting & key).fetch1("analysis_file_name")
+        analysis_file_name = (Curation & key).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
@@ -161,7 +167,7 @@ class Curation(dj.Manual):
 
     @staticmethod
     def get_merged_sorting(key: dict) -> si.BaseSorting:
-        """get sorting with merges applied.
+        """Get sorting with merges applied.
 
         Parameters
         ----------
@@ -173,23 +179,22 @@ class Curation(dj.Manual):
         sorting : si.BaseSorting
 
         """
-        si_sorting = Curation.get_sorting(key)
-        analysis_file_name = (Curation & key).fetch1("analysis_file_name")
-        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-            analysis_file_name
+        curation_key = (Curation & key).fetch1()
+
+        sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+            curation_key["analysis_file_name"]
         )
-        object_id = (Curation & key).fetch1("object_id")
+        si_sorting = se.read_nwb_sorting(sorting_analysis_file_abs_path)
+
         with pynwb.NWBHDF5IO(
-            analysis_file_abs_path, "r", load_namespaces=True
+            sorting_analysis_file_abs_path, "r", load_namespaces=True
         ) as io:
             nwbfile = io.read()
-            nwb_sorting = nwbfile.objects[object_id]
+            nwb_sorting = nwbfile.objects[curation_key["object_id"]]
             merge_groups = nwb_sorting["merge_groups"][:]
+
         if merge_groups:
-            units_to_merge = _union_intersecting_lists(
-                _reverse_associations(merge_groups)
-            )
-            units_to_merge = [lst for lst in units_to_merge if len(lst) >= 2]
+            units_to_merge = _merge_dict_to_list(merge_groups)
             return sc.MergeUnitsSorting(
                 parent_sorting=si_sorting, units_to_merge=units_to_merge
             )
@@ -272,7 +277,7 @@ def _write_sorting_to_nwb_with_curation(
                 data=label_values,
             )
         if merge_groups is not None:
-            merge_groups_dict = _extract_associations(merge_groups, unit_ids)
+            merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
             nwbf.add_unit_column(
                 name="merge_groups",
                 description="merge groups",
@@ -327,7 +332,7 @@ def _union_intersecting_lists(lists):
     return result
 
 
-def _extract_associations(lists_of_strings, target_strings):
+def _list_to_merge_dict(lists_of_strings, target_strings):
     lists_of_strings = _union_intersecting_lists(lists_of_strings)
     result = {string: [] for string in target_strings}
 
@@ -349,3 +354,11 @@ def _reverse_associations(assoc_dict):
             result.append([key])
 
     return result
+
+
+def _merge_dict_to_list(merge_groups):
+    units_to_merge = _union_intersecting_lists(
+        _reverse_associations(merge_groups)
+    )
+    units_to_merge = [lst for lst in units_to_merge if len(lst) >= 2]
+    return units_to_merge

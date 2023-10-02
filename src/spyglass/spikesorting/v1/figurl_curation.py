@@ -1,16 +1,17 @@
-import datajoint as dj
 from typing import Any, Union, List, Dict
 
-
-from spyglass.spikesorting.merge import SpikeSortingOutput
+import datajoint as dj
+import pynwb
 
 import spikeinterface as si
 
-from .curation import Curation
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.v1.sorting import SpikeSorting
+from spyglass.spikesorting.v1.curation import Curation, _merge_dict_to_list
 
-from sortingview.SpikeSortingView import SpikeSortingView
 import kachery_cloud as kcl
 import sortingview.views as vv
+from sortingview.SpikeSortingView import SpikeSortingView
 
 schema = dj.schema("spikesorting_v1_figurl_curation")
 
@@ -19,78 +20,99 @@ schema = dj.schema("spikesorting_v1_figurl_curation")
 class FigURLCurationSelection(dj.Manual):
     definition = """
     -> Curation
-    initial_curation_uri: varchar(1000) = NULL
+    curation_uri: varchar(1000) = NULL  # kachery-cloud URI to sorting curation
+    metrics_figurl: longblob            # metrics to display in the figURL
     """
+
+    def generate_curation_uri(key: Dict) -> str:
+        """Generates a kachery-cloud URI containing curation info from a row in Curation table
+
+        Parameters
+        ----------
+        key : dict
+            primary key from Curation
+        """
+        curation_key = (Curation & key).fetch1()
+        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+            curation_key["analysis_file_name"]
+        )
+        with pynwb.NWBHDF5IO(
+            analysis_file_abs_path, "r", load_namespaces=True
+        ) as io:
+            nwbfile = io.read()
+            nwb_sorting = nwbfile.objects[curation_key["object_id"]]
+            unit_ids = nwb_sorting["id"][:]
+            labels = nwb_sorting["labels"][:]
+            merge_groups = nwb_sorting["merge_groups"][:]
+        if labels:
+            labels_dict = dict(zip(unit_ids, labels))
+        else:
+            labels_dict = {}
+        if merge_groups:
+            merge_groups_list = _merge_dict_to_list(merge_groups)
+        else:
+            merge_groups_list = []
+
+        curation_dict = {
+            "labelsByUnit": labels_dict,
+            "mergeGroups": merge_groups_list,
+        }
+        curation_uri = kcl.store_json(curation_dict)
+
+        return curation_uri
 
 
 @schema
 class FigURLCuration(dj.Computed):
     definition = """
-    -> CurationFigURLSelection
+    -> FigURLCurationSelection
     ---
-    url: varchar(2000)
-    curation_uri: varchar(2000)
+    url: varchar(1000)
     """
 
-    def make(self, key: dict):
-        """Create a Curation Figurl
-        Parameters
-        ----------
-        key : dict
-        """
-
-        # get new_curation_uri from selection table
-        new_curation_uri = (CurationFigURLSelection & key).fetch1(
-            "new_curation_uri"
+    def make(self, key: Dict):
+        # FETCH
+        sorting_analysis_file_name = (Curation & key).fetch1(
+            "analysis_file_name"
         )
+        object_id = (Curation & key).fetch1("object_id")
+        recording_label = (SpikeSorting & key).fetch1("recording_id")
 
-        # fetch
-        recording_path = Curation.get_recording(key)
-        sorting_path = (SpikeSorting & key).fetch1("sorting_path")
-        recording_label = SpikeSortingRecording._get_recording_name(key)
-        sorting_label = SpikeSorting._get_sorting_name(key)
-        unit_metrics = _reformat_metrics(
-            (Curation & key).fetch1("quality_metrics")
+        # DO
+        sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+            sorting_analysis_file_name
         )
-        initial_labels = (Curation & key).fetch1("curation_labels")
-        initial_merge_groups = (Curation & key).fetch1("merge_groups")
+        recording = Curation.get_recording(key)
+        sorting = Curation.get_sorting(key)
+        sorting_label = key["sorting_id"]
+        curation_uri = key["curation_uri"]
 
-        # new_curation_uri = key["new_curation_uri"]
+        metric_dict = {}
+        with pynwb.NWBHDF5IO(
+            sorting_analysis_file_abs_path, "r", load_namespaces=True
+        ) as io:
+            nwbf = io.read()
+            nwb_sorting = nwbf.objects[object_id]
+            unit_ids = nwb_sorting["id"][:]
+            for metric in key["metrics_figurl"]:
+                metric_dict[metric] = dict(
+                    zip(unit_ids, nwb_sorting[metric][:])
+                )
 
-        # Create the initial curation and store it in kachery
-        for k, v in initial_labels.items():
-            new_list = []
-            for item in v:
-                if item not in new_list:
-                    new_list.append(item)
-            initial_labels[k] = new_list
-        initial_curation = {
-            "labelsByUnit": initial_labels,
-            "mergeGroups": initial_merge_groups,
-        }
-        initial_curation_uri = kcl.store_json(initial_curation)
-
-        # Get the recording/sorting extractors
-        R = si.load_extractor(recording_path)
-        if R.get_num_segments() > 1:
-            R = si.concatenate_recordings([R])
-        S = si.load_extractor(sorting_path)
+        unit_metrics = _reformat_metrics(metric_dict)
 
         # Generate the figURL
-        url = _generate_the_figurl(
-            R=R,
-            S=S,
-            initial_curation_uri=initial_curation_uri,
-            new_curation_uri=new_curation_uri,
+        url = _generate_figurl(
+            R=recording,
+            S=sorting,
+            initial_curation_uri=curation_uri,
             recording_label=recording_label,
             sorting_label=sorting_label,
             unit_metrics=unit_metrics,
         )
-
-        # insert
         key["url"] = url
-        key["initial_curation_uri"] = initial_curation_uri
-        key["new_curation_uri"] = new_curation_uri
+
+        # INSERT
         self.insert1(key)
 
 
@@ -102,15 +124,26 @@ def _generate_figurl(
     sorting_label: str,
     new_curation_uri: str,
     unit_metrics: Union[List[Any], None] = None,
+    segment_duration_sec=1200,
+    snippet_ms_before=1,
+    snippet_ms_after=1,
+    max_num_snippets_per_segment=1000,
+    channel_neighborhood_size=5,
+    raster_plot_subsample_max_firing_rate=50,
+    spike_amplitudes_subsample_max_firing_rate=50,
 ):
     print("Preparing spikesortingview data")
+    sampling_frequency = R.get_sampling_frequency()
     X = SpikeSortingView.create(
         recording=R,
         sorting=S,
-        segment_duration_sec=60 * 20,
-        snippet_len=(20, 20),
-        max_num_snippets_per_segment=100,
-        channel_neighborhood_size=7,
+        segment_duration_sec=segment_duration_sec,
+        snippet_len=(
+            int(snippet_ms_before * sampling_frequency / 1000),
+            int(snippet_ms_after * sampling_frequency / 1000),
+        ),
+        max_num_snippets_per_segment=max_num_snippets_per_segment,
+        channel_neighborhood_size=channel_neighborhood_size,
     )
     # create a fake unit similarity matrix (for future reference)
     # similarity_scores = []
@@ -131,8 +164,12 @@ def _generate_figurl(
 
     # Assemble the views in a layout
     # You can replace this with other layouts
-    raster_plot_subsample_max_firing_rate = 50
-    spike_amplitudes_subsample_max_firing_rate = 50
+    raster_plot_subsample_max_firing_rate = (
+        raster_plot_subsample_max_firing_rate
+    )
+    spike_amplitudes_subsample_max_firing_rate = (
+        spike_amplitudes_subsample_max_firing_rate
+    )
     view = vv.MountainLayout(
         items=[
             vv.MountainLayoutItem(
@@ -182,14 +219,10 @@ def _generate_figurl(
             ),
         ]
     )
-    url_state = (
-        {
-            "initialSortingCuration": initial_curation_uri,
-            "sortingCuration": new_curation_uri,
-        }
-        if new_curation_uri
-        else {"sortingCuration": initial_curation_uri}
-    )
+    url_state = {
+        "initialSortingCuration": initial_curation_uri,
+        "sortingCuration": initial_curation_uri,
+    }
     label = f"{recording_label} {sorting_label}"
     url = view.url(label=label, state=url_state)
     return url
