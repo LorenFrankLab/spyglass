@@ -31,53 +31,38 @@ class ArtifactDetectionParameter(dj.Lookup):
     artifact_param : blob
     """
 
-    zscore_thresh = None  # must be None or >= 0
-    amplitude_thresh = 3000  # must be None or >= 0
-    proportion_above_thresh = (
-        1.0  # margin in ms on border to avoid border effect
-    )
-    removal_window_ms = 1.0  # in milliseconds
-    job_kwargs = {
-        "chunk_duration": "10s",
-        "n_jobs": 4,
-        "progress_bar": "True",
-    }
     contents = [
         [
             "default",
             {
-                "zscore_thresh": zscore_thresh,
-                "amplitude_thresh": amplitude_thresh,
-                "proportion_above_thresh": proportion_above_thresh,
-                "removal_window_ms": removal_window_ms,
-                "job_kwargs": job_kwargs,
+                "zscore_thresh": None,
+                "amplitude_thresh_uV_uV": 3000,
+                "proportion_above_thresh": 1.0,
+                "removal_window_ms": 1.0,
+                "job_kwargs": {
+                    "chunk_duration": "10s",
+                    "n_jobs": 4,
+                    "progress_bar": "True",
+                },
             },
         ],
         [
             "none",
             {
                 "zscore_thresh": None,
-                "amplitude_thresh": None,
-                "job_kwargs": job_kwargs,
+                "amplitude_thresh_uV": None,
+                "job_kwargs": {
+                    "chunk_duration": "10s",
+                    "n_jobs": 4,
+                    "progress_bar": "True",
+                },
             },
         ],
     ]
 
     @classmethod
     def insert_default(cls):
-        """Insert the default artifact parameters with an appropriate parameter dict."""
-        artifact_params = {}
-        artifact_params["zscore_thresh"] = None  # must be None or >= 0
-        artifact_params["amplitude_thresh"] = 3000  # must be None or >= 0
-        artifact_params["proportion_above_thresh"] = 1.0
-        artifact_params["removal_window_ms"] = 1.0  # in milliseconds
-
-        artifact_params_none = {}
-        artifact_params_none["zscore_thresh"] = None
-        artifact_params_none["amplitude_thresh"] = None
-
-        cls.insert1(["default", artifact_params], skip_duplicates=True)
-        cls.insert1(["none", artifact_params_none], skip_duplicates=True)
+        cls.insert(cls.contents, skip_duplicates=True)
 
 
 @schema
@@ -102,8 +87,8 @@ class ArtifactRemovedInterval(dj.Computed):
         # FETCH:
         # - artifact parameters
         # - recording analysis nwb file
-        artifact_params = (ArtifactDetectionParameter & key).fetch1(
-            "artifact_params"
+        artifact_param = (ArtifactDetectionParameter & key).fetch1(
+            "artifact_param"
         )
         recording_analysis_nwb_file = (SpikeSortingRecording & key).fetch1(
             "analysis_nwb_file"
@@ -120,8 +105,8 @@ class ArtifactRemovedInterval(dj.Computed):
         recording = se.read_nwb_recording(
             recording_analysis_nwb_file_abs_path, load_time_vector=True
         )
-        if not artifact_params["job_kwargs"]:
-            artifact_params["job_kwargs"] = {
+        if not artifact_param["job_kwargs"]:
+            artifact_param["job_kwargs"] = {
                 "chunk_duration": "10s",
                 "n_jobs": 4,
                 "progress_bar": "True",
@@ -129,24 +114,24 @@ class ArtifactRemovedInterval(dj.Computed):
         key["artifact_id"] = generate_nwb_uuid(key["nwb_file_name"], "A", 6)
         artifact_removed_valid_times, _ = _get_artifact_times(
             recording,
-            **artifact_params,
+            **artifact_param,
         )
 
-        # insert into IntervalList
+        # INSERT
+        # - into IntervalList
         tmp_key = {}
         tmp_key["nwb_file_name"] = key["nwb_file_name"]
         tmp_key["interval_list_name"] = key["artifact_id"]
         tmp_key["valid_times"] = artifact_removed_valid_times
         IntervalList.insert1(tmp_key, skip_duplicates=True)
-
-        # insert into computed table
+        # - into ArtifactRemovedInterval
         self.insert1(key)
 
 
 def _get_artifact_times(
     recording: si.BaseRecording,
     zscore_thresh: Union[float, None] = None,
-    amplitude_thresh: Union[float, None] = None,
+    amplitude_thresh_uV: Union[float, None] = None,
     proportion_above_thresh: float = 1.0,
     removal_window_ms: float = 1.0,
     verbose: bool = False,
@@ -163,7 +148,7 @@ def _get_artifact_times(
     recording : si.BaseRecording
     zscore_thresh : float, optional
         Stdev threshold for exclusion, should be >=0, defaults to None
-    amplitude_thresh : float, optional
+    amplitude_thresh_uV : float, optional
         Amplitude threshold for exclusion, should be >=0, defaults to None
     proportion_above_thresh : float, optional, should be>0 and <=1
         Proportion of electrodes that need to have threshold crossings, defaults to 1
@@ -182,7 +167,7 @@ def _get_artifact_times(
     valid_timestamps = recording.get_times()
 
     # if both thresholds are None, we skip artifract detection
-    if (amplitude_thresh is None) and (zscore_thresh is None):
+    if (amplitude_thresh_uV is None) and (zscore_thresh is None):
         recording_interval = np.asarray(
             [valid_timestamps[0], valid_timestamps[-1]]
         )
@@ -194,11 +179,11 @@ def _get_artifact_times(
 
     # verify threshold parameters
     (
-        amplitude_thresh,
+        amplitude_thresh_uV,
         zscore_thresh,
         proportion_above_thresh,
     ) = _check_artifact_thresholds(
-        amplitude_thresh, zscore_thresh, proportion_above_thresh
+        amplitude_thresh_uV, zscore_thresh, proportion_above_thresh
     )
 
     # detect frames that are above threshold in parallel
@@ -211,14 +196,14 @@ def _get_artifact_times(
         init_args = (
             recording,
             zscore_thresh,
-            amplitude_thresh,
+            amplitude_thresh_uV,
             proportion_above_thresh,
         )
     else:
         init_args = (
             recording.to_dict(),
             zscore_thresh,
-            amplitude_thresh,
+            amplitude_thresh_uV,
             proportion_above_thresh,
         )
 
@@ -283,7 +268,7 @@ def _get_artifact_times(
 def _init_artifact_worker(
     recording,
     zscore_thresh=None,
-    amplitude_thresh=None,
+    amplitude_thresh_uV=None,
     proportion_above_thresh=1.0,
 ):
     # create a local dict per worker
@@ -293,7 +278,7 @@ def _init_artifact_worker(
     else:
         worker_ctx["recording"] = recording
     worker_ctx["zscore_thresh"] = zscore_thresh
-    worker_ctx["amplitude_thresh"] = amplitude_thresh
+    worker_ctx["amplitude_thresh_uV"] = amplitude_thresh_uV
     worker_ctx["proportion_above_thresh"] = proportion_above_thresh
     return worker_ctx
 
@@ -301,7 +286,7 @@ def _init_artifact_worker(
 def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     recording = worker_ctx["recording"]
     zscore_thresh = worker_ctx["zscore_thresh"]
-    amplitude_thresh = worker_ctx["amplitude_thresh"]
+    amplitude_thresh_uV = worker_ctx["amplitude_thresh_uV"]
     proportion_above_thresh = worker_ctx["proportion_above_thresh"]
     # compute the number of electrodes that have to be above threshold
     nelect_above = np.ceil(
@@ -315,13 +300,13 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     )
 
     # find the artifact occurrences using one or both thresholds, across channels
-    if (amplitude_thresh is not None) and (zscore_thresh is None):
-        above_a = np.abs(traces) > amplitude_thresh
+    if (amplitude_thresh_uV is not None) and (zscore_thresh is None):
+        above_a = np.abs(traces) > amplitude_thresh_uV
         above_thresh = (
             np.ravel(np.argwhere(np.sum(above_a, axis=1) >= nelect_above))
             + start_frame
         )
-    elif (amplitude_thresh is None) and (zscore_thresh is not None):
+    elif (amplitude_thresh_uV is None) and (zscore_thresh is not None):
         dataz = np.abs(stats.zscore(traces, axis=1))
         above_z = dataz > zscore_thresh
         above_thresh = (
@@ -329,7 +314,7 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
             + start_frame
         )
     else:
-        above_a = np.abs(traces) > amplitude_thresh
+        above_a = np.abs(traces) > amplitude_thresh_uV
         dataz = np.abs(stats.zscore(traces, axis=1))
         above_z = dataz > zscore_thresh
         above_thresh = (
@@ -346,20 +331,20 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
 
 
 def _check_artifact_thresholds(
-    amplitude_thresh, zscore_thresh, proportion_above_thresh
+    amplitude_thresh_uV, zscore_thresh, proportion_above_thresh
 ):
     """Alerts user to likely unintended parameters. Not an exhaustive verification.
 
     Parameters
     ----------
     zscore_thresh: float
-    amplitude_thresh: float
+    amplitude_thresh_uV: float
     proportion_above_thresh: float
 
     Return
     ------
     zscore_thresh: float
-    amplitude_thresh: float
+    amplitude_thresh_uV: float
     proportion_above_thresh: float
 
     Raise
@@ -368,7 +353,7 @@ def _check_artifact_thresholds(
     """
     # amplitude or zscore thresholds should be negative, as they are applied to an absolute signal
     signal_thresholds = [
-        t for t in [amplitude_thresh, zscore_thresh] if t is not None
+        t for t in [amplitude_thresh_uV, zscore_thresh] if t is not None
     ]
     for t in signal_thresholds:
         if t < 0:
@@ -389,11 +374,13 @@ def _check_artifact_thresholds(
             f"Using proportion_above_thresh = 1 instead of {str(proportion_above_thresh)}"
         )
         proportion_above_thresh = 1
-    return amplitude_thresh, zscore_thresh, proportion_above_thresh
+    return amplitude_thresh_uV, zscore_thresh, proportion_above_thresh
 
 
 def find_missing_intervals(intervals, timestamps):
-    """Given a list of intervals each of which is [start_time, end_time] and an array of timestamps, find intervals are not contained in the input list of intervals but contained in the array of timestamps. Note that the start and stop times of such intervals must be explicitly contained in the array of timestamps
+    """Given a list of intervals each of which is [start_time, end_time] and an array of timestamps,
+    find intervals are not contained in the input list of intervals but contained in the array of timestamps.
+    Note that the start and stop times of such intervals must be explicitly contained in the array of timestamps
 
     Parameters
     ----------
@@ -460,7 +447,8 @@ def find_missing_intervals(intervals, timestamps):
 
 
 def merge_intervals(intervals):
-    """takes a list of intervals each of which is [start_time, stop_time] and takes union over intervals that are intersecting
+    """Takes a list of intervals each of which is [start_time, stop_time]
+    and takes union over intervals that are intersecting
 
     Parameters
     ----------

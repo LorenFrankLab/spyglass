@@ -1,26 +1,23 @@
 import os
-import uuid
-from pathlib import Path
 from typing import List
 
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
-import spikeinterface.preprocessing as sip
+import spikeinterface.preprocessing as sp
 import spikeinterface.qualitymetrics as sq
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.v1.recording import SpikeSortingRecording
+from spyglass.spikesorting.v1.sorting import SpikeSorting
+from spyglass.spikesorting.v1.curation import Curation
 from spyglass.spikesorting.v1.metric_utils import (
     get_num_spikes,
     get_peak_channel,
     get_peak_offset,
     compute_isi_violation_fractions,
 )
-from spyglass.spikesorting.v1.recording import SpikeSortingRecording
-from spyglass.spikesorting.v1.sorting import SpikeSorting
-from spyglass.spikesorting.v1.curation import Curation
 from spyglass.utils.misc import generate_nwb_uuid
-from spyglass.utils.dj_helper_fn import fetch_nwb
 
 schema = dj.schema("spikesorting_v1_metric_curation")
 
@@ -197,7 +194,7 @@ class MetricCuration(dj.Computed):
         # extract waveforms
         if "whiten" in waveform_param:
             if waveform_param.pop("whiten"):
-                recording = sip.whiten(recording, dtype=np.float64)
+                recording = sp.whiten(recording, dtype=np.float64)
         waveforms = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
