@@ -1,8 +1,5 @@
-import json
 import os
-import shutil
 import uuid
-import warnings
 from pathlib import Path
 from typing import List
 
@@ -19,10 +16,11 @@ from spyglass.spikesorting.v1.metric_utils import (
     get_peak_offset,
     compute_isi_violation_fractions,
 )
-from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.spikesorting.v1.sorting import SpikeSorting
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.v1.curation import Curation
+from spyglass.utils.misc import generate_nwb_uuid
+from spyglass.utils.dj_helper_fn import fetch_nwb
 
 schema = dj.schema("spikesorting_v1_metric_curation")
 
@@ -139,12 +137,12 @@ class MetricParameter(dj.Lookup):
 
 
 @schema
-class AutomaticCurationParameter(dj.Lookup):
+class MetricCurationParameter(dj.Lookup):
     definition = """
-    auto_curation_param_name: varchar(200)
+    metric_curation_param_name: varchar(200)
     ---
-    merge_params: blob   # dict of param to merge units
-    label_params: blob   # dict of param to label units
+    merge_param: blob   # dict of param to merge units
+    label_param: blob   # dict of param to label units
     """
 
     contents = [
@@ -163,7 +161,7 @@ class MetricCurationSelection(dj.Manual):
     -> Curation
     -> WaveformParameter
     -> MetricParameter
-    -> AutomaticCurationParameter
+    -> MetricCurationParameter
     """
 
 
@@ -175,58 +173,105 @@ class MetricCuration(dj.Computed):
     -> AutomaticCurationSelection
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the metrics in NWB file
-    metrics: longblob
-    labels: longblob
-    merge_groups: longblob
     """
 
     def make(self, key):
         # FETCH
-        # load recording and sorting
+        recording_id = (SpikeSorting & key).fetch1("recording_id")
+        nwb_file_name = (SpikeSortingRecording & recording_id).fetch1(
+            "nwb_file_name"
+        )
+        waveform_param = (WaveformParameter & key).fetch1("waveform_param")
+        metric_param = (MetricParameter & key).fetch1("metric_param")
+        merge_param = (MetricCurationParameter & key).fetch1("merge_param")
+        label_param = (MetricCurationParameter & key).fetch1("label_param")
 
         # DO
         # create uuid for this metric curation
+        key["metric_curation_id"] = generate_nwb_uuid(
+            nwb_file_name=nwb_file_name, initial="MC"
+        )
+        # load recording and sorting
+        recording = Curation.get_recording(key)
+        sorting = Curation.get_sorting(key)
         # extract waveforms
+        if "whiten" in waveform_param:
+            if waveform_param.pop("whiten"):
+                recording = sip.whiten(recording, dtype=np.float64)
         waveforms = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
             folder=os.environ.get("SPYGLASS_TEMP_DIR"),
-            **waveform_params,
+            **waveform_param,
         )
         # compute metrics
-        params = (MetricParameters & key).fetch1("metric_params")
-        for metric_name, metric_params in params.items():
-            metric = self._compute_metric(
-                waveform_extractor, metric_name, **metric_params
+        quality_metrics = {}
+        for metric_name, metric_param_dict in metric_param.items():
+            quality_metrics[metric_name] = self._compute_metric(
+                waveforms, metric_name, **metric_param_dict
             )
-        qm[metric_name] = metric
         # generate labels and merge groups
-        labels = self.get_labels(
+        labels = self._compute_labels(
             parent_sorting, parent_labels, quality_metrics, label_params
         )
 
-        merge_groups, units_merged = self.get_merge_groups(
+        merge_groups, units_merged = self._compute_merge_groups(
             parent_sorting, parent_merge_groups, quality_metrics, merge_params
         )
         # save everything in NWB
+        (
+            key["analysis_file_name"],
+            key["object_id"],
+        ) = _write_metric_curation_to_nwb()
 
         # INSERT
-
-        c_key = (SpikeSorting & key).fetch("KEY")[0]
-        curation_key = {item: key[item] for item in key if item in c_key}
-        key["auto_curation_key"] = Curation.insert_curation(
-            curation_key,
-            parent_curation_id=parent_curation_id,
-            labels=labels,
-            merge_groups=merge_groups,
-            metrics=metrics,
-            description="auto curated",
-        )
-
         self.insert1(key)
 
+    @classmethod
+    def get_waveforms(cls):
+        return NotImplementedError
+
+    @classmethod
+    def get_metrics(cls):
+        return NotImplementedError
+
+    @classmethod
+    def get_labels(cls):
+        return NotImplementedError
+
+    @classmethod
+    def get_merge_groups(cls):
+        return NotImplementedError
+
     @staticmethod
-    def get_merge_groups(
+    def _compute_metric(waveform_extractor, metric_name, **metric_params):
+        peak_sign_metrics = ["snr", "peak_offset", "peak_channel"]
+        metric_func = _metric_name_to_func[metric_name]
+        # TODO clean up code below
+        if metric_name == "isi_violation":
+            metric = metric_func(waveform_extractor, **metric_params)
+        elif metric_name in peak_sign_metrics:
+            if "peak_sign" in metric_params:
+                metric = metric_func(
+                    waveform_extractor,
+                    peak_sign=metric_params.pop("peak_sign"),
+                    **metric_params,
+                )
+            else:
+                raise Exception(
+                    f"{peak_sign_metrics} metrics require peak_sign",
+                    f"to be defined in the metric parameters",
+                )
+        else:
+            metric = {}
+            for unit_id in waveform_extractor.sorting.get_unit_ids():
+                metric[str(unit_id)] = metric_func(
+                    waveform_extractor, this_unit_id=unit_id, **metric_params
+                )
+        return metric
+
+    @staticmethod
+    def _compute_merge_groups(
         sorting, parent_merge_groups, quality_metrics, merge_params
     ):
         """Identifies units to be merged based on the quality_metrics and
@@ -272,7 +317,7 @@ class MetricCuration(dj.Computed):
             return parent_merge_groups.sort(), True
 
     @staticmethod
-    def get_labels(sorting, parent_labels, quality_metrics, label_params):
+    def _compute_labels(sorting, parent_labels, quality_metrics, label_params):
         """Returns a dictionary of labels using quality_metrics and label
         parameters.
 
@@ -322,188 +367,108 @@ class MetricCuration(dj.Computed):
             return parent_labels
 
 
-@schema
-class Waveforms(dj.Computed):
-    definition = """
-    -> WaveformSelection
-    ---
-    waveform_extractor_path: varchar(400)
-    -> AnalysisNwbfile
-    waveforms_object_id: varchar(40)   # Object ID for the waveforms in NWB file
+def _write_metric_curation_to_nwb(
+    sorting_id: str,
+    labels: Union[None, Dict[str, List[str]]] = None,
+    merge_groups: Union[None, List[List[str]]] = None,
+    metrics: Union[None, Dict[str, Dict[str, float]]] = None,
+    apply_merge: bool = False,
+):
+    """Save sorting to NWB with curation information.
+    Curation information is saved as columns in the units table of the NWB file.
+
+    Parameters
+    ----------
+    sorting_id : str
+        key for the sorting
+    labels : dict or None, optional
+        curation labels (e.g. good, noise, mua)
+    merge_groups : list or None, optional
+        groups of unit IDs to be merged
+    metrics : dict or None, optional
+        Computed quality metrics, one for each cell
+    apply_merge : bool, optional
+        whether to apply the merge groups to the sorting before saving, by default False
+
+    Returns
+    -------
+    analysis_nwb_file : str
+        name of analysis NWB file containing the sorting and curation information
+    object_id : str
+        object_id of the units table in the analysis NWB file
     """
+    # FETCH:
+    # - primary key for the associated sorting and recording
+    sorting_key = (SpikeSorting & {"sorting_id": sorting_id}).fetch1()
+    recording_key = (SpikeSortingRecording & sorting_key).fetch1()
 
-    def make(self, key):
-        recording = Curation.get_recording(key)
-        if recording.get_num_segments() > 1:
-            recording = si.concatenate_recordings([recording])
+    # original nwb file
+    nwb_file_name = recording_key["nwb_file_name"]
 
-        sorting = Curation.get_curated_sorting(key)
-
-        print("Extracting waveforms...")
-        waveform_params = (WaveformParameters & key).fetch1("waveform_params")
-        if "whiten" in waveform_params:
-            if waveform_params.pop("whiten"):
-                recording = sip.whiten(recording, dtype="float32")
-
-        waveform_extractor_name = self._get_waveform_extractor_name(key)
-        key["waveform_extractor_path"] = str(
-            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"])
-            / Path(waveform_extractor_name)
+    # get sorting
+    sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+        sorting_key["analysis_file_name"]
+    )
+    sorting = se.read_nwb_sorting(sorting_analysis_file_abs_path)
+    if apply_merge:
+        sorting = sc.MergeUnitsSorting(
+            parent_sorting=sorting, units_to_merge=merge_groups
         )
-        if os.path.exists(key["waveform_extractor_path"]):
-            shutil.rmtree(key["waveform_extractor_path"])
-        waveforms = si.extract_waveforms(
-            recording=recording,
-            sorting=sorting,
-            folder=key["waveform_extractor_path"],
-            **waveform_params,
-        )
+        merge_groups = None
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
-        )
-        object_id = AnalysisNwbfile().add_units_waveforms(
-            key["analysis_file_name"], waveform_extractor=waveforms
-        )
-        key["waveforms_object_id"] = object_id
-        AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+    unit_ids = sorting.get_unit_ids()
 
-        self.insert1(key)
+    # create new analysis nwb file
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
+    analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
+    with pynwb.NWBHDF5IO(
+        path=analysis_nwb_file_abs_path,
+        mode="a",
+        load_namespaces=True,
+    ) as io:
+        nwbf = io.read()
 
-    def load_waveforms(self, key: dict):
-        """Returns a spikeinterface waveform extractor specified by key
-
-        Parameters
-        ----------
-        key : dict
-            Could be an entry in Waveforms, or some other key that uniquely defines
-            an entry in Waveforms
-
-        Returns
-        -------
-        we : spikeinterface.WaveformExtractor
-        """
-        we_path = (self & key).fetch1("waveform_extractor_path")
-        we = si.WaveformExtractor.load_from_folder(we_path)
-        return we
-
-    def fetch_nwb(self, key):
-        # TODO: implement fetching waveforms from NWB
-        return NotImplementedError
-
-    def _get_waveform_extractor_name(self, key):
-        waveform_params_name = (WaveformParameters & key).fetch1(
-            "waveform_params_name"
-        )
-
-        return (
-            f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
-            f'{key["curation_id"]}_{waveform_params_name}_waveforms'
-        )
-
-
-@schema
-class MetricSelection(dj.Manual):
-    definition = """
-    -> Waveforms
-    -> MetricParameters
-    ---
-    """
-
-    def insert1(self, key, **kwargs):
-        waveform_params = (WaveformParameters & key).fetch1("waveform_params")
-        metric_params = (MetricParameters & key).fetch1("metric_params")
-        if "peak_offset" in metric_params:
-            if waveform_params["whiten"]:
-                warnings.warn(
-                    "Calculating 'peak_offset' metric on "
-                    "whitened waveforms may result in slight "
-                    "discrepancies"
-                )
-        if "peak_channel" in metric_params:
-            if waveform_params["whiten"]:
-                Warning(
-                    "Calculating 'peak_channel' metric on "
-                    "whitened waveforms may result in slight "
-                    "discrepancies"
-                )
-        super().insert1(key, **kwargs)
-
-
-@schema
-class QualityMetrics(dj.Computed):
-    definition = """
-    -> MetricSelection
-    ---
-    quality_metrics_path: varchar(500)
-    -> AnalysisNwbfile
-    object_id: varchar(40) # Object ID for the metrics in NWB file
-    """
-
-    def make(self, key):
-        waveform_extractor = Waveforms().load_waveforms(key)
-        qm = {}
-        params = (MetricParameters & key).fetch1("metric_params")
-        for metric_name, metric_params in params.items():
-            metric = self._compute_metric(
-                waveform_extractor, metric_name, **metric_params
+        # add labels, merge groups, metrics
+        if labels is not None:
+            label_values = []
+            for unit_id in unit_ids:
+                if unit_id not in labels:
+                    label_values.append("")
+                else:
+                    label_values.append(labels[unit_id])
+            nwbf.add_unit_column(
+                name="curation_label",
+                description="curation label",
+                data=label_values,
             )
-            qm[metric_name] = metric
-        qm_name = self._get_quality_metrics_name(key)
-        key["quality_metrics_path"] = str(
-            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"]) / Path(qm_name + ".json")
-        )
-        # save metrics dict as json
-        print(f"Computed all metrics: {qm}")
-        self._dump_to_json(qm, key["quality_metrics_path"])
-
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
-        )
-        key["object_id"] = AnalysisNwbfile().add_units_metrics(
-            key["analysis_file_name"], metrics=qm
-        )
-        AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
-
-        self.insert1(key)
-
-    def _get_quality_metrics_name(self, key):
-        wf_name = Waveforms()._get_waveform_extractor_name(key)
-        qm_name = wf_name + "_qm"
-        return qm_name
-
-    def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
-        peak_sign_metrics = ["snr", "peak_offset", "peak_channel"]
-        metric_func = _metric_name_to_func[metric_name]
-        # TODO clean up code below
-        if metric_name == "isi_violation":
-            metric = metric_func(waveform_extractor, **metric_params)
-        elif metric_name in peak_sign_metrics:
-            if "peak_sign" in metric_params:
-                metric = metric_func(
-                    waveform_extractor,
-                    peak_sign=metric_params.pop("peak_sign"),
-                    **metric_params,
+        if merge_groups is not None:
+            merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
+            nwbf.add_unit_column(
+                name="merge_groups",
+                description="merge groups",
+                data=list(merge_groups_dict.values()),
+            )
+        if metrics is not None:
+            for metric, metric_dict in zip(metrics):
+                metric_values = []
+                for unit_id in unit_ids:
+                    if unit_id not in metric_dict:
+                        metric_values.append(np.nan)
+                    else:
+                        metric_values.append(metric_dict[unit_id])
+                nwbf.add_unit_column(
+                    name=metric,
+                    description=metric,
+                    data=metric_values,
                 )
-            else:
-                raise Exception(
-                    f"{peak_sign_metrics} metrics require peak_sign",
-                    f"to be defined in the metric parameters",
-                )
-        else:
-            metric = {}
-            for unit_id in waveform_extractor.sorting.get_unit_ids():
-                metric[str(unit_id)] = metric_func(
-                    waveform_extractor, this_unit_id=unit_id, **metric_params
-                )
-        return metric
 
-    def _dump_to_json(self, qm_dict, save_path):
-        new_qm = {}
-        for key, value in qm_dict.items():
-            m = {}
-            for unit_id, metric_val in value.items():
-                m[str(unit_id)] = np.float64(metric_val)
-            new_qm[str(key)] = m
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(new_qm, f, ensure_ascii=False, indent=4)
+        # write sorting to the nwb file
+        for unit_id in unit_ids:
+            spike_times = sorting.get_unit_spike_train(unit_id)
+            nwbf.add_unit(
+                spike_times=spike_times,
+                id=unit_id,
+            )
+        units_object_id = nwbf.units.object_id
+        io.write(nwbf)
+    return analysis_nwb_file, units_object_id
