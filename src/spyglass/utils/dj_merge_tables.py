@@ -161,7 +161,7 @@ class Merge(dj.Manual):
         list
             list of datajoint tables, parents of parts of Merge Table
         """
-        # .restict(restriction) does not work on returned part FreeTable
+        # .restrict(restriction) does not work on returned part FreeTable
         # & part.fetch below restricts parent to entries in merge table
         part_parents = [
             parent
