@@ -6,22 +6,21 @@ mysql_config
 
 # Notebooks
 *.ipynb
-!notebooks/00_intro.ipynb
-!notebooks/01_spikesorting.ipynb
-!notebooks/02_curation.ipynb
-!notebooks/03_lfp.ipynb
-!notebooks/04_Trodes_position.ipynb
-!notebooks/05_DLC_from_scratch.ipynb
-!notebooks/06_DLC_from_dir.ipynb
-!notebooks/4_position_info.ipynb
-!notebooks/07_linearization.ipynb
-!notebooks/08_Extract_Mark_indicators.ipynb
-!notebooks/09_Decoding_with_GPUs_on_the_GPU_cluster.ipynb
-!notebooks/10_1D_Clusterless_Decoding.ipynb
-!notebooks/11_2D_Clusterless_Decoding.ipynb
-!notebooks/12_Ripple_Detection.ipynb
-!notebooks/13_Theta_phase_and_power.ipynb
-
+!notebooks/00*.ipynb
+!notebooks/01*.ipynb
+!notebooks/02*.ipynb
+!notebooks/10*.ipynb
+!notebooks/11*.ipynb
+!notebooks/12*.ipynb
+!notebooks/14*.ipynb
+!notebooks/20*.ipynb
+!notebooks/21*.ipynb
+!notebooks/22*.ipynb
+!notebooks/23*.ipynb
+!notebooks/24*.ipynb
+!notebooks/30*.ipynb
+!notebooks/31*.ipynb
+!notebooks/33*.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
