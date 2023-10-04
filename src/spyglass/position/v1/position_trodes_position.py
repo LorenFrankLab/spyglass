@@ -180,6 +180,15 @@ class TrodesPosV1(dj.Computed):
         )
 
         position_info_parameters = (TrodesPosParams() & key).fetch1("params")
+
+        # Rename params to match specificity discussed in #628
+        position_info_parameters[
+            "max_LED_separation"
+        ] = position_info_parameters["max_separation"]
+        position_info_parameters[
+            "max_plausible_speed"
+        ] = position_info_parameters["max_speed"]
+
         spatial_series = (RawPosition.PosObject & key).fetch_nwb()[0][
             "raw_position"
         ]
@@ -304,6 +313,7 @@ class TrodesPosV1(dj.Computed):
         is_upsampled,
         upsampling_sampling_rate,
         upsampling_interpolation_method,
+        **kwargs,
     ):
         """Calculate position info from 2D spatial series."""
         CM_TO_METERS = 100
