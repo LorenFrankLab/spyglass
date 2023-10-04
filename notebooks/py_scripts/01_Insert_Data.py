@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.7
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -53,6 +53,7 @@ import spyglass.common as sgc
 
 # spyglass.data_import has tools for inserting NWB files into the database
 import spyglass.data_import as sgi
+
 # -
 
 # ## Visualizing the database
@@ -107,9 +108,9 @@ dj.Diagram(sgc.Session) - 1 + 2
 #
 # - `minirec20230622.nwb`, .3 GB: minimal recording,
 #   [Link](https://ucsf.box.com/s/k3sgql6z475oia848q1rgms4zdh4rkjn)
-# - `mediumnwb20230802.nwb`, 32 GB: full-featured dataset, 
-#   [Link](https://ucsf.box.com/s/2qbhxghzpttfam4b7q7j8eg0qkut0opa) 
-# - `montague20200802.nwb`, 8 GB: full experimintal recording, 
+# - `mediumnwb20230802.nwb`, 32 GB: full-featured dataset,
+#   [Link](https://ucsf.box.com/s/2qbhxghzpttfam4b7q7j8eg0qkut0opa)
+# - `montague20200802.nwb`, 8 GB: full experimental recording,
 #   [Link](https://ucsf.box.com/s/26je2eytjpqepyznwpm92020ztjuaomb)
 # - For those in the UCSF network, these and many others on `/stelmo/nwb/raw`
 #
@@ -196,7 +197,7 @@ sgc.LabTeam.LabTeamMember()
 # - neural activity (extracellular recording of multiple brain areas)
 # - etc.
 #
-# _Note:_ this may take time as Spyglass creates the copy. You may see a prompt 
+# _Note:_ this may take time as Spyglass creates the copy. You may see a prompt
 # about inserting device information.
 
 sgi.insert_sessions(nwb_file_name)

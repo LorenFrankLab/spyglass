@@ -248,7 +248,7 @@ class SessionGroup(dj.Manual):
 
         FIGURL_CHANNEL = config.get("FIGURL_CHANNEL")
         if not FIGURL_CHANNEL:
-            raise ValueError("FIGURL_CHANNEL conifg/env variagle not set")
+            raise ValueError("FIGURL_CHANNEL config/env variable not set")
 
         return fig.Figure(
             view_url="gs://figurl/spyglassview-1",

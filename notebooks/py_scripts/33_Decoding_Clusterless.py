@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.7
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -24,15 +24,15 @@
 #
 # - To set up your Spyglass environment and database, see
 #   [the Setup notebook](./00_Setup.ipynb)
-# - This tutorial assumes you've already 
-#   [extracted marks](./31_Extract_Mark_Indicators.ipynb), as well as loaded 
+# - This tutorial assumes you've already
+#   [extracted marks](./31_Extract_Mark_Indicators.ipynb), as well as loaded
 #   position data. If 1D decoding, this data should also be
 #   [linearized](./24_Linearization.ipynb).
-# - This tutorial also assumes you're familiar with how to run processes on GPU, 
+# - This tutorial also assumes you're familiar with how to run processes on GPU,
 #   as presented in [this notebook](./32_Decoding_with_GPUs.ipynb)
 #
 # Clusterless decoding can be performed on either 1D or 2D data. A few steps in
-# this notebook will refer to a `decode_1d` variable set in 
+# this notebook will refer to a `decode_1d` variable set in
 # [select data](#select-data) to include these steps.
 #
 
@@ -115,7 +115,7 @@ marks
 # for items that look overly correlated (strong diagonal on the off-diagonal
 # plots) and extreme amplitudes.
 #
-# For tutorial purposes, we only look at the first 2 plots, but removing this 
+# For tutorial purposes, we only look at the first 2 plots, but removing this
 # argument will show all plots.
 
 sgd_clusterless.UnitMarksIndicator.plot_all_marks(marks, plot_limit=2)
@@ -125,7 +125,7 @@ sgd_clusterless.UnitMarksIndicator.plot_all_marks(marks, plot_limit=2)
 
 # ### Get position
 
-# Next, we'll grab the 2D position data from `IntervalPositionInfo` table. 
+# Next, we'll grab the 2D position data from `IntervalPositionInfo` table.
 #
 # _Note:_ Position will need to be upsampled to our decoding frequency (500 Hz).
 # See [this notebook](./20_Position_Trodes.ipynb#upsampling-position) for more
@@ -261,7 +261,7 @@ position_info.shape, marks.shape, linear_position_df.shape
 # ## Decoding
 #
 
-# After sanity checks, we can finally get to decoding. 
+# After sanity checks, we can finally get to decoding.
 #
 # _Note:_ Portions of the code below have been integrated into
 # `spyglass.decoding`, but are presented here in full.

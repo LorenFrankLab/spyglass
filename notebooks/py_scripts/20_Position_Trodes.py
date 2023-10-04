@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.7
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -276,8 +276,8 @@ ax.set_xlim((position_info.index.min(), position_info.index.max()))
 
 # ### Video
 #
-# To keep `minirec`, video is not included. Full datasets can be further 
-# visualized by plotting the results on the video, which will appear in the 
+# To keep `minirec`, video is not included. Full datasets can be further
+# visualized by plotting the results on the video, which will appear in the
 # current working directory.
 #
 
@@ -292,7 +292,7 @@ if "mini" not in nwb_copy_file_name:
 
 # ## Upsampling position
 #
-# To get position data in smaller in time bins, we can upsample using the 
+# To get position data in smaller in time bins, we can upsample using the
 # following parameters
 #
 # - `is_upsampled`, default 0 (False): If 1, perform upsampling.

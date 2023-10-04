@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.7
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: Python [conda env:spyglass-position3] *
 #     language: python
@@ -71,7 +71,7 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 
 # ?sgr.RippleLFPSelection.set_lfp_electrodes
 
-# We'll need the `nwb_file_name`, an `electrode_list`, and to a `group_name`. 
+# We'll need the `nwb_file_name`, an `electrode_list`, and to a `group_name`.
 #
 # - By default, `group_name` is set to CA1 for ripple detection, but we could
 #   alternatively use PFC.
@@ -162,7 +162,7 @@ sgr.RippleParameters()
 # - `speed_name`: the name of the speed parameters in `IntervalPositionInfo`
 #
 # For the `Kay_ripple_detector` (options are currently Kay and Karlsson, see `ripple_detection` package for specifics) the parameters are:
-#     
+#
 # - `speed_threshold` (cm/s): maximum speed the animal can move
 # - `minimum_duration` (s): minimum time above threshold
 # - `zscore_threshold` (std): minimum value to be considered a ripple, in standard
@@ -187,7 +187,7 @@ pos_key = sgp.PositionOutput.merge_get_part(
 
 # We'll use the `head_speed` above as part of `RippleParameters`.
 
-# ## Run Ripple Detection 
+# ## Run Ripple Detection
 #
 
 #
