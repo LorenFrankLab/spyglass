@@ -181,13 +181,13 @@ class TrodesPosV1(dj.Computed):
 
         position_info_parameters = (TrodesPosParams() & key).fetch1("params")
 
-        # Renamed per discussion on #628
+        # Rename params to match specificity discussed in #628
         position_info_parameters[
             "max_LED_separation"
-        ] = position_info_parameters.get("max_separation", 9.0)
+        ] = position_info_parameters["max_separation"]
         position_info_parameters[
             "max_plausible_speed"
-        ] = position_info_parameters.get("max_speed", 300)
+        ] = position_info_parameters["max_speed"]
 
         spatial_series = (RawPosition.PosObject & key).fetch_nwb()[0][
             "raw_position"

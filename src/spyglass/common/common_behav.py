@@ -37,7 +37,7 @@ class PositionSource(dj.Manual):
     class SpatialSeries(dj.Part):
         definition = """
         -> master
-        id : int unsigned            # index of spatial series
+        id = 0 : int unsigned            # index of spatial series
         ---
         name=null: varchar(32)       # name of spatial series
         """
