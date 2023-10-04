@@ -89,7 +89,7 @@ Notes on how the repo / database is organized, intended for a new developer.
 - These are tables that are part of many pipelines.
 - Examples: `IntervalList` (whose entries define time interval for any
   analysis), `AnalysisNwbfile` (whose entries define analysis NWB files created
-  for any analysis), `Sortings` (whose entries include many types of spike
+  for any analysis), `SpikeSorting` (whose entries include many types of spike
   sorting, such as uncurated, automatically curated, manually curated etc)
 - Data tier: `dj.Manual`
 - Note that because these are stand-alone manual tables, they are not part of
@@ -137,7 +137,7 @@ There are a few places where a name needs to be given to objects. Follow these r
 - _Recordings_: should be given unique names. As such we have decided to simply
   concatenate everything that went into defining it separated by underscore,
   i.e. `NWBFileName_IntervalName_ElectrodeGroupName_PreprocessingParamsName`.
-- _Sortings_: should be unique. Simply concatenates
+- _SpikeSorting_: should be unique. Simply concatenates
   `SpikeSorter_SorterParamName` to the name of the recording.
 - _Waveforms_: should be unique. Concatenates `WaveformParamName` to the name of
   the sorting.
@@ -157,8 +157,7 @@ There are a few places where a name needs to be given to objects. Follow these r
 - Store an interval as `[start_time, stop_time]`. The list can be nested for a
   set of disjoint intervals.
 - Some recordings have explicit timestamps associated with each sample. This is
-  obtained by a system called PTP. In this system, time 0 is defined as 1 Jan
-  1970. Other (typically older) recordings do not and their times must be
+  obtained by a system called PTP. In this system, time 0 is defined as 1 Jan 1970. Other (typically older) recordings do not and their times must be
   inferred from the TTL pulses from the camera (ask if this doesn't make sense).
 - What is a valid interval? Because our experiments can be long, sometimes there
   are missing samples. This can be due to many reasons, such as the commutator
@@ -190,11 +189,11 @@ There are a few places where a name needs to be given to objects. Follow these r
 2. In `CITATION.cff`, update the `version` key to the new version string.
 3. Make a pull request with these changes.
 4. After merging these changes, run `git tag --sign -m "spyglass ${release}"
-   ${release} origin/master` where `${release}` is replaced with the new version
+${release} origin/master` where `${release}` is replaced with the new version
    string.
 
-  - This step requires a
-    [GPG signing key](https://docs.github.com/en/authentication/managing-commit-signature-verification/generating-a-new-gpg-key).
+- This step requires a
+  [GPG signing key](https://docs.github.com/en/authentication/managing-commit-signature-verification/generating-a-new-gpg-key).
 
 1. Publish the new release tag. Run `git push origin ${release}`.
 2. Generate distribution packages and upload them to PyPI following [these
