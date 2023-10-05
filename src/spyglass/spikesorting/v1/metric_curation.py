@@ -291,7 +291,8 @@ class MetricCuration(dj.Computed):
                                  ("<", 1, ["noise"])]
                      }
             This indicates that units with values of the "snr" quality metric
-            greater than 5 should be given the labels "good" and "mua".
+            greater than 1 should be given the labels "good" and "mua" and values
+            less than 1 should be given the label "noise".
 
         Returns
         -------
@@ -309,12 +310,14 @@ class MetricCuration(dj.Computed):
                     Warning(f"{metric} not found in quality metrics; skipping")
                 else:
                     for condition in label_param[metric]:
-                        assert len(condition) == 3, f"Condition {condition} must be of length 3"
-                        compare = _comparison_to_function[label_param[metric][0]]
+                        assert (
+                            len(condition) == 3
+                        ), f"Condition {condition} must be of length 3"
+                        compare = _comparison_to_function[condition[0]]
                         for unit_id in unit_ids:
                             if compare(
                                 metrics[metric][unit_id],
-                                label_param[metric][1],
+                                condition[1],
                             ):
                                 labels[unit_id].extend(label_param[metric][2])
             return labels
@@ -324,8 +327,7 @@ class MetricCuration(dj.Computed):
         metrics: Dict[str, Dict[str, Union[float, List[float]]]],
         merge_param: Dict[str, List[Any]],
     ) -> Dict[str, List[str]]:
-        """Identifies units to be merged based on the metrics and
-        merge parameters.
+        """Identifies units to be merged based on the metrics and merge parameters.
 
         Parameters
         ---------

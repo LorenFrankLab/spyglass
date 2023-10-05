@@ -262,13 +262,19 @@ def _write_sorting_to_nwb_with_curation(
         load_namespaces=True,
     ) as io:
         nwbf = io.read()
-
+        # write sorting to the nwb file
+        for unit_id in unit_ids:
+            spike_times = sorting.get_unit_spike_train(unit_id)
+            nwbf.add_unit(
+                spike_times=spike_times,
+                id=unit_id,
+            )
         # add labels, merge groups, metrics
         if labels is not None:
             label_values = []
             for unit_id in unit_ids:
                 if unit_id not in labels:
-                    label_values.append("")
+                    label_values.append([""])
                 else:
                     label_values.append(labels[unit_id])
             nwbf.add_unit_column(
@@ -297,13 +303,6 @@ def _write_sorting_to_nwb_with_curation(
                     data=metric_values,
                 )
 
-        # write sorting to the nwb file
-        for unit_id in unit_ids:
-            spike_times = sorting.get_unit_spike_train(unit_id)
-            nwbf.add_unit(
-                spike_times=spike_times,
-                id=unit_id,
-            )
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
     return analysis_nwb_file, units_object_id
@@ -333,6 +332,23 @@ def _union_intersecting_lists(lists):
 
 
 def _list_to_merge_dict(lists_of_strings, target_strings):
+    """Converts a list of merge groups to a dict.
+    The keys of the dict (unit ids) are provided separately in case
+    the merge groups do not contain all the unit ids.
+    Example: [[1,2,3],[4,5]], [1,2,3,4,5,6] -> {1: [2, 3], 2:[1,3], 3:[1,2] 4: [5], 5: [4], 6: []}
+
+    Parameters
+    ----------
+    lists_of_strings : _type_
+        _description_
+    target_strings : _type_
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
     lists_of_strings = _union_intersecting_lists(lists_of_strings)
     result = {string: [] for string in target_strings}
 
@@ -357,6 +373,19 @@ def _reverse_associations(assoc_dict):
 
 
 def _merge_dict_to_list(merge_groups):
+    """Converts dict of merge groups to list of merge groups.
+    Example: {1: [2, 3], 4: [5]} -> [[1, 2, 3], [4, 5]]
+
+    Parameters
+    ----------
+    merge_groups : _type_
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
     units_to_merge = _union_intersecting_lists(
         _reverse_associations(merge_groups)
     )
