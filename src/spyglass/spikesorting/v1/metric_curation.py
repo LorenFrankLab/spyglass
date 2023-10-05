@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import List, Union, Dict, Any
 
 import datajoint as dj
 import numpy as np
@@ -138,12 +138,12 @@ class MetricCurationParameter(dj.Lookup):
     definition = """
     metric_curation_param_name: varchar(200)
     ---
-    merge_param: blob   # dict of param to merge units
     label_param: blob   # dict of param to label units
+    merge_param: blob   # dict of param to merge units
     """
 
     contents = [
-        ["default", {}, {"nn_noise_overlap": [">", 0.1, ["noise", "reject"]]}],
+        ["default", {"nn_noise_overlap": [">", 0.1, ["noise", "reject"]]}, {}],
         ["none", {}, {}],
     ]
 
@@ -180,13 +180,13 @@ class MetricCuration(dj.Computed):
         )
         waveform_param = (WaveformParameter & key).fetch1("waveform_param")
         metric_param = (MetricParameter & key).fetch1("metric_param")
-        merge_param = (MetricCurationParameter & key).fetch1("merge_param")
         label_param = (MetricCurationParameter & key).fetch1("label_param")
+        merge_param = (MetricCurationParameter & key).fetch1("merge_param")
 
         # DO
         # create uuid for this metric curation
         key["metric_curation_id"] = generate_nwb_uuid(
-            nwb_file_name=nwb_file_name, initial="MC"
+            nwb_file_name=nwb_file_name, initial="MC", len_uuid=6
         )
         # load recording and sorting
         recording = Curation.get_recording(key)
@@ -195,31 +195,37 @@ class MetricCuration(dj.Computed):
         if "whiten" in waveform_param:
             if waveform_param.pop("whiten"):
                 recording = sp.whiten(recording, dtype=np.float64)
+
+        waveforms_dir = (
+            os.environ.get("SPYGLASS_TEMP_DIR")
+            + "/"
+            + key["metric_curation_id"]
+        )
+        try:
+            os.mkdir(waveforms_dir)
+        except FileExistsError:
+            pass
         waveforms = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
-            folder=os.environ.get("SPYGLASS_TEMP_DIR"),
+            folder=waveforms_dir,
             **waveform_param,
         )
         # compute metrics
-        quality_metrics = {}
+        metrics = {}
         for metric_name, metric_param_dict in metric_param.items():
-            quality_metrics[metric_name] = self._compute_metric(
+            metrics[metric_name] = self._compute_metric(
                 waveforms, metric_name, **metric_param_dict
             )
         # generate labels and merge groups
-        labels = self._compute_labels(
-            parent_sorting, parent_labels, quality_metrics, label_params
-        )
+        labels = self._compute_labels(metrics, label_param)
 
-        merge_groups, units_merged = self._compute_merge_groups(
-            parent_sorting, parent_merge_groups, quality_metrics, merge_params
-        )
+        merge_groups = self._compute_merge_groups(metrics, merge_param)
         # save everything in NWB
         (
             key["analysis_file_name"],
             key["object_id"],
-        ) = _write_metric_curation_to_nwb()
+        ) = _write_metric_curation_to_nwb(waveforms, labels, merge_groups)
 
         # INSERT
         self.insert1(key)
@@ -244,10 +250,8 @@ class MetricCuration(dj.Computed):
     def _compute_metric(waveform_extractor, metric_name, **metric_params):
         peak_sign_metrics = ["snr", "peak_offset", "peak_channel"]
         metric_func = _metric_name_to_func[metric_name]
-        # TODO clean up code below
-        if metric_name == "isi_violation":
-            metric = metric_func(waveform_extractor, **metric_params)
-        elif metric_name in peak_sign_metrics:
+        # Not sure what this is doing; leaving in case someone is using them
+        if metric_name in peak_sign_metrics:
             if "peak_sign" in metric_params:
                 metric = metric_func(
                     waveform_extractor,
@@ -268,100 +272,108 @@ class MetricCuration(dj.Computed):
         return metric
 
     @staticmethod
-    def _compute_merge_groups(
-        sorting, parent_merge_groups, quality_metrics, merge_params
-    ):
-        """Identifies units to be merged based on the quality_metrics and
-        merge parameters and returns an updated list of merges for the curation.
+    def _compute_labels(
+        metrics: Dict[str, Dict[str, Union[float, List[float]]]],
+        label_param: Dict[str, List[Any]],
+    ) -> Dict[str, List[str]]:
+        """Computes the labels based on the metric and label parameters.
 
         Parameters
         ---------
-        sorting : spikeinterface.sorting
-        parent_merge_groups : list
-            Information about previous merges
-        quality_metrics : list
-        merge_params : dict
+        quality_metrics : dict
+            Example: {"snr" : {"1" : 2, "2" : 0.1, "3" : 2.3}}
+            This indicates that the values of the "snr" quality metric
+            for the units "1", "2", "3" are 2, 0.1, and 2.3, respectively.
+
+        label_params : dict
+            Example: {
+                        "snr" : [(">", 1, ["good", "mua"]),
+                                 ("<", 1, ["noise"])]
+                     }
+            This indicates that units with values of the "snr" quality metric
+            greater than 5 should be given the labels "good" and "mua".
+
+        Returns
+        -------
+        labels : dict
+            Example: {"1" : ["good", "mua"], "2" : ["noise"], "3" : ["good", "mua"]}
+
+        """
+        if not label_param:
+            return {}
+        else:
+            unit_ids = list(metrics[list(metrics.keys())[0]].keys())
+            labels = {unit_id: [] for unit_id in unit_ids}
+            for metric in label_param:
+                if metric not in metrics:
+                    Warning(f"{metric} not found in quality metrics; skipping")
+                else:
+                    for condition in label_param[metric]:
+                        assert len(condition) == 3, f"Condition {condition} must be of length 3"
+                        compare = _comparison_to_function[label_param[metric][0]]
+                        for unit_id in unit_ids:
+                            if compare(
+                                metrics[metric][unit_id],
+                                label_param[metric][1],
+                            ):
+                                labels[unit_id].extend(label_param[metric][2])
+            return labels
+
+    @staticmethod
+    def _compute_merge_groups(
+        metrics: Dict[str, Dict[str, Union[float, List[float]]]],
+        merge_param: Dict[str, List[Any]],
+    ) -> Dict[str, List[str]]:
+        """Identifies units to be merged based on the metrics and
+        merge parameters.
+
+        Parameters
+        ---------
+        quality_metrics : dict
+            Example: {"cosine_similarity" : {
+                                             "1" : {"1" : 1.00, "2" : 0.10, "3": 0.95},
+                                             "2" : {"1" : 0.10, "2" : 1.00, "3": 0.70},
+                                             "3" : {"1" : 0.95, "2" : 0.70, "3": 1.00}
+                                            }
+            This shows the pairwise values of the "cosine_similarity" quality metric
+            for the units "1", "2", "3" as a nested dict.
+
+        merge_param : dict
+            Example: {"cosine_similarity" : [">", 0.9]}
+            This indicates that units with values of the "cosine_similarity" quality metric
+            greater than 0.9 should be placed in the same merge group.
+
 
         Returns
         -------
         merge_groups : list of lists
-        merge_occurred : bool
+            Example: {"1" : ["3"], "2" : [], "3" : ["1"]}
 
         """
 
-        # overview:
-        # 1. Use quality metrics to determine merge groups for units
-        # 2. Combine merge groups with current merge groups to produce union of merges
-
-        if not merge_params:
-            return parent_merge_groups, False
+        if not merge_param:
+            return []
         else:
-            # TODO: use the metrics to identify clusters that should be merged
-            # new_merges should then reflect those merges and the line below should be deleted.
-            new_merges = []
-            # append these merges to the parent merge_groups
-            for new_merge in new_merges:
-                # check to see if the first cluster listed is in a current merge group
-                for previous_merge in parent_merge_groups:
-                    if new_merge[0] == previous_merge[0]:
-                        # add the additional units in new_merge to the identified merge group.
-                        previous_merge.extend(new_merge[1:])
-                        previous_merge.sort()
-                        break
-                else:
-                    # append this merge group to the list if no previous merge
-                    parent_merge_groups.append(new_merge)
-            return parent_merge_groups.sort(), True
-
-    @staticmethod
-    def _compute_labels(sorting, parent_labels, quality_metrics, label_params):
-        """Returns a dictionary of labels using quality_metrics and label
-        parameters.
-
-        Parameters
-        ---------
-        sorting : spikeinterface.sorting
-        parent_labels : list
-            Information about previous merges
-        quality_metrics : list
-        label_params : dict
-
-        Returns
-        -------
-        parent_labels : list
-
-        """
-        # overview:
-        # 1. Use quality metrics to determine labels for units
-        # 2. Append labels to current labels, checking for inconsistencies
-        if not label_params:
-            return parent_labels
-        else:
-            for metric in label_params:
-                if metric not in quality_metrics:
+            unit_ids = list(metrics[list(metrics.keys())[0]].keys())
+            merge_groups = {unit_id: [] for unit_id in unit_ids}
+            for metric in merge_param:
+                if metric not in metrics:
                     Warning(f"{metric} not found in quality metrics; skipping")
                 else:
-                    compare = _comparison_to_function[label_params[metric][0]]
-
-                    for unit_id in quality_metrics[metric].keys():
-                        # compare the quality metric to the threshold with the specified operator
-                        # note that label_params[metric] is a three element list with a comparison operator as a string,
-                        # the threshold value, and a list of labels to be applied if the comparison is true
-                        if compare(
-                            quality_metrics[metric][unit_id],
-                            label_params[metric][1],
-                        ):
-                            if unit_id not in parent_labels:
-                                parent_labels[unit_id] = label_params[metric][2]
-                            # check if the label is already there, and if not, add it
-                            elif (
-                                label_params[metric][2]
-                                not in parent_labels[unit_id]
+                    compare = _comparison_to_function[merge_param[metric][0]]
+                    for unit_id in unit_ids:
+                        other_unit_ids = [
+                            other_unit_id
+                            for other_unit_id in unit_ids
+                            if other_unit_id != unit_id
+                        ]
+                        for other_unit_id in other_unit_ids:
+                            if compare(
+                                metrics[metric][unit_id][other_unit_id],
+                                merge_param[metric][1],
                             ):
-                                parent_labels[unit_id].extend(
-                                    label_params[metric][2]
-                                )
-            return parent_labels
+                                merge_groups[unit_id].extend(other_unit_id)
+            return merge_groups
 
 
 def _write_metric_curation_to_nwb(
