@@ -274,7 +274,7 @@ def _write_sorting_to_nwb_with_curation(
             label_values = []
             for unit_id in unit_ids:
                 if unit_id not in labels:
-                    label_values.append([""])
+                    label_values.append([])
                 else:
                     label_values.append(labels[unit_id])
             nwbf.add_unit_column(
@@ -290,11 +290,11 @@ def _write_sorting_to_nwb_with_curation(
                 data=list(merge_groups_dict.values()),
             )
         if metrics is not None:
-            for metric, metric_dict in zip(metrics):
+            for metric, metric_dict in metrics.items():
                 metric_values = []
                 for unit_id in unit_ids:
                     if unit_id not in metric_dict:
-                        metric_values.append(np.nan)
+                        metric_values.append([])
                     else:
                         metric_values.append(metric_dict[unit_id])
                 nwbf.add_unit_column(

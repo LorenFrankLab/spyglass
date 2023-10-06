@@ -3,6 +3,7 @@ from typing import List, Union, Dict, Any
 
 import datajoint as dj
 import numpy as np
+import pynwb
 import spikeinterface as si
 import spikeinterface.preprocessing as sp
 import spikeinterface.qualitymetrics as sq
@@ -10,7 +11,11 @@ import spikeinterface.qualitymetrics as sq
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.spikesorting.v1.sorting import SpikeSorting
-from spyglass.spikesorting.v1.curation import Curation
+from spyglass.spikesorting.v1.curation import (
+    Curation,
+    _list_to_merge_dict,
+    _merge_dict_to_list,
+)
 from spyglass.spikesorting.v1.metric_utils import (
     get_num_spikes,
     get_peak_channel,
@@ -215,7 +220,7 @@ class MetricCuration(dj.Computed):
         metrics = {}
         for metric_name, metric_param_dict in metric_param.items():
             metrics[metric_name] = self._compute_metric(
-                waveforms, metric_name, **metric_param_dict
+                nwb_file_name, waveforms, metric_name, **metric_param_dict
             )
         # generate labels and merge groups
         labels = self._compute_labels(metrics, label_param)
@@ -225,7 +230,9 @@ class MetricCuration(dj.Computed):
         (
             key["analysis_file_name"],
             key["object_id"],
-        ) = _write_metric_curation_to_nwb(waveforms, labels, merge_groups)
+        ) = _write_metric_curation_to_nwb(
+            waveforms, metrics, labels, merge_groups
+        )
 
         # INSERT
         self.insert1(key)
@@ -235,16 +242,68 @@ class MetricCuration(dj.Computed):
         return NotImplementedError
 
     @classmethod
-    def get_metrics(cls):
-        return NotImplementedError
+    def get_metrics(cls, key: dict):
+        analysis_file_name = (cls & key).fetch1("analysis_file_name")
+        object_id = (cls & key).fetch1("object_id")
+        metric_param_name = (cls & key).fetch1("metric_param_name")
+        metric_param = (
+            MetricParameter & {"metric_param_name": metric_param_name}
+        ).fetch1("metric_param")
+        metric_names = list(metric_param.keys())
+
+        metrics = {}
+        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+            analysis_file_name
+        )
+        with pynwb.NWBHDF5IO(
+            path=analysis_file_abs_path,
+            mode="r",
+            load_namespaces=True,
+        ) as io:
+            nwbf = io.read()
+            units = nwbf.objects[object_id]
+            for metric_name in metric_names:
+                metrics[metric_name] = dict(
+                    zip(units[id][:], units[metric_name][:])
+                )
+
+        return metrics
 
     @classmethod
-    def get_labels(cls):
-        return NotImplementedError
+    def get_labels(cls, key: dict):
+        analysis_file_name = (cls & key).fetch1("analysis_file_name")
+        object_id = (cls & key).fetch1("object_id")
+        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+            analysis_file_name
+        )
+        with pynwb.NWBHDF5IO(
+            path=analysis_file_abs_path,
+            mode="r",
+            load_namespaces=True,
+        ) as io:
+            nwbf = io.read()
+            units = nwbf.objects[object_id]
+            labels = dict(zip(units[id][:], units["curation_labels"][:]))
+
+        return labels
 
     @classmethod
-    def get_merge_groups(cls):
-        return NotImplementedError
+    def get_merge_groups(cls, key: dict):
+        analysis_file_name = (cls & key).fetch1("analysis_file_name")
+        object_id = (cls & key).fetch1("object_id")
+        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+            analysis_file_name
+        )
+        with pynwb.NWBHDF5IO(
+            path=analysis_file_abs_path,
+            mode="r",
+            load_namespaces=True,
+        ) as io:
+            nwbf = io.read()
+            units = nwbf.objects[object_id]
+            labels = dict(zip(units[id][:], units["merge_groups"][:]))
+
+        return _merge_dict_to_list(labels)
 
     @staticmethod
     def _compute_metric(waveform_extractor, metric_name, **metric_params):
@@ -379,14 +438,13 @@ class MetricCuration(dj.Computed):
 
 
 def _write_metric_curation_to_nwb(
-    sorting_id: str,
+    nwb_file_name: str,
+    waveforms: si.WaveformExtractor,
+    metrics: Union[None, Dict[str, Dict[str, float]]] = None,
     labels: Union[None, Dict[str, List[str]]] = None,
     merge_groups: Union[None, List[List[str]]] = None,
-    metrics: Union[None, Dict[str, Dict[str, float]]] = None,
-    apply_merge: bool = False,
 ):
-    """Save sorting to NWB with curation information.
-    Curation information is saved as columns in the units table of the NWB file.
+    """Save waveforms, metrics, labels, and merge groups to NWB
 
     Parameters
     ----------
@@ -408,26 +466,8 @@ def _write_metric_curation_to_nwb(
     object_id : str
         object_id of the units table in the analysis NWB file
     """
-    # FETCH:
-    # - primary key for the associated sorting and recording
-    sorting_key = (SpikeSorting & {"sorting_id": sorting_id}).fetch1()
-    recording_key = (SpikeSortingRecording & sorting_key).fetch1()
 
-    # original nwb file
-    nwb_file_name = recording_key["nwb_file_name"]
-
-    # get sorting
-    sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-        sorting_key["analysis_file_name"]
-    )
-    sorting = se.read_nwb_sorting(sorting_analysis_file_abs_path)
-    if apply_merge:
-        sorting = sc.MergeUnitsSorting(
-            parent_sorting=sorting, units_to_merge=merge_groups
-        )
-        merge_groups = None
-
-    unit_ids = sorting.get_unit_ids()
+    unit_ids = [int(i) for i in waveforms.sorting.get_unit_ids()]
 
     # create new analysis nwb file
     analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
@@ -438,13 +478,22 @@ def _write_metric_curation_to_nwb(
         load_namespaces=True,
     ) as io:
         nwbf = io.read()
+        # write waveforms to the nwb file
+        for unit_id in unit_ids:
+            nwbf.add_unit(
+                spike_times=waveforms.sorting.get_unit_spike_train(unit_id),
+                id=unit_id,
+                electrodes=waveforms.recording.get_channel_ids(),
+                waveforms=waveforms.get_waveforms(unit_id),
+                waveform_mean=waveforms.get_template(unit_id),
+            )
 
         # add labels, merge groups, metrics
         if labels is not None:
             label_values = []
             for unit_id in unit_ids:
                 if unit_id not in labels:
-                    label_values.append("")
+                    label_values.append([])
                 else:
                     label_values.append(labels[unit_id])
             nwbf.add_unit_column(
@@ -460,11 +509,11 @@ def _write_metric_curation_to_nwb(
                 data=list(merge_groups_dict.values()),
             )
         if metrics is not None:
-            for metric, metric_dict in zip(metrics):
+            for metric, metric_dict in metrics.items():
                 metric_values = []
                 for unit_id in unit_ids:
                     if unit_id not in metric_dict:
-                        metric_values.append(np.nan)
+                        metric_values.append([])
                     else:
                         metric_values.append(metric_dict[unit_id])
                 nwbf.add_unit_column(
@@ -473,13 +522,6 @@ def _write_metric_curation_to_nwb(
                     data=metric_values,
                 )
 
-        # write sorting to the nwb file
-        for unit_id in unit_ids:
-            spike_times = sorting.get_unit_spike_train(unit_id)
-            nwbf.add_unit(
-                spike_times=spike_times,
-                id=unit_id,
-            )
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
     return analysis_nwb_file, units_object_id
