@@ -210,6 +210,7 @@ class MetricCuration(dj.Computed):
             os.mkdir(waveforms_dir)
         except FileExistsError:
             pass
+        print("Extracting waveforms...")
         waveforms = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
@@ -217,16 +218,18 @@ class MetricCuration(dj.Computed):
             **waveform_param,
         )
         # compute metrics
+        print("Computing metrics...")
         metrics = {}
         for metric_name, metric_param_dict in metric_param.items():
             metrics[metric_name] = self._compute_metric(
                 nwb_file_name, waveforms, metric_name, **metric_param_dict
             )
-        # generate labels and merge groups
-        labels = self._compute_labels(metrics, label_param)
 
+        print("Applying curation...")
+        labels = self._compute_labels(metrics, label_param)
         merge_groups = self._compute_merge_groups(metrics, merge_param)
-        # save everything in NWB
+
+        print("Saving to NWB...")
         (
             key["analysis_file_name"],
             key["object_id"],

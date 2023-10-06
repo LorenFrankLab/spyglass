@@ -24,6 +24,7 @@ class FigURLCurationSelection(dj.Manual):
     metrics_figurl: longblob            # metrics to display in the figURL
     """
 
+    @staticmethod
     def generate_curation_uri(key: Dict) -> str:
         """Generates a kachery-cloud URI containing curation info from a row in Curation table
 
@@ -44,12 +45,20 @@ class FigURLCurationSelection(dj.Manual):
             unit_ids = nwb_sorting["id"][:]
             labels = nwb_sorting["labels"][:]
             merge_groups = nwb_sorting["merge_groups"][:]
+
+        unit_ids = [str(unit_id) for unit_id in unit_ids]
+
         if labels:
             labels_dict = dict(zip(unit_ids, labels))
         else:
             labels_dict = {}
+
         if merge_groups:
             merge_groups_list = _merge_dict_to_list(merge_groups)
+            merge_groups_list = [
+                [str(unit_id) for unit_id in merge_group]
+                for merge_group in merge_groups_list
+            ]
         else:
             merge_groups_list = []
 
@@ -70,7 +79,7 @@ class FigURLCuration(dj.Computed):
     url: varchar(1000)
     """
 
-    def make(self, key: Dict):
+    def make(self, key: dict):
         # FETCH
         sorting_analysis_file_name = (Curation & key).fetch1(
             "analysis_file_name"
@@ -101,6 +110,8 @@ class FigURLCuration(dj.Computed):
 
         unit_metrics = _reformat_metrics(metric_dict)
 
+        # TODO: figure out a way to specify the similarity metrics
+
         # Generate the figURL
         key["url"] = _generate_figurl(
             R=recording,
@@ -113,6 +124,14 @@ class FigURLCuration(dj.Computed):
 
         # INSERT
         self.insert1(key, skip_duplicates=True)
+
+    @classmethod
+    def get_labels(cls):
+        return NotImplementedError
+
+    @classmethod
+    def get_merge_groups(cls):
+        return NotImplementedError
 
 
 def _generate_figurl(
@@ -143,6 +162,7 @@ def _generate_figurl(
         max_num_snippets_per_segment=max_num_snippets_per_segment,
         channel_neighborhood_size=channel_neighborhood_size,
     )
+
     # create a fake unit similarity matrix (for future reference)
     # similarity_scores = []
     # for u1 in X.unit_ids:
@@ -154,7 +174,7 @@ def _generate_figurl(
     #                 similarity=similarity_matrix[(X.unit_ids==u1),(X.unit_ids==u2)]
     #             )
     #         )
-    # Create the similarity matrix view
+    # # Create the similarity matrix view
     # unit_similarity_matrix_view = vv.UnitSimilarityMatrix(
     #    unit_ids=X.unit_ids,
     #    similarity_scores=similarity_scores
