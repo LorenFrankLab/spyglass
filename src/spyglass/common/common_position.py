@@ -26,7 +26,7 @@ from track_linearization import (
 from ..settings import raw_dir
 from ..utils.dj_helper_fn import fetch_nwb
 from .common_behav import RawPosition, VideoFile
-from .common_interval import IntervalList
+from .common_interval import IntervalList  # noqa F401
 from .common_nwbfile import AnalysisNwbfile
 
 schema = dj.schema("common_position")
@@ -34,21 +34,23 @@ schema = dj.schema("common_position")
 
 @schema
 class PositionInfoParameters(dj.Lookup):
-    """Parameters for extracting the smoothed head position, oriention and
-    velocity."""
+    """
+    Parameters for extracting the smoothed position, orientation and velocity.
+    """
 
     definition = """
     position_info_param_name : varchar(80) # name for this set of parameters
     ---
     max_separation = 9.0  : float   # max distance (in cm) between head LEDs
     max_speed = 300.0     : float   # max speed (in cm / s) of animal
-    position_smoothing_duration = 0.125 : float # size of moving window (in seconds)
-    speed_smoothing_std_dev = 0.100 : float # smoothing standard deviation (in seconds)
-    head_orient_smoothing_std_dev = 0.001 : float # smoothing std deviation (in seconds)
-    led1_is_front = 1 : int # first LED is front LED and second is back LED, else first LED is back
+    position_smoothing_duration = 0.125 : float # size of moving window (s)
+    speed_smoothing_std_dev = 0.100 : float # smoothing standard deviation (s)
+    head_orient_smoothing_std_dev = 0.001 : float # smoothing std deviation (s)
+    led1_is_front = 1 : int # 1 if 1st LED is front LED, else 1st LED is back
     is_upsampled = 0 : int # upsample the position to higher sampling rate
     upsampling_sampling_rate = NULL : float # The rate to be upsampled to
-    upsampling_interpolation_method = linear : varchar(80) # see pandas.DataFrame.interpolation for list of methods
+    upsampling_interpolation_method = linear : varchar(80) # see
+        # pandas.DataFrame.interpolation for list of methods
     """
 
 
@@ -81,122 +83,179 @@ class IntervalPositionInfo(dj.Computed):
 
     def make(self, key):
         print(f"Computing position for: {key}")
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
+
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+
+        raw_position = RawPosition.PosObject & key
+        spatial_series = raw_position.fetch_nwb()[0]["raw_position"]
+        spatial_df = raw_position.fetch1_dataframe()
+
+        position_info_parameters = (PositionInfoParameters() & key).fetch1()
+
+        position_info = self.calculate_position_info(
+            spatial_df=spatial_df,
+            meters_to_pixels=spatial_series.conversion,
+            **position_info_parameters,
         )
-        raw_position = (
-            RawPosition()
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["interval_list_name"],
-            }
-        ).fetch_nwb()[0]
-        position_info_parameters = (
-            PositionInfoParameters()
-            & {"position_info_param_name": key["position_info_param_name"]}
-        ).fetch1()
 
-        head_position = pynwb.behavior.Position()
-        head_orientation = pynwb.behavior.CompassDirection()
-        head_velocity = pynwb.behavior.BehavioralTimeSeries()
-
-        METERS_PER_CM = 0.01
-
-        try:
-            # calculate the processed position
-            spatial_series = raw_position["raw_position"]
-            position_info = self.calculate_position_info_from_spatial_series(
-                spatial_series,
-                position_info_parameters["max_separation"],
-                position_info_parameters["max_speed"],
-                position_info_parameters["speed_smoothing_std_dev"],
-                position_info_parameters["position_smoothing_duration"],
-                position_info_parameters["head_orient_smoothing_std_dev"],
-                position_info_parameters["led1_is_front"],
-                position_info_parameters["is_upsampled"],
-                position_info_parameters["upsampling_sampling_rate"],
-                position_info_parameters["upsampling_interpolation_method"],
-            )
-
-            # create nwb objects for insertion into analysis nwb file
-            head_position.create_spatial_series(
-                name="head_position",
-                timestamps=position_info["time"],
-                conversion=METERS_PER_CM,
-                data=position_info["head_position"],
-                reference_frame=spatial_series.reference_frame,
-                comments=spatial_series.comments,
-                description="head_x_position, head_y_position",
-            )
-
-            head_orientation.create_spatial_series(
-                name="head_orientation",
-                timestamps=position_info["time"],
-                conversion=1.0,
-                data=position_info["head_orientation"],
-                reference_frame=spatial_series.reference_frame,
-                comments=spatial_series.comments,
-                description="head_orientation",
-            )
-
-            head_velocity.create_timeseries(
-                name="head_velocity",
-                timestamps=position_info["time"],
-                conversion=METERS_PER_CM,
-                unit="m/s",
-                data=np.concatenate(
-                    (
-                        position_info["velocity"],
-                        position_info["speed"][:, np.newaxis],
-                    ),
-                    axis=1,
+        key.update(
+            dict(
+                analysis_file_name=analysis_file_name,
+                **self.generate_pos_components(
+                    spatial_series=spatial_series,
+                    position_info=position_info,
+                    analysis_fname=analysis_file_name,
                 ),
-                comments=spatial_series.comments,
-                description="head_x_velocity, head_y_velocity, head_speed",
             )
-        except ValueError as e:
-            print(e)
-
-        # Insert into analysis nwb file
-        nwb_analysis_file = AnalysisNwbfile()
-
-        key["head_position_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], head_position
-        )
-        key["head_orientation_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], head_orientation
-        )
-        key["head_velocity_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], head_velocity
         )
 
-        AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+        AnalysisNwbfile().add(key["nwb_file_name"], analysis_file_name)
 
         self.insert1(key)
 
     @staticmethod
-    def calculate_position_info_from_spatial_series(
+    def generate_pos_components(
         spatial_series,
-        max_LED_separation,
-        max_plausible_speed,
-        speed_smoothing_std_dev,
+        position_info,
+        analysis_fname,
+        prefix="head_",
+        add_frame_ind=False,
+        video_frame_ind=None,
+    ):
+        """Generate position, orientation and velocity components."""
+        METERS_PER_CM = 0.01
+
+        position = pynwb.behavior.Position()
+        orientation = pynwb.behavior.CompassDirection()
+        velocity = pynwb.behavior.BehavioralTimeSeries()
+
+        # NOTE: CBroz1 removed a try/except ValueError that surrounded all
+        #       .create_X_series methods. dpeg22 could not recall purpose
+
+        time_comments = dict(
+            comments=spatial_series.comments,
+            timestamps=position_info["time"],
+        )
+        time_comments_ref = dict(
+            **time_comments,
+            reference_frame=spatial_series.reference_frame,
+        )
+
+        # create nwb objects for insertion into analysis nwb file
+        position.create_spatial_series(
+            name=f"{prefix}position",
+            conversion=METERS_PER_CM,
+            data=position_info[f"{prefix}position"],
+            description=f"{prefix}x_position, {prefix}y_position",
+            **time_comments_ref,
+        )
+
+        orientation.create_spatial_series(
+            name=f"{prefix}orientation",
+            conversion=1.0,
+            data=position_info[f"{prefix}orientation"],
+            description=f"{prefix}orientation",
+            **time_comments_ref,
+        )
+
+        velocity.create_timeseries(
+            name=f"{prefix}velocity",
+            conversion=METERS_PER_CM,
+            unit="m/s",
+            data=np.concatenate(
+                (
+                    position_info["velocity"],
+                    position_info["speed"][:, np.newaxis],
+                ),
+                axis=1,
+            ),
+            description=f"{prefix}x_velocity, {prefix}y_velocity, "
+            + f"{prefix}speed",
+            **time_comments,
+        )
+
+        if add_frame_ind:
+            if video_frame_ind:
+                velocity.create_timeseries(
+                    name="video_frame_ind",
+                    unit="index",
+                    data=video_frame_ind.to_numpy(),
+                    description="video_frame_ind",
+                    **time_comments,
+                )
+            else:
+                print(
+                    "No video frame index found. Assuming all camera frames "
+                    + "are present."
+                )
+                velocity.create_timeseries(
+                    name="video_frame_ind",
+                    unit="index",
+                    data=np.arange(len(position_info["time"])),
+                    description="video_frame_ind",
+                    **time_comments,
+                )
+
+        # Insert into analysis nwb file
+        nwba = AnalysisNwbfile()
+
+        return {
+            f"{prefix}position_object_id": nwba.add_nwb_object(
+                analysis_fname, position
+            ),
+            f"{prefix}orientation_object_id": nwba.add_nwb_object(
+                analysis_fname, orientation
+            ),
+            f"{prefix}velocity_object_id": nwba.add_nwb_object(
+                analysis_fname, velocity
+            ),
+        }
+
+    @staticmethod
+    def calculate_position_info(
+        spatial_df: pd.DataFrame,
+        meters_to_pixels: float,
         position_smoothing_duration,
-        head_orient_smoothing_std_dev,
+        orient_smoothing_std_dev,
         led1_is_front,
         is_upsampled,
         upsampling_sampling_rate,
         upsampling_interpolation_method,
+        speed_smoothing_std_dev=None,
+        max_LED_separation=None,
+        max_plausible_speed=None,
+        **kwargs,
     ):
         CM_TO_METERS = 100
 
+        if not speed_smoothing_std_dev:
+            speed_smoothing_std_dev = kwargs.get("head_speed_smoothing_std_dev")
+        if not max_LED_separation:
+            max_LED_separation = kwargs.get("max_separation")
+        if not max_plausible_speed:
+            max_plausible_speed = kwargs.get("max_speed")
+        if not all(
+            [speed_smoothing_std_dev, max_LED_separation, max_plausible_speed]
+        ):
+            raise ValueError("Missing required parameters")
+
+        # Accepts x/y 'loc' or 'loc1' format for first pos. Renames to 'loc'
+        DEFAULT_COLS = ["xloc", "yloc", "xloc2", "yloc2", "xloc1", "yloc1"]
+
+        cols = list(spatial_df.columns)
+        if len(cols) != 4 or not all([c in DEFAULT_COLS for c in cols]):
+            choice = dj.utils.user_choice(
+                "Unexpected columns in raw position. Assume "
+                + f"{DEFAULT_COLS[:4]}?\n{spatial_df}\n"
+            )
+            if choice.lower() not in ["yes", "y"]:
+                raise ValueError(f"Unexpected columns in raw position: {cols}")
+        # rename first 4 columns, keep rest. Rest dropped below
+        spatial_df.columns = DEFAULT_COLS[:4] + cols[4:]
+
         # Get spatial series properties
-        time = np.asarray(spatial_series.timestamps)  # seconds
-        position = np.asarray(
-            pd.DataFrame(
-                spatial_series.data,
-                columns=spatial_series.description.split(", "),
-            ).loc[:, ["xloc", "yloc", "xloc2", "yloc2"]]
-        )  # meters
+        time = np.asarray(spatial_df.index)  # seconds
+        position = np.asarray(spatial_df.iloc[:, :4])  # meters
 
         # remove NaN times
         is_nan_time = np.isnan(time)
@@ -205,7 +264,6 @@ class IntervalPositionInfo(dj.Computed):
 
         dt = np.median(np.diff(time))
         sampling_rate = 1 / dt
-        meters_to_pixels = spatial_series.conversion
 
         # Define LEDs
         if led1_is_front:
@@ -306,28 +364,26 @@ class IntervalPositionInfo(dj.Computed):
 
             sampling_rate = upsampling_sampling_rate
 
-        # Calculate head position, head orientation, velocity, speed
-        head_position = get_centriod(back_LED, front_LED)  # cm
+        # Calculate position, orientation, velocity, speed
+        position = get_centriod(back_LED, front_LED)  # cm
 
-        head_orientation = get_angle(back_LED, front_LED)  # radians
-        is_nan = np.isnan(head_orientation)
+        orientation = get_angle(back_LED, front_LED)  # radians
+        is_nan = np.isnan(orientation)
 
         # Unwrap orientation before smoothing
-        head_orientation[~is_nan] = np.unwrap(head_orientation[~is_nan])
-        head_orientation[~is_nan] = gaussian_smooth(
-            head_orientation[~is_nan],
-            head_orient_smoothing_std_dev,
+        orientation[~is_nan] = np.unwrap(orientation[~is_nan])
+        orientation[~is_nan] = gaussian_smooth(
+            orientation[~is_nan],
+            orient_smoothing_std_dev,
             sampling_rate,
             axis=0,
             truncate=8,
         )
         # convert back to between -pi and pi
-        head_orientation[~is_nan] = np.angle(
-            np.exp(1j * head_orientation[~is_nan])
-        )
+        orientation[~is_nan] = np.angle(np.exp(1j * orientation[~is_nan]))
 
         velocity = get_velocity(
-            head_position,
+            position,
             time=time,
             sigma=speed_smoothing_std_dev,
             sampling_frequency=sampling_rate,
@@ -336,8 +392,8 @@ class IntervalPositionInfo(dj.Computed):
 
         return {
             "time": time,
-            "head_position": head_position,
-            "head_orientation": head_orientation,
+            "position": position,
+            "orientation": orientation,
             "velocity": velocity,
             "speed": speed,
         }
@@ -348,55 +404,73 @@ class IntervalPositionInfo(dj.Computed):
         )
 
     def fetch1_dataframe(self):
-        nwb_data = self.fetch_nwb()[0]
-        index = pd.Index(
-            np.asarray(
-                nwb_data["head_position"].get_spatial_series().timestamps
-            ),
-            name="time",
-        )
-        COLUMNS = [
-            "head_position_x",
-            "head_position_y",
-            "head_orientation",
-            "head_velocity_x",
-            "head_velocity_y",
-            "head_speed",
+        return self._data_to_df(self.fetch_nwb()[0])
+
+    @staticmethod
+    def _data_to_df(data, prefix="head_", add_frame_ind=False):
+        pos, ori, vel = [
+            prefix + c for c in ["position", "orientation", "velocity"]
         ]
-        return pd.DataFrame(
+
+        COLUMNS = [
+            f"{pos}_x",
+            f"{pos}_y",
+            ori,
+            f"{vel}_x",
+            f"{vel}_y",
+            f"{prefix}speed",
+        ]
+
+        df = pd.DataFrame(
             np.concatenate(
                 (
-                    np.asarray(
-                        nwb_data["head_position"].get_spatial_series().data
-                    ),
-                    np.asarray(
-                        nwb_data["head_orientation"].get_spatial_series().data
-                    )[:, np.newaxis],
-                    np.asarray(
-                        nwb_data["head_velocity"]
-                        .time_series["head_velocity"]
-                        .data
-                    ),
+                    np.asarray(data[pos].get_spatial_series().data),
+                    np.asarray(data[ori].get_spatial_series().data)[
+                        :, np.newaxis
+                    ],
+                    np.asarray(data[vel].time_series[vel].data),
                 ),
                 axis=1,
             ),
             columns=COLUMNS,
-            index=index,
+            index=pd.Index(
+                np.asarray(data[pos].get_spatial_series().timestamps),
+                name="time",
+            ),
         )
+
+        if add_frame_ind:
+            df.insert(
+                0,
+                "video_frame_ind",
+                np.asarray(
+                    data[vel].time_series["video_frame_ind"].data,
+                    dtype=int,
+                ),
+            )
+
+        return df
 
 
 @schema
 class LinearizationParameters(dj.Lookup):
-    """Choose whether to use an HMM to linearize position. This can help when
-    the eucledian distances between separate arms are too close and the previous
-    position has some information about which arm the animal is on."""
+    """Choose whether to use an HMM to linearize position.
+
+    This can help when the euclidean distances between separate arms are too
+    close and the previous position has some information about which arm the
+    animal is on.
+
+    route_euclidean_distance_scaling: How much to prefer route distances between
+    successive time points that are closer to the euclidean distance. Smaller
+    numbers mean the route distance is more likely to be close to the euclidean
+    distance.
+    """
 
     definition = """
     linearization_param_name : varchar(80)   # name for this set of parameters
     ---
     use_hmm = 0 : int   # use HMM to determine linearization
-    # How much to prefer route distances between successive time points that are closer to the euclidean distance. Smaller numbers mean the route distance is more likely to be close to the euclidean distance.
-    route_euclidean_distance_scaling = 1.0 : float
+    route_euclidean_distance_scaling = 1.0 : float # Preference for euclidean.
     sensor_std_dev = 5.0 : float   # Uncertainty of position sensor (in cm).
     # Biases the transition matrix to prefer the current track segment.
     diagonal_bias = 0.5 : float
@@ -406,16 +480,18 @@ class LinearizationParameters(dj.Lookup):
 @schema
 class TrackGraph(dj.Manual):
     """Graph representation of track representing the spatial environment.
-    Used for linearizing position."""
+
+    Used for linearizing position.
+    """
 
     definition = """
     track_graph_name : varchar(80)
     ----
-    environment : varchar(80)    # Type of Environment
-    node_positions : blob  # 2D position of track_graph nodes, shape (n_nodes, 2)
-    edges: blob                  # shape (n_edges, 2)
-    linear_edge_order : blob  # order of track graph edges in the linear space, shape (n_edges, 2)
-    linear_edge_spacing : blob  # amount of space between edges in the linear space, shape (n_edges,)
+    environment : varchar(80)  # Type of Environment
+    node_positions : blob      # 2D position of nodes, (n_nodes, 2)
+    edges: blob                # shape (n_edges, 2)
+    linear_edge_order : blob   # order of edges in linear space, (n_edges, 2)
+    linear_edge_spacing : blob # space btwn edges in linear space, (n_edges,)
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):
@@ -581,7 +657,8 @@ class NodePicker:
             ax.imshow(frame, picker=True)
             ax.set_title(
                 "Left click to place node.\nRight click to remove node."
-                "\nShift+Left click to clear nodes.\nCntrl+Left click two nodes to place an edge"
+                "\nShift+Left click to clear nodes."
+                "\nCntrl+Left click two nodes to place an edge"
             )
 
         self.connect()
