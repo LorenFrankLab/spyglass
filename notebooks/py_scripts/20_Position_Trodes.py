@@ -34,7 +34,7 @@
 # - Defining parameters
 # - Processing raw position
 # - Extracting centroid and orientation
-# - Insert the results into the `IntervalPositionInfo` table
+# - Insert the results into the `TrodesPosV1` table
 # - Plotting the head position/direction results for quality assurance
 #
 # The pipeline takes the 2D video pixel data of green/red LEDs, and computes:
@@ -211,7 +211,7 @@ trodes_key = (sgp.v1.TrodesPosSelection() & trodes_s_key).fetch1("KEY")
 #
 
 # We can run the pipeline for our chosen interval/parameters by using the
-# `TrodesPos.populate`.
+# `TrodesPosV1.populate`.
 #
 
 sgp.v1.TrodesPosV1.populate(trodes_key)
@@ -221,15 +221,15 @@ sgp.v1.TrodesPosV1.populate(trodes_key)
 
 sgp.v1.TrodesPosV1 & trodes_key
 
-# To retrieve the results as a pandas DataFrame with time as the index, we use `IntervalPositionInfo.fetch1_dataframe`.
+# To retrieve the results as a pandas DataFrame with time as the index, we use `TrodesPosV1.fetch1_dataframe`.
 #
 # This dataframe has the following columns:
 #
-# - `head_position_{x,y}`: X or Y position of the head in cm.
-# - `head_orientation`: Direction of the head relative to the bottom left corner
+# - `position_{x,y}`: X or Y position of the head in cm.
+# - `orientation`: Direction of the head relative to the bottom left corner
 #   in radians
-# - `head_velocity_{x,y}`: Directional change in head position over time in cm/s
-# - `head_speed`: the magnitude of the change in head position over time in cm/s
+# - `velocity_{x,y}`: Directional change in head position over time in cm/s
+# - `speed`: the magnitude of the change in head position over time in cm/s
 #
 
 position_info = (
@@ -250,7 +250,11 @@ position_info.index
 
 # We should always spot check our results to verify that the pipeline worked correctly.
 #
+
+#
 # ### Plots
+#
+
 #
 # Let's plot some of the variables first:
 #
@@ -276,19 +280,23 @@ ax.set_xlim((position_info.index.min(), position_info.index.max()))
 
 # ### Video
 #
-# To keep `minirec`, video is not included. Full datasets can be further
-# visualized by plotting the results on the video, which will appear in the
-# current working directory.
+# To keep `minirec` small, the download link does not include videos by default.
+#
+# (Download links coming soon)
+#
+# Full datasets can be further visualized by plotting the results on the video,
+# which will appear in the current working directory.
 #
 
-if "mini" not in nwb_copy_file_name:
-    sgp.v1.TrodesPosVideo().make(
-        {
-            "nwb_file_name": nwb_copy_file_name,
-            "interval_list_name": "pos 1 valid times",
-            "position_info_param_name": "default",
-        }
-    )
+sgp.v1.TrodesPosVideo().populate(
+    {
+        "nwb_file_name": nwb_copy_file_name,
+        "interval_list_name": interval_list_name,
+        "position_info_param_name": trodes_params_name,
+    }
+)
+
+sgp.v1.TrodesPosVideo()
 
 # ## Upsampling position
 #

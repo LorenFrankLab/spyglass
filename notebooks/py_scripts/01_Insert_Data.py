@@ -310,6 +310,49 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # with _cascading deletes_. For example, if we delete our `Session` entry, all
 # associated downstream entries are also deleted (e.g. `Raw`, `IntervalList`).
 #
+# _Note_: The deletion process can be complicated by
+# [Merge Tables](https://lorenfranklab.github.io/spyglass/0.4/misc/merge_tables/)
+# when the entry is referenced by a part table. To demo deletion in these cases,
+# run the hidden code below.
+#
+# <details>
+# <summary>Quick Merge Insert</summary>
+#
+# ```python
+# import spyglass.lfp as lfp
+#
+# sgc.FirFilterParameters().create_standard_filters()
+# lfp.lfp_electrode.LFPElectrodeGroup.create_lfp_electrode_group(
+#     nwb_file_name=nwb_copy_file_name,
+#     group_name="test",
+#     electrode_list=[0],
+# )
+# lfp.v1.LFPSelection.insert1(
+#     {
+#         "nwb_file_name": nwb_copy_file_name,
+#         "lfp_electrode_group_name": "test",
+#         "target_interval_list_name": "01_s1",
+#         "filter_name": "LFP 0-400 Hz",
+#         "filter_sampling_rate": 30_000,
+#     },
+#     skip_duplicates=True,
+# )
+# lfp.v1.LFPV1().populate()
+# ```
+# </details>
+# <details>
+# <summary>Deleting Merge Entries</summary>
+#
+# ```python
+# from spyglass.utils.dj_merge_tables import delete_downstream_merge
+#
+# delete_downstream_merge(
+#     sgc.Nwbfile(),
+#     restriction={"nwb_file_name": nwb_copy_file_name},
+#     dry_run=False, # True will show Merge Table entries that would be deleted
+# )
+# ```
+# </details>
 
 session_entry = sgc.Session & {"nwb_file_name": nwb_copy_file_name}
 session_entry

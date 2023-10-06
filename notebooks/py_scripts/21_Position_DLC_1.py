@@ -34,7 +34,7 @@
 # - extracting and labeling frames
 # - training your model
 #
-# If you already have a pretrained project, you can either skip to the
+# If you have a pre-trained project, you can either skip to the
 # [next tutorial](./22_Position_DLC_2.ipynb) to load it into the database, or skip
 # to the [following tutorial](./23_Position_DLC_3.ipynb) to start pose estimation
 # with a model that is already inserted.
