@@ -2,27 +2,15 @@ import copy
 import os
 from pathlib import Path
 
-import bottleneck
 import cv2
 import datajoint as dj
 import numpy as np
-import pandas as pd
-import pynwb
-import pynwb.behavior
 from datajoint.utils import to_camel_case
-from position_tools import (
-    get_angle,
-    get_centriod,
-    get_distance,
-    get_speed,
-    get_velocity,
-    interpolate_nan,
-)
-from position_tools.core import gaussian_smooth
 from tqdm import tqdm as tqdm
 
 from ...common.common_behav import RawPosition
 from ...common.common_nwbfile import AnalysisNwbfile
+from ...common.common_positon import IntervalPositionInfo
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import check_videofile, get_video_path
 
@@ -170,125 +158,40 @@ class TrodesPosV1(dj.Computed):
     """
 
     def make(self, key):
-        METERS_PER_CM = 0.01
-
         print(f"Computing position for: {key}")
-
         orig_key = copy.deepcopy(key)
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
-        )
+
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+
+        raw_position = RawPosition.PosObject & key
+        spatial_series = raw_position.fetch_nwb()[0]["raw_position"]
+        spatial_df = raw_position.fetch1_dataframe()
 
         position_info_parameters = (TrodesPosParams() & key).fetch1("params")
-
-        # Rename params to match specificity discussed in #628
-        position_info_parameters[
-            "max_LED_separation"
-        ] = position_info_parameters["max_separation"]
-        position_info_parameters[
-            "max_plausible_speed"
-        ] = position_info_parameters["max_speed"]
-
-        spatial_series = (RawPosition.PosObject & key).fetch_nwb()[0][
-            "raw_position"
-        ]
-
-        spatial_df = (RawPosition.PosObject & key).fetch1_dataframe()
-        video_frame_ind = getattr(spatial_df, "video_frame_ind", None)
-
-        position = pynwb.behavior.Position()
-        orientation = pynwb.behavior.CompassDirection()
-        velocity = pynwb.behavior.BehavioralTimeSeries()
-
-        # NOTE: CBroz1 removed a try/except ValueError that surrounded all
-        #       .create_X_series methods. dpeg22 could not recall purpose
-
-        position_info = self.calculate_position_info_from_spatial_series(
+        position_info = self.calculate_position_info(
             spatial_df=spatial_df,
             meters_to_pixels=spatial_series.conversion,
             **position_info_parameters,
         )
 
-        time_comments = dict(
-            comments=spatial_series.comments,
-            timestamps=position_info["time"],
-        )
-        time_comments_ref = dict(
-            **time_comments,
-            reference_frame=spatial_series.reference_frame,
-        )
-
-        # create nwb objects for insertion into analysis nwb file
-        position.create_spatial_series(
-            name="position",
-            conversion=METERS_PER_CM,
-            data=position_info["position"],
-            description="x_position, y_position",
-            **time_comments_ref,
-        )
-
-        orientation.create_spatial_series(
-            name="orientation",
-            conversion=1.0,
-            data=position_info["orientation"],
-            description="orientation",
-            **time_comments_ref,
-        )
-
-        velocity.create_timeseries(
-            name="velocity",
-            conversion=METERS_PER_CM,
-            unit="m/s",
-            data=np.concatenate(
-                (
-                    position_info["velocity"],
-                    position_info["speed"][:, np.newaxis],
-                ),
-                axis=1,
-            ),
-            description="x_velocity, y_velocity, speed",
-            **time_comments,
-        )
-
-        if video_frame_ind:
-            velocity.create_timeseries(
-                name="video_frame_ind",
-                unit="index",
-                data=spatial_df.video_frame_ind.to_numpy(),
-                description="video_frame_ind",
-                **time_comments,
-            )
-        else:
-            print(
-                "No video frame index found. Assuming all camera frames "
-                + "are present."
-            )
-            velocity.create_timeseries(
-                name="video_frame_ind",
-                unit="index",
-                data=np.arange(len(position_info["time"])),
-                description="video_frame_ind",
-                **time_comments,
-            )
-
-        # Insert into analysis nwb file
-        nwb_analysis_file = AnalysisNwbfile()
-
         key.update(
             dict(
-                position_object_id=nwb_analysis_file.add_nwb_object(
-                    key["analysis_file_name"], position
-                ),
-                orientation_object_id=nwb_analysis_file.add_nwb_object(
-                    key["analysis_file_name"], orientation
-                ),
-                velocity_object_id=nwb_analysis_file.add_nwb_object(
-                    key["analysis_file_name"], velocity
+                analysis_file_name=analysis_file_name,
+                **self.generate_pos_components(
+                    spatial_series=spatial_series,
+                    spatial_df=spatial_df,
+                    position_info=position_info,
+                    analysis_fname=analysis_file_name,
+                    prefix="",
+                    add_frame_ind=True,
+                    video_frame_ind=getattr(
+                        spatial_df, "video_frame_ind", None
+                    ),
                 ),
             )
         )
 
-        AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+        AnalysisNwbfile().add(key["nwb_file_name"], analysis_file_name)
 
         self.insert1(key)
 
@@ -302,181 +205,13 @@ class TrodesPosV1(dj.Computed):
         )
 
     @staticmethod
-    def calculate_position_info_from_spatial_series(
-        spatial_df: pd.DataFrame,
-        meters_to_pixels: float,
-        max_LED_separation,
-        max_plausible_speed,
-        speed_smoothing_std_dev,
-        position_smoothing_duration,
-        orient_smoothing_std_dev,
-        led1_is_front,
-        is_upsampled,
-        upsampling_sampling_rate,
-        upsampling_interpolation_method,
-        **kwargs,
-    ):
+    def generate_pos_components(*args, **kwargs):
+        return IntervalPositionInfo.generate_pos_components(*args, **kwargs)
+
+    @staticmethod
+    def calculate_position_info(*args, **kwargs):
         """Calculate position info from 2D spatial series."""
-        # TODO: remove in favor of fetching the same from common?
-        CM_TO_METERS = 100
-        # Accepts x/y 'loc' or 'loc1' format for first pos. Renames to 'loc'
-        DEFAULT_COLS = ["xloc", "yloc", "xloc2", "yloc2", "xloc1", "yloc1"]
-
-        cols = list(spatial_df.columns)
-        if len(cols) != 4 or not all([c in DEFAULT_COLS for c in cols]):
-            choice = dj.utils.user_choice(
-                f"Unexpected columns in raw position. Assume "
-                + f"{DEFAULT_COLS[:4]}?\n{spatial_df}\n"
-            )
-            if choice.lower() not in ["yes", "y"]:
-                raise ValueError(f"Unexpected columns in raw position: {cols}")
-        # rename first 4 columns, keep rest. Rest dropped below
-        spatial_df.columns = DEFAULT_COLS[:4] + cols[4:]
-
-        # Get spatial series properties
-        time = np.asarray(spatial_df.index)  # seconds
-        position = np.asarray(spatial_df.iloc[:, :4])  # meters
-
-        # remove NaN times
-        is_nan_time = np.isnan(time)
-        position = position[~is_nan_time]
-        time = time[~is_nan_time]
-
-        dt = np.median(np.diff(time))
-        sampling_rate = 1 / dt
-
-        # Define LEDs
-        if led1_is_front:
-            front_LED = position[:, [0, 1]].astype(float)
-            back_LED = position[:, [2, 3]].astype(float)
-        else:
-            back_LED = position[:, [0, 1]].astype(float)
-            front_LED = position[:, [2, 3]].astype(float)
-
-        # Convert to cm
-        back_LED *= meters_to_pixels * CM_TO_METERS
-        front_LED *= meters_to_pixels * CM_TO_METERS
-
-        # Set points to NaN where the front and back LEDs are too separated
-        dist_between_LEDs = get_distance(back_LED, front_LED)
-        is_too_separated = dist_between_LEDs >= max_LED_separation
-
-        back_LED[is_too_separated] = np.nan
-        front_LED[is_too_separated] = np.nan
-
-        # Calculate speed
-        front_LED_speed = get_speed(
-            front_LED,
-            time,
-            sigma=speed_smoothing_std_dev,
-            sampling_frequency=sampling_rate,
-        )
-        back_LED_speed = get_speed(
-            back_LED,
-            time,
-            sigma=speed_smoothing_std_dev,
-            sampling_frequency=sampling_rate,
-        )
-
-        # Set to points to NaN where the speed is too fast
-        is_too_fast = (front_LED_speed > max_plausible_speed) | (
-            back_LED_speed > max_plausible_speed
-        )
-        back_LED[is_too_fast] = np.nan
-        front_LED[is_too_fast] = np.nan
-
-        # Interpolate the NaN points
-        back_LED = interpolate_nan(back_LED)
-        front_LED = interpolate_nan(front_LED)
-
-        # Smooth
-        moving_average_window = int(position_smoothing_duration * sampling_rate)
-        back_LED = bottleneck.move_mean(
-            back_LED, window=moving_average_window, axis=0, min_count=1
-        )
-        front_LED = bottleneck.move_mean(
-            front_LED, window=moving_average_window, axis=0, min_count=1
-        )
-
-        if is_upsampled:
-            position_df = pd.DataFrame(
-                {
-                    "time": time,
-                    "back_LED_x": back_LED[:, 0],
-                    "back_LED_y": back_LED[:, 1],
-                    "front_LED_x": front_LED[:, 0],
-                    "front_LED_y": front_LED[:, 1],
-                }
-            ).set_index("time")
-
-            upsampling_start_time = time[0]
-            upsampling_end_time = time[-1]
-
-            n_samples = (
-                int(
-                    np.ceil(
-                        (upsampling_end_time - upsampling_start_time)
-                        * upsampling_sampling_rate
-                    )
-                )
-                + 1
-            )
-            new_time = np.linspace(
-                upsampling_start_time, upsampling_end_time, n_samples
-            )
-            new_index = pd.Index(
-                np.unique(np.concatenate((position_df.index, new_time))),
-                name="time",
-            )
-            position_df = (
-                position_df.reindex(index=new_index)
-                .interpolate(method=upsampling_interpolation_method)
-                .reindex(index=new_time)
-            )
-
-            time = np.asarray(position_df.index)
-            back_LED = np.asarray(
-                position_df.loc[:, ["back_LED_x", "back_LED_y"]]
-            )
-            front_LED = np.asarray(
-                position_df.loc[:, ["front_LED_x", "front_LED_y"]]
-            )
-
-            sampling_rate = upsampling_sampling_rate
-
-        # Calculate position, orientation, velocity, speed
-        position = get_centriod(back_LED, front_LED)  # cm
-
-        orientation = get_angle(back_LED, front_LED)  # radians
-        is_nan = np.isnan(orientation)
-
-        # Unwrap orientation before smoothing
-        orientation[~is_nan] = np.unwrap(orientation[~is_nan])
-        orientation[~is_nan] = gaussian_smooth(
-            orientation[~is_nan],
-            orient_smoothing_std_dev,
-            sampling_rate,
-            axis=0,
-            truncate=8,
-        )
-        # convert back to between -pi and pi
-        orientation[~is_nan] = np.angle(np.exp(1j * orientation[~is_nan]))
-
-        velocity = get_velocity(
-            position,
-            time=time,
-            sigma=speed_smoothing_std_dev,
-            sampling_frequency=sampling_rate,
-        )  # cm/s
-        speed = np.sqrt(np.sum(velocity**2, axis=1))  # cm/s
-
-        return {
-            "time": time,
-            "position": position,
-            "orientation": orientation,
-            "velocity": velocity,
-            "speed": speed,
-        }
+        return IntervalPositionInfo.calculate_position_info(*args, **kwargs)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
@@ -484,41 +219,8 @@ class TrodesPosV1(dj.Computed):
         )
 
     def fetch1_dataframe(self):
-        nwb_data = self.fetch_nwb()[0]
-        index = pd.Index(
-            np.asarray(nwb_data["position"].get_spatial_series().timestamps),
-            name="time",
-        )
-        COLUMNS = [
-            "video_frame_ind",
-            "position_x",
-            "position_y",
-            "orientation",
-            "velocity_x",
-            "velocity_y",
-            "speed",
-        ]
-        return pd.DataFrame(
-            np.concatenate(
-                (
-                    np.asarray(
-                        nwb_data["velocity"]
-                        .time_series["video_frame_ind"]
-                        .data,
-                        dtype=int,
-                    )[:, np.newaxis],
-                    np.asarray(nwb_data["position"].get_spatial_series().data),
-                    np.asarray(
-                        nwb_data["orientation"].get_spatial_series().data
-                    )[:, np.newaxis],
-                    np.asarray(
-                        nwb_data["velocity"].time_series["velocity"].data
-                    ),
-                ),
-                axis=1,
-            ),
-            columns=COLUMNS,
-            index=index,
+        return IntervalPositionInfo._data_to_df(
+            self.fetch_nwb()[0], prefix="", add_frame_ind=True
         )
 
 
@@ -531,7 +233,7 @@ class TrodesPosVideo(dj.Computed):
 
     definition = """
     -> TrodesPosV1
-    --- 
+    ---
     has_video : bool
     """
 
