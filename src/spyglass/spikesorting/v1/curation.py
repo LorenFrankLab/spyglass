@@ -17,7 +17,7 @@ valid_labels = ["reject", "noise", "artifact", "mua", "accept"]
 
 
 @schema
-class Curation(dj.Manual):
+class CurationV1(dj.Manual):
     definition = """
     # Curation of a SpikeSorting. Use `insert_curation` to insert rows if possible.
     -> SpikeSorting

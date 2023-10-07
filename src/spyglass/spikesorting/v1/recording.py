@@ -153,7 +153,7 @@ class SortGroup(dj.Manual):
                 ]
                 if (
                     omit_unitrode and len(shank_elect) == 1
-                ):  # ommit unitrodes if indicated
+                ):  # omit unitrodes if indicated
                     print(
                         f"Omitting electrode group {e_group}, shank {shank} from sort groups because unitrode."
                     )
@@ -436,7 +436,7 @@ class SpikeSortingRecording(dj.Computed):
             timestamps = recording.get_times()[
                 valid_sort_times_indices[0][0] : valid_sort_times_indices[0][1]
             ]
-        # slice in channles; include ref channel in first slice, then exclude it in second slice
+        # slice in channels; include ref channel in first slice, then exclude it in second slice
         if ref_channel_id >= 0:
             recording = recording.channel_slice(channel_ids=channel_ids)
             recording = si.preprocessing.common_reference(
