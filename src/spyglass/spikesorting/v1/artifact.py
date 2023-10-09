@@ -119,11 +119,14 @@ class ArtifactRemovedInterval(dj.Computed):
 
         # INSERT
         # - into IntervalList
-        tmp_key = {}
-        tmp_key["nwb_file_name"] = key["nwb_file_name"]
-        tmp_key["interval_list_name"] = key["artifact_id"]
-        tmp_key["valid_times"] = artifact_removed_valid_times
-        IntervalList.insert1(tmp_key, skip_duplicates=True)
+        IntervalList.insert1(
+            dict(
+                nwb_file_name=key["nwb_file_name"],
+                interval_list_name=key["artifact_id"],
+                valid_times=artifact_removed_valid_times,
+            ),
+            skip_duplicates=True,
+        )
         # - into ArtifactRemovedInterval
         self.insert1(key)
 
