@@ -145,7 +145,7 @@ class IntervalPositionInfo(dj.Computed):
         position.create_spatial_series(
             name=f"{prefix}position",
             conversion=METERS_PER_CM,
-            data=position_info[f"{prefix}position"],
+            data=position_info["position"],
             description=f"{prefix}x_position, {prefix}y_position",
             **time_comments_ref,
         )
@@ -153,7 +153,7 @@ class IntervalPositionInfo(dj.Computed):
         orientation.create_spatial_series(
             name=f"{prefix}orientation",
             conversion=1.0,
-            data=position_info[f"{prefix}orientation"],
+            data=position_info["orientation"],
             description=f"{prefix}orientation",
             **time_comments_ref,
         )
@@ -216,11 +216,11 @@ class IntervalPositionInfo(dj.Computed):
         spatial_df: pd.DataFrame,
         meters_to_pixels: float,
         position_smoothing_duration,
-        orient_smoothing_std_dev,
         led1_is_front,
         is_upsampled,
         upsampling_sampling_rate,
         upsampling_interpolation_method,
+        orient_smoothing_std_dev=None,
         speed_smoothing_std_dev=None,
         max_LED_separation=None,
         max_plausible_speed=None,
@@ -228,6 +228,10 @@ class IntervalPositionInfo(dj.Computed):
     ):
         CM_TO_METERS = 100
 
+        if not orient_smoothing_std_dev:
+            orient_smoothing_std_dev = kwargs.get(
+                "head_orient_smoothing_std_dev"
+            )
         if not speed_smoothing_std_dev:
             speed_smoothing_std_dev = kwargs.get("head_speed_smoothing_std_dev")
         if not max_LED_separation:
@@ -237,7 +241,12 @@ class IntervalPositionInfo(dj.Computed):
         if not all(
             [speed_smoothing_std_dev, max_LED_separation, max_plausible_speed]
         ):
-            raise ValueError("Missing required parameters")
+            raise ValueError(
+                "Missing required parameters:\n\t"
+                + f"speed_smoothing_std_dev: {speed_smoothing_std_dev}\n\t"
+                + f"max_LED_separation: {max_LED_separation}\n\t"
+                + f"max_plausible_speed: {max_plausible_speed}"
+            )
 
         # Accepts x/y 'loc' or 'loc1' format for first pos. Renames to 'loc'
         DEFAULT_COLS = ["xloc", "yloc", "xloc2", "yloc2", "xloc1", "yloc1"]
