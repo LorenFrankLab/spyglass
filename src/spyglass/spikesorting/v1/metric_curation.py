@@ -410,7 +410,7 @@ class MetricCuration(dj.Computed):
 
         Returns
         -------
-        merge_groups : list of lists
+        merge_groups : dict
             Example: {"1" : ["3"], "2" : [], "3" : ["1"]}
 
         """

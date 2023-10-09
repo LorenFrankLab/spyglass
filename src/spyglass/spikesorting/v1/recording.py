@@ -12,8 +12,8 @@ from neuroconv.tools.spikeinterface.spikeinterfacerecordingdatachunkiterator imp
 )
 from hdmf.data_utils import GenericDataChunkIterator
 
-from spyglass.common import Session
-from spyglass.common.common_ephys import Electrode, Raw
+from spyglass.common import Session  # noqa: F401
+from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
 from spyglass.common.common_device import Probe
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_interval import (
