@@ -7,7 +7,7 @@ import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.sorting import SpikeSorting
-from spyglass.spikesorting.v1.curation import Curation, _merge_dict_to_list
+from spyglass.spikesorting.v1.curation import CurationV1, _merge_dict_to_list
 
 import kachery_cloud as kcl
 import sortingview.views as vv
@@ -19,21 +19,21 @@ schema = dj.schema("spikesorting_v1_figurl_curation")
 @schema
 class FigURLCurationSelection(dj.Manual):
     definition = """
-    -> Curation
+    -> CurationV1
     curation_uri: varchar(1000) = NULL  # kachery-cloud URI to sorting curation
     metrics_figurl: longblob            # metrics to display in the figURL
     """
 
     @staticmethod
     def generate_curation_uri(key: Dict) -> str:
-        """Generates a kachery-cloud URI containing curation info from a row in Curation table
+        """Generates a kachery-cloud URI containing curation info from a row in CurationV1 table
 
         Parameters
         ----------
         key : dict
-            primary key from Curation
+            primary key from CurationV1
         """
-        curation_key = (Curation & key).fetch1()
+        curation_key = (CurationV1 & key).fetch1()
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             curation_key["analysis_file_name"]
         )
@@ -81,18 +81,18 @@ class FigURLCuration(dj.Computed):
 
     def make(self, key: dict):
         # FETCH
-        sorting_analysis_file_name = (Curation & key).fetch1(
+        sorting_analysis_file_name = (CurationV1 & key).fetch1(
             "analysis_file_name"
         )
-        object_id = (Curation & key).fetch1("object_id")
+        object_id = (CurationV1 & key).fetch1("object_id")
         recording_label = (SpikeSorting & key).fetch1("recording_id")
 
         # DO
         sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             sorting_analysis_file_name
         )
-        recording = Curation.get_recording(key)
-        sorting = Curation.get_sorting(key)
+        recording = CurationV1.get_recording(key)
+        sorting = CurationV1.get_sorting(key)
         sorting_label = key["sorting_id"]
         curation_uri = key["curation_uri"]
 

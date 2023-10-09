@@ -252,7 +252,7 @@ class SpikeSortingRecording(dj.Computed):
         Parameters
         ----------
         key : dict
-            primary key of Curation table
+            primary key of SpikeSorting table
         """
 
         analysis_file_name = (cls & key).fetch1("analysis_file_name")

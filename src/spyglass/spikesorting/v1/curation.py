@@ -41,7 +41,7 @@ class CurationV1(dj.Manual):
         description: str = "",
     ):
         """Given a sorting_id and the parent_sorting_id (and optional
-        arguments) insert an entry into Curation.
+        arguments) insert an entry into CurationV1.
 
         Parameters
         ----------
@@ -76,16 +76,18 @@ class CurationV1(dj.Manual):
             parent_curation_id = -1
             # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
             if (
-                len((Curation & [sorting_id, parent_curation_id]).fetch("KEY"))
+                len(
+                    (CurationV1 & [sorting_id, parent_curation_id]).fetch("KEY")
+                )
                 > 0
             ):
                 Warning(f"Sorting has already been inserted.")
-                return (Curation & [sorting_id, parent_curation_id]).fetch(
+                return (CurationV1 & [sorting_id, parent_curation_id]).fetch(
                     "KEY"
                 )
 
         # generate curation ID
-        existing_curation_ids = (Curation & sorting_id).fetch("curation_id")
+        existing_curation_ids = (CurationV1 & sorting_id).fetch("curation_id")
         if len(existing_curation_ids) > 0:
             curation_id = max(existing_curation_ids) + 1
         else:
@@ -116,7 +118,7 @@ class CurationV1(dj.Manual):
             "merges_applied": str(apply_merge),
             "description": description,
         }
-        Curation.insert1(key, skip_duplicates=True)
+        CurationV1.insert1(key, skip_duplicates=True)
 
         return key
 
@@ -127,7 +129,7 @@ class CurationV1(dj.Manual):
         Parameters
         ----------
         key : dict
-            primary key of Curation table
+            primary key of CurationV1 table
         """
 
         recording_id = (SpikeSorting & key).fetch1("recording_id")
@@ -150,7 +152,7 @@ class CurationV1(dj.Manual):
         Parameters
         ----------
         key : dict
-            primary key of Curation table
+            primary key of CurationV1 table
 
         Returns
         -------
@@ -158,7 +160,7 @@ class CurationV1(dj.Manual):
 
         """
 
-        analysis_file_name = (Curation & key).fetch1("analysis_file_name")
+        analysis_file_name = (CurationV1 & key).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
@@ -173,14 +175,14 @@ class CurationV1(dj.Manual):
         Parameters
         ----------
         key : dict
-            Curation key
+            CurationV1 key
 
         Returns
         -------
         sorting : si.BaseSorting
 
         """
-        curation_key = (Curation & key).fetch1()
+        curation_key = (CurationV1 & key).fetch1()
 
         sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             curation_key["analysis_file_name"]

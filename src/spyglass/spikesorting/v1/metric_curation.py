@@ -12,7 +12,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.spikesorting.v1.sorting import SpikeSorting
 from spyglass.spikesorting.v1.curation import (
-    Curation,
+    CurationV1,
     _list_to_merge_dict,
     _merge_dict_to_list,
 )
@@ -160,7 +160,7 @@ class MetricCurationParameter(dj.Lookup):
 @schema
 class MetricCurationSelection(dj.Manual):
     definition = """
-    -> Curation
+    -> CurationV1
     -> WaveformParameter
     -> MetricParameter
     -> MetricCurationParameter
@@ -194,8 +194,8 @@ class MetricCuration(dj.Computed):
             nwb_file_name=nwb_file_name, initial="MC", len_uuid=6
         )
         # load recording and sorting
-        recording = Curation.get_recording(key)
-        sorting = Curation.get_sorting(key)
+        recording = CurationV1.get_recording(key)
+        sorting = CurationV1.get_sorting(key)
         # extract waveforms
         if "whiten" in waveform_param:
             if waveform_param.pop("whiten"):
