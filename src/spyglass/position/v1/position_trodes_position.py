@@ -10,7 +10,7 @@ from tqdm import tqdm as tqdm
 
 from ...common.common_behav import RawPosition
 from ...common.common_nwbfile import AnalysisNwbfile
-from ...common.common_positon import IntervalPositionInfo
+from ...common.common_position import IntervalPositionInfo
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import check_videofile, get_video_path
 
@@ -179,7 +179,6 @@ class TrodesPosV1(dj.Computed):
                 analysis_file_name=analysis_file_name,
                 **self.generate_pos_components(
                     spatial_series=spatial_series,
-                    spatial_df=spatial_df,
                     position_info=position_info,
                     analysis_fname=analysis_file_name,
                     prefix="",
