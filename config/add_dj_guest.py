@@ -8,20 +8,27 @@ shared_modules = [
     "spikesorting\_%",
     "decoding\_%",
     "position\_%",
+    "position_linearization\_%",
+    "ripple\_%",
     "lfp\_%",
 ]
 
 
 def add_user(user_name):
-    # create a tempoary file for the command
+    # create a temporary file for the command
     file = tempfile.NamedTemporaryFile(mode="w")
 
+    # Create the user (if not already created) and set password
     file.write(
-        f"GRANT SELECT ON `%`.* TO `{user_name}`@'%' IDENTIFIED BY 'Data_$haring';\n"
+        f"CREATE USER IF NOT EXISTS '{user_name}'@'%' IDENTIFIED BY 'Data_$haring';\n"
     )
+
+    # Grant privileges
+    file.write(f"GRANT SELECT ON `%`.* TO '{user_name}'@'%';\n")
+
     file.flush()
 
-    # run that commands in sql
+    # run those commands in sql
     os.system(f"mysql -p -h lmf-db.cin.ucsf.edu < {file.name}")
 
 

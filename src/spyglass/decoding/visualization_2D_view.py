@@ -266,28 +266,12 @@ def get_ul_corners(width: float, height: float, centers):
     return ul.T
 
 
-def make_track(position, bin_size: float = 1.0):
-    (edges, _, place_bin_centers, _) = get_grid(position, bin_size)
-    is_track_interior = get_track_interior(position, edges)
-
-    # bin dimensions are the difference between bin centers in the x and y directions.
-    bin_width = np.max(np.diff(place_bin_centers, axis=0)[:, 0])
-    bin_height = np.max(np.diff(place_bin_centers, axis=0)[:, 1])
-
-    # so we can represent the track as a collection of rectangles of width bin_width and height bin_height,
-    # centered on the values of place_bin_centers where track_interior = true.
-    # Note, the original code uses Fortran ordering.
-    true_ctrs = place_bin_centers[is_track_interior.ravel(order="F")]
-    upper_left_points = get_ul_corners(bin_width, bin_height, true_ctrs)
-
-    return bin_width, bin_height, upper_left_points
-
-
 def create_2D_decode_view(
     position_time: np.ndarray,
     position: np.ndarray,
+    interior_place_bin_centers: np.ndarray,
+    place_bin_size: np.ndarray,
     posterior: xr.DataArray,
-    bin_size: float,
     head_dir: np.ndarray = None,
 ) -> vvf.TrackPositionAnimationV1:
     """Creates a 2D decoding movie view
@@ -296,8 +280,9 @@ def create_2D_decode_view(
     ----------
     position_time : np.ndarray, shape (n_time,)
     position : np.ndarray, shape (n_time, 2)
+    interior_place_bin_centers: np.ndarray, shape (n_track_bins, 2)
+    place_bin_size : np.ndarray, shape (2, 1)
     posterior : xr.DataArray, shape (n_time, n_position_bins)
-    bin_size : float
     head_dir : np.ndarray, optional
 
     Returns
@@ -317,14 +302,18 @@ def create_2D_decode_view(
     if head_dir is not None:
         head_dir = np.squeeze(np.asarray(head_dir))
 
-    track_width, track_height, upper_left_points = make_track(
-        position, bin_size=bin_size
+    track_bin_width = place_bin_size[0]
+    track_bin_height = place_bin_size[1]
+    # NOTE: We expect caller to have converted from fortran ordering already
+    # i.e. somewhere upstream, centers = env.place_bin_centers_[env.is_track_interior_.ravel(order="F")]
+    upper_left_points = get_ul_corners(
+        track_bin_width, track_bin_height, interior_place_bin_centers
     )
 
     data = create_static_track_animation(
         ul_corners=upper_left_points,
-        track_rect_height=track_height,
-        track_rect_width=track_width,
+        track_rect_height=track_bin_height,
+        track_rect_width=track_bin_width,
         timestamps=position_time,
         positions=position.T,
         head_dir=head_dir,
