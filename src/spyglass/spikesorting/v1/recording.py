@@ -26,9 +26,9 @@ schema = dj.schema("spikesorting_v1_recording")
 class SortGroup(dj.Manual):
     definition = """
     # Set of electrodes to spike sort together
+    -> Session
     sort_group_id: str  # identifier for a group of electrodes
     ---
-    -> Session
     sort_reference_electrode_id = -1: int  # the electrode to use for referencing
                                            # -1: no reference, -2: common median
     """
@@ -600,6 +600,7 @@ def _write_recording_to_nwb(
 
 
 # For writing recording to NWB file
+
 
 class SpikeInterfaceRecordingDataChunkIterator(GenericDataChunkIterator):
     """DataChunkIterator specifically for use on RecordingExtractor objects."""
