@@ -105,7 +105,7 @@ class ArtifactRemovedInterval(dj.Computed):
         recording = se.read_nwb_recording(
             recording_analysis_nwb_file_abs_path, load_time_vector=True
         )
-        if not artifact_param["job_kwargs"]:
+        if not artifact_param.get("job_kwargs"):
             artifact_param["job_kwargs"] = {
                 "chunk_duration": "10s",
                 "n_jobs": 4,
