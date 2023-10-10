@@ -92,12 +92,9 @@ class CurationV1(dj.Manual):
         else:
             curation_id = 0
 
-        if labels is None:
-            labels = {}
-        if merge_groups is None:
-            merge_groups = []
-        if metrics is None:
-            metrics = {}
+        labels = labels or {}
+        merge_groups = merge_groups or []
+        metrics = metrics or {}
 
         # write the curation labels, merge groups, and metrics as columns in the units table of NWB
         analysis_file_name, object_id = _write_sorting_to_nwb_with_curation(
