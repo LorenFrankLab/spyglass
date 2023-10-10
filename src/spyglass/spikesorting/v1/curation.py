@@ -233,11 +233,10 @@ def _write_sorting_to_nwb_with_curation(
     """
     # FETCH:
     # - primary key for the associated sorting and recording
-    sorting_key = (SpikeSorting & {"sorting_id": sorting_id}).fetch1()
-    recording_key = (SpikeSortingRecording & sorting_key).fetch1()
-
-    # original nwb file
-    nwb_file_name = recording_key["nwb_file_name"]
+    nwb_file_name = (
+        SpikeSortingRecording
+        & (SpikeSorting & {"sorting_id": sorting_id}).fetch1()
+    ).fetch1("nwb_file_name")
 
     # get sorting
     sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
