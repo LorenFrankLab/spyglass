@@ -16,7 +16,6 @@ from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
