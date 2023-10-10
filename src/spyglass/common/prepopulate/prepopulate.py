@@ -5,20 +5,13 @@ import sys
 
 import datajoint as dj
 import yaml
-from ...settings import load_config
+from ...settings import base_dir
 
 
 def prepopulate_default():
-    """Prepopulate the database with the default values in SPYGLASS_BASE_DIR/entries.yaml."""
-
-    base_dir = os.getenv("SPYGLASS_BASE_DIR", None) or load_config().get(
-        "SPYGLASS_BASE_DIR"
-    )
-    if not base_dir:
-        raise ValueError(
-            "You must set SPYGLASS_BASE_DIR or provide the base_dir argument"
-        )
-
+    """
+    Populate the database with default values in SPYGLASS_BASE_DIR/entries.yaml
+    """
     yaml_path = pathlib.Path(base_dir) / "entries.yaml"
     if os.path.exists(yaml_path):
         populate_from_yaml(yaml_path)

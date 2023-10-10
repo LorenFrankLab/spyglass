@@ -47,28 +47,30 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Miscellaneous:
-      - FigURL: misc/figurl_views.md
-      - Session Groups: misc/session_groups.md
-      - Insert Data: misc/insert_data.md
-      - Merge Tables: misc/merge_tables.md
+    - FigURL: misc/figurl_views.md
+    - Session Groups: misc/session_groups.md
+    - Insert Data: misc/insert_data.md
+    - Merge Tables: misc/merge_tables.md
   - Tutorials:
+    - General:
       - Setup: notebooks/00_Setup.ipynb
       - Insert Data: notebooks/01_Insert_Data.ipynb
-      - Spike Sorting: notebooks/02_Spike_Sorting.ipynb
-      - Curation: notebooks/03_Curation.ipynb
-      - LFP: notebooks/03_lfp.ipynb
-      - Position:
-          - Information: notebooks/4_position_info.ipynb
-          - Pipeline: notebooks/04_Trodes_position.ipynb
-          - From Scratch: notebooks/05_DLC_from_scratch.ipynb
-          - From Pre-Trained: notebooks/06_DLC_from_dir.ipynb
-      - Linearization Pipeline: notebooks/07_linearization.ipynb
-      - Mark Indicators: notebooks/08_Extract_Mark_indicators.ipynb
-      - GPU: notebooks/09_Decoding_with_GPUs_on_the_GPU_cluster.ipynb
-      - 1D Clusterless Decoding: notebooks/10_1D_Clusterless_Decoding.ipynb
-      - 2D Clusterless Decoding: notebooks/11_2D_Clusterless_Decoding.ipynb
-      - Ripple Detection: notebooks/12_Ripple_Detection.ipynb
-      - Spyglass Kachery Setup: notebooks/Spyglass_kachery_setup.ipynb
+      - Data Sync: notebooks/02_Data_Sync.ipynb
+    - Ephys: 
+      - Spike Sorting: notebooks/10_Spike_Sorting.ipynb
+      - Curation: notebooks/11_Curation.ipynb
+      - LFP: notebooks/12_LFP.ipynb
+      - Theta: notebooks/14_Theta.ipynb
+    - Position: 
+      - Position Trodes: notebooks/20_Position_Trodes.ipynb
+      - Position DLC 1: notebooks/21_Position_DLC_1.ipynb
+      - Position DLC 2: notebooks/22_Position_DLC_2.ipynb
+      - Linearization: notebooks/24_Linearization.ipynb
+    - Combined: 
+      - Ripple Detection: notebooks/30_Ripple_Detection.ipynb
+      - Extract Mark Indicators: notebooks/31_Extract_Mark_Indicators.ipynb
+      - Decoding with GPUs: notebooks/32_Decoding_with_GPUs.ipynb
+      - Decoding Clusterless: notebooks/33_Decoding_Clusterless.ipynb
   - API Reference: api/ # defer to gen-files + literate-nav
   - How to Contribute: contribute.md
   - Change Log: CHANGELOG.md

@@ -31,6 +31,10 @@
     "database.prefix": "username_",
     "spyglass_dirs": {
       "base": "/your/base/path"
-    }
+    },
+    "kachery_dirs": {
+      "cloud": "/your/base/path/.kachery_cloud"
+    },
+    "kachery_zone": "franklab.default"
   }
 }

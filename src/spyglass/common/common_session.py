@@ -246,11 +246,17 @@ class SessionGroup(dj.Manual):
     def create_spyglass_view(session_group_name: str):
         import figurl as fig
 
-        FIGURL_CHANNEL = os.getenv("FIGURL_CHANNEL")
-        assert FIGURL_CHANNEL, "Environment variable not set: FIGURL_CHANNEL"
-        data = {"type": "spyglassview", "sessionGroupName": session_group_name}
-        F = fig.Figure(view_url="gs://figurl/spyglassview-1", data=data)
-        return F
+        FIGURL_CHANNEL = config.get("FIGURL_CHANNEL")
+        if not FIGURL_CHANNEL:
+            raise ValueError("FIGURL_CHANNEL config/env variable not set")
+
+        return fig.Figure(
+            view_url="gs://figurl/spyglassview-1",
+            data={
+                "type": "spyglassview",
+                "sessionGroupName": session_group_name,
+            },
+        )
 
 
 # The reason this is not implemented as a dj.Part is that
