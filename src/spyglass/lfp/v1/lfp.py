@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 
 from spyglass.common.common_ephys import Raw
-from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.common.common_interval import (
     IntervalList,
@@ -14,6 +13,7 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
 
 schema = dj.schema("lfp_v1")
@@ -60,6 +60,9 @@ class LFPV1(dj.Computed):
         # get the NWB object with the data
         nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
         rawdata = (Raw & nwbf_key).fetch_nwb()[0]["raw"]
+
+        # CBroz: assumes Raw sampling rate matches FirFilterParameters set?
+        #        if we just pull rate from Raw, why include in Param table?
         sampling_rate, raw_interval_list_name = (Raw & nwbf_key).fetch1(
             "sampling_rate", "interval_list_name"
         )
@@ -95,8 +98,10 @@ class LFPV1(dj.Computed):
         # get the LFP filter that matches the raw data
         filter = (
             FirFilterParameters()
-            & {"filter_name": key["filter_name"]}
-            & {"filter_sampling_rate": sampling_rate}
+            & {
+                "filter_name": key["filter_name"],
+                "filter_sampling_rate": sampling_rate,
+            }  # not key['filter_sampling_rate']?
         ).fetch(as_dict=True)[0]
 
         # there should only be one filter that matches, so we take the first of the dictionaries
