@@ -105,16 +105,18 @@ class CurationV1(dj.Manual):
             apply_merge=apply_merge,
         )
         # INSERT
-        key = {
-            "sorting_id": sorting_id,
-            "curation_id": curation_id,
-            "parent_curation_id": parent_curation_id,
-            "analysis_file_name": analysis_file_name,
-            "object_id": object_id,
-            "merges_applied": str(apply_merge),
-            "description": description,
-        }
-        CurationV1.insert1(key, skip_duplicates=True)
+        CurationV1.insert1(
+            {
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
+                "parent_curation_id": parent_curation_id,
+                "analysis_file_name": analysis_file_name,
+                "object_id": object_id,
+                "merges_applied": str(apply_merge),
+                "description": description,
+            },
+            skip_duplicates=True,
+        )
 
         return key
 
