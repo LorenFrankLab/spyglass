@@ -2,7 +2,6 @@ from typing import List, Union, Dict
 
 import datajoint as dj
 import pynwb
-import numpy as np
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.curation as sc
