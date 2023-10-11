@@ -473,7 +473,7 @@ class PositionIntervalMap(dj.Computed):
             return
 
         # *** HARD CODED VALUES ***
-        EPSILON = 0.11  # tolerated time diff in bounds across epoch/pos
+        EPSILON = 0.51  # tolerated time diff in bounds across epoch/pos
         no_pop_msg = "CANNOT POPULATE PositionIntervalMap"
 
         nwb_file_name = key["nwb_file_name"]
