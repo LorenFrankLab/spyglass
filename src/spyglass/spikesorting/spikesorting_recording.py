@@ -21,6 +21,7 @@ from ..common.common_lab import LabTeam  # noqa: F401
 from ..common.common_nwbfile import Nwbfile
 from ..common.common_session import Session  # noqa: F401
 from ..utils.dj_helper_fn import dj_replace
+from ..settings import recording_dir
 
 schema = dj.schema("spikesorting_recording")
 
@@ -379,59 +380,67 @@ class SpikeSortingRecording(dj.Computed):
         recording = self._get_filtered_recording(key)
         recording_name = self._get_recording_name(key)
 
-        tmp_key = {
-            "nwb_file_name": key["nwb_file_name"],
-            "interval_list_name": recording_name,
-            "valid_times": sort_interval_valid_times,
-        }
-        IntervalList.insert1(tmp_key, replace=True)
-
-        # store the list of valid times for the sort
-        key["sort_interval_list_name"] = tmp_key["interval_list_name"]
-
         # Path to files that will hold the recording extractors
-        recording_folder = Path(os.getenv("SPYGLASS_RECORDING_DIR"))
-        key["recording_path"] = str(recording_folder / Path(recording_name))
-        if os.path.exists(key["recording_path"]):
-            shutil.rmtree(key["recording_path"])
-        recording = recording.save(
-            folder=key["recording_path"], chunk_duration="10000ms", n_jobs=8
+        recording_path = str(recording_dir / Path(recording_name))
+        if os.path.exists(recording_path):
+            shutil.rmtree(recording_path)
+
+        recording.save(
+            folder=recording_path, chunk_duration="10000ms", n_jobs=8
         )
 
-        self.insert1(key)
+        IntervalList.insert1(
+            {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": recording_name,
+                "valid_times": sort_interval_valid_times,
+            },
+            replace=True,
+        )
+
+        self.insert1(
+            {
+                **key,
+                # store the list of valid times for the sort
+                "sort_interval_list_name": recording_name,
+                "recording_path": recording_path,
+            }
+        )
 
     @staticmethod
     def _get_recording_name(key):
-        recording_name = (
-            key["nwb_file_name"]
-            + "_"
-            + key["sort_interval_name"]
-            + "_"
-            + str(key["sort_group_id"])
-            + "_"
-            + key["preproc_params_name"]
+        return "_".join(
+            [
+                key["nwb_file_name"],
+                key["sort_interval_name"],
+                str(key["sort_group_id"]),
+                key["preproc_params_name"],
+            ]
         )
-        return recording_name
 
     @staticmethod
     def _get_recording_timestamps(recording):
-        if recording.get_num_segments() > 1:
-            frames_per_segment = [0]
-            for i in range(recording.get_num_segments()):
-                frames_per_segment.append(
-                    recording.get_num_frames(segment_index=i)
-                )
+        num_segments = recording.get_num_segments()
 
-            cumsum_frames = np.cumsum(frames_per_segment)
-            total_frames = np.sum(frames_per_segment)
+        if num_segments <= 1:
+            return recording.get_times()
 
-            timestamps = np.zeros((total_frames,))
-            for i in range(recording.get_num_segments()):
-                timestamps[
-                    cumsum_frames[i] : cumsum_frames[i + 1]
-                ] = recording.get_times(segment_index=i)
-        else:
-            timestamps = recording.get_times()
+        frames_per_segment = [0] + [
+            recording.get_num_frames(segment_index=i)
+            for i in range(num_segments)
+        ]
+
+        cumsum_frames = np.cumsum(frames_per_segment)
+        total_frames = np.sum(frames_per_segment)
+
+        timestamps = np.zeros((total_frames,))
+        for i in range(num_segments):
+            start_index = cumsum_frames[i]
+            end_index = cumsum_frames[i + 1]
+            timestamps[start_index:end_index] = recording.get_times(
+                segment_index=i
+            )
+
         return timestamps
 
     def _get_sort_interval_valid_times(self, key):
@@ -456,9 +465,11 @@ class SpikeSortingRecording(dj.Computed):
                 "sort_interval_name": key["sort_interval_name"],
             }
         ).fetch1("sort_interval")
+
         interval_list_name = (SpikeSortingRecordingSelection & key).fetch1(
             "interval_list_name"
         )
+
         valid_interval_times = (
             IntervalList
             & {
@@ -466,6 +477,7 @@ class SpikeSortingRecording(dj.Computed):
                 "interval_list_name": interval_list_name,
             }
         ).fetch1("valid_times")
+
         valid_sort_times = interval_list_intersect(
             sort_interval, valid_interval_times
         )
