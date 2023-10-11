@@ -169,7 +169,7 @@ There are a few places where a name needs to be given to objects. Follow these r
 
 - You may want to create a development/testing environment independent of the
   lab datajoint server. To do so, run your own datajoint server with Docker. See
-  [example](./notebooks/docker_mysql_tutorial.ipynb).
+  [example](./notebooks/00_Setup.ipynb).
 - Datajoint is unable to set delete permissions on a per-table basis. In other
   words, if a user is able to delete entries in a given table, she can delete
   entries in any table in the schema. Some tables that hold important data

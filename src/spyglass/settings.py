@@ -55,7 +55,7 @@ def load_config(base_dir: Path = None, force_reload: bool = False) -> dict:
     Returns
     -------
     dict
-       list of relative_dirs and other settings (e.g., prepopulate).
+        list of relative_dirs and other settings (e.g., prepopulate).
     """
     global config, config_loaded
     if config_loaded and not force_reload:

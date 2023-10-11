@@ -145,7 +145,121 @@ sgd.clusterless.populate_mark_indicators(spikesorting_selections)
 
 # We can verify that this worked:
 
-sgd.UnitMarksIndicator & spikesorting_selections
+plt.plot(position_info.head_position_x, position_info.head_position_y)
+
+position_info.shape, marks.shape
+
+# +
+from spyglass.common.common_interval import interval_list_intersect
+from spyglass.common import IntervalList
+
+key = {}
+key["interval_list_name"] = "02_r1"
+key["nwb_file_name"] = nwb_copy_file_name
+
+interval = (
+    IntervalList
+    & {
+        "nwb_file_name": key["nwb_file_name"],
+        "interval_list_name": key["interval_list_name"],
+    }
+).fetch1("valid_times")
+
+valid_ephys_times = (
+    IntervalList
+    & {
+        "nwb_file_name": key["nwb_file_name"],
+        "interval_list_name": "raw data valid times",
+    }
+).fetch1("valid_times")
+position_interval_names = (
+    IntervalPositionInfo
+    & {
+        "nwb_file_name": key["nwb_file_name"],
+        "position_info_param_name": "default_decoding",
+    }
+).fetch("interval_list_name")
+valid_pos_times = [
+    (
+        IntervalList
+        & {
+            "nwb_file_name": key["nwb_file_name"],
+            "interval_list_name": pos_interval_name,
+        }
+    ).fetch1("valid_times")
+    for pos_interval_name in position_interval_names
+]
+
+intersect_interval = interval_list_intersect(
+    interval_list_intersect(interval, valid_ephys_times), valid_pos_times[0]
+)
+valid_time_slice = slice(intersect_interval[0][0], intersect_interval[0][1])
+valid_time_slice
+
+# +
+from replay_trajectory_classification import ClusterlessClassifier
+from replay_trajectory_classification.environments import Environment
+from replay_trajectory_classification.continuous_state_transitions import (
+    RandomWalk,
+    Uniform,
+)
+from spyglass.decoding.clusterless import ClusterlessClassifierParameters
+
+marks = marks.sel(time=valid_time_slice)
+position_info = position_info.loc[valid_time_slice]
+
+parameters = (
+    ClusterlessClassifierParameters()
+    & {"classifier_param_name": "default_decoding_gpu"}
+).fetch1()
+
+parameters["classifier_params"]["clusterless_algorithm_params"] = {
+    "mark_std": 24.0,
+    "position_std": 3.0,
+    "block_size": int(2**13),
+    "disable_progress_bar": False,
+    "use_diffusion": False,
+}
+parameters["classifier_params"]["environments"][0] = Environment(
+    place_bin_size=3.0
+)
+
+
+import cupy as cp
+
+with cp.cuda.Device(0):
+    classifier = ClusterlessClassifier(**parameters["classifier_params"])
+    classifier.fit(
+        position=position_info[["head_position_x", "head_position_y"]].values,
+        multiunits=marks.values,
+        **parameters["fit_params"],
+    )
+    results = classifier.predict(
+        multiunits=marks.values,
+        time=position_info.index,
+        **parameters["predict_params"],
+    )
+    logging.info("Done!")
+
+# +
+from spyglass.decoding.visualization import (
+    create_interactive_2D_decoding_figurl,
+)
+
+
+view = create_interactive_2D_decoding_figurl(
+    position_info,
+    marks,
+    results,
+    classifier.environments[0].place_bin_size,
+    position_name=["head_position_x", "head_position_y"],
+    head_direction_name="head_orientation",
+    speed_name="head_speed",
+    posterior_type="acausal_posterior",
+    sampling_frequency=500,
+    view_height=800,
+)
+# -
 
 # ## Up Next
 #

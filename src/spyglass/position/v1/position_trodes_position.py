@@ -102,7 +102,7 @@ class TrodesPosSelection(dj.Manual):
             Restriction uniquely identifying entr(y/ies) in RawPosition.
         skip_duplicates: bool, optional
             Skip duplicate entries.
-        edit_defauts: dict, optional
+        edit_defaults: dict, optional
             Dictionary of overrides to default parameters.
         edit_name: str, optional
             If edit_defauts is passed, the name of the new entry

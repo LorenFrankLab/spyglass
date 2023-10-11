@@ -103,7 +103,7 @@ class PositionSource(dj.Manual):
 
         Parameters
         ----------
-        pos_epoch_num : int
+        epoch_num : int
             Input epoch number
 
         Returns
