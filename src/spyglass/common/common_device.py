@@ -1,9 +1,8 @@
 import datajoint as dj
 import ndx_franklab_novela
 
-from .errors import PopulateException
 from ..utils.nwb_helper_fn import get_nwb_file
-
+from .errors import PopulateException
 
 schema = dj.schema("common_device")
 
@@ -133,7 +132,7 @@ class DataAcquisitionDevice(dj.Manual):
 
     @classmethod
     def _add_device(cls, new_device_dict):
-        """Ensure match betweent NWB file info & database entry.
+        """Ensure match between NWB file info & database entry.
 
         If no DataAcquisitionDevice with the given name exists in the database,
         check whether the user wants to add a new entry instead of referencing

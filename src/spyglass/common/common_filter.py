@@ -1,6 +1,6 @@
 # code to define filters that can be applied to continuous time data
-from typing import Union
 import warnings
+from typing import Union
 
 import datajoint as dj
 import matplotlib.pyplot as plt
@@ -256,7 +256,7 @@ class FirFilterParameters(dj.Manual):
             The NWB object ID of the filtered data and a list containing the
             first and last timestamps.
         """
-        MEM_USE_LIMIT = 0.9  # % of RAM use permited
+        MEM_USE_LIMIT = 0.9  # % of RAM use permitted
 
         gsp = _import_ghostipy()
 
