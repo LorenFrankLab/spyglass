@@ -47,30 +47,32 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Miscellaneous:
-    - FigURL: misc/figurl_views.md
-    - Session Groups: misc/session_groups.md
-    - Insert Data: misc/insert_data.md
-    - Merge Tables: misc/merge_tables.md
+      - FigURL: misc/figurl_views.md
+      - Session Groups: misc/session_groups.md
+      - Insert Data: misc/insert_data.md
+      - Merge Tables: misc/merge_tables.md
   - Tutorials:
-    - General:
-      - Setup: notebooks/00_Setup.ipynb
-      - Insert Data: notebooks/01_Insert_Data.ipynb
-      - Data Sync: notebooks/02_Data_Sync.ipynb
-    - Ephys: 
-      - Spike Sorting: notebooks/10_Spike_Sorting.ipynb
-      - Curation: notebooks/11_Curation.ipynb
-      - LFP: notebooks/12_LFP.ipynb
-      - Theta: notebooks/14_Theta.ipynb
-    - Position: 
-      - Position Trodes: notebooks/20_Position_Trodes.ipynb
-      - Position DLC 1: notebooks/21_Position_DLC_1.ipynb
-      - Position DLC 2: notebooks/22_Position_DLC_2.ipynb
-      - Linearization: notebooks/24_Linearization.ipynb
-    - Combined: 
-      - Ripple Detection: notebooks/30_Ripple_Detection.ipynb
-      - Extract Mark Indicators: notebooks/31_Extract_Mark_Indicators.ipynb
-      - Decoding with GPUs: notebooks/32_Decoding_with_GPUs.ipynb
-      - Decoding Clusterless: notebooks/33_Decoding_Clusterless.ipynb
+      - Overview: notebooks/README.md
+      - General:
+          - Setup: notebooks/00_Setup.ipynb
+          - Insert Data: notebooks/01_Insert_Data.ipynb
+          - Data Sync: notebooks/02_Data_Sync.ipynb
+      - Ephys:
+          - Spike Sorting: notebooks/10_Spike_Sorting.ipynb
+          - Curation: notebooks/11_Curation.ipynb
+          - LFP: notebooks/12_LFP.ipynb
+          - Theta: notebooks/14_Theta.ipynb
+      - Position:
+          - Position Trodes: notebooks/20_Position_Trodes.ipynb
+          - DLC From Scratch: notebooks/21_Position_DLC_1.ipynb
+          - DLC From Model: notebooks/22_Position_DLC_2.ipynb
+          - DLC Prediction: notebooks/23_Position_DLC_3.ipynb
+          - Linearization: notebooks/24_Linearization.ipynb
+      - Combined:
+          - Ripple Detection: notebooks/30_Ripple_Detection.ipynb
+          - Extract Mark Indicators: notebooks/31_Extract_Mark_Indicators.ipynb
+          - Decoding with GPUs: notebooks/32_Decoding_with_GPUs.ipynb
+          - Decoding Clusterless: notebooks/33_Decoding_Clusterless.ipynb
   - API Reference: api/ # defer to gen-files + literate-nav
   - How to Contribute: contribute.md
   - Change Log: CHANGELOG.md
@@ -85,6 +87,7 @@ plugins:
       glob:
         - "temp*"
         - "0*yaml"
+        - "*py_scripts/*"
   - mike:
       canonical_version: latest
       css_dir: stylesheets
@@ -98,8 +101,8 @@ plugins:
             group_by_category: false
             line_length: 80
             docstring_style: numpy
-      watch:
-        - src/spyglass/
+      # watch:
+      # - src/spyglass/
   - literate-nav:
       nav_file: navigation.md
   - exclude-search:
@@ -109,8 +112,10 @@ plugins:
       scripts:
         - ./src/api/make_pages.py
   - mkdocs-jupyter: # Comment this block during dev to reduce build time
+      execute: False # Very slow, needs gh-action edit to work/link to db
+      include_source: False
       ignore_h1_titles: True
-      ignore: ["*make_pages.py", "**checkpoints**"]
+      ignore: ["*make_pages.py", "**checkpoints**", "*/py_scripts/*"]
 
 markdown_extensions:
   - attr_list

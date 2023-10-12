@@ -274,5 +274,5 @@ sgs.AnalysisNwbfileKachery.populate()
 
 # # Up Next
 
-# In the [next notebook](./10_Spike_Sorting.ipynb), we'll start working with
-# ephys data with spike sorting.
+# In the [next notebook](./03_Merge_Tables.ipynb), we'll explore the details of a
+# table tier unique to Spyglass, Merge Tables.

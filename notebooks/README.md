@@ -10,6 +10,7 @@ described in the categories below.
 
 Everyone should complete the Setup and Insert Data notebooks. Data Sync is an
 optional additional tool for collaborators that want to share analysis files.
+Merge Tables features details on a new table tier unique to Spyglass.
 
 ## 1. Electrophysiology
 

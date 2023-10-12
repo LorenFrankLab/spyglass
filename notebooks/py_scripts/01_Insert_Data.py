@@ -327,17 +327,15 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 #     group_name="test",
 #     electrode_list=[0],
 # )
-# lfp.v1.LFPSelection.insert1(
-#     {
-#         "nwb_file_name": nwb_copy_file_name,
-#         "lfp_electrode_group_name": "test",
-#         "target_interval_list_name": "01_s1",
-#         "filter_name": "LFP 0-400 Hz",
-#         "filter_sampling_rate": 30_000,
-#     },
-#     skip_duplicates=True,
-# )
-# lfp.v1.LFPV1().populate()
+# lfp_key = {
+#     "nwb_file_name": nwb_copy_file_name,
+#     "lfp_electrode_group_name": "test",
+#     "target_interval_list_name": "01_s1",
+#     "filter_name": "LFP 0-400 Hz",
+#     "filter_sampling_rate": 30_000,
+# }
+# lfp.v1.LFPSelection.insert1(lfp_key, skip_duplicates=True)
+# lfp.v1.LFPV1().populate(lfp_key)
 # ```
 # </details>
 # <details>

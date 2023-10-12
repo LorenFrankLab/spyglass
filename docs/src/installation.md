@@ -7,7 +7,7 @@ with the `-e` flag: `pip install -e /path/to/spyglass`
 ## Basic Installation
 
 For basic installation steps, see the
-[Setup notebook](../notebooks/00_Setup.ipynb) 'local installation' section,
+[Setup notebook](./notebooks/00_Setup.ipynb) 'local installation' section,
 including python, mamba (for managing a
 [virtual environment](https://en.wikipedia.org/wiki/Virtual_environment_software)),
 VSCode, Jupyter, and git. This notebook also covers
@@ -41,7 +41,7 @@ pip install ghostipy
 ## Database access
 
 For basic installation steps, see the
-[Setup notebook](../notebooks/00_Setup.ipynb) 'database connection' section. For
+[Setup notebook](./notebooks/00_Setup.ipynb) 'database connection' section. For
 additional details, see the
 [DataJoint documentation](https://datajoint.com/docs/elements/user-guide/#relational-databases).
 
@@ -58,12 +58,12 @@ specified, the subfolder names below are included as defaults.
     "database.prefix": "username_",
     "spyglass_dirs": {
       "base": "/your/base/path",
-      "raw":"/your/base/path/raw",
-      "analysis":"/your/base/path/analysis",
-      "recording":"/your/base/path/recording",
-      "spike_sorting_storage":"/your/base/path/spikesorting",
-      "waveforms":"/your/base/path/waveforms",
-      "temp":"/your/base/path/tmp",
+      "raw": "/your/base/path/raw",
+      "analysis": "/your/base/path/analysis",
+      "recording": "/your/base/path/recording",
+      "spike_sorting_storage": "/your/base/path/spikesorting",
+      "waveforms": "/your/base/path/waveforms",
+      "temp": "/your/base/path/tmp"
     }
   }
 }

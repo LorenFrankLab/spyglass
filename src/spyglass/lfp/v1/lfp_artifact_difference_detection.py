@@ -36,10 +36,16 @@ def difference_artifact_detector(
     ----------
     recording : lfp eseries zscore_thresh : float, optional
         Stdev threshold for exclusion, should be >=0, defaults to None
-    amplitude_thresh : float, optional
+    amplitude_thresh_1st : float, optional
         Amplitude (ad units) threshold for exclusion, should be >=0, defaults to
         None
-    proportion_above_thresh : float, optional, should be>0 and <=1
+    amplitude_thresh_2nd : float, optional
+        Amplitude (ad units) threshold for exclusion, should be >=0, defaults to
+        None
+    proportion_above_thresh_1st : float, optional, should be>0 and <=1
+        Proportion of electrodes that need to have threshold crossings, defaults
+        to 1
+    proportion_above_thresh_2nd : float, optional, should be>0 and <=1
         Proportion of electrodes that need to have threshold crossings, defaults
         to 1
     removal_window_ms : float, optional
