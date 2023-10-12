@@ -140,11 +140,14 @@ def _get_artifact_times(
     verbose: bool = False,
     **job_kwargs,
 ):
-    """Detects times during which artifacts do and do not occur.
-    Artifacts are defined as periods where the absolute value of the recording signal exceeds one
-    or both specified amplitude or zscore thresholds on the proportion of channels specified,
-    with the period extended by the removal_window_ms/2 on each side. Z-score and amplitude
-    threshold values of None are ignored.
+    """
+    Detects times during which artifacts do and do not occur.
+
+    Artifacts are defined as periods where the absolute value of the recording
+    signal exceeds one or both specified amplitude or z-score thresholds on the
+    proportion of channels specified, with the period extended by the
+    removal_window_ms/2 on each side. Z-score and amplitude threshold values of
+    None are ignored.
 
     Parameters
     ----------

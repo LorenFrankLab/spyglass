@@ -81,7 +81,7 @@ class WaveformParameter(dj.Lookup):
 
     @classmethod
     def insert_default(cls):
-        cls.insert1(cls.contents, skip_duplicates=True)
+        cls.insert(cls.contents, skip_duplicates=True)
 
 
 @schema
@@ -126,10 +126,7 @@ class MetricParameter(dj.Lookup):
 
     @classmethod
     def insert_default(cls):
-        cls.insert1(
-            cls.contents,
-            skip_duplicates=True,
-        )
+        cls.insert(cls.contents, skip_duplicates=True)
 
     @classmethod
     def show_available_metrics(self):
@@ -154,7 +151,7 @@ class MetricCurationParameter(dj.Lookup):
 
     @classmethod
     def insert_default(cls):
-        cls.insert1(cls.contents, skip_duplicates=True)
+        cls.insert(cls.contents, skip_duplicates=True)
 
 
 @schema

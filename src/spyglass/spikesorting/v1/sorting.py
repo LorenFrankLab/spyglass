@@ -94,7 +94,7 @@ class SpikeSorterParameter(dj.Lookup):
 
     @classmethod
     def insert_default(cls):
-        cls.insert1(cls.contents, skip_duplicates=True)
+        cls.insert(cls.contents, skip_duplicates=True)
 
 
 @schema
