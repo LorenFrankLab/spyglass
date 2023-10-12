@@ -2,7 +2,17 @@
 
 Notes on how the repo / database is organized, intended for a new developer.
 
-## Overall organization
+## Development workflow
+
+New contributors should follow the
+[Fork-and-Branch workflow](https://www.atlassian.com/git/tutorials/comparing-workflows/forking-workflow).
+See GitHub instructions [here](https://docs.github.com/en/get-started/quickstart/contributing-to-projects).
+
+Regular contributors may choose to follow the
+[Feature Branch Workflow](https://www.atlassian.com/git/tutorials/comparing-workflows/feature-branch-workflow)
+for features that will involve multiple contributors.
+
+## Code organization
 
 - Tables are grouped into schemas by topic (e.g., `common_metrics`)
 - Schemas
@@ -191,7 +201,7 @@ The following objects should be uniquely named.
 - _Quality metrics_: Adds `_MetricParamName` to the name of the waveform.
 - _Analysis NWB files_:
   `NWBFileName_IntervalName_ElectrodeGroupName_PreprocessingParamsName.nwb`
-- Recordings and sortings are each given truncated UUID strings as part of concatenations.
+- Each recording and sorting is given truncated UUID strings as part of concatenations.
 
 Following broader Python conventions, methods a method that will not be
 explicitly called by the user should start with `_`
