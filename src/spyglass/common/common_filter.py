@@ -34,14 +34,14 @@ class FirFilterParameters(dj.Manual):
     filter_sampling_rate: int          # sampling rate for this filter
     ---
     filter_type: enum("lowpass", "highpass", "bandpass")
-    filter_low_stop = 0: float         # lowest freq for stop band for low filt
-    filter_low_pass = 0: float         # lowest freq for pass band of low filt
-    filter_high_pass = 0: float        # hi'est freq for pass band for high filt
-    filter_high_stop = 0: float        # hi'est freq for stop band of high filt
-    filter_comments: varchar(2000)     # comments about the filter
-    filter_band_edges: blob            # numpy array of filter bands
-                                       # redundant with individual parameters
-    filter_coeff: longblob             # numpy array of filter coefficients
+    filter_low_stop = 0: float     # lowest freq for stop band for low filt
+    filter_low_pass = 0: float     # lowest freq for pass band of low filt
+    filter_high_pass = 0: float    # highest freq for pass band for high filt
+    filter_high_stop = 0: float    # highest freq for stop band of high filt
+    filter_comments: varchar(2000) # comments about the filter
+    filter_band_edges: blob        # numpy array of filter bands
+                                   # redundant with individual parameters
+    filter_coeff: longblob         # numpy array of filter coefficients
     """
 
     def add_filter(

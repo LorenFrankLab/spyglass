@@ -367,7 +367,7 @@ class Probe(dj.Manual):
     probe_id: varchar(80)     # a unique ID for this probe & dynamic config
     ---
     -> ProbeType              # Type of probe, selected from a controlled list
-    -> [nullable] DataAcquisitionDevice  # the data actwquisition device used
+    -> [nullable] DataAcquisitionDevice  # the data acquisition device used
     contact_side_numbering: enum("True", "False")  # Facing you when numbering
     """
 
