@@ -197,7 +197,7 @@ def _get_artifact_times(
     # if both thresholds are None, we skip artifract detection
     if (amplitude_thresh is None) and (zscore_thresh is None):
         recording_interval = np.asarray(
-            [valid_timestamps[0], valid_timestamps[-1]]
+            [[valid_timestamps[0], valid_timestamps[-1]]]
         )
         artifact_times_empty = np.asarray([])
         print(
