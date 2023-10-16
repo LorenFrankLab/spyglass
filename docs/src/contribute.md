@@ -26,9 +26,9 @@ for features that will involve multiple contributors.
     modules (e.g., `lfp`)
   - Should not be added to without discussion.
 - A pipeline
-  - refers to a set of tables used for processing data of a particular modality
+  - Refers to a set of tables used for processing data of a particular modality
     (e.g., LFP, spike sorting, position tracking).
-  - may span multiple schema.
+  - May span multiple schema.
 - For analysis that will be only useful to you, create your own schema.
 
 ## Types of tables
@@ -51,12 +51,12 @@ Tables shared across multiple pipelines for shared data types.
 
 - Naming convention: None
 - Data tier: `dj.Manual`
-- Examples: `IntervalList` (time interval for any
-  analysis), `AnalysisNwbfile` (analysis NWB files)
+- Examples: `IntervalList` (time interval for any analysis), `AnalysisNwbfile`
+  (analysis NWB files)
 
 _Note_: Because these are stand-alone tables not part of the dependency
 structure, developers should include enough information to link entries back to
-the pipelines.
+the pipeline where the data is used.
 
 ### NWB ingestion
 
@@ -214,7 +214,7 @@ These are used to exclude any invalid timepoints, such as missing data from
 a faulty connection.
 
 - Intervals can be nested for a set of disjoint intervals.
-- Some recordings explicit
+- Some recordings have explicit
   [PTP timestamps](https://en.wikipedia.org/wiki/Precision_Time_Protocol)
   associated with each sample. Some older recordings are missing PTP times, and
   times must be inferred from the TTL pulses from the camera.
