@@ -241,7 +241,7 @@ versioning of the form `X.Y.Z` (e.g., `0.4.2`).
 
 1. In `CITATION.cff`, update the `version` key.
 2. Make a pull request with changes. 
-3. After the pull request is merged, pull this merge commit and tag it with `gig tag {version}` 
+3. After the pull request is merged, pull this merge commit and tag it with `git tag {version}` 
 4. Publish the new release tag. Run `git push origin {version}`. This will
    rebuild docs and push updates to PyPI. 
 5. Make a new 
