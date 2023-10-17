@@ -210,8 +210,8 @@ class AnalysisNwbfile(dj.Manual):
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
-        # each file ends with a random string of 10 digits, so we generate that string and redo if by some miracle
-        # it's already there
+        # each file ends with a random string of 10 digits, so we generate that
+        # string and redo if by some miracle it's already there
         file_in_table = True
         while file_in_table:
             analysis_file_name = (
