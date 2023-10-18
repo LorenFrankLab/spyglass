@@ -68,7 +68,7 @@ def generate_config(filename: str = None, **kwargs):
 
     if not filename:
         filename = "dj_local_config.json"
-    if os.path(filename).exists():
+    if os.path.exists(filename):
         warnings.warn(f"File already exists: {filename}")
     else:
         with open(filename, "w") as outfile:
