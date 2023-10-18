@@ -169,7 +169,7 @@ class MetricCuration(dj.Computed):
     definition = """
     metric_curation_id: varchar(32)
     ---
-    -> AutomaticCurationSelection
+    -> MetricCurationSelection
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the metrics in NWB file
     """
