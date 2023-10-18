@@ -276,7 +276,7 @@ class FirFilterParameters(dj.Manual):
         ]
 
         indices = []
-        output_shape_list = input_dim_restrictions
+        output_shape_list = [0] * len(data_on_disk.shape)
         output_shape_list[electrode_axis] = len(electrode_ids)
         data_dtype = data_on_disk[0][0].dtype
 
@@ -354,7 +354,7 @@ class FirFilterParameters(dj.Manual):
                     timestamps_on_disk[0].itemsize
                     + n_electrodes * data_on_disk[0][0].itemsize
                 )
-                if req_mem < MEM_USE_LIMIT * psutil.virtual_memory():
+                if req_mem < MEM_USE_LIMIT * psutil.virtual_memory().available:
                     print(f"Interval {ii}: loading data into memory")
                     timestamps = np.asarray(
                         timestamps_on_disk[start:stop],
@@ -373,7 +373,7 @@ class FirFilterParameters(dj.Manual):
                         ts_offset : ts_offset + len(extracted_ts)
                     ] = extracted_ts
                     ts_offset += len(extracted_ts)
-                    input_index_bounds = ([0, interval_samples - 1],)
+                    input_index_bounds = [0, interval_samples - 1]
 
                 else:
                     print(f"Interval {ii}: leaving data on disk")
