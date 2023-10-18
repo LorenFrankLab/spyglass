@@ -175,7 +175,7 @@ class IntervalPositionInfo(dj.Computed):
         )
 
         if add_frame_ind:
-            if not video_frame_ind is None:
+            if video_frame_ind is not None:
                 velocity.create_timeseries(
                     name="video_frame_ind",
                     unit="index",
