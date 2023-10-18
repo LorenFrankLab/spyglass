@@ -272,7 +272,6 @@ class IntervalPositionInfo(dj.Computed):
                     )
             # rename first 4 columns, keep rest. Rest dropped below
             spatial_df.columns = DEFAULT_COLS[:4] + cols[4:]
-        print(spatial_df)
         # Get spatial series properties
         time = np.asarray(spatial_df.index)  # seconds
         position = np.asarray(spatial_df.iloc[:, :4])  # meters
