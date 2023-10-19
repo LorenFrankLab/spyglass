@@ -235,7 +235,7 @@ class SpyglassConfig:
 
         Parameters
         ----------
-        base_dir : str, otional
+        base_dir : str, optional
             The base directory. If not provided, will use the env variable or
             existing config.
         database_user : str, optional
