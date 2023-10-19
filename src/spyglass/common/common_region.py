@@ -45,5 +45,8 @@ class BrainRegion(dj.Lookup):
             subregion_name=subregion_name,
             subsubregion_name=subsubregion_name,
         )
-        cls.insert1(key, skip_duplicates=True)
-        return (BrainRegion & key).fetch1("region_id")
+        query = BrainRegion & key
+        if not query:
+            cls.insert1(key)
+            query = BrainRegion & key
+        return query.fetch1("region_id")

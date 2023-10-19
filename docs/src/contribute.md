@@ -236,15 +236,13 @@ a faulty connection.
 
 ## Making a release
 
+Spyglass follows [Semantic Versioning](https://semver.org/) with 
+versioning of the form `X.Y.Z` (e.g., `0.4.2`).
+
 1. In `CITATION.cff`, update the `version` key.
-1. Make a pull request with changes.
-1. After merging these changes, run `git tag --sign -m "spyglass ${release}"
-${release} origin/master` where `${release}` is replaced with the new
-   version string. This step requires a [GPG signing
-   key](https://docs.github.com/en/authentication/managing-commit-signature-verification/generating-a-new-gpg-key).
-1. Publish the new release tag. Run `git push origin ${release}`. This will
-   rebuild docs.
-1. Generate distribution packages and upload them to PyPI following [these
-   instructions](https://packaging.python.org/en/latest/tutorials/packaging-projects/#generating-distribution-archives).
-1. Make a new release on GitHub with the new release tag:
-   <https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository>
+2. Make a pull request with changes. 
+3. After the pull request is merged, pull this merge commit and tag it with `git tag {version}` 
+4. Publish the new release tag. Run `git push origin {version}`. This will
+   rebuild docs and push updates to PyPI. 
+5. Make a new 
+   [release on GitHub](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository).

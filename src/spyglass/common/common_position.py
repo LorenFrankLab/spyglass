@@ -175,7 +175,7 @@ class IntervalPositionInfo(dj.Computed):
         )
 
         if add_frame_ind:
-            if video_frame_ind:
+            if video_frame_ind is not None:
                 velocity.create_timeseries(
                     name="video_frame_ind",
                     unit="index",
@@ -250,18 +250,28 @@ class IntervalPositionInfo(dj.Computed):
 
         # Accepts x/y 'loc' or 'loc1' format for first pos. Renames to 'loc'
         DEFAULT_COLS = ["xloc", "yloc", "xloc2", "yloc2", "xloc1", "yloc1"]
+        ALTERNATIVE_COLS = ["xloc1", "xloc2", "yloc1", "yloc2"]
 
-        cols = list(spatial_df.columns)
-        if len(cols) != 4 or not all([c in DEFAULT_COLS for c in cols]):
-            choice = dj.utils.user_choice(
-                "Unexpected columns in raw position. Assume "
-                + f"{DEFAULT_COLS[:4]}?\n{spatial_df}\n"
-            )
-            if choice.lower() not in ["yes", "y"]:
-                raise ValueError(f"Unexpected columns in raw position: {cols}")
-        # rename first 4 columns, keep rest. Rest dropped below
-        spatial_df.columns = DEFAULT_COLS[:4] + cols[4:]
-
+        if all([c in spatial_df.columns for c in DEFAULT_COLS[:4]]):
+            # move the 4 position columns to front, continue
+            spatial_df = spatial_df[DEFAULT_COLS[:4]]
+        elif all([c in spatial_df.columns for c in ALTERNATIVE_COLS]):
+            # move the 4 position columns to front, rename to default, continue
+            spatial_df = spatial_df[ALTERNATIVE_COLS]
+            spatial_df.columns = DEFAULT_COLS[:4]
+        else:
+            cols = list(spatial_df.columns)
+            if len(cols) != 4 or not all([c in DEFAULT_COLS for c in cols]):
+                choice = dj.utils.user_choice(
+                    "Unexpected columns in raw position. Assume "
+                    + f"{DEFAULT_COLS[:4]}?\n{spatial_df}\n"
+                )
+                if choice.lower() not in ["yes", "y"]:
+                    raise ValueError(
+                        f"Unexpected columns in raw position: {cols}"
+                    )
+            # rename first 4 columns, keep rest. Rest dropped below
+            spatial_df.columns = DEFAULT_COLS[:4] + cols[4:]
         # Get spatial series properties
         time = np.asarray(spatial_df.index)  # seconds
         position = np.asarray(spatial_df.iloc[:, :4])  # meters
