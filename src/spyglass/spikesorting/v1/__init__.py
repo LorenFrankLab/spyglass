@@ -1,6 +1,6 @@
 from .recording import (
     SortGroup,
-    SpikeSortingPreprocessingParameter,
+    SpikeSortingPreprocessingParameters,
     SpikeSortingRecordingSelection,
     SpikeSortingRecording,
 )

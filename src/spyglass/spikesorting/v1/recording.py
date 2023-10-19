@@ -27,7 +27,7 @@ class SortGroup(dj.Manual):
     definition = """
     # Set of electrodes to spike sort together
     -> Session
-    sort_group_id: str  # identifier for a group of electrodes
+    sort_group_name: str
     ---
     sort_reference_electrode_id = -1: int  # the electrode to use for referencing
                                            # -1: no reference, -2: common median
@@ -61,10 +61,10 @@ class SortGroup(dj.Manual):
         references : dict, optional
             If passed, used to set references. Otherwise, references set using
             original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
-        omit_ref_electrode_group : bool
-            Optional. If True, no sort group is defined for electrode group of reference.
-        omit_unitrode : bool
-            Optional. If True, no sort groups are defined for unitrodes.
+        omit_ref_electrode_group : bool, optional
+            If True, no sort group is defined for electrode group of reference.
+        omit_unitrode : bool, optional
+            If True, no sort groups are defined for unitrodes.
         """
         # get the electrodes from this NWB file
         electrodes = (
@@ -88,7 +88,9 @@ class SortGroup(dj.Manual):
             sge_key["electrode_group_name"] = e_group
             # get the indices of all electrodes in this group / shank and set their sorting group
             for shank in shank_list:
-                sg_key["sort_group_id"] = sge_key["sort_group_id"] = sort_group
+                sg_key["sort_group_name"] = sge_key[
+                    "sort_group_name"
+                ] = sort_group
                 # specify reference electrode. Use 'references' if passed, otherwise use reference from config
                 if not references:
                     shank_elect_ref = electrodes[
@@ -164,13 +166,13 @@ class SortGroup(dj.Manual):
 
 
 @schema
-class SpikeSortingPreprocessingParameter(dj.Lookup):
+class SpikeSortingPreprocessingParameters(dj.Lookup):
     definition = """
-    # Parameter for denoising (filtering and referencing/whitening) recording
+    # Parameters for denoising (filtering and referencing/whitening) recording
     # prior to spike sorting
     preproc_param_name: varchar(200)
     ---
-    preproc_param: blob
+    preproc_params: blob
     """
 
     contents = [
@@ -193,22 +195,42 @@ class SpikeSortingPreprocessingParameter(dj.Lookup):
 @schema
 class SpikeSortingRecordingSelection(dj.Manual):
     definition = """
-    # Raw voltage traces and parameter
+    # Raw voltage traces and parameters. Use `insert_selection` method to insert.
+    recording_id: varchar(50)
+    ---
     -> Raw
     -> SortGroup
     -> IntervalList
-    -> SpikeSortingPreprocessingParameter
+    -> SpikeSortingPreprocessingParameters
     -> LabTeam
     """
+
+    @classmethod
+    def insert_selection(cls, key: dict):
+        """Insert a row into SpikeSortingRecordingSelection with an
+        automatically generated unique recording ID as the sole primary key.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of Raw, SortGroup, IntervalList, SpikeSortingPreprocessingParameters, LabTeam tables
+
+        Returns
+        -------
+        recording_id : str
+            the unique recording ID serving as primary key for SpikeSortingRecordingSelection
+        """
+        key["recording_id"] = generate_nwb_uuid(key["nwb_file_name"], "R", 6)
+        cls.insert1(key, skip_duplicates=True)
+        return key["recording_id"]
 
 
 @schema
 class SpikeSortingRecording(dj.Computed):
     definition = """
     # Processed recording
-    recording_id: varchar(50)
-    ---
     -> SpikeSortingRecordingSelection
+    ---
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the processed recording in NWB file
     """
@@ -221,11 +243,14 @@ class SpikeSortingRecording(dj.Computed):
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         recording, timestamps = self._get_preprocessed_recording(key)
         recording_nwb_file_name, recording_object_id = _write_recording_to_nwb(
-            recording, timestamps, key["nwb_file_name"]
+            recording,
+            timestamps,
+            (Raw * SpikeSortingRecordingSelection & key).fetch1(
+                ["nwb_file_name"]
+            ),
         )
-        key["object_id"] = recording_object_id
-        key["recording_id"] = generate_nwb_uuid(key["nwb_file_name"], "R", 6)
         key["analysis_file_name"] = recording_nwb_file_name
+        key["object_id"] = recording_object_id
 
         # INSERT:
         # - valid times into IntervalList
@@ -233,7 +258,9 @@ class SpikeSortingRecording(dj.Computed):
         # - entry into SpikeSortingRecording
         IntervalList.insert1(
             {
-                "nwb_file_name": key["nwb_file_name"],
+                "nwb_file_name": (
+                    Raw * SpikeSortingRecordingSelection & key
+                ).fetch1("nwb_file_name"),
                 "interval_list_name": key["recording_id"],
                 "valid_times": sort_interval_valid_times,
             }
@@ -284,12 +311,12 @@ class SpikeSortingRecording(dj.Computed):
 
     def _get_sort_interval_valid_times(self, key: dict):
         """Identifies the intersection between sort interval specified by the user
-        and the valid times (times for which neural data exist)
+        and the valid times (times for which neural data exist, excluding e.g. dropped packets).
 
         Parameters
         ----------
         key: dict
-            specifies a (partially filled) entry of SpikeSorting table
+            primary key of SpikeSortingRecordingSelection table
 
         Returns
         -------
@@ -304,19 +331,33 @@ class SpikeSortingRecording(dj.Computed):
         sort_interval = (
             IntervalList
             & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["sort_interval_name"],
+                "nwb_file_name": (SpikeSortingRecordingSelection & key).fetch1(
+                    "nwb_file_name"
+                ),
+                "interval_list_name": (
+                    SpikeSortingRecordingSelection & key
+                ).fetch1("sort_interval_name"),
             }
         ).fetch1("sort_interval")
         valid_interval_times = (
             IntervalList
             & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["sort_interval_name"],
+                "nwb_file_name": (SpikeSortingRecordingSelection & key).fetch1(
+                    "nwb_file_name"
+                ),
+                "interval_list_name": (
+                    SpikeSortingRecordingSelection & key
+                ).fetch1("sort_interval_name"),
             }
         ).fetch1("valid_times")
-        params = (SpikeSortingPreprocessingParameter & key).fetch1(
-            "preproc_params"
+        params = (
+            (
+                SpikeSortingPreprocessingParameters
+                * SpikeSortingRecordingSelection
+                & key
+            )
+            .fetch1("preproc_param_name")
+            .fetch1("preproc_params")
         )
 
         # DO:
@@ -330,7 +371,7 @@ class SpikeSortingRecording(dj.Computed):
         return valid_sort_times
 
     def _get_preprocessed_recording(self, key: dict):
-        """Filters and references a recording
+        """Filters and references a recording.
         - Loads the NWB file created during insertion as a spikeinterface Recording
         - Slices recording in time (interval) and space (channels);
           recording chunks from disjoint intervals are concatenated
@@ -338,8 +379,8 @@ class SpikeSortingRecording(dj.Computed):
 
         Parameters
         ----------
-        key: dict,
-            primary key of SpikeSortingRecording table
+        key: dict
+            primary key of SpikeSortingRecordingSelection table
 
         Returns
         -------
@@ -351,19 +392,25 @@ class SpikeSortingRecording(dj.Computed):
         # - the reference channel
         # - probe type
         # - filter parameters
-        nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
+        nwb_file_name = (Raw * SpikeSortingRecordingSelection & key).fetch1(
+            "nwb_file_name"
+        )
+        sort_group_name = (
+            SortGroup * SpikeSortingRecordingSelection & key
+        ).fetch1("sort_group_name")
+        nwb_file_abs_path = Nwbfile().get_abs_path(nwb_file_name)
         channel_ids = (
             SortGroup.SortGroupElectrode
             & {
-                "nwb_file_name": key["nwb_file_name"],
-                "sort_group_id": key["sort_group_id"],
+                "nwb_file_name": nwb_file_name,
+                "sort_group_name": sort_group_name,
             }
         ).fetch("electrode_id")
         ref_channel_id = (
             SortGroup
             & {
-                "nwb_file_name": key["nwb_file_name"],
-                "sort_group_id": key["sort_group_id"],
+                "nwb_file_name": nwb_file_name,
+                "sort_group_name": sort_group_name,
             }
         ).fetch1("sort_reference_electrode_id")
         recording_channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
@@ -390,9 +437,10 @@ class SpikeSortingRecording(dj.Computed):
                 ).fetch1("electrode_group_name")
             )
         probe_type = np.unique(probe_type_by_channel)
-        filter_params = (SpikeSortingPreprocessingParameter & key).fetch1(
-            "preproc_params"
-        )
+        filter_params = (
+            SpikeSortingPreprocessingParameters * SpikeSortingRecordingSelection
+            & key
+        ).fetch1("preproc_params")
 
         # DO:
         # - load NWB file as a spikeinterface Recording
@@ -455,7 +503,9 @@ class SpikeSortingRecording(dj.Computed):
                 dtype=np.float64,
             )
         else:
-            raise ValueError("Invalid reference channel ID")
+            raise ValueError(
+                "Invalid reference channel ID. Use -1 to skip referencing. Use -2 to reference via global median. Use positive integer to reference to a specific channel."
+            )
 
         recording = si.preprocessing.bandpass_filter(
             recording,
