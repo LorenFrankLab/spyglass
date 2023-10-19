@@ -21,17 +21,18 @@ from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecordingSelection,
 )
 from .recording import _consolidate_intervals
+from .utils import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_sorting")
 
 
 @schema
-class SpikeSorterParameter(dj.Lookup):
+class SpikeSorterParameters(dj.Lookup):
     definition = """
     sorter: varchar(200)
     sorter_param_name: varchar(200)
     ---
-    sorter_param: blob
+    sorter_params: blob
     """
     contents = [
         [
@@ -100,21 +101,41 @@ class SpikeSorterParameter(dj.Lookup):
 @schema
 class SpikeSortingSelection(dj.Manual):
     definition = """
-    # Processed recording and parameter
+    # Processed recording and parameters. Use `insert_selection` method to insert rows.
+    sorting_id: varchar(50)
+    ---
     -> SpikeSortingRecording
-    -> SpikeSorterParameter
+    -> SpikeSorterParameters
     -> IntervalList
     """
+
+    @classmethod
+    def insert_selection(cls, key: dict):
+        """Insert a row into SpikeSortingSelection with an
+        automatically generated unique sorting ID as the sole primary key.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of SpikeSortingRecording, SpikeSorterParameters, IntervalList tables
+
+        Returns
+        -------
+        sorting_id : str
+            the unique sorting ID serving as primary key for SpikeSorting
+        """
+        key["sorting_id"] = generate_nwb_uuid(key["nwb_file_name"], "S", 6)
+        cls.insert1(key, skip_duplicates=True)
+        return key["sorting_id"]
 
 
 @schema
 class SpikeSorting(dj.Computed):
     definition = """
-    sorting_id: varchar(50)
-    ---
     -> SpikeSortingSelection
+    ---
     -> AnalysisNwbfile
-    object_id: varchar(40) # Object ID for the sorting in NWB file
+    object_id: varchar(40)          # Object ID for the sorting in NWB file
     time_of_sort: int               # in Unix time, to the nearest second
     """
 
@@ -126,7 +147,9 @@ class SpikeSorting(dj.Computed):
         # - information about the recording
         # - artifact free intervals
         # - spike sorter and sorter params
-        recording_key = (SpikeSortingRecording & key).fetch1()
+        recording_key = (
+            SpikeSortingRecording * SpikeSortingSelection & key
+        ).fetch1()
         artifact_removed_intervals = (
             IntervalList
             & {
@@ -134,9 +157,9 @@ class SpikeSorting(dj.Computed):
                 "interval_list_name": key["interval_list_name"],
             }
         ).fetch1("valid_times")
-        sorter, sorter_params = (SpikeSorterParameter & key).fetch1(
-            "sorter", "sorter_params"
-        )
+        sorter, sorter_params = (
+            SpikeSorterParameters * SpikeSorterParameters & key
+        ).fetch1("sorter", "sorter_params")
 
         # DO:
         # - load recording
