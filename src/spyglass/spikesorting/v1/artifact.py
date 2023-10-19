@@ -15,7 +15,7 @@ from spyglass.common.common_interval import (
     _union_concat,
     interval_from_inds,
 )
-from spyglass.utils.misc import generate_nwb_uuid
+from spyglass.spikesorting.v1.utils import generate_nwb_uuid
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 
 schema = dj.schema("spikesorting_v1_artifact")

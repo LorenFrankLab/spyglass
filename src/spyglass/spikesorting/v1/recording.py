@@ -17,7 +17,7 @@ from spyglass.common.common_interval import (
     interval_list_intersect,
 )
 from spyglass.common.common_lab import LabTeam
-from spyglass.utils.misc import generate_nwb_uuid
+from spyglass.spikesorting.v1.utils import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_recording")
 

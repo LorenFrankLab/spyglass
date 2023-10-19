@@ -22,7 +22,7 @@ from spyglass.spikesorting.v1.metric_utils import (
     get_peak_offset,
     compute_isi_violation_fractions,
 )
-from spyglass.utils.misc import generate_nwb_uuid
+from spyglass.spikesorting.v1.utils import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_metric_curation")
 
