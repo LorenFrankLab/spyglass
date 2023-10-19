@@ -47,6 +47,8 @@ additional details, see the
 
 ### Config
 
+#### Via File (Recommended)
+
 A `dj_local_conf.json` file in your Spyglass directory (or wherever python is
 launched) can hold all the specifics needed to connect to a database. This can
 include different directories for different pipelines. If only the `base` is
@@ -69,8 +71,19 @@ specified, the subfolder names below are included as defaults.
 }
 ```
 
-For those who prefer environment variables, the following can pasted into a
-file like `~/.bashrc`.
+`dj_local_conf_example.json` can be copied and saved as `dj_local_conf.json`
+to set the configuration for a given folder. Alternatively, it can be saved as
+`.datajoint_config.json` in a user's home directory to be accessed globally.
+See
+[DataJoint docs](https://datajoint.com/docs/core/datajoint-python/0.14/quick-start/#connection)
+for more details.
+
+#### Via Environment Variables
+
+Older versions of Spyglass relied exclusively on environment for config. If
+`spyglass_dirs` is not found in the config file, Spyglass will look for
+environment variables. These can be set either once in a terminal session, or
+permanently in a `.bashrc` file.
 
 ```bash
 export SPYGLASS_BASE_DIR="/stelmo/nwb"
@@ -78,15 +91,17 @@ export SPYGLASS_RECORDING_DIR="$SPYGLASS_BASE_DIR/recording"
 export SPYGLASS_SORTING_DIR="$SPYGLASS_BASE_DIR/sorting"
 export SPYGLASS_VIDEO_DIR="$SPYGLASS_BASE_DIR/video"
 export SPYGLASS_WAVEFORMS_DIR="$SPYGLASS_BASE_DIR/waveforms"
-export SPYGLASS_TEMP_DIR="$SPYGLASS_BASE_DIR/tmp/spyglass"
+export SPYGLASS_TEMP_DIR="$SPYGLASS_BASE_DIR/tmp"
 export DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE"
 ```
 
-And then loaded with `source ~/.bashrc`.
+To load variables from a `.bashrc` file, run `source ~/.bashrc` in a terminal.
 
-Note that a local `SPYGLASS_TEMP_DIR` (e.g., one on your machine) will speed
-up spike sorting, but make sure it has enough free space (ideally at least
-500GB)
+#### Temporary directory
+
+A temporary directory will speed up spike sorting. If unspecified by either
+method above, it will be assumed as a `tmp` subfolder relative to the base
+path. Be sure it has enough free space (ideally at least 500GB).
 
 ## File manager
 

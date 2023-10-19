@@ -1,7 +1,7 @@
 {
-  "database.host": "localhost",
-  "database.password": "tutorial",
-  "database.user": "root",
+  "database.host": "localhost or lmf-db.cin.ucsf.edu",
+  "database.password": "Delete this line for shared machines",
+  "database.user": "Your username",
   "database.port": 3306,
   "database.reconnect": true,
   "connection.init_function": null,
@@ -28,7 +28,6 @@
     }
   },
   "custom": {
-    "database.prefix": "username_",
     "spyglass_dirs": {
       "base": "/your/base/path"
     },
