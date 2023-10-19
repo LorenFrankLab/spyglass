@@ -18,7 +18,7 @@ class DatabaseSettings:
     def __init__(
         self, user_name=None, host_name=None, target_group=None, debug=False
     ):
-        """Class to manage database settings
+        """Class to manage common database settings
 
         Parameters
         ----------
@@ -47,8 +47,9 @@ class DatabaseSettings:
         self.target_group = target_group or "kachery-users"
         self.debug = debug
 
-    def add_collab_user(self):
-        content = [
+    @property
+    def _add_collab_usr_sql(self):
+        return [
             # Create the user (if not already created) and set the password
             f"{CREATE_USR}'{self.user}'@'%'{TEMP_PASS}\n",
             # Grant privileges to databases matching the user_name pattern
@@ -57,18 +58,23 @@ class DatabaseSettings:
             f"{GRANT_SEL}`%`.* TO '{self.user}'@'%';\n",
         ]
 
-        file = self.write_temp_file(content)
+    def add_collab_user(self):
+        """Add collaborator user with full permissions to shared modules"""
+        file = self.write_temp_file(self._add_collab_usr_sql)
         self.run_file(file)
 
-    def add_dj_guest(self):
-        content = [
+    @property
+    def _add_dj_guest_sql(self):
+        return [
             # Create the user (if not already created) and set the password
             f"{CREATE_USR}'{self.user}'@'%' IDENTIFIED BY 'Data_$haring';\n",
             # Grant privileges
             f"{GRANT_SEL}`%`.* TO '{self.user}'@'%';\n",
         ]
 
-        file = self.write_temp_file(content)
+    def add_dj_guest(self):
+        """Add guest user with select permissions to shared modules"""
+        file = self.write_temp_file(self._add_dj_guest_sql)
         self.run_file(file)
 
     def _find_group(self):
@@ -92,29 +98,23 @@ class DatabaseSettings:
 
         return group
 
-    def add_module(self, module_name):
-        print(f"Granting everyone permissions to module {module_name}")
-        group = self._find_group()
-
-        content = [
+    def _add_module_sql(self, module_name, group):
+        return [
             f"{GRANT_ALL}`{module_name}{ESC}`.* TO `{user}`@'%';\n"
             # get a list of usernames
             for user in group.gr_mem
         ]
 
-        file = self.write_temp_file(content)
+    def add_module(self, module_name):
+        """Add module to database. Grant permissions to all users in group"""
+        print(f"Granting everyone permissions to module {module_name}")
+        group = self._find_group()
+        file = self.write_temp_file(self._add_module_sql(module_name, group))
         self.run_file(file)
 
-    def add_dj_user(self):
-        user_home = Path.home().parent / self.user
-        if user_home.exists():
-            print("Creating database user ", self.user)
-        else:
-            sys.exit(
-                f"Error: could not find {self.user} in home dir: {user_home}"
-            )
-
-        content = (
+    @property
+    def _add_dj_user_sql(self):
+        return (
             [
                 f"{CREATE_USR}'{self.user}'@'%' "
                 + "IDENTIFIED BY 'temppass';\n",
@@ -127,7 +127,18 @@ class DatabaseSettings:
             + [f"{GRANT_SEL}`%`.* TO '{self.user}'@'%';\n"]
         )
 
-        file = self.write_temp_file(content)
+    def add_dj_user(self, check_exists=True):
+        """Add user to database with permissions to shared modules"""
+        if check_exists:
+            user_home = Path.home().parent / self.user
+            if user_home.exists():
+                print("Creating database user ", self.user)
+            else:
+                sys.exit(
+                    f"Error: could not find {self.user} in home dir: {user_home}"
+                )
+
+        file = self.write_temp_file(self._add_dj_user_sql)
         self.run_file(file)
 
     def write_temp_file(self, content: list) -> tempfile.NamedTemporaryFile:
