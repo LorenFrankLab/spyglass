@@ -14,7 +14,6 @@ from spyglass.common.common_interval import (
     IntervalList,
     _union_concat,
     interval_from_inds,
-    interval_set_difference_inds,
 )
 from spyglass.utils.misc import generate_nwb_uuid
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
@@ -23,12 +22,12 @@ schema = dj.schema("spikesorting_v1_artifact")
 
 
 @schema
-class ArtifactDetectionParameter(dj.Lookup):
+class ArtifactDetectionParameters(dj.Lookup):
     definition = """
     # Parameter for detecting artifacts (non-neural high amplitude events)
     artifact_param_name : varchar(200)
     ---
-    artifact_param : blob
+    artifact_params : blob
     """
 
     contents = [
@@ -68,18 +67,37 @@ class ArtifactDetectionParameter(dj.Lookup):
 @schema
 class ArtifactDetectionSelection(dj.Manual):
     definition = """
-    # Processed recording and artifact detection parameter
+    # Processed recording and artifact detection parameters. Use `insert_selection` method to insert new rows.
+    artifact_id: varchar(30)
+    ---
     -> SpikeSortingRecording
     -> ArtifactDetectionParameter
     """
 
+    @classmethod
+    def insert_selection(cls, key: dict):
+        """Insert a row into ArtifactDetectionSelection with an
+        automatically generated unique artifact ID as the sole primary key.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of SpikeSortingRecording and ArtifactDetectionParameters
+
+        Returns
+        -------
+        artifact_id : str
+            the unique artifact ID serving as primary key for ArtifactDetectionSelection
+        """
+        key["artifact_id"] = generate_nwb_uuid(key["nwb_file_name"], "A", 6)
+        cls.insert1(key, skip_duplicates=True)
+        return key["artifact_id"]
+
 
 @schema
-class ArtifactRemovedInterval(dj.Computed):
+class ArtifactDetection(dj.Computed):
     definition = """
-    # Interval during which artifact occur
-    artifact_id: varchar(30)
-    ---
+    # Detects artifacts (e.g. large transients from movement) and saves artifact-free intervals in IntervalList.
     -> ArtifactDetectionSelection
     """
 
@@ -87,34 +105,31 @@ class ArtifactRemovedInterval(dj.Computed):
         # FETCH:
         # - artifact parameters
         # - recording analysis nwb file
-        artifact_param = (ArtifactDetectionParameter & key).fetch1(
-            "artifact_param"
-        )
-        recording_analysis_nwb_file = (SpikeSortingRecording & key).fetch1(
-            "analysis_nwb_file"
-        )
+        artifact_params, recording_analysis_nwb_file = (
+            ArtifactDetectionParameters
+            * SpikeSortingRecording
+            * ArtifactDetectionSelection
+            & key
+        ).fetch1("artifact_params", "analysis_nwb_file")
 
         # DO:
         # - load recording
-        # - detect artifacts
-        # - save as NWB and insert into ArtifactInterval
-        # - insert into IntervalList
         recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
             recording_analysis_nwb_file
         )
         recording = se.read_nwb_recording(
             recording_analysis_nwb_file_abs_path, load_time_vector=True
         )
-        if not artifact_param.get("job_kwargs"):
-            artifact_param["job_kwargs"] = {
+        # - detect artifacts
+        if not artifact_params.get("job_kwargs"):
+            artifact_params["job_kwargs"] = {
                 "chunk_duration": "10s",
                 "n_jobs": 4,
                 "progress_bar": "True",
             }
-        key["artifact_id"] = generate_nwb_uuid(key["nwb_file_name"], "A", 6)
         artifact_removed_valid_times, _ = _get_artifact_times(
             recording,
-            **artifact_param,
+            **artifact_params,
         )
 
         # INSERT
@@ -173,15 +188,14 @@ def _get_artifact_times(
     valid_timestamps = recording.get_times()
 
     # if both thresholds are None, we skip artifract detection
-    if (amplitude_thresh_uV is None) and (zscore_thresh is None):
-        recording_interval = np.asarray(
-            [valid_timestamps[0], valid_timestamps[-1]]
-        )
-        artifact_times_empty = np.asarray([])
+    if amplitude_thresh_uV is zscore_thresh is None:
         print(
-            "Amplitude and zscore thresholds are both None, skipping artifact detection"
+            "Amplitude and zscore thresholds are both None, "
+            + "skipping artifact detection"
         )
-        return recording_interval, artifact_times_empty
+        return np.asarray(
+            [valid_timestamps[0], valid_timestamps[-1]]
+        ), np.asarray([])
 
     # verify threshold parameters
     (
@@ -196,33 +210,27 @@ def _get_artifact_times(
     n_jobs = ensure_n_jobs(recording, n_jobs=job_kwargs.get("n_jobs", 1))
     print(f"Using {n_jobs} jobs...")
 
-    func = _compute_artifact_chunk
-    init_func = _init_artifact_worker
     if n_jobs == 1:
-        init_args = (
-            recording,
-            zscore_thresh,
-            amplitude_thresh_uV,
-            proportion_above_thresh,
-        )
+        init_recording = recording
     else:
-        init_args = (
-            recording.to_dict(),
-            zscore_thresh,
-            amplitude_thresh_uV,
-            proportion_above_thresh,
-        )
+        init_recording = recording.to_dict()
 
     executor = ChunkRecordingExecutor(
-        recording,
-        func,
-        init_func,
-        init_args,
+        recording=recording,
+        func=_compute_artifact_chunk,
+        init_func=_init_artifact_worker,
+        init_args=(
+            init_recording,
+            zscore_thresh,
+            amplitude_thresh_uV,
+            proportion_above_thresh,
+        ),
         verbose=verbose,
         handle_returns=True,
         job_name="detect_artifact_frames",
         **job_kwargs,
     )
+
     artifact_frames = executor.run()
     artifact_frames = np.concatenate(artifact_frames)
 
