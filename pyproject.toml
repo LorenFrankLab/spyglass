@@ -3,6 +3,30 @@ requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
+dependencies = [
+    "pydotplus",
+    "dask",
+    "position_tools",
+    "track_linearization>=2.3",
+    "non_local_detector",
+    "ripple_detection",
+    "matplotlib",
+    "seaborn",
+    "bottleneck",
+    "numpy<1.24",
+    "ipympl",
+    "tqdm",
+    "pubnub<6.4.0",
+    "pynwb>=2.2.0,<3",
+    "hdmf>=3.4.6",
+    "datajoint>=0.13.6",
+    "pymysql",
+    "sortingview>=0.11",
+    "pyyaml",
+    "click",
+    "spikeinterface>=0.98.2,<0.99",
+    "ndx_franklab_novela>=0.1.0",
+]
 name = "spyglass-neuro"
 description = "Neuroscience data analysis framework for reproducible research"
 readme = "README.md"
@@ -34,31 +58,6 @@ keywords = [
     "kachery",
     "sortingview",
 ]
-dependencies = [
-    "pydotplus",
-    "dask",
-    "position_tools",
-    "track_linearization>=2.3",
-    "replay_trajectory_classification",
-    "ripple_detection",
-    "trajectory_analysis_tools",
-    "matplotlib",
-    "seaborn",
-    "bottleneck",
-    "numpy<1.24",
-    "ipympl",
-    "tqdm",
-    "pubnub<6.4.0",
-    "pynwb>=2.2.0,<3",
-    "hdmf>=3.4.6",
-    "datajoint>=0.13.6",
-    "pymysql",
-    "sortingview>=0.11",
-    "pyyaml",
-    "click",
-    "spikeinterface>=0.98.2,<0.99",
-    "ndx_franklab_novela>=0.1.0",
-]
 dynamic = ["version"]
 
 [project.scripts]
@@ -78,7 +77,7 @@ test = [
     "kachery-cloud",
 ]
 docs = [
-    "hatch",                 # Get version from env 
+    "hatch",                 # Get version from env
     "mike",                  # Docs versioning
     "mkdocs",                # Docs core
     "mkdocs-exclude",        # Docs exclude files
