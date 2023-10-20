@@ -85,11 +85,10 @@ class SpikeSorterParameters(dj.Lookup):
             },
         ],
     ]
-    sorters = sis.available_sorters()
     contents.extend(
         [
             [sorter, "default", sis.get_default_sorter_params(sorter)]
-            for sorter in sorters
+            for sorter in sis.available_sorters()
         ]
     )
 
@@ -153,12 +152,16 @@ class SpikeSorting(dj.Computed):
         artifact_removed_intervals = (
             IntervalList
             & {
-                "nwb_file_name": recording_key["nwb_file_name"],
-                "interval_list_name": key["interval_list_name"],
+                "nwb_file_name": (
+                    SpikeSortingRecordingSelection * SpikeSortingSelection & key
+                ).fetch1("nwb_file_name"),
+                "interval_list_name": (
+                    SpikeSortingRecordingSelection * SpikeSortingSelection & key
+                ).fetch1("interval_list_name"),
             }
         ).fetch1("valid_times")
         sorter, sorter_params = (
-            SpikeSorterParameters * SpikeSorterParameters & key
+            SpikeSorterParameters * SpikeSortingSelection & key
         ).fetch1("sorter", "sorter_params")
 
         # DO:
@@ -200,15 +203,16 @@ class SpikeSorting(dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
         else:
+            # Specify tempdir (expected by some sorters like mountainsort4)
             sorter_temp_dir = tempfile.TemporaryDirectory(
                 dir=os.getenv("SPYGLASS_TEMP_DIR")
             )
-            # add tempdir option for mountainsort
             sorter_params["tempdir"] = sorter_temp_dir.name
-            # turn off whitening by sorter because
-            # recording will be whitened before feeding it to sorter
-            sorter_params["whiten"] = False
-            recording = sip.whiten(recording, dtype=np.float64)
+            # if whitening is specified in sorter params, apply whitening separately
+            # prior to sorting and turn off "sorter whitening"
+            if sorter_params["whiten"]:
+                recording = sip.whiten(recording, dtype=np.float64)
+                sorter_params["whiten"] = False
             sorting = sis.run_sorter(
                 sorter,
                 recording,
@@ -217,11 +221,9 @@ class SpikeSorting(dj.Computed):
             )
         key["time_of_sort"] = int(time.time())
 
-        analysis_file_name, units_object_id = _write_sorting_to_nwb(
+        key["analysis_file_name"], key["object_id"] = _write_sorting_to_nwb(
             sorting, artifact_removed_intervals, key["nwb_file_name"]
         )
-        key["object_id"] = units_object_id
-        key["analysis_file_name"] = analysis_file_name
 
         # INSERT
         # - new entry to AnalysisNwbfile
@@ -278,7 +280,7 @@ class SpikeSorting(dj.Computed):
         Parameters
         ----------
         key : dict
-            primary key of Curation table
+            primary key of SpikeSorting
 
         Returns
         -------
@@ -300,19 +302,19 @@ def _write_sorting_to_nwb(
     sort_interval: Iterable,
     nwb_file_name: str,
 ):
-    """Write a recording in NWB format
+    """Write a sorting in NWB format.
 
     Parameters
     ----------
     sorting : si.BaseSorting
     sort_interval : Iterable
     nwb_file_name : str
-        name of NWB file the recording originates
+        Name of NWB file the recording originates from
 
     Returns
     -------
     analysis_nwb_file : str
-        name of analysis NWB file containing the sorting
+        Name of analysis NWB file containing the sorting
     """
 
     analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
@@ -324,8 +326,8 @@ def _write_sorting_to_nwb(
     ) as io:
         nwbf = io.read()
         nwbf.add_unit_column(
-            name="quality",
-            description="quality of unit",
+            name="curation_label",
+            description="curation label applyed to a unit",
         )
         for unit_id in sorting.get_unit_ids():
             spike_times = sorting.get_unit_spike_train(unit_id)
@@ -333,7 +335,7 @@ def _write_sorting_to_nwb(
                 spike_times=spike_times,
                 id=unit_id,
                 obs_intervals=sort_interval,
-                quality="uncurated",
+                curation_label="uncurated",
             )
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
