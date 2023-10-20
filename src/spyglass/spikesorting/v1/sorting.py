@@ -123,7 +123,11 @@ class SpikeSortingSelection(dj.Manual):
         sorting_id : str
             the unique sorting ID serving as primary key for SpikeSorting
         """
-        key["sorting_id"] = generate_nwb_uuid(key["nwb_file_name"], "S", 6)
+        key["sorting_id"] = generate_nwb_uuid(
+            (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
+            "S",
+            6,
+        )
         cls.insert1(key, skip_duplicates=True)
         return key["sorting_id"]
 

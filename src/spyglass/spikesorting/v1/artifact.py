@@ -16,7 +16,10 @@ from spyglass.common.common_interval import (
     interval_from_inds,
 )
 from spyglass.spikesorting.v1.utils import generate_nwb_uuid
-from spyglass.spikesorting.v1.recording import SpikeSortingRecording
+from spyglass.spikesorting.v1.recording import (
+    SpikeSortingRecording,
+    SpikeSortingRecordingSelection,
+)
 
 schema = dj.schema("spikesorting_v1_artifact")
 
@@ -89,7 +92,11 @@ class ArtifactDetectionSelection(dj.Manual):
         artifact_id : str
             the unique artifact ID serving as primary key for ArtifactDetectionSelection
         """
-        key["artifact_id"] = generate_nwb_uuid(key["nwb_file_name"], "A", 6)
+        key["artifact_id"] = generate_nwb_uuid(
+            (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
+            "A",
+            6,
+        )
         cls.insert1(key, skip_duplicates=True)
         return key["artifact_id"]
 
@@ -155,8 +162,7 @@ def _get_artifact_times(
     verbose: bool = False,
     **job_kwargs,
 ):
-    """
-    Detects times during which artifacts do and do not occur.
+    """Detects times during which artifacts do and do not occur.
 
     Artifacts are defined as periods where the absolute value of the recording
     signal exceeds one or both specified amplitude or z-score thresholds on the
