@@ -42,13 +42,15 @@ NWB_KEEP_FIELDS = (
 class Nwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files.
-    nwb_file_name: varchar(255)   # name of the NWB file
+    nwb_file_name: varchar(64)   # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
     INDEX (nwb_file_abs_path)
     """
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
     # so that alter() can work
+
+    # NOTE: No existing entries impacted my varchar reduction from 255 to 64
 
     @classmethod
     def insert_from_relative_file_name(cls, nwb_file_name):
