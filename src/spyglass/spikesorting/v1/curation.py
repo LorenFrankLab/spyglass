@@ -7,8 +7,11 @@ import spikeinterface.extractors as se
 import spikeinterface.curation as sc
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v1.recording import SpikeSortingRecording
-from spyglass.spikesorting.v1.sorting import SpikeSorting
+from spyglass.spikesorting.v1.recording import (
+    SpikeSortingRecording,
+    SpikeSortingRecordingSelection,
+)
+from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
 
 schema = dj.schema("spikesorting_v1_curation")
 
@@ -18,7 +21,7 @@ valid_labels = ["reject", "noise", "artifact", "mua", "accept"]
 @schema
 class CurationV1(dj.Manual):
     definition = """
-    # Curation of a SpikeSorting. Use `insert_curation` to insert rows if possible.
+    # Curation of a SpikeSorting. Use `insert_curation` to insert rows.
     -> SpikeSorting
     curation_id=0: int
     ---
@@ -39,15 +42,14 @@ class CurationV1(dj.Manual):
         metrics: Union[None, Dict[str, Dict[str, float]]] = None,
         description: str = "",
     ):
-        """Given a sorting_id and the parent_sorting_id (and optional
-        arguments) insert an entry into CurationV1.
+        """Insert an row into CurationV1.
 
         Parameters
         ----------
         sorting_id : str
             The key for the original SpikeSorting
         parent_curation_id : int, optional
-            The id of the parent sorting
+            The curation id of the parent curation
         labels : dict or None, optional
             curation labels (e.g. good, noise, mua)
         merge_groups : dict or None, optional
@@ -105,16 +107,17 @@ class CurationV1(dj.Manual):
             apply_merge=apply_merge,
         )
         # INSERT
+        key = {
+            "sorting_id": sorting_id,
+            "curation_id": curation_id,
+            "parent_curation_id": parent_curation_id,
+            "analysis_file_name": analysis_file_name,
+            "object_id": object_id,
+            "merges_applied": str(apply_merge),
+            "description": description,
+        }
         CurationV1.insert1(
-            {
-                "sorting_id": sorting_id,
-                "curation_id": curation_id,
-                "parent_curation_id": parent_curation_id,
-                "analysis_file_name": analysis_file_name,
-                "object_id": object_id,
-                "merges_applied": str(apply_merge),
-                "description": description,
-            },
+            key,
             skip_duplicates=True,
         )
 
@@ -130,7 +133,7 @@ class CurationV1(dj.Manual):
             primary key of CurationV1 table
         """
 
-        recording_id = (SpikeSorting & key).fetch1("recording_id")
+        recording_id = (SpikeSortingSelection & key).fetch1("recording_id")
         analysis_file_name = (
             SpikeSortingRecording & {"recording_id": recording_id}
         ).fetch1("analysis_file_name")
@@ -236,13 +239,13 @@ def _write_sorting_to_nwb_with_curation(
     # FETCH:
     # - primary key for the associated sorting and recording
     nwb_file_name = (
-        SpikeSortingRecording
-        & (SpikeSorting & {"sorting_id": sorting_id}).fetch1()
+        SpikeSortingRecordingSelection * SpikeSortingSelection
+        & {"sorting_id": sorting_id}
     ).fetch1("nwb_file_name")
 
     # get sorting
     sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-        sorting_key["analysis_file_name"]
+        (SpikeSorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
     )
     sorting = se.read_nwb_sorting(sorting_analysis_file_abs_path)
     if apply_merge:
@@ -331,7 +334,7 @@ def _union_intersecting_lists(lists):
     return result
 
 
-def _list_to_merge_dict(lists_of_strings, target_strings):
+def _list_to_merge_dict(lists_of_strings: List, target_strings: List) -> dict:
     """Converts a list of merge groups to a dict.
     The keys of the dict (unit ids) are provided separately in case
     the merge groups do not contain all the unit ids.
@@ -372,19 +375,9 @@ def _reverse_associations(assoc_dict):
     return result
 
 
-def _merge_dict_to_list(merge_groups):
+def _merge_dict_to_list(merge_groups: dict) -> List:
     """Converts dict of merge groups to list of merge groups.
     Example: {1: [2, 3], 4: [5]} -> [[1, 2, 3], [4, 5]]
-
-    Parameters
-    ----------
-    merge_groups : _type_
-        _description_
-
-    Returns
-    -------
-    _type_
-        _description_
     """
     units_to_merge = _union_intersecting_lists(
         _reverse_associations(merge_groups)
