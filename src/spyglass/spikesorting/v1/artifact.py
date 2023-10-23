@@ -74,7 +74,7 @@ class ArtifactDetectionSelection(dj.Manual):
     artifact_id: varchar(30)
     ---
     -> SpikeSortingRecording
-    -> ArtifactDetectionParameter
+    -> ArtifactDetectionParameters
     """
 
     @classmethod

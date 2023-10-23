@@ -20,7 +20,7 @@ schema = dj.schema("spikesorting_v1_figurl_curation")
 class FigURLCurationSelection(dj.Manual):
     definition = """
     -> CurationV1
-    curation_uri: varchar(1000) = NULL  # kachery-cloud URI to sorting curation
+    curation_uri: varchar(1000) = NULL  # GitHub-based URI to a file that will hold the manual curation
     metrics_figurl: longblob            # metrics to display in the figURL
     """
 

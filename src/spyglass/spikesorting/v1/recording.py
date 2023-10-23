@@ -27,7 +27,7 @@ class SortGroup(dj.Manual):
     definition = """
     # Set of electrodes to spike sort together
     -> Session
-    sort_group_name: str
+    sort_group_name: varchar(30)
     ---
     sort_reference_electrode_id = -1: int  # the electrode to use for referencing
                                            # -1: no reference, -2: common median
@@ -195,7 +195,7 @@ class SpikeSortingPreprocessingParameters(dj.Lookup):
 @schema
 class SpikeSortingRecordingSelection(dj.Manual):
     definition = """
-    # Raw voltage traces and parameters. Use `insert_selection` method to insert.
+    # Raw voltage traces and parameters. Use `insert_selection` method to insert rows.
     recording_id: varchar(50)
     ---
     -> Raw
