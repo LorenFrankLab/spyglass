@@ -6,21 +6,7 @@ mysql_config
 
 # Notebooks
 *.ipynb
-!notebooks/00*.ipynb
-!notebooks/01*.ipynb
-!notebooks/02*.ipynb
-!notebooks/10*.ipynb
-!notebooks/11*.ipynb
-!notebooks/12*.ipynb
-!notebooks/14*.ipynb
-!notebooks/20*.ipynb
-!notebooks/21*.ipynb
-!notebooks/22*.ipynb
-!notebooks/23*.ipynb
-!notebooks/24*.ipynb
-!notebooks/30*.ipynb
-!notebooks/31*.ipynb
-!notebooks/33*.ipynb
+!notebooks/[0-9]*.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
