@@ -223,7 +223,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
         """
         if len((cls & key).fetch()) > 0:
             print(
-                "This recording has already been inserted into SpikeSortingRecordingSelection."
+                "This row has already been inserted into SpikeSortingRecordingSelection."
             )
             return (cls & key).fetch1()
         key["recording_id"] = generate_nwb_uuid(key["nwb_file_name"], "R", 6)

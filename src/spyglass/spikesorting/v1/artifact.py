@@ -38,14 +38,12 @@ class ArtifactDetectionParameters(dj.Lookup):
             "default",
             {
                 "zscore_thresh": None,
-                "amplitude_thresh_uV_uV": 3000,
+                "amplitude_thresh_uV": 3000,
                 "proportion_above_thresh": 1.0,
                 "removal_window_ms": 1.0,
-                "job_kwargs": {
-                    "chunk_duration": "10s",
-                    "n_jobs": 4,
-                    "progress_bar": "True",
-                },
+                "chunk_duration": "10s",
+                "n_jobs": 4,
+                "progress_bar": "True",
             },
         ],
         [
@@ -53,11 +51,9 @@ class ArtifactDetectionParameters(dj.Lookup):
             {
                 "zscore_thresh": None,
                 "amplitude_thresh_uV": None,
-                "job_kwargs": {
-                    "chunk_duration": "10s",
-                    "n_jobs": 4,
-                    "progress_bar": "True",
-                },
+                "chunk_duration": "10s",
+                "n_jobs": 4,
+                "progress_bar": "True",
             },
         ],
     ]
@@ -92,13 +88,18 @@ class ArtifactDetectionSelection(dj.Manual):
         artifact_id : str
             the unique artifact ID serving as primary key for ArtifactDetectionSelection
         """
+        if len((cls & key).fetch()) > 0:
+            print(
+                "This row has already been inserted into ArtifactDetectionSelection."
+            )
+            return (cls & key).fetch1()
         key["artifact_id"] = generate_nwb_uuid(
             (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
             "A",
             6,
         )
         cls.insert1(key, skip_duplicates=True)
-        return key["artifact_id"]
+        return key
 
 
 @schema
@@ -117,7 +118,7 @@ class ArtifactDetection(dj.Computed):
             * SpikeSortingRecording
             * ArtifactDetectionSelection
             & key
-        ).fetch1("artifact_params", "analysis_nwb_file")
+        ).fetch1("artifact_params", "analysis_file_name")
 
         # DO:
         # - load recording
@@ -128,12 +129,6 @@ class ArtifactDetection(dj.Computed):
             recording_analysis_nwb_file_abs_path, load_time_vector=True
         )
         # - detect artifacts
-        if not artifact_params.get("job_kwargs"):
-            artifact_params["job_kwargs"] = {
-                "chunk_duration": "10s",
-                "n_jobs": 4,
-                "progress_bar": "True",
-            }
         artifact_removed_valid_times, _ = _get_artifact_times(
             recording,
             **artifact_params,
@@ -143,7 +138,10 @@ class ArtifactDetection(dj.Computed):
         # - into IntervalList
         IntervalList.insert1(
             dict(
-                nwb_file_name=key["nwb_file_name"],
+                nwb_file_name=(
+                    SpikeSortingRecordingSelection * ArtifactDetectionSelection
+                    & key
+                ).fetch1("nwb_file_name"),
                 interval_list_name=key["artifact_id"],
                 valid_times=artifact_removed_valid_times,
             ),
@@ -215,22 +213,28 @@ def _get_artifact_times(
     # detect frames that are above threshold in parallel
     n_jobs = ensure_n_jobs(recording, n_jobs=job_kwargs.get("n_jobs", 1))
     print(f"Using {n_jobs} jobs...")
-
+    func = _compute_artifact_chunk
+    init_func = _init_artifact_worker
     if n_jobs == 1:
-        init_recording = recording
-    else:
-        init_recording = recording.to_dict()
-
-    executor = ChunkRecordingExecutor(
-        recording=recording,
-        func=_compute_artifact_chunk,
-        init_func=_init_artifact_worker,
-        init_args=(
-            init_recording,
+        init_args = (
+            recording,
             zscore_thresh,
             amplitude_thresh_uV,
             proportion_above_thresh,
-        ),
+        )
+    else:
+        init_args = (
+            recording.to_dict(),
+            zscore_thresh,
+            amplitude_thresh_uV,
+            proportion_above_thresh,
+        )
+
+    executor = ChunkRecordingExecutor(
+        recording,
+        func,
+        init_func,
+        init_args,
         verbose=verbose,
         handle_returns=True,
         job_name="detect_artifact_frames",

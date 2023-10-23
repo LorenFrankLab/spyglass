@@ -123,13 +123,18 @@ class SpikeSortingSelection(dj.Manual):
         sorting_id : str
             the unique sorting ID serving as primary key for SpikeSorting
         """
+        if len((cls & key).fetch()) > 0:
+            print(
+                "This row has already been inserted into SpikeSortingSelection."
+            )
+            return (cls & key).fetch1()
         key["sorting_id"] = generate_nwb_uuid(
-            (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
+            key["nwb_file_name"],
             "S",
             6,
         )
         cls.insert1(key, skip_duplicates=True)
-        return key["sorting_id"]
+        return key
 
 
 @schema
@@ -156,12 +161,12 @@ class SpikeSorting(dj.Computed):
         artifact_removed_intervals = (
             IntervalList
             & {
-                "nwb_file_name": (
-                    SpikeSortingRecordingSelection * SpikeSortingSelection & key
-                ).fetch1("nwb_file_name"),
-                "interval_list_name": (
-                    SpikeSortingRecordingSelection * SpikeSortingSelection & key
-                ).fetch1("interval_list_name"),
+                "nwb_file_name": (SpikeSortingSelection & key).fetch1(
+                    "nwb_file_name"
+                ),
+                "interval_list_name": (SpikeSortingSelection & key).fetch1(
+                    "interval_list_name"
+                ),
             }
         ).fetch1("valid_times")
         sorter, sorter_params = (
@@ -226,13 +231,18 @@ class SpikeSorting(dj.Computed):
         key["time_of_sort"] = int(time.time())
 
         key["analysis_file_name"], key["object_id"] = _write_sorting_to_nwb(
-            sorting, artifact_removed_intervals, key["nwb_file_name"]
+            sorting,
+            artifact_removed_intervals,
+            (SpikeSortingSelection & key).fetch1("nwb_file_name"),
         )
 
         # INSERT
         # - new entry to AnalysisNwbfile
         # - new entry to SpikeSorting
-        AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+        AnalysisNwbfile().add(
+            (SpikeSortingSelection & key).fetch1("nwb_file_name"),
+            key["analysis_file_name"],
+        )
         self.insert1(key)
 
     def delete(self):
