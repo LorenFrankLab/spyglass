@@ -3461,6 +3461,26 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/src/spyglass/utils/database_settings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    database_settings.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/src/spyglass/utils/dj_helper_fn/" class="md-nav__link">
         
   
@@ -4154,7 +4174,8 @@ MySQL), and (b) automate processing steps. To use Spyglass, you'll need to ...</
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="local-environment">Local environment<a class="anchor-link" href="#local-environment">¶</a></h2><p>Codespace users can skip this step.</p>
+<h2 id="local-environment">Local environment<a class="anchor-link" href="#local-environment">¶</a></h2><p>Codespace users can skip this step. Frank Lab members should first follow
+'rec to nwb overview' steps on Google Drive to set up an ssh connection.</p>
 <p>For local use, download and install ...</p>
 <ol>
 <li><a href="https://wiki.python.org/moin/BeginnersGuide/Download">Python 3.9</a>.</li>
@@ -4246,15 +4267,29 @@ with your <code>dj_local_conf.json</code> file.</p>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <p>Members of the Frank Lab can run the <code>dj_config.py</code> helper script to generate
-a default <code>dj_local_conf.json</code> like the one below. Outside users should adjust
-values accordingly.</p>
+a config like the one below. Outside users should copy/paste <code>dj_local_conf_example</code> and adjust values accordingly.</p>
 <div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>spyglass
-python<span class="w"> </span>config/dj_config.py<span class="w"> </span>&lt;username&gt;<span class="w"> </span>&lt;base_path&gt;
+python<span class="w"> </span>config/dj_config.py<span class="w"> </span>&lt;username&gt;<span class="w"> </span>&lt;base_path&gt;<span class="w"> </span>&lt;output_filename&gt;
 </pre></div>
-<p>Producing a json config like the following.</p>
+<p>The base path (formerly <code>SPYGLASS_BASE_DIR</code>) is the directory where all data
+will be saved. See also
+<a href="https://lorenfranklab.github.io/spyglass/0.4/installation/">docs</a> for more
+information on subdirectories.</p>
+<p>A different <code>output_filename</code> will save different files:</p>
+<ul>
+<li><code>dj_local_conf.json</code>: Recommended. Used for tutorials. A file in the current
+directory DataJoint will automatically recognize when a Python session is
+launched from this directory.</li>
+<li><code>.datajoint_config.json</code> or no input: A file in the user's home directory
+that will be referenced whenever no local version (see above) is present.</li>
+<li>Anything else: A custom name that will need to be loaded (e.g.,
+<code>dj.load('x')</code>) for each python session.</li>
+</ul>
+<p>The config will be a <code>json</code> file like the following.</p>
 <div class="highlight"><pre><span></span><span class="p">{</span>
 <span class="w">    </span><span class="nt">"database.host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"lmf-db.cin.ucsf.edu"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"database.user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;username&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"database.password"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Not recommended for shared machines"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"database.port"</span><span class="p">:</span><span class="w"> </span><span class="mi">3306</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"database.use_tls"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"enable_python_native_blobs"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>

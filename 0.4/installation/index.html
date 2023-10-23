@@ -360,6 +360,33 @@
     Config
   </a>
   
+    <nav class="md-nav" aria-label="Config">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#via-file-recommended" class="md-nav__link">
+    Via File (Recommended)
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#via-environment-variables" class="md-nav__link">
+    Via Environment Variables
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temporary-directory" class="md-nav__link">
+    Temporary directory
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -3437,6 +3464,26 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/src/spyglass/utils/database_settings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    database_settings.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/src/spyglass/utils/dj_helper_fn/" class="md-nav__link">
         
   
@@ -3632,6 +3679,33 @@
     Config
   </a>
   
+    <nav class="md-nav" aria-label="Config">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#via-file-recommended" class="md-nav__link">
+    Via File (Recommended)
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#via-environment-variables" class="md-nav__link">
+    Via Environment Variables
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temporary-directory" class="md-nav__link">
+    Temporary directory
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -3702,6 +3776,7 @@ BEFORE installing <code>ghostipy</code>:</p>
 additional details, see the
 <a href="https://datajoint.com/docs/elements/user-guide/#relational-databases">DataJoint documentation</a>.</p>
 <h3 id="config">Config<a class="headerlink" href="#config" title="Permanent link">&para;</a></h3>
+<h4 id="via-file-recommended">Via File (Recommended)<a class="headerlink" href="#via-file-recommended" title="Permanent link">&para;</a></h4>
 <p>A <code>dj_local_conf.json</code> file in your Spyglass directory (or wherever python is
 launched) can hold all the specifics needed to connect to a database. This can
 include different directories for different pipelines. If only the <code>base</code> is
@@ -3721,20 +3796,30 @@ specified, the subfolder names below are included as defaults.</p>
 </span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">  </span><span class="p">}</span>
 </span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="p">}</span>
 </span></code></pre></div>
-<p>For those who prefer environment variables, the following can pasted into a
-file like <code>~/.bashrc</code>.</p>
+<p><code>dj_local_conf_example.json</code> can be copied and saved as <code>dj_local_conf.json</code>
+to set the configuration for a given folder. Alternatively, it can be saved as
+<code>.datajoint_config.json</code> in a user's home directory to be accessed globally.
+See
+<a href="https://datajoint.com/docs/core/datajoint-python/0.14/quick-start/#connection">DataJoint docs</a>
+for more details.</p>
+<h4 id="via-environment-variables">Via Environment Variables<a class="headerlink" href="#via-environment-variables" title="Permanent link">&para;</a></h4>
+<p>Older versions of Spyglass relied exclusively on environment for config. If
+<code>spyglass_dirs</code> is not found in the config file, Spyglass will look for
+environment variables. These can be set either once in a terminal session, or
+permanently in a <code>.bashrc</code> file.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SPYGLASS_BASE_DIR</span><span class="o">=</span><span class="s2">&quot;/stelmo/nwb&quot;</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SPYGLASS_RECORDING_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$SPYGLASS_BASE_DIR</span><span class="s2">/recording&quot;</span>
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SPYGLASS_SORTING_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$SPYGLASS_BASE_DIR</span><span class="s2">/sorting&quot;</span>
 </span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SPYGLASS_VIDEO_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$SPYGLASS_BASE_DIR</span><span class="s2">/video&quot;</span>
 </span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SPYGLASS_WAVEFORMS_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$SPYGLASS_BASE_DIR</span><span class="s2">/waveforms&quot;</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SPYGLASS_TEMP_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$SPYGLASS_BASE_DIR</span><span class="s2">/tmp/spyglass&quot;</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SPYGLASS_TEMP_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$SPYGLASS_BASE_DIR</span><span class="s2">/tmp&quot;</span>
 </span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="nb">export</span><span class="w"> </span><span class="nv">DJ_SUPPORT_FILEPATH_MANAGEMENT</span><span class="o">=</span><span class="s2">&quot;TRUE&quot;</span>
 </span></code></pre></div>
-<p>And then loaded with <code>source ~/.bashrc</code>.</p>
-<p>Note that a local <code>SPYGLASS_TEMP_DIR</code> (e.g., one on your machine) will speed
-up spike sorting, but make sure it has enough free space (ideally at least
-500GB)</p>
+<p>To load variables from a <code>.bashrc</code> file, run <code>source ~/.bashrc</code> in a terminal.</p>
+<h4 id="temporary-directory">Temporary directory<a class="headerlink" href="#temporary-directory" title="Permanent link">&para;</a></h4>
+<p>A temporary directory will speed up spike sorting. If unspecified by either
+method above, it will be assumed as a <code>tmp</code> subfolder relative to the base
+path. Be sure it has enough free space (ideally at least 500GB).</p>
 <h2 id="file-manager">File manager<a class="headerlink" href="#file-manager" title="Permanent link">&para;</a></h2>
 <p><a href="https://github.com/flatironinstitute/kachery-cloud"><code>kachery-cloud</code></a> is a file
 manager for Frank Lab collaborators who do not have access to the lab's
