@@ -183,6 +183,7 @@ class SpikeSortingPreprocessingParameters(dj.Lookup):
                 "frequency_max": 6000,  # low pass filter value
                 "margin_ms": 5,  # margin in ms on border to avoid border effect
                 "seed": 0,  # random seed for whitening
+                "min_segment_length": 1,  # minimum segment length in seconds
             },
         ]
     ]
@@ -220,9 +221,14 @@ class SpikeSortingRecordingSelection(dj.Manual):
         recording_id : str
             the unique recording ID serving as primary key for SpikeSortingRecordingSelection
         """
+        if len((cls & key).fetch()) > 0:
+            print(
+                "This recording has already been inserted into SpikeSortingRecordingSelection."
+            )
+            return (cls & key).fetch1()
         key["recording_id"] = generate_nwb_uuid(key["nwb_file_name"], "R", 6)
         cls.insert1(key, skip_duplicates=True)
-        return key["recording_id"]
+        return key
 
 
 @schema
@@ -245,9 +251,7 @@ class SpikeSortingRecording(dj.Computed):
         recording_nwb_file_name, recording_object_id = _write_recording_to_nwb(
             recording,
             timestamps,
-            (Raw * SpikeSortingRecordingSelection & key).fetch1(
-                ["nwb_file_name"]
-            ),
+            (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
         )
         key["analysis_file_name"] = recording_nwb_file_name
         key["object_id"] = recording_object_id
@@ -258,14 +262,14 @@ class SpikeSortingRecording(dj.Computed):
         # - entry into SpikeSortingRecording
         IntervalList.insert1(
             {
-                "nwb_file_name": (
-                    Raw * SpikeSortingRecordingSelection & key
-                ).fetch1("nwb_file_name"),
+                "nwb_file_name": (SpikeSortingRecordingSelection & key).fetch1(
+                    "nwb_file_name"
+                ),
                 "interval_list_name": key["recording_id"],
                 "valid_times": sort_interval_valid_times,
             }
         )
-        AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+        AnalysisNwbfile().add((SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"), key["analysis_file_name"])
         self.insert1(key)
 
     @classmethod
@@ -336,29 +340,22 @@ class SpikeSortingRecording(dj.Computed):
                 ),
                 "interval_list_name": (
                     SpikeSortingRecordingSelection & key
-                ).fetch1("sort_interval_name"),
+                ).fetch1("interval_list_name"),
             }
-        ).fetch1("sort_interval")
+        ).fetch1("valid_times")
         valid_interval_times = (
             IntervalList
             & {
                 "nwb_file_name": (SpikeSortingRecordingSelection & key).fetch1(
                     "nwb_file_name"
                 ),
-                "interval_list_name": (
-                    SpikeSortingRecordingSelection & key
-                ).fetch1("sort_interval_name"),
+                "interval_list_name": "raw data valid times",
             }
         ).fetch1("valid_times")
         params = (
-            (
-                SpikeSortingPreprocessingParameters
-                * SpikeSortingRecordingSelection
-                & key
-            )
-            .fetch1("preproc_param_name")
-            .fetch1("preproc_params")
-        )
+            SpikeSortingPreprocessingParameters * SpikeSortingRecordingSelection
+            & key
+        ).fetch1("preproc_params")
 
         # DO:
         # - take intersection between sort interval and valid times
@@ -392,12 +389,12 @@ class SpikeSortingRecording(dj.Computed):
         # - the reference channel
         # - probe type
         # - filter parameters
-        nwb_file_name = (Raw * SpikeSortingRecordingSelection & key).fetch1(
+        nwb_file_name = (SpikeSortingRecordingSelection & key).fetch1(
             "nwb_file_name"
         )
-        sort_group_name = (
-            SortGroup * SpikeSortingRecordingSelection & key
-        ).fetch1("sort_group_name")
+        sort_group_name = (SpikeSortingRecordingSelection & key).fetch1(
+            "sort_group_name"
+        )
         nwb_file_abs_path = Nwbfile().get_abs_path(nwb_file_name)
         channel_ids = (
             SortGroup.SortGroupElectrode
@@ -422,7 +419,7 @@ class SpikeSortingRecording(dj.Computed):
                 (
                     Electrode * Probe
                     & {
-                        "nwb_file_name": key["nwb_file_name"],
+                        "nwb_file_name": nwb_file_name,
                         "electrode_id": channel_id,
                     }
                 ).fetch1("probe_type")
@@ -431,7 +428,7 @@ class SpikeSortingRecording(dj.Computed):
                 (
                     Electrode
                     & {
-                        "nwb_file_name": key["nwb_file_name"],
+                        "nwb_file_name": nwb_file_name,
                         "electrode_id": channel_id,
                     }
                 ).fetch1("electrode_group_name")
@@ -501,6 +498,10 @@ class SpikeSortingRecording(dj.Computed):
                 reference="global",
                 operator="median",
                 dtype=np.float64,
+            )
+        elif ref_channel_id == -1:
+            recording = recording.channel_slice(
+                channel_ids=recording_channel_ids
             )
         else:
             raise ValueError(
@@ -623,7 +624,7 @@ def _write_recording_to_nwb(
     ) as io:
         nwbfile = io.read()
         table_region = nwbfile.create_electrode_table_region(
-            region=recording.get_channel_ids(),
+            region=[i for i in recording.get_channel_ids()],
             description="Sort group",
         )
         data_iterator = SpikeInterfaceRecordingDataChunkIterator(
@@ -632,7 +633,7 @@ def _write_recording_to_nwb(
         timestamps_iterator = TimestampsDataChunkIterator(
             recording=TimestampsExtractor(timestamps), buffer_gb=5
         )
-        processed_electrical_series = pynwb.ElectricalSeries(
+        processed_electrical_series = pynwb.ecephys.ElectricalSeries(
             name="ProcessedElectricalSeries",
             data=data_iterator,
             electrodes=table_region,

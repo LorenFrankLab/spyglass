@@ -20,8 +20,9 @@ schema = dj.schema("spikesorting_v1_figurl_curation")
 class FigURLCurationSelection(dj.Manual):
     definition = """
     -> CurationV1
-    curation_uri: varchar(1000) = NULL  # GitHub-based URI to a file that will hold the manual curation
-    metrics_figurl: longblob            # metrics to display in the figURL
+    curation_uri: varchar(1000)     # GitHub-based URI to a file to which the manual curation will be saved
+    ---
+    metrics_figurl: blob            # metrics to display in the figURL
     """
 
     @staticmethod

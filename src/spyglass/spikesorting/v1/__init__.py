@@ -5,11 +5,11 @@ from .recording import (
     SpikeSortingRecording,
 )
 from .artifact import (
-    ArtifactDetectionParameter,
+    ArtifactDetectionParameters,
     ArtifactDetectionSelection,
-    ArtifactRemovedInterval,
+    ArtifactDetection,
 )
-from .sorting import SpikeSorterParameter, SpikeSortingSelection, SpikeSorting
+from .sorting import SpikeSorterParameters, SpikeSortingSelection, SpikeSorting
 from .curation import CurationV1
 from .metric_curation import (
     WaveformParameter,
