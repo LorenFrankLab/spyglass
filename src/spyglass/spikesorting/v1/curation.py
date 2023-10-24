@@ -116,6 +116,13 @@ class CurationV1(dj.Manual):
             apply_merge=apply_merge,
         )
         # INSERT
+        AnalysisNwbfile().add(
+            (SpikeSortingSelection & {"sorting_id": sorting_id}).fetch1(
+                "nwb_file_name"
+            ),
+            analysis_file_name,
+        )
+
         key = {
             "sorting_id": sorting_id,
             "curation_id": curation_id,
@@ -296,7 +303,6 @@ def _write_sorting_to_nwb_with_curation(
             )
         # add labels, merge groups, metrics
         if labels is not None:
-            print("labels not none")
             label_values = []
             for unit_id in unit_ids:
                 if unit_id not in labels:
@@ -309,7 +315,6 @@ def _write_sorting_to_nwb_with_curation(
                 data=label_values,
             )
         if merge_groups is not None:
-            print("merge_groups not none")
             merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
             merge_groups_list = [
                 [""] if value == [] else value
@@ -321,7 +326,6 @@ def _write_sorting_to_nwb_with_curation(
                 data=merge_groups_list,
             )
         if metrics is not None:
-            print("metrics not none")
             for metric, metric_dict in metrics.items():
                 metric_values = []
                 for unit_id in unit_ids:
