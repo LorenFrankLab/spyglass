@@ -7,9 +7,9 @@ import spikeinterface.extractors as se
 import spikeinterface.curation as sc
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_ephys import Raw
 from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
-    SpikeSortingRecordingSelection,
 )
 from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
 
@@ -32,8 +32,9 @@ class CurationV1(dj.Manual):
     description: varchar(100)
     """
 
-    @staticmethod
+    @classmethod
     def insert_curation(
+        cls,
         sorting_id: str,
         parent_curation_id: int = -1,
         labels: Union[None, Dict[str, List[str]]] = None,
@@ -78,25 +79,33 @@ class CurationV1(dj.Manual):
             # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
             if (
                 len(
-                    (CurationV1 & [sorting_id, parent_curation_id]).fetch("KEY")
+                    (
+                        cls
+                        & {
+                            "sorting_id": sorting_id,
+                            "parent_curation_id": parent_curation_id,
+                        }
+                    ).fetch("KEY")
                 )
                 > 0
             ):
                 Warning(f"Sorting has already been inserted.")
-                return (CurationV1 & [sorting_id, parent_curation_id]).fetch(
-                    "KEY"
-                )
+                return (
+                    cls
+                    & {
+                        "sorting_id": sorting_id,
+                        "parent_curation_id": parent_curation_id,
+                    }
+                ).fetch("KEY")
 
         # generate curation ID
-        existing_curation_ids = (CurationV1 & sorting_id).fetch("curation_id")
+        existing_curation_ids = (cls & {"sorting_id": sorting_id}).fetch(
+            "curation_id"
+        )
         if len(existing_curation_ids) > 0:
             curation_id = max(existing_curation_ids) + 1
         else:
             curation_id = 0
-
-        labels = labels or {}
-        merge_groups = merge_groups or []
-        metrics = metrics or {}
 
         # write the curation labels, merge groups, and metrics as columns in the units table of NWB
         analysis_file_name, object_id = _write_sorting_to_nwb_with_curation(
@@ -116,15 +125,15 @@ class CurationV1(dj.Manual):
             "merges_applied": str(apply_merge),
             "description": description,
         }
-        CurationV1.insert1(
+        cls.insert1(
             key,
             skip_duplicates=True,
         )
 
         return key
 
-    @staticmethod
-    def get_recording(key: dict) -> si.BaseRecording:
+    @classmethod
+    def get_recording(cls, key: dict) -> si.BaseRecording:
         """Get recording related to this curation as spikeinterface BaseRecording
 
         Parameters
@@ -146,8 +155,8 @@ class CurationV1(dj.Manual):
 
         return recording
 
-    @staticmethod
-    def get_sorting(key: dict) -> si.BaseSorting:
+    @classmethod
+    def get_sorting(cls, key: dict) -> si.BaseSorting:
         """Get sorting in the analysis NWB file as spikeinterface BaseSorting
 
         Parameters
@@ -160,17 +169,21 @@ class CurationV1(dj.Manual):
         sorting : si.BaseSorting
 
         """
+        recording = cls.get_recording(key)
 
         analysis_file_name = (CurationV1 & key).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
-        sorting = se.read_nwb_sorting(analysis_file_abs_path)
+        sorting = se.read_nwb_sorting(
+            analysis_file_abs_path,
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
 
         return sorting
 
-    @staticmethod
-    def get_merged_sorting(key: dict) -> si.BaseSorting:
+    @classmethod
+    def get_merged_sorting(cls, key: dict) -> si.BaseSorting:
         """Get sorting with merges applied.
 
         Parameters
@@ -183,12 +196,17 @@ class CurationV1(dj.Manual):
         sorting : si.BaseSorting
 
         """
-        curation_key = (CurationV1 & key).fetch1()
+        recording = cls.get_recording(key)
+
+        curation_key = (cls & key).fetch1()
 
         sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             curation_key["analysis_file_name"]
         )
-        si_sorting = se.read_nwb_sorting(sorting_analysis_file_abs_path)
+        si_sorting = se.read_nwb_sorting(
+            sorting_analysis_file_abs_path,
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
 
         with pynwb.NWBHDF5IO(
             sorting_analysis_file_abs_path, "r", load_namespaces=True
@@ -238,16 +256,20 @@ def _write_sorting_to_nwb_with_curation(
     """
     # FETCH:
     # - primary key for the associated sorting and recording
-    nwb_file_name = (
-        SpikeSortingRecordingSelection * SpikeSortingSelection
-        & {"sorting_id": sorting_id}
-    ).fetch1("nwb_file_name")
+    nwb_file_name = (SpikeSortingSelection & {"sorting_id": sorting_id}).fetch1(
+        "nwb_file_name"
+    )
 
     # get sorting
     sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
         (SpikeSorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
     )
-    sorting = se.read_nwb_sorting(sorting_analysis_file_abs_path)
+    sorting = se.read_nwb_sorting(
+        sorting_analysis_file_abs_path,
+        sampling_frequency=(Raw & {"nwb_file_name": nwb_file_name}).fetch1(
+            "sampling_rate"
+        ),
+    )
     if apply_merge:
         sorting = sc.MergeUnitsSorting(
             parent_sorting=sorting, units_to_merge=merge_groups
@@ -274,10 +296,11 @@ def _write_sorting_to_nwb_with_curation(
             )
         # add labels, merge groups, metrics
         if labels is not None:
+            print("labels not none")
             label_values = []
             for unit_id in unit_ids:
                 if unit_id not in labels:
-                    label_values.append([])
+                    label_values.append([""])
                 else:
                     label_values.append(labels[unit_id])
             nwbf.add_unit_column(
@@ -286,13 +309,19 @@ def _write_sorting_to_nwb_with_curation(
                 data=label_values,
             )
         if merge_groups is not None:
+            print("merge_groups not none")
             merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
+            merge_groups_list = [
+                [""] if value == [] else value
+                for value in merge_groups_dict.values()
+            ]
             nwbf.add_unit_column(
                 name="merge_groups",
                 description="merge groups",
-                data=list(merge_groups_dict.values()),
+                data=merge_groups_list,
             )
         if metrics is not None:
+            print("metrics not none")
             for metric, metric_dict in metrics.items():
                 metric_values = []
                 for unit_id in unit_ids:
