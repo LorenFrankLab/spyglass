@@ -10,7 +10,7 @@ import spikeinterface.qualitymetrics as sq
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
-from spyglass.spikesorting.v1.sorting import SpikeSorting
+from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
 from spyglass.spikesorting.v1.curation import (
     CurationV1,
     _list_to_merge_dict,
@@ -47,11 +47,11 @@ _comparison_to_function = {
 
 
 @schema
-class WaveformParameter(dj.Lookup):
+class WaveformParameters(dj.Lookup):
     definition = """
     waveform_param_name: varchar(80) # name of waveform extraction parameters
     ---
-    waveform_param: blob # a dict of waveform extraction parameters
+    waveform_params: blob # a dict of waveform extraction parameters
     """
 
     contents = [
@@ -85,12 +85,12 @@ class WaveformParameter(dj.Lookup):
 
 
 @schema
-class MetricParameter(dj.Lookup):
+class MetricParameters(dj.Lookup):
     definition = """
     # Parameters for computing quality metrics of sorted units
     metric_param_name: varchar(200)
     ---
-    metric_param: blob
+    metric_params: blob
     """
     metric_default_param_name = "franklab_default"
     metric_default_param = {
@@ -136,12 +136,12 @@ class MetricParameter(dj.Lookup):
 
 
 @schema
-class MetricCurationParameter(dj.Lookup):
+class MetricCurationParameters(dj.Lookup):
     definition = """
     metric_curation_param_name: varchar(200)
     ---
-    label_param: blob   # dict of param to label units
-    merge_param: blob   # dict of param to merge units
+    label_params: blob   # dict of param to label units
+    merge_params: blob   # dict of param to merge units
     """
 
     contents = [
@@ -157,45 +157,68 @@ class MetricCurationParameter(dj.Lookup):
 @schema
 class MetricCurationSelection(dj.Manual):
     definition = """
+    metric_curation_id: varchar(32)
+    ---
     -> CurationV1
-    -> WaveformParameter
-    -> MetricParameter
-    -> MetricCurationParameter
+    -> WaveformParameters
+    -> MetricParameters
+    -> MetricCurationParameters
     """
+
+    @classmethod
+    def insert_selection(cls, key: dict):
+        """Insert a row into MetricCurationSelection with an
+        automatically generated unique metric curation ID as the sole primary key.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of CurationV1, WaveformParameters, MetricParameters MetricCurationParameters
+
+        Returns
+        -------
+        key : dict
+            key for the inserted row
+        """
+        if len((cls & key).fetch()) > 0:
+            print(
+                "This row has already been inserted into MetricCurationSelection."
+            )
+            return (cls & key).fetch1()
+        key["metric_curation_id"] = generate_nwb_uuid(
+            (SpikeSortingSelection & key).fetch1("nwb_file_name"),
+            "MC",
+            6,
+        )
+        cls.insert1(key, skip_duplicates=True)
+        return key
 
 
 @schema
 class MetricCuration(dj.Computed):
     definition = """
-    metric_curation_id: varchar(32)
-    ---
     -> MetricCurationSelection
+    ---
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the metrics in NWB file
     """
 
     def make(self, key):
         # FETCH
-        recording_id = (SpikeSorting & key).fetch1("recording_id")
-        nwb_file_name = (SpikeSortingRecording & recording_id).fetch1(
-            "nwb_file_name"
-        )
-        waveform_param = (WaveformParameter & key).fetch1("waveform_param")
-        metric_param = (MetricParameter & key).fetch1("metric_param")
-        label_param = (MetricCurationParameter & key).fetch1("label_param")
-        merge_param = (MetricCurationParameter & key).fetch1("merge_param")
+        nwb_file_name = (SpikeSortingSelection *
+                         MetricCurationSelection & key).fetch1("nwb_file_name")
 
+        waveform_params = (WaveformParameters * MetricCurationSelection & key).fetch1("waveform_params")
+        metric_params = (MetricParameters * MetricCurationSelection & key).fetch1("metric_params")
+        label_params, merge_params = (MetricCurationParameters* MetricCurationSelection & key).fetch1("label_params", "merge_params")
+        sorting_id, curation_id = (MetricCurationSelection & key).fetch1("sorting_id","curation_id")
         # DO
-        # create uuid for this metric curation
-        key["metric_curation_id"] = generate_nwb_uuid(
-            nwb_file_name=nwb_file_name, initial="MC", len_uuid=6
-        )
         # load recording and sorting
-        recording = CurationV1.get_recording(key)
-        sorting = CurationV1.get_sorting(key)
+        recording = CurationV1.get_recording({"sorting_id":sorting_id, "curation_id":curation_id})
+        sorting = CurationV1.get_sorting({"sorting_id":sorting_id, "curation_id":curation_id})
         # extract waveforms
-        if "whiten" in waveform_param:
-            if waveform_param.pop("whiten"):
+        if "whiten" in waveform_params:
+            if waveform_params.pop("whiten"):
                 recording = sp.whiten(recording, dtype=np.float64)
 
         waveforms_dir = (
@@ -212,19 +235,19 @@ class MetricCuration(dj.Computed):
             recording=recording,
             sorting=sorting,
             folder=waveforms_dir,
-            **waveform_param,
+            **waveform_params,
         )
         # compute metrics
         print("Computing metrics...")
         metrics = {}
-        for metric_name, metric_param_dict in metric_param.items():
+        for metric_name, metric_param_dict in metric_params.items():
             metrics[metric_name] = self._compute_metric(
                 nwb_file_name, waveforms, metric_name, **metric_param_dict
             )
 
         print("Applying curation...")
-        labels = self._compute_labels(metrics, label_param)
-        merge_groups = self._compute_merge_groups(metrics, merge_param)
+        labels = self._compute_labels(metrics, label_params)
+        merge_groups = self._compute_merge_groups(metrics, merge_params)
 
         print("Saving to NWB...")
         (
@@ -234,7 +257,12 @@ class MetricCuration(dj.Computed):
             waveforms, metrics, labels, merge_groups
         )
 
+
         # INSERT
+        AnalysisNwbfile().add(
+            nwb_file_name,
+            key["analysis_file_name"],
+        )
         self.insert1(key)
 
     @classmethod
@@ -246,10 +274,10 @@ class MetricCuration(dj.Computed):
         analysis_file_name = (cls & key).fetch1("analysis_file_name")
         object_id = (cls & key).fetch1("object_id")
         metric_param_name = (cls & key).fetch1("metric_param_name")
-        metric_param = (
-            MetricParameter & {"metric_param_name": metric_param_name}
-        ).fetch1("metric_param")
-        metric_names = list(metric_param.keys())
+        metric_params = (
+            MetricParameters & {"metric_param_name": metric_param_name}
+        ).fetch1("metric_params")
+        metric_names = list(metric_params.keys())
 
         metrics = {}
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
@@ -333,12 +361,12 @@ class MetricCuration(dj.Computed):
     @staticmethod
     def _compute_labels(
         metrics: Dict[str, Dict[str, Union[float, List[float]]]],
-        label_param: Dict[str, List[Any]],
+        label_params: Dict[str, List[Any]],
     ) -> Dict[str, List[str]]:
         """Computes the labels based on the metric and label parameters.
 
         Parameters
-        ---------
+        ----------
         quality_metrics : dict
             Example: {"snr" : {"1" : 2, "2" : 0.1, "3" : 2.3}}
             This indicates that the values of the "snr" quality metric
@@ -359,16 +387,16 @@ class MetricCuration(dj.Computed):
             Example: {"1" : ["good", "mua"], "2" : ["noise"], "3" : ["good", "mua"]}
 
         """
-        if not label_param:
+        if not label_params:
             return {}
         else:
             unit_ids = list(metrics[list(metrics.keys())[0]].keys())
             labels = {unit_id: [] for unit_id in unit_ids}
-            for metric in label_param:
+            for metric in label_params:
                 if metric not in metrics:
                     Warning(f"{metric} not found in quality metrics; skipping")
                 else:
-                    for condition in label_param[metric]:
+                    for condition in label_params[metric]:
                         assert (
                             len(condition) == 3
                         ), f"Condition {condition} must be of length 3"
@@ -378,13 +406,13 @@ class MetricCuration(dj.Computed):
                                 metrics[metric][unit_id],
                                 condition[1],
                             ):
-                                labels[unit_id].extend(label_param[metric][2])
+                                labels[unit_id].extend(label_params[metric][2])
             return labels
 
     @staticmethod
     def _compute_merge_groups(
         metrics: Dict[str, Dict[str, Union[float, List[float]]]],
-        merge_param: Dict[str, List[Any]],
+        merge_params: Dict[str, List[Any]],
     ) -> Dict[str, List[str]]:
         """Identifies units to be merged based on the metrics and merge parameters.
 
@@ -395,11 +423,11 @@ class MetricCuration(dj.Computed):
                                              "1" : {"1" : 1.00, "2" : 0.10, "3": 0.95},
                                              "2" : {"1" : 0.10, "2" : 1.00, "3": 0.70},
                                              "3" : {"1" : 0.95, "2" : 0.70, "3": 1.00}
-                                            }
+                                            }}
             This shows the pairwise values of the "cosine_similarity" quality metric
             for the units "1", "2", "3" as a nested dict.
 
-        merge_param : dict
+        merge_params : dict
             Example: {"cosine_similarity" : [">", 0.9]}
             This indicates that units with values of the "cosine_similarity" quality metric
             greater than 0.9 should be placed in the same merge group.
@@ -412,16 +440,16 @@ class MetricCuration(dj.Computed):
 
         """
 
-        if not merge_param:
+        if not merge_params:
             return []
         else:
             unit_ids = list(metrics[list(metrics.keys())[0]].keys())
             merge_groups = {unit_id: [] for unit_id in unit_ids}
-            for metric in merge_param:
+            for metric in merge_params:
                 if metric not in metrics:
                     Warning(f"{metric} not found in quality metrics; skipping")
                 else:
-                    compare = _comparison_to_function[merge_param[metric][0]]
+                    compare = _comparison_to_function[merge_params[metric][0]]
                     for unit_id in unit_ids:
                         other_unit_ids = [
                             other_unit_id
@@ -431,7 +459,7 @@ class MetricCuration(dj.Computed):
                         for other_unit_id in other_unit_ids:
                             if compare(
                                 metrics[metric][unit_id][other_unit_id],
-                                merge_param[metric][1],
+                                merge_params[metric][1],
                             ):
                                 merge_groups[unit_id].extend(other_unit_id)
             return merge_groups

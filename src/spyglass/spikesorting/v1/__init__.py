@@ -12,9 +12,9 @@ from .artifact import (
 from .sorting import SpikeSorterParameters, SpikeSortingSelection, SpikeSorting
 from .curation import CurationV1
 from .metric_curation import (
-    WaveformParameter,
-    MetricParameter,
-    MetricCurationParameter,
+    WaveformParameters,
+    MetricParameters,
+    MetricCurationParameters,
     MetricCurationSelection,
     MetricCuration,
 )
