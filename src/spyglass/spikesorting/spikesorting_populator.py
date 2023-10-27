@@ -227,7 +227,7 @@ def spikesorting_pipeline_populator(
         print("Extracting waveforms")
         curation_keys = [
             {**k, "waveform_params_name": waveform_params_name}
-            for k in (Curation() & sort_dict).fetch("KEY")
+            for k in (Curation() & sort_dict & {"curation_id": 0}).fetch("KEY")
         ]
         WaveformSelection.insert(curation_keys, skip_duplicates=True)
         Waveforms.populate(sort_dict)
