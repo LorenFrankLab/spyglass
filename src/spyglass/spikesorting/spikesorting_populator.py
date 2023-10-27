@@ -214,7 +214,8 @@ def spikesorting_pipeline_populator(
     # initial curation
     print("Beginning curation")
     for sorting_key in (SpikeSorting() & sort_dict).fetch("KEY"):
-        Curation.insert_curation(sorting_key)
+        if not (Curation() & sorting_key):
+            Curation.insert_curation(sorting_key)
 
     # Calculate quality metrics and perform automatic curation if specified
     if (
