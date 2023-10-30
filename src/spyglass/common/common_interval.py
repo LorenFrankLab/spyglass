@@ -506,3 +506,34 @@ def interval_set_difference_inds(intervals1, intervals2):
                 i += 1
     result += intervals1[i:]
     return result
+
+
+def interval_list_complement(intervals1, intervals2):
+    "Finds intervals in intervals1 that are not in intervals2"
+    result = []
+
+    for start1, end1 in intervals1:
+        subtracted = [(start1, end1)]
+
+        for start2, end2 in intervals2:
+            new_subtracted = []
+
+            for s, e in subtracted:
+                if start2 <= s and e <= end2:
+                    continue
+
+                if e <= start2 or end2 <= s:
+                    new_subtracted.append((s, e))
+                    continue
+
+                if start2 > s:
+                    new_subtracted.append((s, start2))
+
+                if end2 < e:
+                    new_subtracted.append((end2, e))
+
+            subtracted = new_subtracted
+
+        result.extend(subtracted)
+
+    return np.asarray(result)
