@@ -269,7 +269,10 @@ class SpikeSortingRecording(dj.Computed):
                 "valid_times": sort_interval_valid_times,
             }
         )
-        AnalysisNwbfile().add((SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"), key["analysis_file_name"])
+        AnalysisNwbfile().add(
+            (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
+            key["analysis_file_name"],
+        )
         self.insert1(key)
 
     @classmethod

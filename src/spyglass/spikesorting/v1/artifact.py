@@ -261,7 +261,6 @@ def _get_artifact_times(
 
     artifact_frames = executor.run()
     artifact_frames = np.concatenate(artifact_frames)
-    print(f"artifact_frames: {artifact_frames}")
 
     # turn ms to remove total into s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms / 2 / 1000
@@ -276,7 +275,6 @@ def _get_artifact_times(
 
     # convert indices to intervals
     artifact_intervals = interval_from_inds(artifact_frames)
-    print(f"artifact_intervals: {artifact_intervals}")
 
     # convert to seconds and pad with window
     artifact_intervals_s = np.zeros(
@@ -303,7 +301,7 @@ def _get_artifact_times(
 
     # find non-artifact intervals in timestamps
     artifact_removed_valid_times = interval_list_complement(
-        sort_interval_valid_times, artifact_intervals_s
+        sort_interval_valid_times, artifact_intervals_s, min_length=1
     )
     artifact_removed_valid_times = reduce(
         _union_concat, artifact_removed_valid_times
