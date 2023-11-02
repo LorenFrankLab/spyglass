@@ -72,12 +72,14 @@ class MarkParameters(dj.Manual):
     time."""
 
     definition = """
-    mark_param_name : varchar(80) # a name for this set of parameters
+    mark_param_name : varchar(32) # a name for this set of parameters
     ---
     # the type of mark. Currently only 'amplitude' is supported
     mark_type = 'amplitude':  varchar(40)
     mark_param_dict:    BLOB    # dictionary of parameters for the mark extraction function
     """
+
+    # NOTE: Current max lenth is 7
 
     def insert_default(self):
         """Insert the default parameter set
@@ -665,11 +667,10 @@ class MultiunitHighSynchronyEventsParameters(dj.Manual):
         )
 
 
-@schema
-class MultiunitHighSynchronyEvents(dj.Computed):
+class MultiunitHighSynchronyEvents(object):
     """Finds times of high mulitunit activity during immobility."""
 
-    definition = """
+    non_definition = """
     -> MultiunitHighSynchronyEventsParameters
     -> UnitMarksIndicator
     -> IntervalPositionInfo
@@ -677,6 +678,8 @@ class MultiunitHighSynchronyEvents(dj.Computed):
     -> AnalysisNwbfile
     multiunit_hse_times_object_id: varchar(40)
     """
+
+    # NOTE: table unused. Needs redesign
 
     def make(self, key):
         marks = (UnitMarksIndicator & key).fetch_xarray()

@@ -151,7 +151,7 @@ class Nwbfile(dj.Manual):
 class AnalysisNwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting.
-    analysis_file_name: varchar(255)               # name of the file
+    analysis_file_name: varchar(64)               # name of the file
     ---
     -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
     analysis_file_abs_path: filepath@analysis      # the full path to the file
@@ -162,6 +162,8 @@ class AnalysisNwbfile(dj.Manual):
     """
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
     # so that alter() can work
+
+    # NOTE: Current max is 44
 
     def create(self, nwb_file_name):
         """Open the NWB file, create a copy, write the copy to disk and return the name of the new file.
