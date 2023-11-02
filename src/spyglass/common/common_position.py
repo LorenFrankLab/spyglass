@@ -291,6 +291,7 @@ class IntervalPositionInfo(dj.Computed):
 
         return spatial_df
 
+    @staticmethod
     def _upsample(
         front_LED,
         back_LED,
