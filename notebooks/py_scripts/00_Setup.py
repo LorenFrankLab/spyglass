@@ -168,7 +168,7 @@
 # ```
 #
 # If you see an error saying `Could not find SPYGLASS_BASE_DIR`, try loading your
-# config befor importing Spyglass.
+# config before importing Spyglass.
 #
 # ```python
 # import datajoint as dj
