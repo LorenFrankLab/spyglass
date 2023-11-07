@@ -6,7 +6,7 @@
 - Revise contribution guidelines. #655
 - Minor bug fixes. #656, #657, #659, #651, #671
 - Add setup instruction specificity.
-- Reduce primary key varchar allocaion aross may tables. #664
+- Reduce primary key varchar allocation aross may tables. #664
 
 ## [0.4.2] (October 10, 2023)
 
