@@ -664,7 +664,7 @@ class MultiunitHighSynchronyEventsParameters(dj.Manual):
 
 
 """
-NOTE: Table decomissioned. See #630, #664. Excessive key length.
+NOTE: Table decommissioned. See #630, #664. Excessive key length.
 
 class MultiunitHighSynchronyEvents(dj.Computed):
     "Finds times of high mulitunit activity during immobility."
