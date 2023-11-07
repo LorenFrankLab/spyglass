@@ -325,8 +325,8 @@ class SortInterval(dj.Manual):
     ---
     sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
-    # NOTE: Reduced key less than 2 existing entries
-    # All existing entries are below 69
+
+    # NOTE: See #630, #664. Excessive key length.
 
 
 @schema
@@ -368,8 +368,6 @@ class SpikeSortingRecordingSelection(dj.Manual):
     ---
     -> IntervalList
     """
-
-    # NOTE: Too make pks?
 
 
 @schema

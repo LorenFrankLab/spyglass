@@ -53,7 +53,7 @@ class PositionInfoParameters(dj.Lookup):
         # pandas.DataFrame.interpolation for list of methods
     """
 
-    # NOTE: Current max len 26
+    # See #630, #664. Excessive key length.
 
 
 @schema

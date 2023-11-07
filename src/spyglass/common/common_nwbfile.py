@@ -50,7 +50,7 @@ class Nwbfile(dj.Manual):
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
     # so that alter() can work
 
-    # NOTE: No existing entries impacted my varchar reduction from 255 to 64
+    # NOTE: See #630, #664. Excessive key length.
 
     @classmethod
     def insert_from_relative_file_name(cls, nwb_file_name):
@@ -163,7 +163,7 @@ class AnalysisNwbfile(dj.Manual):
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
     # so that alter() can work
 
-    # NOTE: Current max is 44
+    # See #630, #664. Excessive key length.
 
     def create(self, nwb_file_name):
         """Open the NWB file, create a copy, write the copy to disk and return the name of the new file.

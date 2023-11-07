@@ -23,7 +23,7 @@ class IntervalList(dj.Manual):
     valid_times: longblob  # numpy array with start/end times for each interval
     """
 
-    # NOTE: Current max is 165
+    # See #630, #664. Excessive key length.
 
     @classmethod
     def insert_from_nwbfile(cls, nwbf, *, nwb_file_name):

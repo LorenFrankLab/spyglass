@@ -33,7 +33,7 @@ class SpikeSorterParameters(dj.Manual):
     sorter_params: blob
     """
 
-    # NOTE no existing entries impacted by this change
+    # NOTE: See #630, #664. Excessive key length.
 
     def insert_default(self):
         """Default params from spike sorters available via spikeinterface"""

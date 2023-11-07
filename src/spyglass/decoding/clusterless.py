@@ -26,24 +26,20 @@ from replay_trajectory_classification.classifier import (
     _DEFAULT_CONTINUOUS_TRANSITIONS,
     _DEFAULT_ENVIRONMENT,
 )
-from replay_trajectory_classification.discrete_state_transitions import (
-    DiagonalDiscrete,
-)
-from replay_trajectory_classification.initial_conditions import (
-    UniformInitialConditions,
-)
-
+from replay_trajectory_classification.discrete_state_transitions import DiagonalDiscrete
+from replay_trajectory_classification.initial_conditions import UniformInitialConditions
 from ripple_detection import (
     get_multiunit_population_firing_rate,
     multiunit_HSE_detector,
 )
-from spyglass.common.common_interval import IntervalList
-from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from tqdm.auto import tqdm
+
 from spyglass.common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
 )
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.decoding.core import (
     convert_valid_times_to_slice,
     get_valid_ephys_position_times_by_epoch,
@@ -61,7 +57,7 @@ from spyglass.spikesorting.spikesorting_sorting import (
     SpikeSorting,
     SpikeSortingSelection,
 )
-from tqdm.auto import tqdm
+from spyglass.utils.dj_helper_fn import fetch_nwb
 
 schema = dj.schema("decoding_clusterless")
 
@@ -79,7 +75,7 @@ class MarkParameters(dj.Manual):
     mark_param_dict:    BLOB    # dictionary of parameters for the mark extraction function
     """
 
-    # NOTE: Current max lenth is 7
+    # NOTE: See #630, #664. Excessive key length.
 
     def insert_default(self):
         """Insert the default parameter set
@@ -667,19 +663,20 @@ class MultiunitHighSynchronyEventsParameters(dj.Manual):
         )
 
 
-class MultiunitHighSynchronyEvents(object):
-    """Finds times of high mulitunit activity during immobility."""
+"""
+NOTE: Table decomissioned. See #630, #664. Excessive key length.
 
-    non_definition = """
+class MultiunitHighSynchronyEvents(dj.Computed):
+    "Finds times of high mulitunit activity during immobility."
+
+    definition = "
     -> MultiunitHighSynchronyEventsParameters
     -> UnitMarksIndicator
     -> IntervalPositionInfo
     ---
     -> AnalysisNwbfile
     multiunit_hse_times_object_id: varchar(40)
-    """
-
-    # NOTE: table unused. Needs redesign
+    "
 
     def make(self, key):
         marks = (UnitMarksIndicator & key).fetch_xarray()
@@ -715,6 +712,7 @@ class MultiunitHighSynchronyEvents(object):
         )
 
         self.insert1(key)
+"""
 
 
 def get_decoding_data_for_epoch(

@@ -390,7 +390,7 @@ class MetricParameters(dj.Manual):
     metric_params: blob
     """
 
-    # NOTE: No existing entries impacted by this change
+    # NOTE: See #630, #664. Excessive key length.
 
     metric_default_params = {
         "snr": {

@@ -1,7 +1,9 @@
 import datajoint as dj
 import kachery_client as kc
 import spikeinterface as si
-from sortingview.SpikeSortingView import SpikeSortingView as SortingViewSpikeSortingView
+from sortingview.SpikeSortingView import (
+    SpikeSortingView as SortingViewSpikeSortingView,
+)
 
 from ..spikesorting import SpikeSorting, SpikeSortingRecording
 from .prepare_spikesortingview_data import prepare_spikesortingview_data

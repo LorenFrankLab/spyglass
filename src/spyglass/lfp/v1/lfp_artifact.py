@@ -182,7 +182,6 @@ class LFPArtifactDetection(dj.Computed):
                         key["target_interval_list_name"],
                         "LFP",
                         key["artifact_params_name"],
-                        # "artifact_removed_valid_times",
                     ]
                 ),
             )
@@ -211,6 +210,5 @@ class LFPArtifactRemovedIntervalList(dj.Manual):
     artifact_times: longblob # np.array of artifact intervals
     """
 
-    # NOTE: 200 existing enties over this new limit.
-    # Existing names could be significantly cut by reducing redundancy.
-    # Removing final string above from existing entries means all below new 128
+    # See #630, #664. Excessive key length.
+    # 200 enties in database over 128. If string removed as above, all fit.

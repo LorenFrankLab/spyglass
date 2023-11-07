@@ -95,7 +95,7 @@ class PositionVideoSelection(dj.Manual):
     output_dir              : varchar(255)                 # directory where to save output video
     """
 
-    # NOTE: table not currently in use
+    # NOTE: See #630, #664. Excessive key length.
 
     def insert1(self, key, **kwargs):
         key["plot_id"] = self.get_plotid(key)
