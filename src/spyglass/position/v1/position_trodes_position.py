@@ -205,12 +205,12 @@ class TrodesPosV1(dj.Computed):
 
     @staticmethod
     def generate_pos_components(*args, **kwargs):
-        return IntervalPositionInfo.generate_pos_components(*args, **kwargs)
+        return IntervalPositionInfo().generate_pos_components(*args, **kwargs)
 
     @staticmethod
     def calculate_position_info(*args, **kwargs):
         """Calculate position info from 2D spatial series."""
-        return IntervalPositionInfo.calculate_position_info(*args, **kwargs)
+        return IntervalPositionInfo().calculate_position_info(*args, **kwargs)
 
     def fetch_nwb(self, *attrs, **kwargs):
         return fetch_nwb(
