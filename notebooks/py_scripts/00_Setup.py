@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.14.5
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -39,6 +39,10 @@
 # 2. [mamba](https://mamba.readthedocs.io/en/latest/installation.html) as a
 #    replacement for conda. Spyglass installation is significantly faster with
 #    mamba.
+#    ```bash
+#    wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+#    bash Miniforge3-$(uname)-$(uname -m).sh
+#    ```
 # 3. [VS Code](https://code.visualstudio.com/docs/python/python-tutorial) with
 #    relevant python extensions, including
 #    [Jupyter](https://code.visualstudio.com/docs/datascience/jupyter-notebooks).
@@ -96,13 +100,25 @@
 # ### Existing Database
 #
 
-# Members of the Frank Lab can run the `dj_config.py` helper script to generate
-# a config like the one below. Outside users should copy/paste `dj_local_conf_example` and adjust values accordingly.
+# Members of the Frank Lab will need to use DataJoint 0.14.2 (currently in
+# pre-release) in order to change their password on the MySQL 8 server. DataJoint
+# 0.14.2
+#
+# ```bash
+# git clone https://github.com/datajoint/datajoint-python
+# pip install ./datajoint-python
+# ```
+#
+# Members of the lab can run the `dj_config.py` helper script to generate a config
+# like the one below.
 #
 # ```bash
 # # cd spyglass
 # python config/dj_config.py <username> <base_path> <output_filename>
 # ```
+#
+# Outside users should copy/paste `dj_local_conf_example` and adjust values
+# accordingly.
 #
 # The base path (formerly `SPYGLASS_BASE_DIR`) is the directory where all data
 # will be saved. See also
@@ -151,6 +167,14 @@
 # }
 # ```
 #
+# If you see an error saying `Could not find SPYGLASS_BASE_DIR`, try loading your
+# config before importing Spyglass.
+#
+# ```python
+# import datajoint as dj
+# dj.load('/path/to/config')
+# import spyglass
+# ```
 
 # ### Running your own database
 #

@@ -5,6 +5,7 @@
 - Migrate `config` helper scripts to Spyglass codebase. #662
 - Revise contribution guidelines. #655
 - Minor bug fixes. #656, #657, #659, #651, #671
+- Add setup instruction specificity.
 
 ## [0.4.2] (October 10, 2023)
 
