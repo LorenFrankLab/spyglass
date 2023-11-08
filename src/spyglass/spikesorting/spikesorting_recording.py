@@ -20,8 +20,8 @@ from ..common.common_interval import (
 from ..common.common_lab import LabTeam  # noqa: F401
 from ..common.common_nwbfile import Nwbfile
 from ..common.common_session import Session  # noqa: F401
-from ..utils.dj_helper_fn import dj_replace
 from ..settings import recording_dir
+from ..utils.dj_helper_fn import dj_replace
 
 schema = dj.schema("spikesorting_recording")
 
@@ -321,19 +321,23 @@ class SortGroup(dj.Manual):
 class SortInterval(dj.Manual):
     definition = """
     -> Session
-    sort_interval_name: varchar(200) # name for this interval
+    sort_interval_name: varchar(64) # name for this interval 
     ---
     sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
+
+    # NOTE: See #630, #664. Excessive key length.
 
 
 @schema
 class SpikeSortingPreprocessingParameters(dj.Manual):
     definition = """
-    preproc_params_name: varchar(200)
+    preproc_params_name: varchar(32)
     ---
     preproc_params: blob
     """
+    # NOTE: Reduced key less than 2 existing entries
+    # All existing entries are below 48
 
     def insert_default(self):
         # set up the default filter parameters

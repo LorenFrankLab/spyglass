@@ -14,7 +14,7 @@ from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
 from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import AnalysisNwbfile
-from ..settings import temp_dir, sorting_dir
+from ..settings import sorting_dir, temp_dir
 from .spikesorting_artifact import ArtifactRemovedIntervalList
 from .spikesorting_recording import (
     SpikeSortingRecording,
@@ -27,11 +27,13 @@ schema = dj.schema("spikesorting_sorting")
 @schema
 class SpikeSorterParameters(dj.Manual):
     definition = """
-    sorter: varchar(200)
-    sorter_params_name: varchar(200)
+    sorter: varchar(32)
+    sorter_params_name: varchar(64)
     ---
     sorter_params: blob
     """
+
+    # NOTE: See #630, #664. Excessive key length.
 
     def insert_default(self):
         """Default params from spike sorters available via spikeinterface"""
@@ -236,10 +238,11 @@ class SpikeSorting(dj.Computed):
         self.insert1(key)
 
     def delete(self):
-        """Extends the delete method of base class to implement permission checking.
-        Note that this is NOT a security feature, as anyone that has access to source code
-        can disable it; it just makes it less likely to accidentally delete entries.
-        """
+        """Extends the delete method of base class to implement permission
+        checking. Note that this is NOT a security feature, as anyone that has
+        access to source code can disable it; it just makes it less likely to
+        accidentally delete entries."""
+
         current_user_name = dj.config["database.user"]
         entries = self.fetch()
         permission_bool = np.zeros((len(entries),))

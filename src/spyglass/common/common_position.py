@@ -39,7 +39,7 @@ class PositionInfoParameters(dj.Lookup):
     """
 
     definition = """
-    position_info_param_name : varchar(80) # name for this set of parameters
+    position_info_param_name : varchar(32) # name for this set of parameters
     ---
     max_separation = 9.0  : float   # max distance (in cm) between head LEDs
     max_speed = 300.0     : float   # max speed (in cm / s) of animal
@@ -52,6 +52,8 @@ class PositionInfoParameters(dj.Lookup):
     upsampling_interpolation_method = linear : varchar(80) # see
         # pandas.DataFrame.interpolation for list of methods
     """
+
+    # See #630, #664. Excessive key length.
 
 
 @schema

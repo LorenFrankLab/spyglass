@@ -18,10 +18,12 @@ class IntervalList(dj.Manual):
     definition = """
     # Time intervals used for analysis
     -> Session
-    interval_list_name: varchar(200)  # descriptive name of this interval list
+    interval_list_name: varchar(170)  # descriptive name of this interval list
     ---
     valid_times: longblob  # numpy array with start/end times for each interval
     """
+
+    # See #630, #664. Excessive key length.
 
     @classmethod
     def insert_from_nwbfile(cls, nwbf, *, nwb_file_name):

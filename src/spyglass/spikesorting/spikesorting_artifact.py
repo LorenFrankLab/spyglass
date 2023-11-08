@@ -140,12 +140,14 @@ class ArtifactRemovedIntervalList(dj.Manual):
     definition = """
     # Stores intervals without detected artifacts.
     # Note that entries can come from either ArtifactDetection() or alternative artifact removal analyses.
-    artifact_removed_interval_list_name: varchar(200)
+    artifact_removed_interval_list_name: varchar(170)
     ---
     -> ArtifactDetectionSelection
     artifact_removed_valid_times: longblob
     artifact_times: longblob # np array of artifact intervals
     """
+
+    # See #630, #664. Excessive key length.
 
 
 def _get_artifact_times(

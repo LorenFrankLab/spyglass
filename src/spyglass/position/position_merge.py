@@ -88,12 +88,14 @@ class PositionOutput(_Merge):
 class PositionVideoSelection(dj.Manual):
     definition = """
     nwb_file_name           : varchar(255)                 # name of the NWB file
-    interval_list_name      : varchar(200)                 # descriptive name of this interval list
+    interval_list_name      : varchar(170)                 # descriptive name of this interval list
     plot_id                 : int
     plot                    : varchar(40) # Which position info to overlay on video file
     ---
     output_dir              : varchar(255)                 # directory where to save output video
     """
+
+    # NOTE: See #630, #664. Excessive key length.
 
     def insert1(self, key, **kwargs):
         key["plot_id"] = self.get_plotid(key)

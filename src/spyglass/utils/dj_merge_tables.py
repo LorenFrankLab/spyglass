@@ -727,7 +727,10 @@ def delete_downstream_merge(
 
 
 def _unique_descendants(
-    table: dj.Table, recurse_level: int, return_names: bool = False
+    table: dj.Table,
+    recurse_level: int = 2,
+    return_names: bool = False,
+    attribute=None,
 ) -> list:
     """Recurisively find unique descendants of a given table
 
@@ -739,6 +742,8 @@ def _unique_descendants(
         The maximum level of descendants to find.
     return_names: bool
         If True, return names of descendants found. Else return Table objects.
+    attribute: str, optional
+        If provided, only return descendants that have this attribute.
 
     Returns
     -------
@@ -749,11 +754,18 @@ def _unique_descendants(
     if recurse_level == 0:
         return []
 
+    if attribute is None:
+        skip_attr_check = True
+    else:
+        skip_attr_check = False
+
     descendants = {}
 
     def recurse_descendants(sub_table, level):
         for descendant in sub_table.descendants(as_objects=True):
-            if descendant.full_table_name not in descendants:
+            if descendant.full_table_name not in descendants and (
+                skip_attr_check or attribute in descendant.heading.attributes
+            ):
                 descendants[descendant.full_table_name] = descendant
                 if level > 1:
                     recurse_descendants(descendant, level - 1)

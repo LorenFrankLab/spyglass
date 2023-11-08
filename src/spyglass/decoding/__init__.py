@@ -3,7 +3,6 @@ from spyglass.decoding.clusterless import (
     ClusterlessClassifierParameters,
     MarkParameters,
     MultiunitFiringRate,
-    MultiunitHighSynchronyEvents,
     MultiunitHighSynchronyEventsParameters,
     UnitMarkParameters,
     UnitMarks,

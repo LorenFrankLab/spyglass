@@ -1,13 +1,13 @@
 import datajoint as dj
+import numpy as np
 
+from spyglass.common import get_electrode_indices
 from spyglass.common.common_interval import IntervalList
 from spyglass.lfp.v1.lfp import LFPV1
 from spyglass.lfp.v1.lfp_artifact_difference_detection import (
     difference_artifact_detector,
 )
 from spyglass.lfp.v1.lfp_artifact_MAD_detection import mad_artifact_detector
-import numpy as np
-from spyglass.common import get_electrode_indices
 
 schema = dj.schema("lfp_v1")
 
@@ -182,7 +182,6 @@ class LFPArtifactDetection(dj.Computed):
                         key["target_interval_list_name"],
                         "LFP",
                         key["artifact_params_name"],
-                        "artifact_removed_valid_times",
                     ]
                 ),
             )
@@ -204,9 +203,12 @@ class LFPArtifactRemovedIntervalList(dj.Manual):
     definition = """
     # Stores intervals without detected artifacts. Entries can come from either
     # ArtifactDetection() or alternative artifact removal analyses.
-    artifact_removed_interval_list_name: varchar(200)
+    artifact_removed_interval_list_name: varchar(128)
     ---
     -> LFPArtifactDetectionSelection
     artifact_removed_valid_times: longblob
     artifact_times: longblob # np.array of artifact intervals
     """
+
+    # See #630, #664. Excessive key length.
+    # 200 enties in database over 128. If string removed as above, all fit.
