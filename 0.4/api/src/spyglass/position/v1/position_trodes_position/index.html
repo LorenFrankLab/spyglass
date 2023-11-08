@@ -22,7 +22,7 @@
       
       
       <link rel="icon" href="../../../../../../images/Spyglass.svg">
-      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.4.6">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.4.8">
     
     
       
@@ -30,7 +30,7 @@
       
     
     
-      <link rel="stylesheet" href="../../../../../../assets/stylesheets/main.35e1ed30.min.css">
+      <link rel="stylesheet" href="../../../../../../assets/stylesheets/main.4b4a2bd9.min.css">
       
         
         <link rel="stylesheet" href="../../../../../../assets/stylesheets/palette.356b1318.min.css">
@@ -4596,12 +4596,12 @@ the new paramset as edit_name.</p>
 </span><span id="__span-0-205"><a id="__codelineno-0-205" name="__codelineno-0-205"></a>
 </span><span id="__span-0-206"><a id="__codelineno-0-206" name="__codelineno-0-206"></a>    <span class="nd">@staticmethod</span>
 </span><span id="__span-0-207"><a id="__codelineno-0-207" name="__codelineno-0-207"></a>    <span class="k">def</span> <span class="nf">generate_pos_components</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-</span><span id="__span-0-208"><a id="__codelineno-0-208" name="__codelineno-0-208"></a>        <span class="k">return</span> <span class="n">IntervalPositionInfo</span><span class="o">.</span><span class="n">generate_pos_components</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</span><span id="__span-0-208"><a id="__codelineno-0-208" name="__codelineno-0-208"></a>        <span class="k">return</span> <span class="n">IntervalPositionInfo</span><span class="p">()</span><span class="o">.</span><span class="n">generate_pos_components</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
 </span><span id="__span-0-209"><a id="__codelineno-0-209" name="__codelineno-0-209"></a>
 </span><span id="__span-0-210"><a id="__codelineno-0-210" name="__codelineno-0-210"></a>    <span class="nd">@staticmethod</span>
 </span><span id="__span-0-211"><a id="__codelineno-0-211" name="__codelineno-0-211"></a>    <span class="k">def</span> <span class="nf">calculate_position_info</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
 </span><span id="__span-0-212"><a id="__codelineno-0-212" name="__codelineno-0-212"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Calculate position info from 2D spatial series.&quot;&quot;&quot;</span>
-</span><span id="__span-0-213"><a id="__codelineno-0-213" name="__codelineno-0-213"></a>        <span class="k">return</span> <span class="n">IntervalPositionInfo</span><span class="o">.</span><span class="n">calculate_position_info</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</span><span id="__span-0-213"><a id="__codelineno-0-213" name="__codelineno-0-213"></a>        <span class="k">return</span> <span class="n">IntervalPositionInfo</span><span class="p">()</span><span class="o">.</span><span class="n">calculate_position_info</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
 </span><span id="__span-0-214"><a id="__codelineno-0-214" name="__codelineno-0-214"></a>
 </span><span id="__span-0-215"><a id="__codelineno-0-215" name="__codelineno-0-215"></a>    <span class="k">def</span> <span class="nf">fetch_nwb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
 </span><span id="__span-0-216"><a id="__codelineno-0-216" name="__codelineno-0-216"></a>        <span class="k">return</span> <span class="n">fetch_nwb</span><span class="p">(</span>
@@ -4653,7 +4653,7 @@ the new paramset as edit_name.</p>
 <span class="normal"><a href="#__codelineno-0-213">213</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-210"><a id="__codelineno-0-210" name="__codelineno-0-210"></a><span class="nd">@staticmethod</span>
 </span><span id="__span-0-211"><a id="__codelineno-0-211" name="__codelineno-0-211"></a><span class="k">def</span> <span class="nf">calculate_position_info</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
 </span><span id="__span-0-212"><a id="__codelineno-0-212" name="__codelineno-0-212"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Calculate position info from 2D spatial series.&quot;&quot;&quot;</span>
-</span><span id="__span-0-213"><a id="__codelineno-0-213" name="__codelineno-0-213"></a>    <span class="k">return</span> <span class="n">IntervalPositionInfo</span><span class="o">.</span><span class="n">calculate_position_info</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</span><span id="__span-0-213"><a id="__codelineno-0-213" name="__codelineno-0-213"></a>    <span class="k">return</span> <span class="n">IntervalPositionInfo</span><span class="p">()</span><span class="o">.</span><span class="n">calculate_position_info</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
 </span></code></pre></div></td></tr></table></div>
           </details>
   </div>
@@ -5415,7 +5415,7 @@ the original LED positions overlaid on the video of the animal.</p>
     <script id="__config" type="application/json">{"base": "../../../../../..", "features": ["toc.follow", "navigation.top", "navigation.instant", "navigation.tracking", "navigation.top", "search.suggest", "search.share", "navigation.footer", "content.code.copy"], "search": "../../../../../../assets/javascripts/workers/search.f886a092.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../../../../../assets/javascripts/bundle.aecac24b.min.js"></script>
+      <script src="../../../../../../assets/javascripts/bundle.81fa17fe.min.js"></script>
       
     
   </body>

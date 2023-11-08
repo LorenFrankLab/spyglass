@@ -22,7 +22,7 @@
       
       
       <link rel="icon" href="../../images/Spyglass.svg">
-      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.4.6">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.4.8">
     
     
       
@@ -30,7 +30,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.35e1ed30.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.4b4a2bd9.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.356b1318.min.css">
@@ -3992,7 +3992,7 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
     if (!diagrams.length) {
       return;
     }
-    const mermaid = (await import("https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.5.0/mermaid.esm.min.mjs")).default;
+    const mermaid = (await import("https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.0/mermaid.esm.min.mjs")).default;
     const parser = new DOMParser();
 
     mermaid.initialize({
@@ -4181,7 +4181,10 @@ MySQL), and (b) automate processing steps. To use Spyglass, you'll need to ...</
 <li><a href="https://wiki.python.org/moin/BeginnersGuide/Download">Python 3.9</a>.</li>
 <li><a href="https://mamba.readthedocs.io/en/latest/installation.html">mamba</a> as a
 replacement for conda. Spyglass installation is significantly faster with
-mamba.</li>
+mamba.<div class="highlight"><pre><span></span>wget<span class="w"> </span><span class="s2">"https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-</span><span class="k">$(</span>uname<span class="k">)</span><span class="s2">-</span><span class="k">$(</span>uname<span class="w"> </span>-m<span class="k">)</span><span class="s2">.sh"</span>
+bash<span class="w"> </span>Miniforge3-<span class="k">$(</span>uname<span class="k">)</span>-<span class="k">$(</span>uname<span class="w"> </span>-m<span class="k">)</span>.sh
+</pre></div>
+</li>
 <li><a href="https://code.visualstudio.com/docs/python/python-tutorial">VS Code</a> with
 relevant python extensions, including
 <a href="https://code.visualstudio.com/docs/datascience/jupyter-notebooks">Jupyter</a>.
@@ -4266,11 +4269,19 @@ with your <code>dj_local_conf.json</code> file.</p>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>Members of the Frank Lab can run the <code>dj_config.py</code> helper script to generate
-a config like the one below. Outside users should copy/paste <code>dj_local_conf_example</code> and adjust values accordingly.</p>
+<p>Members of the Frank Lab will need to use DataJoint 0.14.2 (currently in
+pre-release) in order to change their password on the MySQL 8 server. DataJoint
+0.14.2</p>
+<div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/datajoint/datajoint-python
+pip<span class="w"> </span>install<span class="w"> </span>./datajoint-python
+</pre></div>
+<p>Members of the lab can run the <code>dj_config.py</code> helper script to generate a config
+like the one below.</p>
 <div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>spyglass
 python<span class="w"> </span>config/dj_config.py<span class="w"> </span>&lt;username&gt;<span class="w"> </span>&lt;base_path&gt;<span class="w"> </span>&lt;output_filename&gt;
 </pre></div>
+<p>Outside users should copy/paste <code>dj_local_conf_example</code> and adjust values
+accordingly.</p>
 <p>The base path (formerly <code>SPYGLASS_BASE_DIR</code>) is the directory where all data
 will be saved. See also
 <a href="https://lorenfranklab.github.io/spyglass/0.4/installation/">docs</a> for more
@@ -4312,6 +4323,12 @@ that will be referenced whenever no local version (see above) is present.</li>
 <span class="w">        </span><span class="p">}</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="p">}</span>
+</pre></div>
+<p>If you see an error saying <code>Could not find SPYGLASS_BASE_DIR</code>, try loading your
+config before importing Spyglass.</p>
+<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">datajoint</span> <span class="k">as</span> <span class="nn">dj</span>
+<span class="n">dj</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s1">'/path/to/config'</span><span class="p">)</span>
+<span class="kn">import</span> <span class="nn">spyglass</span>
 </pre></div>
 </div>
 </div>
@@ -4752,7 +4769,7 @@ Populate: Populating table DataAcquisitionDeviceAmplifier with data {'data_acqui
     <script id="__config" type="application/json">{"base": "../..", "features": ["toc.follow", "navigation.top", "navigation.instant", "navigation.tracking", "navigation.top", "search.suggest", "search.share", "navigation.footer", "content.code.copy"], "search": "../../assets/javascripts/workers/search.f886a092.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.aecac24b.min.js"></script>
+      <script src="../../assets/javascripts/bundle.81fa17fe.min.js"></script>
       
     
   </body>
