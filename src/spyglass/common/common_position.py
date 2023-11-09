@@ -406,6 +406,12 @@ class IntervalPositionInfo(dj.Computed):
         # Set points to NaN where the front and back LEDs are too separated
         dist_between_LEDs = get_distance(back_LED, front_LED)
         is_too_separated = dist_between_LEDs >= max_LED_separation
+        if np.all(is_too_separated):
+            raise ValueError(
+                "All points are too far apart. If this is single LED data,"
+                + "please check that using a parameter set with large max_LED_seperation."
+                + f"Current max_LED_separation: {max_LED_separation}"
+            )
 
         back_LED[is_too_separated] = np.nan
         front_LED[is_too_separated] = np.nan
