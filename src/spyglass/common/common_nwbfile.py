@@ -3,6 +3,7 @@ import pathlib
 import random
 import stat
 import string
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -11,6 +12,7 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
+from ..settings import raw_dir
 from ..utils.dj_helper_fn import get_child_tables
 from ..utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
@@ -40,13 +42,15 @@ NWB_KEEP_FIELDS = (
 class Nwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files.
-    nwb_file_name: varchar(255)   # name of the NWB file
+    nwb_file_name: varchar(64)   # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
     INDEX (nwb_file_abs_path)
     """
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
     # so that alter() can work
+
+    # NOTE: See #630, #664. Excessive key length.
 
     @classmethod
     def insert_from_relative_file_name(cls, nwb_file_name):
@@ -57,7 +61,7 @@ class Nwbfile(dj.Manual):
         nwb_file_name : str
             The relative path to the NWB file.
         """
-        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name, new_file=True)
         assert os.path.exists(
             nwb_file_abs_path
         ), f"File does not exist: {nwb_file_abs_path}"
@@ -67,29 +71,48 @@ class Nwbfile(dj.Manual):
         key["nwb_file_abs_path"] = nwb_file_abs_path
         cls.insert1(key, skip_duplicates=True)
 
-    @staticmethod
-    def get_abs_path(nwb_file_name):
-        """Return the absolute path for a stored raw NWB file given just the file name.
+    @classmethod
+    def _get_file_name(cls, nwb_file_name: str) -> str:
+        """Get valid nwb file name given substring."""
+        query = cls & f'nwb_file_name LIKE "%{nwb_file_name}%"'
 
-        The SPYGLASS_BASE_DIR environment variable must be set.
+        if len(query) == 1:
+            return query.fetch1("nwb_file_name")
+
+        raise ValueError(
+            f"Found {len(query)} matches for {nwb_file_name} in Nwbfile table:"
+            + f" \n{query}"
+        )
+
+    @classmethod
+    def get_file_key(cls, nwb_file_name: str) -> dict:
+        """Return primary key using nwb_file_name substring."""
+        return {"nwb_file_name": cls._get_file_name(nwb_file_name)}
+
+    @classmethod
+    def get_abs_path(cls, nwb_file_name, new_file=False) -> str:
+        """Return absolute path for a stored raw NWB file given file name.
+
+        The SPYGLASS_BASE_DIR must be set, either as an environment or part of
+        dj.config['custom']. See spyglass.settings.load_config
 
         Parameters
         ----------
         nwb_file_name : str
-            The name of an NWB file that has been inserted into the Nwbfile() schema.
+            The name of an NWB file that has been inserted into the Nwbfile()
+            table. May be file substring. May include % wildcard(s).
+        new_file : bool, optional
+            Adding a new file to Nwbfile table. Defaults to False.
 
         Returns
         -------
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
-        assert (
-            base_dir is not None
-        ), "You must set SPYGLASS_BASE_DIR or provide the base_dir argument"
+        if new_file:
+            return raw_dir + "/" + nwb_file_name
 
-        nwb_file_abspath = base_dir / "raw" / nwb_file_name
-        return str(nwb_file_abspath)
+        return raw_dir + "/" + cls._get_file_name(nwb_file_name)
 
     @staticmethod
     def add_to_lock(nwb_file_name):
@@ -128,7 +151,7 @@ class Nwbfile(dj.Manual):
 class AnalysisNwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting.
-    analysis_file_name: varchar(255)               # name of the file
+    analysis_file_name: varchar(64)               # name of the file
     ---
     -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
     analysis_file_abs_path: filepath@analysis      # the full path to the file
@@ -139,6 +162,8 @@ class AnalysisNwbfile(dj.Manual):
     """
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
     # so that alter() can work
+
+    # See #630, #664. Excessive key length.
 
     def create(self, nwb_file_name):
         """Open the NWB file, create a copy, write the copy to disk and return the name of the new file.
@@ -189,8 +214,8 @@ class AnalysisNwbfile(dj.Manual):
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
-        # each file ends with a random string of 10 digits, so we generate that string and redo if by some miracle
-        # it's already there
+        # each file ends with a random string of 10 digits, so we generate that
+        # string and redo if by some miracle it's already there
         file_in_table = True
         while file_in_table:
             analysis_file_name = (

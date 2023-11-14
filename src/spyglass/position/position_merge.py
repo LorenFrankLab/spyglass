@@ -5,6 +5,7 @@ from pathlib import Path
 import datajoint as dj
 import numpy as np
 import pandas as pd
+from datajoint.utils import to_camel_case
 from tqdm import tqdm as tqdm
 
 from ..common.common_position import IntervalPositionInfo as CommonPos
@@ -16,6 +17,12 @@ from .v1.position_trodes_position import TrodesPosV1
 
 schema = dj.schema("position_merge")
 
+source_class_dict = {
+    "IntervalPositionInfo": CommonPos,
+    "DLCPosV1": DLCPosV1,
+    "TrodesPosV1": TrodesPosV1,
+}
+
 
 @schema
 class PositionOutput(_Merge):
@@ -26,10 +33,9 @@ class PositionOutput(_Merge):
     """
 
     definition = """
-    merge_id : uuid
+    merge_id: uuid
     ---
     source: varchar(32)
-    ---
     """
 
     class DLCPosV1(dj.Part):
@@ -68,85 +74,28 @@ class PositionOutput(_Merge):
     def fetch1_dataframe(self):
         # proj replaces operator restriction to enable
         # (TableName & restriction).fetch1_dataframe()
-        nwb_data = self.fetch_nwb(self.proj())[0]
-        index = pd.Index(
-            np.asarray(nwb_data["position"].get_spatial_series().timestamps),
-            name="time",
+        key = self.merge_restrict(self.proj())
+        query = (
+            source_class_dict[
+                to_camel_case(self.merge_get_parent(self.proj()).table_name)
+            ]
+            & key
         )
-        if (
-            "video_frame_ind"
-            in nwb_data["velocity"].fields["time_series"].keys()
-        ):
-            COLUMNS = [
-                "video_frame_ind",
-                "position_x",
-                "position_y",
-                "orientation",
-                "velocity_x",
-                "velocity_y",
-                "speed",
-            ]
-            return pd.DataFrame(
-                np.concatenate(
-                    (
-                        np.asarray(
-                            nwb_data["velocity"]
-                            .get_timeseries("video_frame_ind")
-                            .data,
-                            dtype=int,
-                        )[:, np.newaxis],
-                        np.asarray(
-                            nwb_data["position"].get_spatial_series().data
-                        ),
-                        np.asarray(
-                            nwb_data["orientation"].get_spatial_series().data
-                        )[:, np.newaxis],
-                        np.asarray(
-                            nwb_data["velocity"].get_timeseries("velocity").data
-                        ),
-                    ),
-                    axis=1,
-                ),
-                columns=COLUMNS,
-                index=index,
-            )
-        else:
-            COLUMNS = [
-                "position_x",
-                "position_y",
-                "orientation",
-                "velocity_x",
-                "velocity_y",
-                "speed",
-            ]
-            return pd.DataFrame(
-                np.concatenate(
-                    (
-                        np.asarray(
-                            nwb_data["position"].get_spatial_series().data
-                        ),
-                        np.asarray(
-                            nwb_data["orientation"].get_spatial_series().data
-                        )[:, np.newaxis],
-                        np.asarray(nwb_data["velocity"].get_timeseries().data),
-                    ),
-                    axis=1,
-                ),
-                columns=COLUMNS,
-                index=index,
-            )
+        return query.fetch1_dataframe()
 
 
 @schema
 class PositionVideoSelection(dj.Manual):
     definition = """
     nwb_file_name           : varchar(255)                 # name of the NWB file
-    interval_list_name      : varchar(200)                 # descriptive name of this interval list
+    interval_list_name      : varchar(170)                 # descriptive name of this interval list
     plot_id                 : int
     plot                    : varchar(40) # Which position info to overlay on video file
     ---
     output_dir              : varchar(255)                 # directory where to save output video
     """
+
+    # NOTE: See #630, #664. Excessive key length.
 
     def insert1(self, key, **kwargs):
         key["plot_id"] = self.get_plotid(key)

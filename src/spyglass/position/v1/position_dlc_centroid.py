@@ -890,7 +890,7 @@ def one_pt_centroid(pos_df: pd.DataFrame, **params):
     pos_df : pd.DataFrame
         dataframe containing x and y position for the point of interest,
         index is timestamps. Column name specified by params
-    **kwargs : dict
+    **params : dict
         contains a 'point1' key,
         whose value specifies the column name in `pos_df`
 

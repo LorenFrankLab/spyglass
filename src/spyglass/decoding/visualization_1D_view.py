@@ -29,13 +29,9 @@ def get_sampling_freq(times: np.ndarray) -> float:
 def get_trimmed_bin_center_index(
     place_bin_centers: np.ndarray, trimmed_place_bin_centers: np.ndarray
 ) -> np.ndarray:
-    return np.asarray(
-        [
-            np.nonzero(np.isclose(place_bin_centers, trimmed_bin_center))[0][0]
-            for trimmed_bin_center in trimmed_place_bin_centers
-        ],
-        dtype=np.uint16,
-    )
+    return np.searchsorted(
+        place_bin_centers, trimmed_place_bin_centers, side="left"
+    ).astype(np.uint16)
 
 
 def create_1D_decode_view(

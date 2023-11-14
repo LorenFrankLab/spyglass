@@ -1,5 +1,42 @@
 # Change Log
 
+## [0.4.4] (Unreleased)
+
+- Support multi-cam projects in DeepLabCut.
+
+## [0.4.3] (November 7, 2023)
+
+- Migrate `config` helper scripts to Spyglass codebase. #662
+- Revise contribution guidelines. #655
+- Minor bug fixes. #656, #657, #659, #651, #671
+- Add setup instruction specificity.
+- Reduce primary key varchar allocation aross may tables. #664
+
+## [0.4.2] (October 10, 2023)
+
+### Infrastructure / Support
+
+- Bumped Python version to 3.9. #583
+- Updated user management helper scripts for MySQL 8. #650
+- Centralized config/path handling to permit setting via datajoint config. #593
+- Fixed Merge Table deletes: error specificity and transaction context. #617
+
+### Pipelines
+
+- Common:
+    - Added support multiple cameras per epoch. #557
+    - Removed `common_backup` schema. #631
+    - Added support for multiple position objects per NWB in `common_behav` via
+    PositionSource.SpatialSeries and RawPosition.PosObject #628, #616.
+    _Note:_ Existing functions have been made compatible, but column labels for
+    `RawPosition.fetch1_dataframe` may change.
+- Spike sorting:
+    - Added pipeline populator. #637, #646, #647
+    - Fixed curation functionality for `nn_isolation`. #597, #598
+- Position: Added position interval/epoch mapping via PositionIntervalMap. #620,
+  #621, #627
+- LFP: Refactored pipeline. #594, #588, #605, #606, #607, #608, #615, #629
+
 ## [0.4.1] (June 30, 2023)
 
 - Add mkdocs automated deployment. #527, #537, #549, #551
@@ -62,6 +99,9 @@
 - Allow creation and linkage of device metadata from YAML #400
 - Move helper functions to utils directory #386
 
+[0.4.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.4
+[0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
+[0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
 [0.4.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.1
 [0.4.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.0
 [0.3.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.4

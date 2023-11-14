@@ -71,41 +71,9 @@ def _set_env():
     """Set environment variables."""
     print("Setting datajoint and kachery environment variables.")
 
-    spyglass_base_dir = pathlib.Path(tempfile.mkdtemp())
-
-    spike_sorting_storage_dir = spyglass_base_dir / "spikesorting"
-    tmp_dir = spyglass_base_dir / "tmp"
-
-    os.environ["SPYGLASS_BASE_DIR"] = str(spyglass_base_dir)
-    print("SPYGLASS_BASE_DIR set to", spyglass_base_dir)
-    os.environ["DJ_SUPPORT_FILEPATH_MANAGEMENT"] = "TRUE"
-    os.environ["SPIKE_SORTING_STORAGE_DIR"] = str(spike_sorting_storage_dir)
-    os.environ["SPYGLASS_TEMP_DIR"] = str(tmp_dir)
-    os.environ["KACHERY_CLOUD_EPHEMERAL"] = "TRUE"
-
-    os.mkdir(spike_sorting_storage_dir)
-    os.mkdir(tmp_dir)
-
-    raw_dir = spyglass_base_dir / "raw"
-    analysis_dir = spyglass_base_dir / "analysis"
-
-    os.mkdir(raw_dir)
-    os.mkdir(analysis_dir)
+    os.environ["SPYGLASS_BASE_DIR"] = str(tempfile.mkdtemp())
 
     dj.config["database.host"] = "localhost"
     dj.config["database.port"] = DATAJOINT_SERVER_PORT
     dj.config["database.user"] = "root"
     dj.config["database.password"] = "tutorial"
-
-    dj.config["stores"] = {
-        "raw": {
-            "protocol": "file",
-            "location": str(raw_dir),
-            "stage": str(raw_dir),
-        },
-        "analysis": {
-            "protocol": "file",
-            "location": str(analysis_dir),
-            "stage": str(analysis_dir),
-        },
-    }

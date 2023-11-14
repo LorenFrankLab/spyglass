@@ -9,7 +9,11 @@ import pandas as pd
 import pynwb
 from IPython.display import display
 
-from ...common.common_behav import RawPosition, VideoFile  # noqa: F401
+from ...common.common_behav import (
+    RawPosition,
+    VideoFile,
+    convert_epoch_interval_name_to_position_interval_name,
+)  # noqa: F401
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import OutputLogger, infer_output_dir
@@ -235,12 +239,14 @@ class DLCPoseEstimation(dj.Computed):
 
             logger.logger.info("getting raw position")
             interval_list_name = (
-                key["interval_list_name"]
-                if "interval_list_name" in key
-                else f"pos {key['epoch']-1} valid times"
+                convert_epoch_interval_name_to_position_interval_name(
+                    {
+                        "nwb_file_name": key["nwb_file_name"],
+                        "epoch": key["epoch"],
+                    },
+                    populate_missing=False,
+                )
             )
-            if "interval_list_name" in key:
-                del key["interval_list_name"]
             spatial_series = (
                 RawPosition()
                 & {**key, "interval_list_name": interval_list_name}

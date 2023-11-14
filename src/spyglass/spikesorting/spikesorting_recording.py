@@ -9,7 +9,7 @@ import probeinterface as pi
 import spikeinterface as si
 import spikeinterface.extractors as se
 
-from ..common.common_device import Probe, ProbeType
+from ..common.common_device import Probe, ProbeType  # noqa: F401
 from ..common.common_ephys import Electrode, ElectrodeGroup
 from ..common.common_interval import (
     IntervalList,
@@ -17,9 +17,10 @@ from ..common.common_interval import (
     intervals_by_length,
     union_adjacent_index,
 )
-from ..common.common_lab import LabTeam
+from ..common.common_lab import LabTeam  # noqa: F401
 from ..common.common_nwbfile import Nwbfile
-from ..common.common_session import Session
+from ..common.common_session import Session  # noqa: F401
+from ..settings import recording_dir
 from ..utils.dj_helper_fn import dj_replace
 
 schema = dj.schema("spikesorting_recording")
@@ -59,12 +60,15 @@ class SortGroup(dj.Manual):
         Parameters
         ----------
         nwb_file_name : str
-            the name of the NWB file whose electrodes should be put into sorting groups
+            the name of the NWB file whose electrodes should be put into
+            sorting groups
         references : dict, optional
             If passed, used to set references. Otherwise, references set using
-            original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
+            original reference electrodes from config. Keys: electrode groups.
+            Values: reference electrode.
         omit_ref_electrode_group : bool
-            Optional. If True, no sort group is defined for electrode group of reference.
+            Optional. If True, no sort group is defined for electrode group of
+            reference.
         omit_unitrode : bool
             Optional. If True, no sort groups are defined for unitrodes.
         """
@@ -109,12 +113,14 @@ class SortGroup(dj.Manual):
                         ]
                     else:
                         ValueError(
-                            f"Error in electrode group {e_group}: reference electrodes are not all the same"
+                            f"Error in electrode group {e_group}: reference "
+                            + "electrodes are not all the same"
                         )
                 else:
                     if e_group not in references.keys():
                         raise Exception(
-                            f"electrode group {e_group} not a key in references, so cannot set reference"
+                            f"electrode group {e_group} not a key in "
+                            + "references, so cannot set reference"
                         )
                     else:
                         sg_key["sort_reference_electrode_id"] = references[
@@ -135,14 +141,16 @@ class SortGroup(dj.Manual):
                     len(reference_electrode_group) != 1
                 ):
                     raise Exception(
-                        f"Should have found exactly one electrode group for reference electrode,"
-                        f"but found {len(reference_electrode_group)}."
+                        "Should have found exactly one electrode group for "
+                        + "reference electrode, but found "
+                        + f"{len(reference_electrode_group)}."
                     )
                 if omit_ref_electrode_group and (
                     str(e_group) == str(reference_electrode_group)
                 ):
                     print(
-                        f"Omitting electrode group {e_group} from sort groups because contains reference."
+                        f"Omitting electrode group {e_group} from sort groups "
+                        + "because contains reference."
                     )
                     continue
                 shank_elect = electrodes["electrode_id"][
@@ -313,19 +321,23 @@ class SortGroup(dj.Manual):
 class SortInterval(dj.Manual):
     definition = """
     -> Session
-    sort_interval_name: varchar(200) # name for this interval
+    sort_interval_name: varchar(64) # name for this interval 
     ---
     sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
+
+    # NOTE: See #630, #664. Excessive key length.
 
 
 @schema
 class SpikeSortingPreprocessingParameters(dj.Manual):
     definition = """
-    preproc_params_name: varchar(200)
+    preproc_params_name: varchar(32)
     ---
     preproc_params: blob
     """
+    # NOTE: Reduced key less than 2 existing entries
+    # All existing entries are below 48
 
     def insert_default(self):
         # set up the default filter parameters
@@ -372,59 +384,67 @@ class SpikeSortingRecording(dj.Computed):
         recording = self._get_filtered_recording(key)
         recording_name = self._get_recording_name(key)
 
-        tmp_key = {
-            "nwb_file_name": key["nwb_file_name"],
-            "interval_list_name": recording_name,
-            "valid_times": sort_interval_valid_times,
-        }
-        IntervalList.insert1(tmp_key, replace=True)
-
-        # store the list of valid times for the sort
-        key["sort_interval_list_name"] = tmp_key["interval_list_name"]
-
         # Path to files that will hold the recording extractors
-        recording_folder = Path(os.getenv("SPYGLASS_RECORDING_DIR"))
-        key["recording_path"] = str(recording_folder / Path(recording_name))
-        if os.path.exists(key["recording_path"]):
-            shutil.rmtree(key["recording_path"])
-        recording = recording.save(
-            folder=key["recording_path"], chunk_duration="10000ms", n_jobs=8
+        recording_path = str(recording_dir / Path(recording_name))
+        if os.path.exists(recording_path):
+            shutil.rmtree(recording_path)
+
+        recording.save(
+            folder=recording_path, chunk_duration="10000ms", n_jobs=8
         )
 
-        self.insert1(key)
+        IntervalList.insert1(
+            {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": recording_name,
+                "valid_times": sort_interval_valid_times,
+            },
+            replace=True,
+        )
+
+        self.insert1(
+            {
+                **key,
+                # store the list of valid times for the sort
+                "sort_interval_list_name": recording_name,
+                "recording_path": recording_path,
+            }
+        )
 
     @staticmethod
     def _get_recording_name(key):
-        recording_name = (
-            key["nwb_file_name"]
-            + "_"
-            + key["sort_interval_name"]
-            + "_"
-            + str(key["sort_group_id"])
-            + "_"
-            + key["preproc_params_name"]
+        return "_".join(
+            [
+                key["nwb_file_name"],
+                key["sort_interval_name"],
+                str(key["sort_group_id"]),
+                key["preproc_params_name"],
+            ]
         )
-        return recording_name
 
     @staticmethod
     def _get_recording_timestamps(recording):
-        if recording.get_num_segments() > 1:
-            frames_per_segment = [0]
-            for i in range(recording.get_num_segments()):
-                frames_per_segment.append(
-                    recording.get_num_frames(segment_index=i)
-                )
+        num_segments = recording.get_num_segments()
 
-            cumsum_frames = np.cumsum(frames_per_segment)
-            total_frames = np.sum(frames_per_segment)
+        if num_segments <= 1:
+            return recording.get_times()
 
-            timestamps = np.zeros((total_frames,))
-            for i in range(recording.get_num_segments()):
-                timestamps[
-                    cumsum_frames[i] : cumsum_frames[i + 1]
-                ] = recording.get_times(segment_index=i)
-        else:
-            timestamps = recording.get_times()
+        frames_per_segment = [0] + [
+            recording.get_num_frames(segment_index=i)
+            for i in range(num_segments)
+        ]
+
+        cumsum_frames = np.cumsum(frames_per_segment)
+        total_frames = np.sum(frames_per_segment)
+
+        timestamps = np.zeros((total_frames,))
+        for i in range(num_segments):
+            start_index = cumsum_frames[i]
+            end_index = cumsum_frames[i + 1]
+            timestamps[start_index:end_index] = recording.get_times(
+                segment_index=i
+            )
+
         return timestamps
 
     def _get_sort_interval_valid_times(self, key):
@@ -449,9 +469,11 @@ class SpikeSortingRecording(dj.Computed):
                 "sort_interval_name": key["sort_interval_name"],
             }
         ).fetch1("sort_interval")
+
         interval_list_name = (SpikeSortingRecordingSelection & key).fetch1(
             "interval_list_name"
         )
+
         valid_interval_times = (
             IntervalList
             & {
@@ -459,6 +481,7 @@ class SpikeSortingRecording(dj.Computed):
                 "interval_list_name": interval_list_name,
             }
         ).fetch1("valid_times")
+
         valid_sort_times = interval_list_intersect(
             sort_interval, valid_interval_times
         )

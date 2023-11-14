@@ -130,12 +130,17 @@ class AnalysisNwbfileKachery(dj.Computed):
         """
 
     def make(self, key):
-        # note that we're assuming that the user has initialized a kachery-cloud client with kachery-cloud-init
-        # uncomment the line below once we are sharing linked files as well.
+        # note that we're assuming that the user has initialized a kachery-cloud
+        # client with kachery-cloud-init. Uncomment the line below once we are
+        # sharing linked files as well.
+
         # linked_key = copy.deepcopy(key)
+
         print(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
         # set the kachery zone
+
         KacheryZone.set_zone(key)
+
         key["analysis_file_uri"] = kcl.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )

@@ -385,10 +385,13 @@ class Waveforms(dj.Computed):
 class MetricParameters(dj.Manual):
     definition = """
     # Parameters for computing quality metrics of sorted units
-    metric_params_name: varchar(200)
+    metric_params_name: varchar(64)
     ---
     metric_params: blob
     """
+
+    # NOTE: See #630, #664. Excessive key length.
+
     metric_default_params = {
         "snr": {
             "peak_sign": "neg",
@@ -551,6 +554,9 @@ class QualityMetrics(dj.Computed):
                 metric[str(unit_id)] = metric_func(
                     waveform_extractor, this_unit_id=unit_id, **metric_params
                 )
+                # nn_isolation returns tuple with isolation and unit number. We only want isolation.
+                if metric_name == "nn_isolation":
+                    metric[str(unit_id)] = metric[str(unit_id)][0]
         return metric
 
     def _dump_to_json(self, qm_dict, save_path):
@@ -642,11 +648,13 @@ _metric_name_to_func = {
 @schema
 class AutomaticCurationParameters(dj.Manual):
     definition = """
-    auto_curation_params_name: varchar(200)   # name of this parameter set
+    auto_curation_params_name: varchar(36)   # name of this parameter set
     ---
     merge_params: blob   # dictionary of params to merge units
     label_params: blob   # dictionary params to label units
     """
+
+    # NOTE: No existing entries impacted by this change
 
     def insert1(self, key, **kwargs):
         # validate the labels and then insert

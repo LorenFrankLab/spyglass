@@ -7,7 +7,9 @@ import datajoint as dj
 import pynwb
 import pytest
 from hdmf.backends.warnings import BrokenLinkWarning
+
 from spyglass.data_import.insert_sessions import copy_nwb_link_raw_ephys
+from spyglass.settings import raw_dir
 
 
 @pytest.fixture()
@@ -45,26 +47,13 @@ def new_nwbfile_raw_file_name(tmp_path):
     )
     nwbfile.add_acquisition(es)
 
-    spyglass_base_dir = tmp_path / "nwb-data"
-    os.environ["SPYGLASS_BASE_DIR"] = str(spyglass_base_dir)
-    os.mkdir(os.environ["SPYGLASS_BASE_DIR"])
-
-    raw_dir = spyglass_base_dir / "raw"
-    os.mkdir(raw_dir)
-
-    dj.config["stores"] = {
-        "raw": {
-            "protocol": "file",
-            "location": str(raw_dir),
-            "stage": str(raw_dir),
-        },
-    }
+    _ = tmp_path  # CBroz: Changed to match testing base directory
 
     file_name = "raw.nwb"
-    file_path = raw_dir / file_name
+    file_path = raw_dir + "/" + file_name
+
     with pynwb.NWBHDF5IO(str(file_path), mode="w") as io:
         io.write(nwbfile)
-
     return file_name
 
 
@@ -102,8 +91,10 @@ def test_copy_nwb(
             new_nwbfile_raw_file_name_abspath
         )
 
-    # test readability after moving the linking raw file (paths are stored as relative paths in NWB)
-    # so this should break the link (moving the linked-to file should also break the link)
+    # test readability after moving the linking raw file (paths are stored as
+    # relative paths in NWB) so this should break the link (moving the linked-to
+    # file should also break the link)
+
     shutil.move(out_nwb_file_abspath, moved_nwbfile_no_ephys_file_path)
     with pynwb.NWBHDF5IO(
         path=str(moved_nwbfile_no_ephys_file_path), mode="r"
