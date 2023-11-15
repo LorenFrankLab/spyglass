@@ -288,9 +288,16 @@ class MetricCuration(dj.Computed):
 
     @classmethod
     def get_metrics(cls, key: dict):
+        """Returns metrics identified by metric curation
+
+        Parameters
+        ----------
+        key : dict
+            primary key to MetricCuration
+        """
         analysis_file_name = (cls & key).fetch1("analysis_file_name")
         object_id = (cls & key).fetch1("object_id")
-        metric_param_name = (cls & key).fetch1("metric_param_name")
+        metric_param_name = (MetricCurationSelection & key).fetch1("metric_param_name")
         metric_params = (
             MetricParameters & {"metric_param_name": metric_param_name}
         ).fetch1("metric_params")
@@ -306,16 +313,21 @@ class MetricCuration(dj.Computed):
             load_namespaces=True,
         ) as io:
             nwbf = io.read()
-            units = nwbf.objects[object_id]
-            for metric_name in metric_names:
-                metrics[metric_name] = dict(
-                    zip(units[id][:], units[metric_name][:])
-                )
+            units = nwbf.objects[object_id].to_dataframe()
+        for metric_name in metric_names:
+            metrics[metric_name] = dict(zip(units.index, units[metric_name]))
 
         return metrics
 
     @classmethod
     def get_labels(cls, key: dict):
+        """Returns curation labels identified by metric curation
+
+        Parameters
+        ----------
+        key : dict
+            primary key to MetricCuration
+        """
         analysis_file_name = (cls & key).fetch1("analysis_file_name")
         object_id = (cls & key).fetch1("object_id")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
@@ -327,13 +339,20 @@ class MetricCuration(dj.Computed):
             load_namespaces=True,
         ) as io:
             nwbf = io.read()
-            units = nwbf.objects[object_id]
-            labels = dict(zip(units[id][:], units["curation_labels"][:]))
+            units = nwbf.objects[object_id].to_dataframe()
+        labels = dict(zip(units.index, units["curation_label"]))
 
         return labels
 
     @classmethod
     def get_merge_groups(cls, key: dict):
+        """Returns merge groups identified by metric curation
+
+        Parameters
+        ----------
+        key : dict
+            primary key to MetricCuration
+        """
         analysis_file_name = (cls & key).fetch1("analysis_file_name")
         object_id = (cls & key).fetch1("object_id")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
@@ -345,10 +364,10 @@ class MetricCuration(dj.Computed):
             load_namespaces=True,
         ) as io:
             nwbf = io.read()
-            units = nwbf.objects[object_id]
-            labels = dict(zip(units[id][:], units["merge_groups"][:]))
+            units = nwbf.objects[object_id].to_dataframe()
+        merge_group_dict = dict(zip(units.index, units["merge_groups"]))
 
-        return _merge_dict_to_list(labels)
+        return _merge_dict_to_list(merge_group_dict)
 
     @staticmethod
     def _compute_metric(waveform_extractor, metric_name, **metric_params):
@@ -541,13 +560,14 @@ def _write_metric_curation_to_nwb(
             label_values = []
             for unit_id in unit_ids:
                 if unit_id not in labels:
-                    label_values.append([""])
+                    label_values.append([])
                 else:
                     label_values.append(labels[unit_id])
             nwbf.add_unit_column(
                 name="curation_label",
                 description="curation label",
                 data=label_values,
+                index=True,
             )
         if merge_groups is not None:
             merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
@@ -558,6 +578,7 @@ def _write_metric_curation_to_nwb(
                 name="merge_groups",
                 description="merge groups",
                 data=merge_groups_list,
+                index=True,
             )
         if metrics is not None:
             for metric, metric_dict in metrics.items():

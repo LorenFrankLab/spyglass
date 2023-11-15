@@ -342,13 +342,14 @@ def _write_sorting_to_nwb_with_curation(
             label_values = []
             for unit_id in unit_ids:
                 if unit_id not in labels:
-                    label_values.append([""])
+                    label_values.append([])
                 else:
                     label_values.append(labels[unit_id])
             nwbf.add_unit_column(
                 name="curation_label",
                 description="curation label",
                 data=label_values,
+                index=True,
             )
         if merge_groups is not None:
             merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
@@ -360,6 +361,7 @@ def _write_sorting_to_nwb_with_curation(
                 name="merge_groups",
                 description="merge groups",
                 data=merge_groups_list,
+                index=True,
             )
         if metrics is not None:
             for metric, metric_dict in metrics.items():
@@ -434,7 +436,7 @@ def _list_to_merge_dict(
             if unit_id in merge_group:
                 merge_dict[unit_id].extend(
                     [
-                        merge_unit_id
+                        str(merge_unit_id)
                         for merge_unit_id in merge_group
                         if merge_unit_id != unit_id
                     ]
