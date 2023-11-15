@@ -10,6 +10,7 @@ import pynwb
 import spikeinterface as si
 import spikeinterface.extractors as se
 import spikeinterface.preprocessing as sip
+import spikeinterface.curation as sic
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
@@ -191,12 +192,27 @@ class SpikeSorting(dj.Computed):
             artifact_removed_intervals, timestamps
         )
 
-        recording_list = []
-        for interval in artifact_removed_intervals_ind:
-            recording_list.append(
-                recording.frame_slice(interval[0], interval[1])
+        # if the artifact removed intervals do not span the entire time range
+        if (len(artifact_removed_intervals_ind)>1) or (artifact_removed_intervals_ind[0][0]>0) or (artifact_removed_intervals_ind[-1][1]<len(timestamps)):
+            # set the artifact intervals to zero
+            list_triggers = []
+            if artifact_removed_intervals_ind[0][0]>0:
+                list_triggers.append(np.array([0, artifact_removed_intervals_ind[0][0]]))
+            for interval_ind in range(len(artifact_removed_intervals_ind)-1):
+                list_triggers.append(
+                    np.arange((artifact_removed_intervals_ind[interval_ind][1]+1),artifact_removed_intervals_ind[interval_ind+1][0])
+                )
+            if artifact_removed_intervals_ind[-1][1]<len(timestamps):
+                list_triggers.append(np.array([artifact_removed_intervals_ind[-1][1], len(timestamps)-1]))
+
+            list_triggers = [list(np.concatenate(list_triggers))]
+            recording = sip.remove_artifacts(
+                recording=recording,
+                list_triggers=list_triggers,
+                ms_before=None,
+                ms_after=None,
+                mode="zeros",
             )
-        recording = si.concatenate_recordings(recording_list)
 
         if sorter == "clusterless_thresholder":
             # need to remove tempdir and whiten from sorter_params
@@ -226,10 +242,11 @@ class SpikeSorting(dj.Computed):
                 sorter,
                 recording,
                 output_folder=sorter_temp_dir.name,
+                remove_existing_folder=True,
                 **sorter_params,
             )
         key["time_of_sort"] = int(time.time())
-
+        sorting = sic.remove_excess_spikes(sorting, recording)
         key["analysis_file_name"], key["object_id"] = _write_sorting_to_nwb(
             sorting,
             timestamps,
@@ -244,7 +261,7 @@ class SpikeSorting(dj.Computed):
             (SpikeSortingSelection & key).fetch1("nwb_file_name"),
             key["analysis_file_name"],
         )
-        self.insert1(key)
+        self.insert1(key, skip_duplicates=True)
 
     # def delete(self):
     #     """Extends the delete method of base class to implement permission checking.

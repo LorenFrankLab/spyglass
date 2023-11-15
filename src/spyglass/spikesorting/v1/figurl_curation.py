@@ -44,7 +44,7 @@ class FigURLCurationSelection(dj.Manual):
             nwbfile = io.read()
             nwb_sorting = nwbfile.objects[curation_key["object_id"]]
             unit_ids = nwb_sorting["id"][:]
-            labels = nwb_sorting["labels"][:]
+            labels = nwb_sorting["curation_labels"][:]
             merge_groups = nwb_sorting["merge_groups"][:]
 
         unit_ids = [str(unit_id) for unit_id in unit_ids]

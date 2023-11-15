@@ -235,6 +235,7 @@ class MetricCuration(dj.Computed):
             recording=recording,
             sorting=sorting,
             folder=waveforms_dir,
+            overwrite=True,
             **waveform_params,
         )
         # compute metrics
@@ -242,8 +243,10 @@ class MetricCuration(dj.Computed):
         metrics = {}
         for metric_name, metric_param_dict in metric_params.items():
             metrics[metric_name] = self._compute_metric(
-                nwb_file_name, waveforms, metric_name, **metric_param_dict
+                waveforms, metric_name, **metric_param_dict
             )
+        if metrics['nn_isolation']:
+            metrics['nn_isolation'] = {unit_id: value[0] for unit_id, value in metrics['nn_isolation'].items()}
 
         print("Applying curation...")
         labels = self._compute_labels(metrics, label_params)
@@ -254,7 +257,7 @@ class MetricCuration(dj.Computed):
             key["analysis_file_name"],
             key["object_id"],
         ) = _write_metric_curation_to_nwb(
-            waveforms, metrics, labels, merge_groups
+            nwb_file_name, waveforms, metrics, labels, merge_groups
         )
 
 
@@ -345,6 +348,7 @@ class MetricCuration(dj.Computed):
                     peak_sign=metric_params.pop("peak_sign"),
                     **metric_params,
                 )
+                # metric = {str(unit_id): val for unit_id, val in metric.items()}
             else:
                 raise Exception(
                     f"{peak_sign_metrics} metrics require peak_sign",
@@ -353,7 +357,7 @@ class MetricCuration(dj.Computed):
         else:
             metric = {}
             for unit_id in waveform_extractor.sorting.get_unit_ids():
-                metric[str(unit_id)] = metric_func(
+                metric[unit_id] = metric_func(
                     waveform_extractor, this_unit_id=unit_id, **metric_params
                 )
         return metric
@@ -390,23 +394,23 @@ class MetricCuration(dj.Computed):
         if not label_params:
             return {}
         else:
-            unit_ids = list(metrics[list(metrics.keys())[0]].keys())
+            unit_ids = [unit_id for unit_id in metrics[list(metrics.keys())[0]].keys()]
             labels = {unit_id: [] for unit_id in unit_ids}
             for metric in label_params:
                 if metric not in metrics:
                     Warning(f"{metric} not found in quality metrics; skipping")
                 else:
-                    for condition in label_params[metric]:
-                        assert (
-                            len(condition) == 3
-                        ), f"Condition {condition} must be of length 3"
-                        compare = _comparison_to_function[condition[0]]
-                        for unit_id in unit_ids:
-                            if compare(
-                                metrics[metric][unit_id],
-                                condition[1],
-                            ):
-                                labels[unit_id].extend(label_params[metric][2])
+                    condition = label_params[metric]
+                    assert (
+                        len(condition) == 3
+                    ), f"Condition {condition} must be of length 3"
+                    compare = _comparison_to_function[condition[0]]
+                    for unit_id in unit_ids:
+                        if compare(
+                            metrics[metric][unit_id],
+                            condition[1],
+                        ):
+                            labels[unit_id].extend(label_params[metric][2])
             return labels
 
     @staticmethod
@@ -521,7 +525,7 @@ def _write_metric_curation_to_nwb(
             label_values = []
             for unit_id in unit_ids:
                 if unit_id not in labels:
-                    label_values.append([])
+                    label_values.append([''])
                 else:
                     label_values.append(labels[unit_id])
             nwbf.add_unit_column(
@@ -531,10 +535,11 @@ def _write_metric_curation_to_nwb(
             )
         if merge_groups is not None:
             merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
+            merge_groups_list = [[""] for i in merge_groups_dict.values() if i==[]]
             nwbf.add_unit_column(
                 name="merge_groups",
                 description="merge groups",
-                data=list(merge_groups_dict.values()),
+                data=merge_groups_list,
             )
         if metrics is not None:
             for metric, metric_dict in metrics.items():

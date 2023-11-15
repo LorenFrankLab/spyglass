@@ -1,6 +1,7 @@
 from typing import List, Union, Dict
 
 import datajoint as dj
+import numpy as np
 import pynwb
 import spikeinterface as si
 import spikeinterface.extractors as se
@@ -159,6 +160,7 @@ class CurationV1(dj.Manual):
         recording = se.read_nwb_recording(
             analysis_file_abs_path, load_time_vector=True
         )
+        recording.annotate(is_filtered=True)
 
         return recording
 
@@ -177,15 +179,17 @@ class CurationV1(dj.Manual):
 
         """
         recording = cls.get_recording(key)
-
+        sampling_frequency = recording.get_sampling_frequency()
         analysis_file_name = (CurationV1 & key).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
-        sorting = se.read_nwb_sorting(
-            analysis_file_abs_path,
-            sampling_frequency=recording.get_sampling_frequency(),
-        )
+        with pynwb.NWBHDF5IO(analysis_file_abs_path, "r", load_namespaces=True) as io:
+            nwbf = io.read()
+            units = nwbf.units.to_dataframe()
+        units_dict_list = [{unit_id: np.searchsorted(recording.get_times(),spike_times) for unit_id, spike_times in zip(units.index, units['spike_times'])}]
+
+        sorting = si.NumpySorting.from_unit_dict(units_dict_list, sampling_frequency=sampling_frequency)
 
         return sorting
 
@@ -271,19 +275,33 @@ def _write_sorting_to_nwb_with_curation(
     sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
         (SpikeSorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
     )
-    sorting = se.read_nwb_sorting(
-        sorting_analysis_file_abs_path,
-        sampling_frequency=(Raw & {"nwb_file_name": nwb_file_name}).fetch1(
-            "sampling_rate"
-        ),
-    )
+    with pynwb.NWBHDF5IO(sorting_analysis_file_abs_path, "r", load_namespaces=True) as io:
+        nwbf = io.read()
+        units = nwbf.units.to_dataframe()
+    units_dict = {unit_id: spike_times for unit_id, spike_times in zip(units.index, units['spike_times'])}
+
     if apply_merge:
-        sorting = sc.MergeUnitsSorting(
-            parent_sorting=sorting, units_to_merge=merge_groups
-        )
+        for merge_group in merge_groups:
+            new_unit_id = np.max(list(units_dict.keys()))+1
+            units_dict[new_unit_id] = np.concatenate([units_dict[merge_unit_id] for merge_unit_id in merge_group])
+            for merge_unit_id in merge_group:
+                units_dict.pop(merge_unit_id, None)
         merge_groups = None
 
-    unit_ids = sorting.get_unit_ids()
+    # sorting = se.read_nwb_sorting(
+    #     sorting_analysis_file_abs_path,
+    #     sampling_frequency=(Raw & {"nwb_file_name": nwb_file_name}).fetch1(
+    #         "sampling_rate"
+    #     ),
+    # )
+
+    # if apply_merge:
+    #     sorting = sc.MergeUnitsSorting(
+    #         parent_sorting=sorting, units_to_merge=merge_groups
+    #     )
+    #     merge_groups = None
+
+    unit_ids = list(units_dict.keys())
 
     # create new analysis nwb file
     analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
@@ -296,9 +314,9 @@ def _write_sorting_to_nwb_with_curation(
         nwbf = io.read()
         # write sorting to the nwb file
         for unit_id in unit_ids:
-            spike_times = sorting.get_unit_spike_train(unit_id)
+            # spike_times = sorting.get_unit_spike_train(unit_id)
             nwbf.add_unit(
-                spike_times=spike_times,
+                spike_times=units_dict[unit_id],
                 id=unit_id,
             )
         # add labels, merge groups, metrics
