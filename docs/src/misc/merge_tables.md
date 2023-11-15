@@ -70,7 +70,7 @@ The Merge class in Spyglass's utils is a subclass of DataJoint's [Manual
 Table](https://datajoint.com/docs/core/design/tables/tiers/#data-entry-lookup-and-manual)
 and adds functions to make the awkwardness of part tables more manageable.
 These functions are described in the
-[API section](../../api/src/spyglass/utils/dj_merge_tables.md), under
+[API section](../api/utils/dj_merge_tables.md), under
 `utils.dj_merge_tables`.
 
 ### Restricting

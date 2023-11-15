@@ -225,7 +225,7 @@ class FirFilterParameters(dj.Manual):
         electrode_ids: list,
         decimation: int,
         description: str = "filtered data",
-        type: Union[None, str] = None,
+        data_type: Union[None, str] = None,
     ):
         """
         Filter data from an NWB electrical series using the ghostipy package,
@@ -256,6 +256,10 @@ class FirFilterParameters(dj.Manual):
             The NWB object ID of the filtered data and a list containing the
             first and last timestamps.
         """
+        # Note: type -> data_type to avoid conflict with builtin type
+        # All existing refs to this func use positional args, so no need to
+        # adjust elsewhere, but low probability of issues with custom scripts
+
         MEM_USE_LIMIT = 0.9  # % of RAM use permitted
 
         gsp = _import_ghostipy()
@@ -323,7 +327,7 @@ class FirFilterParameters(dj.Manual):
                 timestamps=np.empty(output_shape_list[time_axis]),
                 description=description,
             )
-            if type == "LFP":
+            if data_type == "LFP":
                 ecephys_module = nwbf.create_processing_module(
                     name="ecephys", description=description
                 )

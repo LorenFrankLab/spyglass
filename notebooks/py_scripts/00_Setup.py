@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -185,11 +185,15 @@
 # - Add yourself to the
 #   [`docker` group](https://docs.docker.com/engine/install/linux-postinstall/) so
 #   that you don't have to be sudo to run docker.
-# - Download the docker image for datajoint/mysql
+# - Download the docker image for `datajoint/mysql:8.0`.
 #
 #   ```bash
-#   docker pull datajoint/mysql
+#   docker pull datajoint/mysql:8.0
 #   ```
+#
+# _Note_: For demonstation, MySQL version won't matter. Some
+#   [database management](https://lorenfranklab.github.io/spyglass/latest/misc/database_management/#mysql-version)
+#   features of Spyglass, however, expect MySQL >= 8.
 #
 # - When run, this is referred to as a 'Docker container'
 # - Next start the container with a couple additional pieces of info...
@@ -199,7 +203,7 @@
 #   - Port mapping. Here, we map 3306 across the local machine and container.
 #
 #   ```bash
-#   docker run --name spyglass-db -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql
+#   docker run --name spyglass-db -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql:8.0
 #   ```
 #
 # - For data to persist after terminating the container,

@@ -65,9 +65,10 @@ class DatabaseSettings:
 
     @property
     def _add_dj_guest_sql(self):
+        # Note: changing to temppass for uniformity
         return [
             # Create the user (if not already created) and set the password
-            f"{CREATE_USR}'{self.user}'@'%' IDENTIFIED BY 'Data_$haring';\n",
+            f"{CREATE_USR}'{self.user}'@'%'{TEMP_PASS}\n",
             # Grant privileges
             f"{GRANT_SEL}`%`.* TO '{self.user}'@'%';\n",
         ]
