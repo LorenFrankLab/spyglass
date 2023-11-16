@@ -40,8 +40,10 @@ class SpikeSortingOutput(_Merge):
         """
         key["merge_id"] = str(uuid.uuid4())
         key["source"] = "CurationV1"
-        cls.insert1([key["merge_id"]], skip_duplicates=True)
-        cls.CurationV1.insert1(key, skip_duplicates=True)
+        cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
+        cls.CurationV1.insert1(
+            key, ignore_extra_fields=True, skip_duplicates=True
+        )
         return key
 
     @classmethod
@@ -55,6 +57,8 @@ class SpikeSortingOutput(_Merge):
         """
         key["merge_id"] = str(uuid.uuid4())
         key["source"] = "ImportedSpikeSorting"
-        cls.insert1([key["merge_id"]], skip_duplicates=True)
-        cls.CurationV1.insert1(key, skip_duplicates=True)
+        cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
+        cls.CurationV1.insert1(
+            key, ignore_extra_fields=True, skip_duplicates=True
+        )
         return key
