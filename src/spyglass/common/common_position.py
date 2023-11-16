@@ -899,7 +899,7 @@ class PositionVideo(dj.Computed):
             VideoFile()
             & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         ).fetch1()
-        io = pynwb.NWBHDF5IO(raw_dir + '/' + video_info["nwb_file_name"], "r")
+        io = pynwb.NWBHDF5IO(raw_dir + "/" + video_info["nwb_file_name"], "r")
         nwb_file = io.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
         video_filename = nwb_video.external_file[0]
@@ -916,7 +916,9 @@ class PositionVideo(dj.Computed):
             raw_position_df.columns = columns
         # if IntervalPositionInfo supersampled position, downsample to video
         if position_info_df.shape[0] > raw_position_df.shape[0]:
-            ind = np.digitize(raw_position_df.index, position_info_df.index,right=True)
+            ind = np.digitize(
+                raw_position_df.index, position_info_df.index,right=True
+            )
             position_info_df = position_info_df.iloc[ind]
 
         centroids = {
