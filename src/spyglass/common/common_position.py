@@ -23,7 +23,7 @@ from track_linearization import (
     plot_track_graph,
 )
 
-from ..settings import raw_dir
+from ..settings import raw_dir, video_dir
 from ..utils.dj_helper_fn import fetch_nwb
 from .common_behav import RawPosition, VideoFile
 from .common_interval import IntervalList  # noqa F401
@@ -935,7 +935,7 @@ class PositionVideo(dj.Computed):
 
         print("Making video...")
         self.make_video(
-            video_filename,
+            f"{video_dir}/{video_filename}",
             centroids,
             head_position_mean,
             head_orientation_mean,

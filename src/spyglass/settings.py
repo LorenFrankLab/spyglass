@@ -442,3 +442,4 @@ analysis_dir = sg_config.analysis_dir
 sorting_dir = sg_config.sorting_dir
 waveform_dir = sg_config.waveform_dir
 debug_mode = sg_config.debug_mode
+video_dir = sg_config.video_dir
