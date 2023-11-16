@@ -7,6 +7,7 @@
 - Minor bug fixes. #656, #657, #659, #651, #671
 - Add setup instruction specificity.
 - Reduce primary key varchar allocation aross may tables. #664
+- Additional documentation. #682, #686
 
 ## [0.4.2] (October 10, 2023)
 
@@ -95,6 +96,7 @@
 - Allow creation and linkage of device metadata from YAML #400
 - Move helper functions to utils directory #386
 
+[0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
 [0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
 [0.4.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.1
 [0.4.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.0

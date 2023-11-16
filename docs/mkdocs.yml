@@ -47,13 +47,14 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Miscellaneous:
+      - Overview: misc/index.md
       - FigURL: misc/figurl_views.md
       - Session Groups: misc/session_groups.md
       - Insert Data: misc/insert_data.md
       - Merge Tables: misc/merge_tables.md
       - Database Management: misc/database_management.md
   - Tutorials:
-      - Overview: notebooks/README.md
+      - Overview: notebooks/index.md
       - General:
           - Setup: notebooks/00_Setup.ipynb
           - Insert Data: notebooks/01_Insert_Data.ipynb
