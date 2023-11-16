@@ -898,10 +898,10 @@ class PositionVideo(dj.Computed):
             VideoFile()
             & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         ).fetch1()
-        io = pynwb.NWBHDF5IO(raw_dir() + video_info["nwb_file_name"], "r")
+        io = pynwb.NWBHDF5IO(raw_dir + '/' + video_info["nwb_file_name"], "r")
         nwb_file = io.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        video_filename = nwb_video.external_file.value[0]
+        video_filename = nwb_video.external_file[0]
 
         nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
         output_video_filename = (
