@@ -267,29 +267,30 @@ class IntervalPositionInfo(dj.Computed):
         has_0_idx = all([c in input_cols for c in ZERO_IDX_COLS])
         has_1_idx = all([c in input_cols for c in ONE_IDX_COLS])
 
-        # if unexpected columns, ask user to confirm
-        if len(input_cols) != 4 or not (has_default or has_0_idx or has_1_idx):
-            choice = dj.utils.user_choice(
-                "Unexpected columns in raw position. Assume "
-                + f"{DEFAULT_COLS[:4]}?\n{spatial_df}\n"
-            )
-            if choice.lower() not in ["yes", "y"]:
-                raise ValueError(
-                    f"Unexpected columns in raw position: {input_cols}"
+        if has_default:
+            # move the 4 position columns to front, continue
+            spatial_df = spatial_df[DEFAULT_COLS]
+        elif has_0_idx:
+            # move the 4 position columns to front, rename to default, continue
+            spatial_df = spatial_df[ZERO_IDX_COLS]
+            spatial_df.columns = DEFAULT_COLS
+        elif has_1_idx:
+            # move the 4 position columns to front, rename to default, continue
+            spatial_df = spatial_df[ONE_IDX_COLS]
+            spatial_df.columns = DEFAULT_COLS
+        else:
+            cols = list(spatial_df.columns)
+            if len(cols) != 4 or not all([c in DEFAULT_COLS for c in cols]):
+                choice = dj.utils.user_choice(
+                    "Unexpected columns in raw position. Assume "
+                    + f"{DEFAULT_COLS[:4]}?\n{spatial_df}\n"
                 )
-            spatial_df.columns = DEFAULT_COLS + input_cols[4:]
-
-        # Ensure data order, only 4 col
-        spatial_df = (
-            spatial_df[DEFAULT_COLS]
-            if has_default
-            else spatial_df[ZERO_IDX_COLS]
-            if has_0_idx
-            else spatial_df[ONE_IDX_COLS]
-        )
-
-        # rename to default
-        spatial_df.columns = DEFAULT_COLS
+                if choice.lower() not in ["yes", "y"]:
+                    raise ValueError(
+                        f"Unexpected columns in raw position: {cols}"
+                    )
+            # rename first 4 columns, keep rest. Rest dropped below
+            spatial_df.columns = DEFAULT_COLS + cols[4:]
 
         return spatial_df
 
@@ -909,6 +910,9 @@ class PositionVideo(dj.Computed):
             f'{key["position_info_param_name"]}.mp4'
         )
 
+        if raw_position_df.columns[0] == "xloc1":
+            columns = ["xloc", "yloc", "xloc2", "yloc2"]
+            raw_position_df.columns = columns
         centroids = {
             "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
             "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
