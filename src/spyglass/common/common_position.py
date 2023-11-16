@@ -910,9 +910,15 @@ class PositionVideo(dj.Computed):
             f'{key["position_info_param_name"]}.mp4'
         )
 
+        # ensure standardized column names
         if raw_position_df.columns[0] == "xloc1":
             columns = ["xloc", "yloc", "xloc2", "yloc2"]
             raw_position_df.columns = columns
+        # if IntervalPositionInfo supersampled position, downsample to video
+        if position_info_df.shape[0] > raw_position_df.shape[0]:
+            ind = np.digitize(raw_position_df.index, position_info_df.index,right=True)
+            position_info_df = position_info_df.iloc[ind]
+
         centroids = {
             "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
             "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
