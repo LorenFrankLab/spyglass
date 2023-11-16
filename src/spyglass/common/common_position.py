@@ -917,7 +917,7 @@ class PositionVideo(dj.Computed):
         # if IntervalPositionInfo supersampled position, downsample to video
         if position_info_df.shape[0] > raw_position_df.shape[0]:
             ind = np.digitize(
-                raw_position_df.index, position_info_df.index,right=True
+                raw_position_df.index, position_info_df.index, right=True
             )
             position_info_df = position_info_df.iloc[ind]
 
