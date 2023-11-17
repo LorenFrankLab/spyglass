@@ -244,7 +244,6 @@
 
 # +
 import os
-
 import datajoint as dj
 
 if os.path.basename(os.getcwd()) == "notebooks":

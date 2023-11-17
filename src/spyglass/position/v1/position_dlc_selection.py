@@ -7,14 +7,19 @@ import pandas as pd
 import pynwb
 from datajoint.utils import to_camel_case
 
-from ...common.common_behav import convert_epoch_interval_name_to_position_interval_name
+from ...common.common_behav import (
+    convert_epoch_interval_name_to_position_interval_name,
+)
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
 from .dlc_utils import make_video
 from .position_dlc_centroid import DLCCentroid
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_orient import DLCOrientation
-from .position_dlc_pose_estimation import DLCPoseEstimation, DLCPoseEstimationSelection
+from .position_dlc_pose_estimation import (
+    DLCPoseEstimation,
+    DLCPoseEstimationSelection,
+)
 from .position_dlc_position import DLCSmoothInterpParams
 
 schema = dj.schema("position_v1_dlc_selection")

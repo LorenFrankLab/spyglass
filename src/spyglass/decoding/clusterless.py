@@ -25,8 +25,12 @@ from replay_trajectory_classification.classifier import (
     _DEFAULT_CONTINUOUS_TRANSITIONS,
     _DEFAULT_ENVIRONMENT,
 )
-from replay_trajectory_classification.discrete_state_transitions import DiagonalDiscrete
-from replay_trajectory_classification.initial_conditions import UniformInitialConditions
+from replay_trajectory_classification.discrete_state_transitions import (
+    DiagonalDiscrete,
+)
+from replay_trajectory_classification.initial_conditions import (
+    UniformInitialConditions,
+)
 from ripple_detection import (
     get_multiunit_population_firing_rate,
     multiunit_HSE_detector,
