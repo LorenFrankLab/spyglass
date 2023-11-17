@@ -51,11 +51,8 @@ def validate_option(
     ValueError
         If option is not in options.
     """
-    if option is None:
-        if permit_none:
-            return
-        else:
-            raise ValueError(f"{name} cannot be None")
+    if option is None and not permit_none:
+        raise ValueError(f"{name} cannot be None")
 
     if options and option not in options:
         raise KeyError(

@@ -22,7 +22,7 @@ interested in in hosting a Spyglass instance for their own data should read the
 
 We have a series of additional docs under the [misc](./misc/index.md) folder
 that may be helpful. Our [changelog](./CHANGELOG.md) highlights the changes that
-have been made to Spyglass over time and the [copyright](./copyright.md) page
+have been made to Spyglass over time and the [copyright](./LICENSE.md) page
 contains license information.
 
 ## Citing Spyglass

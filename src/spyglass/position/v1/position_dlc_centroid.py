@@ -366,8 +366,7 @@ class DLCCentroid(dj.Computed):
 
 
 def four_led_centroid(pos_df: pd.DataFrame, **params):
-    """
-    Determines the centroid of 4 LEDS on an implant LED ring.
+    """Determines the centroid of 4 LEDS on an implant LED ring.
     Assumed to be the Green LED, and 3 red LEDs called: redLED_C, redLED_L, redLED_R
     By default, uses (greenled + redLED_C) / 2 to calculate centroid
     If Green LED is NaN, but red center LED is not,
