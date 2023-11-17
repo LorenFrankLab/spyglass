@@ -191,7 +191,7 @@
 #   docker pull datajoint/mysql:8.0
 #   ```
 #
-# _Note_: For demonstation, MySQL version won't matter. Some
+# _Note_: For this demo, MySQL version won't matter. Some
 #   [database management](https://lorenfranklab.github.io/spyglass/latest/misc/database_management/#mysql-version)
 #   features of Spyglass, however, expect MySQL >= 8.
 #
@@ -244,6 +244,7 @@
 
 # +
 import os
+
 import datajoint as dj
 
 if os.path.basename(os.getcwd()) == "notebooks":

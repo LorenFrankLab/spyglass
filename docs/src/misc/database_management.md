@@ -28,7 +28,7 @@ temporary `.sql` file and execute it on the database.
 
 ### Privileges
 
-DataJoint schemas correspond to MySQL databases. Priveleges are managed by
+DataJoint schemas correspond to MySQL databases. Privileges are managed by
 schema/database prefix.
 
 - `SELECT` privileges allow users to read, write, and delete data.
@@ -52,7 +52,7 @@ these prifixes.
 
 ### Setting Passwords
 
-New users are generted with the password `temppass`. In order to change this,
+New users are generated with the password `temppass`. In order to change this,
 we recommend downloading DataJoint `0.14.2` (currently pre-release).
 
 ```console
