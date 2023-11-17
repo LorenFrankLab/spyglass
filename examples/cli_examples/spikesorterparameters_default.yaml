@@ -8,4 +8,3 @@ sorter_params:
   clip_size: 50
   detect_threshold: 3
   detect_interval: 10
-

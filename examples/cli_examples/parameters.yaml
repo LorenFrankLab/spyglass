@@ -9,4 +9,3 @@ team_name: LorenLab
 # spike sorting
 artifact_params_name: default
 sorter_params_name: default
-
