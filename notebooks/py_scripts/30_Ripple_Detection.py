@@ -36,7 +36,6 @@
 
 # +
 import os
-import copy
 import datajoint as dj
 import numpy as np
 import pandas as pd

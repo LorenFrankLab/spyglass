@@ -704,7 +704,7 @@ def make_video(
 
     RGB_PINK = (234, 82, 111)
     RGB_YELLOW = (253, 231, 76)
-    RGB_WHITE = (255, 255, 255)
+    # RGB_WHITE = (255, 255, 255)
     RGB_BLUE = (30, 144, 255)
     RGB_ORANGE = (255, 127, 80)
     #     "#29ff3e",
@@ -923,10 +923,10 @@ def make_video(
 
         position_mean = position_mean["DLC"]
         orientation_mean = orientation_mean["DLC"]
-        frame_offset = -1
-        time_slice = []
         video_slowdown = 1
-        vmax = 0.07  # ?
+        # frame_offset = -1
+        # time_slice = []
+        # vmax = 0.07  # ?
         # Set up formatting for the movie files
 
         window_size = 501

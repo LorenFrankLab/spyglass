@@ -490,6 +490,6 @@ def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
     nand_inds = np.where(np.isnan(dlc_df["x"]))[0]
     all_nan_inds = list(set(sub_thresh_inds).union(set(nand_inds)))
     all_nan_inds.sort()
-    sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
     # TODO: add option to return sub_thresh_percent
+    # sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
     return all_nan_inds

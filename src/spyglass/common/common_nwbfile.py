@@ -1,5 +1,4 @@
 import os
-import pathlib
 import random
 import stat
 import string
@@ -309,7 +308,7 @@ class AnalysisNwbfile(dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
+        base_dir = Path(os.getenv("SPYGLASS_BASE_DIR", None))
         assert (
             base_dir is not None
         ), "You must set SPYGLASS_BASE_DIR environment variable."

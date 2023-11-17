@@ -211,7 +211,7 @@ class DLCModel(dj.Computed):
                 raise KeyError("no trainingsetindex specified in key")
             model_prefix = params.pop("model_prefix", "")
             model_description = params.pop("model_description", model_name)
-            paramset_name = params.pop("dlc_training_params_name", None)
+            _ = params.pop("dlc_training_params_name", None)
 
             needed_attributes = [
                 "Task",
