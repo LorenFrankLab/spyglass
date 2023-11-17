@@ -751,10 +751,12 @@ def make_video(
                 key: fill_nan(
                     position_mean[key]["orientation"], video_time, position_time
                 )
-                for key in orientation_mean.keys()
+                for key in position_mean.keys()
+                # CBroz: Bug was here, using nonexistent orientation_mean dict
             }
         print(
-            f"frames start: {frames[0]}\nvideo_frames start: {video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
+            f"frames start: {frames[0]}\nvideo_frames start: "
+            + f"{video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
         )
         for time_ind in tqdm(
             frames, desc="frames", disable=disable_progressbar
@@ -1036,7 +1038,7 @@ def make_video(
                 f"time = {time_delta:3.4f}s\n frame = {frame_ind}",
                 fontsize=8,
             )
-            fontprops = fm.FontProperties(size=12)
+            _ = fm.FontProperties(size=12)
             #     scalebar = AnchoredSizeBar(axes[0].transData,
             #                                20, '20 cm', 'lower right',
             #                                pad=0.1,

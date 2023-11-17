@@ -135,11 +135,12 @@ class DLCCentroidParams(dj.Manual):
                         ]
                         if smooth_method not in _key_to_smooth_func_dict:
                             raise KeyError(
-                                f"smooth_method: {smooth_method} not an available method."
+                                f"Unknown smooth_method: {smooth_method}"
                             )
-                    if not "smoothing_duration" in params["smoothing_params"]:
+                    if "smoothing_duration" not in params["smoothing_params"]:
                         raise KeyError(
-                            "smoothing_duration must be passed as a smoothing_params within key['params']"
+                            "smoothing_duration must be passed as a "
+                            + "smoothing_params within key['params']"
                         )
                     else:
                         assert isinstance(

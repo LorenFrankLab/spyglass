@@ -547,7 +547,7 @@ class QualityMetrics(dj.Computed):
             else:
                 raise Exception(
                     f"{peak_sign_metrics} metrics require peak_sign",
-                    f"to be defined in the metric parameters",
+                    "to be defined in the metric parameters",
                 )
         else:
             metric = {}
@@ -950,9 +950,7 @@ class CuratedSpikeSorting(dj.Computed):
         recording = Curation.get_recording(key)
 
         # get the sort_interval and sorting interval list
-        sort_interval_name = (SpikeSortingRecording & key).fetch1(
-            "sort_interval_name"
-        )
+        _ = (SpikeSortingRecording & key).fetch1("sort_interval_name")
         sort_interval = (SortInterval & key).fetch1("sort_interval")
         sort_interval_list_name = (SpikeSorting & key).fetch1(
             "artifact_removed_interval_list_name"

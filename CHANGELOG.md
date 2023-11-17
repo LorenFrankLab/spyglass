@@ -24,8 +24,8 @@
   - Added support multiple cameras per epoch. #557
   - Removed `common_backup` schema. #631
   - Added support for multiple position objects per NWB in `common_behav` via
-    PositionSource.SpatialSeries and RawPosition.PosObject #628, #616.
-    _Note:_ Existing functions have been made compatible, but column labels for
+    PositionSource.SpatialSeries and RawPosition.PosObject #628, #616. _Note:_
+    Existing functions have been made compatible, but column labels for
     `RawPosition.fetch1_dataframe` may change.
 - Spike sorting:
   - Added pipeline populator. #637, #646, #647
@@ -96,12 +96,12 @@
 - Allow creation and linkage of device metadata from YAML #400
 - Move helper functions to utils directory #386
 
-[0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
-[0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
-[0.4.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.1
-[0.4.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.0
-[0.3.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.4
-[0.3.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.3
-[0.3.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.2
-[0.3.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.1
 [0.3.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.0
+[0.3.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.1
+[0.3.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.2
+[0.3.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.3
+[0.3.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.4
+[0.4.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.0
+[0.4.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.1
+[0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
+[0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3

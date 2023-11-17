@@ -6,7 +6,6 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 from datajoint.utils import to_camel_case
-from tqdm import tqdm as tqdm
 
 from ..common.common_position import IntervalPositionInfo as CommonPos
 from ..utils.dj_merge_tables import _Merge
@@ -207,6 +206,7 @@ class PositionVideo(dj.Computed):
             )
 
         print("Loading video data...")
+        epoch = int("".join(filter(str.isdigit, key["interval_list_name"]))) + 1
 
         (
             video_path,
@@ -214,13 +214,7 @@ class PositionVideo(dj.Computed):
             meters_per_pixel,
             video_time,
         ) = get_video_path(
-            {
-                "nwb_file_name": key["nwb_file_name"],
-                "epoch": int(
-                    "".join(filter(str.isdigit, key["interval_list_name"]))
-                )
-                + 1,
-            }
+            {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         )
         video_dir = os.path.dirname(video_path) + "/"
         video_frame_col_name = [

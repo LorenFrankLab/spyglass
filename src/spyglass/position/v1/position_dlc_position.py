@@ -106,7 +106,7 @@ class DLCSmoothInterpParams(dj.Manual):
 
     def insert1(self, key, **kwargs):
         if "params" in key:
-            if not "max_cm_between_pts" in key["params"]:
+            if "max_cm_between_pts" not in key["params"]:
                 raise KeyError("max_cm_between_pts is a required parameter")
             if "smooth" in key["params"]:
                 if key["params"]["smooth"]:
@@ -117,14 +117,15 @@ class DLCSmoothInterpParams(dj.Manual):
                             ]
                             if smooth_method not in _key_to_smooth_func_dict:
                                 raise KeyError(
-                                    f"smooth_method: {smooth_method} not an available method."
+                                    f"Unknown smooth_method: {smooth_method}"
                                 )
                         if (
-                            not "smoothing_duration"
-                            in key["params"]["smoothing_params"]
+                            "smoothing_duration"
+                            not in key["params"]["smoothing_params"]
                         ):
                             raise KeyError(
-                                "smoothing_duration must be passed as a smoothing_params within key['params']"
+                                "smoothing_duration must be passed as a "
+                                + "smoothing_params within key['params']"
                             )
                         else:
                             assert isinstance(
