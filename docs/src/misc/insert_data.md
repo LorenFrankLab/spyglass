@@ -22,14 +22,17 @@ particular probe is stored in the `ProbeType` and `Probe` tables of
 1. create these entries programmatically using DataJoint `insert` commands, for
    example:
 
-    ```python
-    sgc.ProbeType.insert1({
-    "probe_type": "128c-4s6mm6cm-15um-26um-sl",
-    "probe_description": "A Livermore flexible probe with 128 channels, 4 shanks, 6 mm shank length, 6 cm ribbon length. 15 um contact diameter, 26 um center-to-center distance (pitch), single-line configuration.",
-    "manufacturer": "Lawrence Livermore National Lab",
-    "num_shanks": 4,
-    }, skip_duplicates=True)
-    ```
+   ```python
+   sgc.ProbeType.insert1(
+       {
+           "probe_type": "128c-4s6mm6cm-15um-26um-sl",
+           "probe_description": "A Livermore flexible probe with 128 channels, 4 shanks, 6 mm shank length, 6 cm ribbon length. 15 um contact diameter, 26 um center-to-center distance (pitch), single-line configuration.",
+           "manufacturer": "Lawrence Livermore National Lab",
+           "num_shanks": 4,
+       },
+       skip_duplicates=True,
+   )
+   ```
 
 2. define these entries in a special YAML file called `entries.yaml` that is
    processed when `spyglass` is imported. One can think of `entries.yaml` as a
@@ -38,23 +41,25 @@ particular probe is stored in the `ProbeType` and `Probe` tables of
    `spyglass` base directory. An example can be found in
    `examples/config_yaml/entries.yaml`. It has the following structure:
 
-    ```yaml
-    TableName:
-    - TableEntry1Field1: Value
-    TableEntry1Field2: Value
-    - TableEntry2Field1: Value
-    TableEntry2Field2: Value
-    ```
+   ```yaml
+   TableName:
+   - TableEntry1Field1: Value
+   TableEntry1Field2: Value
+   - TableEntry2Field1: Value
+   TableEntry2Field2: Value
+   ```
 
-    For example,
+   For example,
 
-    ```yaml
-    ProbeType:
-    - probe_type: 128c-4s6mm6cm-15um-26um-sl
-    probe_description: A Livermore flexible probe with 128 channels, 4 shanks, 6 mm shank length, 6 cm ribbon length. 15 um contact diameter, 26 um center-to-center distance (pitch), single-line configuration.
-    manufacturer: Lawrence Livermore National Lab
-    num_shanks: 4
-    ```
+   ```yaml
+   ProbeType:
+     - probe_type: 128c-4s6mm6cm-15um-26um-sl
+   probe_description: A Livermore flexible probe with 128 channels, 4 shanks, 6 mm shank
+     length, 6 cm ribbon length. 15 um contact diameter, 26 um center-to-center distance
+     (pitch), single-line configuration.
+   manufacturer: Lawrence Livermore National Lab
+   num_shanks: 4
+   ```
 
 Using a YAML file over programmatically creating these entries in a notebook or
 script has the advantages that the YAML file maintains a record of what entries
@@ -78,14 +83,14 @@ This is the general format for the config entry:
 
 ```yaml
 TableName:
-- primary_key1: value1
+  - primary_key1: value1
 ```
 
 For example:
 
 ```yaml
 DataAcquisitionDevice:
-- data_acquisition_device_name: Neuropixels Recording Device
+  - data_acquisition_device_name: Neuropixels Recording Device
 ```
 
 In this example, the NWB file that corresponds to this config YAML will become

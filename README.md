@@ -24,7 +24,8 @@ directory. We strongly recommend opening them in the context of `jupyterlab`.
 
 ## Contributing
 
-See the [Developer's Note](https://lorenfranklab.github.io/spyglass/latest/contribute/)
+See the
+[Developer's Note](https://lorenfranklab.github.io/spyglass/latest/contribute/)
 for contributing instructions found at -
 [https://lorenfranklab.github.io/spyglass/latest/contribute/](https://lorenfranklab.github.io/spyglass/latest/contribute/)
 

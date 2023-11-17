@@ -42,8 +42,8 @@ processing.
 ## Developer note
 
 The `py_scripts` directory contains the same notebook data in `.py` form to
-facilitate GitHub PR reviews. To update them, run the following from the
-root Spyglass directory
+facilitate GitHub PR reviews. To update them, run the following from the root
+Spyglass directory
 
 ```bash
 pip install jupytext

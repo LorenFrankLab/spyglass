@@ -4,8 +4,8 @@ The files in this directory are automatically generated from the docstrings in
 the source code. They include descriptions of each of the DataJoint tables and
 other classes/methods within Spyglass.
 
-These docs are updated any time a new release is made or a tag is
-pushed to the repository.
+These docs are updated any time a new release is made or a tag is pushed to the
+repository.
 
 <!--
 TODO: add section indexes
