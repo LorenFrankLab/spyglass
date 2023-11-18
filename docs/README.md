@@ -6,7 +6,7 @@
 section of this file. New pages should be either:
 
 1. A markdown file in the `docs/` directory.
-2. A Jupyter notebook in the `notebooks/` directory.
+1. A Jupyter notebook in the `notebooks/` directory.
 
 The remainder of `mkdocs.yml` specifies the site's
 [configuration](https://www.mkdocs.org/user-guide/configuration/)

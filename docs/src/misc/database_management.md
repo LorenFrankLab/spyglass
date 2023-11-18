@@ -34,7 +34,7 @@ schema/database prefix.
 
 - `SELECT` privileges allow users to read, write, and delete data.
 - `ALL` privileges allow users to create, alter, or drop tables and schemas in
-  addition to operations above.
+    addition to operations above.
 
 In practice, DataJoint only permits alerations of secondary keys on existing
 tables, and more derstructive operations would require using DataJoint to
@@ -76,7 +76,7 @@ migrate the contents to another server. Some conventions to note:
 - `.host`: files used in the host's context
 - `.container`: files used inside the database Docker container
 - `.env`: files used to set environment variables used by the scripts for
-  database name, backup name, and backup credentials
+    database name, backup name, and backup credentials
 
 ### mysql.env.host
 

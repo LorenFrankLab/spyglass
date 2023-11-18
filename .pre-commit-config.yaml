@@ -13,6 +13,7 @@ repos:
         types: [markdown]
         args: [--wrap, "80", --number]
         additional_dependencies:
+          - mdformat-mkdocs
           - mdformat-toc
           - mdformat-beautysh
           - mdformat-config

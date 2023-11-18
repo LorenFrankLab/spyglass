@@ -18,7 +18,7 @@ For folks running ephys analysis, one could use the either one or both of the
 following...
 
 1. Spike Sorting, and optionally the Curation notebooks
-2. LFP, and optionally Theta notebooks
+1. LFP, and optionally Theta notebooks
 
 ## 2. Position
 
@@ -33,9 +33,9 @@ processing.
 
 - Ripple Detection: Uses LFP and Position information
 - Extract Marks: Comparing actual and mental position using unclustered spikes
-  and spike waveform features.
+    and spike waveform features.
 - Decoding: Uses either spike sorted of clusterless ephys analysis to look at
-  mental position.
+    mental position.
 
 <!-- CBroz: Did I get this right? -->
 

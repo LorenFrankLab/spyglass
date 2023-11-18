@@ -24,12 +24,12 @@ A Merge Table is fundamentally a master table with one part for each divergent
 pipeline. By convention...
 
 1. The master table has one primary key, `merge_id`, a
-   [UUID](https://en.wikipedia.org/wiki/Universally_unique_identifier), and one
-   secondary attribute, `source`, which gives the part table name. Both are
-   managed with the custom `insert` function of this class.
+    [UUID](https://en.wikipedia.org/wiki/Universally_unique_identifier), and
+    one secondary attribute, `source`, which gives the part table name. Both
+    are managed with the custom `insert` function of this class.
 
-2. Each part table has inherits the final table in its respective pipeline, and
-   shares the same name as this table.
+1. Each part table has inherits the final table in its respective pipeline, and
+    shares the same name as this table.
 
 ```python
 from spyglass.utils.dj_merge_tables import _Merge
