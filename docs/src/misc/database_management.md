@@ -78,10 +78,15 @@ migrate the contents to another server. Some conventions to note:
 - `.env`: files used to set environment variables used by the scripts for
     database name, backup name, and backup credentials
 
+This backup process uses a dedicated backup user, that an admin would need to
+criate with the relevant permissions.
+
 ### mysql.env.host
 
 <details>
 <summary>MySQL host environment variables</summary>
+
+Values may be adjusted as needed for different building images.
 
 ```bash
 ROOT_PATH=/usr/local/containers/mysql # path to this container's working area
@@ -145,9 +150,9 @@ cd ${PRIOR_DIR}
 
 ### mysql-backup-xfer.csh.host
 
-This script transfers the backup to another server 'X' and is specific for us -
+This script transfers the backup to another server 'X' and is specific for us as
 it uses passwordless ssh keys to a local unprivileged user on X that has the
-mysql backup area on X as that user's home
+mysql backup area on X as that user's home.
 
 <details>
 <summary>MySQL host transfer script</summary>
