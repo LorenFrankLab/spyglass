@@ -100,7 +100,7 @@ def validate_list(
         )
 
 
-def vaidate_smooth_params(params):
+def validate_smooth_params(params):
     """If params['smooth'], validate method is in list and duration type"""
     if not params.get("smooth"):
         return
