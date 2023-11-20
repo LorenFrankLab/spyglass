@@ -69,7 +69,147 @@ dj.set_password()
 
 ## Database Backups
 
-Coming soon...
+The following codeblockes are a series of files used to back up our database and
+migrate the contents to another server. Some conventions to note:
+
+- `.host`: files used in the host's context
+- `.container`: files used inside the database Docker container
+- `.env`: files used to set environment variables used by the scripts for
+  database name, backup name, and backup credentials
+
+This backup process uses a dedicated backup user, that an admin would need to
+criate with the relevant permissions.
+
+### mysql.env.host
+
+<details>
+<summary>MySQL host environment variables</summary>
+
+Values may be adjusted as needed for different building images.
+
+```bash
+ROOT_PATH=/usr/local/containers/mysql # path to this container's working area
+
+# variables for building image
+SRC=ubuntu
+VER=20.04
+DOCKERFILE=Dockerfile.base
+
+# variables for referencing image
+IMAGE=mysql8
+TAG=u20
+# variables for running the container
+CNAME=mysql-datajoint
+MACADDR=4e:b0:3d:42:e0:70
+RPORT=3306
+
+# variables for initializing/relaunching the container
+# - where the mysql data and backups will live - these values
+# are examples
+DB_PATH=/data/db
+DB_DATA=mysql
+DB_BACKUP=/data/mysql-backups
+
+# backup info
+BACK_USER=mysql-backup
+BACK_PW={password}
+BACK_DBNAME={database}
+# mysql root password - make sure to remove this AFTER the container
+# is initialized - and this file will be replicated inside the container
+# on initialization, so remove it from there: /opt/bin/mysql.env
+```
+
+</details>
+
+### backup-database.sh.host
+
+This script runs the mysql-backup container script (exec inside the container)
+that dumps the database contents for each database as well as the entire
+database. Use cron to set this to run on your desired schedule.
+
+<details>
+<summary>MySQL host docker exec</summary>
+
+```bash
+#!/bin/bash
+
+PRIOR_DIR=$(pwd)
+cd /usr/local/containers/mysql || exit
+. mysql.env
+cd "$(dirname ${ROOT_PATH})"
+#
+docker exec ${CNAME} /opt/bin/mysql-backup.csh
+#
+cd "$(dirname ${DB_BACKUP})"
+#
+cd ${PRIOR_DIR}
+```
+
+</details>
+
+### mysql-backup-xfer.csh.host
+
+This script transfers the backup to another server 'X' and is specific for us as
+it uses passwordless ssh keys to a local unprivileged user on X that has the
+mysql backup area on X as that user's home.
+
+<details>
+<summary>MySQL host transfer script</summary>
+
+```bash
+#!/bin/csh
+set td=`date +"%Y%m%d"`
+cd /data/mysql-backups
+scp -P {port} -i ~/mysql-backup -r ${database}-${td} mysql-backup@${X}:~/
+/bin/rm -r lmf-db-${td}
+```
+
+</details>
+
+### myenv.csh.container
+
+<details>
+<summary>Docker container environment variables</summary>
+
+```bash
+set db_backup=mysql-backups
+set back_user=mysql-backup
+set back_pw={password}
+set back_dbname={database}
+```
+
+</details>
+
+### mysql-backup.csh.container
+
+<details>
+<summary>Generate backups from within container</summary>
+
+```bash
+#!/bin/csh
+source /opt/bin/myenv.csh
+set td=`date +"%Y%m%d"`
+cd /${db_backup}
+mkdir ${back_dbname}-${td}
+
+set list=`echo "show databases;" | mysql --user=${back_user} --password=${back_pw}`
+set cnt=0
+
+foreach db ($list)
+  if ($cnt == 0) then
+    echo "dumping mysql databases on $td"
+  else
+    echo "dumping MySQL database : $db"
+    # Per-schema backups
+    mysqldump $db --max_allowed_packet=512M --user=${back_user} --password=${back_pw} > /${db_backup}/${back_dbname}-${td}/mysql.${db}.sql
+  endif
+@ cnt = $cnt + 1
+end
+# Full database backup
+mysqldump --all-databases --max_allowed_packet=512M --user=${back_user} --password=${back_pw} > /${db_backup}/${back_dbname}-${td}/mysql-all.sql
+```
+
+</details>
 
 ## File Cleanup
 
