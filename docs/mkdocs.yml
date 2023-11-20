@@ -112,11 +112,11 @@ plugins:
   - gen-files:
       scripts:
         - ./src/api/make_pages.py
-  # - mkdocs-jupyter: # Comment this block during dev to reduce build time
-  #     execute: False # Very slow, needs gh-action edit to work/link to db
-  #     include_source: False
-  #     ignore_h1_titles: True
-  #     ignore: ["*make_pages.py", "**checkpoints**", "*/py_scripts/*"]
+  - mkdocs-jupyter: # Comment this block during dev to reduce build time
+      execute: False # Very slow, needs gh-action edit to work/link to db
+      include_source: False
+      ignore_h1_titles: True
+      ignore: ["*make_pages.py", "**checkpoints**", "*/py_scripts/*"]
 
 markdown_extensions:
   - attr_list
