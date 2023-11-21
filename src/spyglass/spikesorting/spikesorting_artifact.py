@@ -302,7 +302,7 @@ def _get_artifact_times(
             (valid_timestamps[i[0]], valid_timestamps[i[1]])
         )
 
-    return artifact_removed_valid_times, artifact_intervals_s
+    return np.asarray(artifact_removed_valid_times), artifact_intervals_s
 
 
 def _init_artifact_worker(
