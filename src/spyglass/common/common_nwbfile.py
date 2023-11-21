@@ -3,7 +3,6 @@ import pathlib
 import random
 import stat
 import string
-from pathlib import Path
 
 import datajoint as dj
 import numpy as np

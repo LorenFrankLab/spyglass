@@ -14,7 +14,9 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
-from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
+
+# from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("lfp_v1")
 
@@ -43,7 +45,7 @@ class LFPSelection(dj.Manual):
 
 
 @schema
-class LFPV1(dj.Computed):
+class LFPV1(SpyglassMixin, dj.Computed):
     """The filtered LFP data"""
 
     definition = """
@@ -169,11 +171,6 @@ class LFPV1(dj.Computed):
         orig_key["analysis_file_name"] = lfp_file_name
         orig_key["lfp_object_id"] = lfp_object_id
         LFPOutput.insert1(orig_key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self, *attrs, **kwargs):
         nwb_lfp = self.fetch_nwb()[0]

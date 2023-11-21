@@ -40,6 +40,7 @@ from spyglass.decoding.dj_decoder_conversion import (
     restore_classes,
 )
 from spyglass.spikesorting.spikesorting_curation import CuratedSpikeSorting
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("decoding_sortedspikes")
 
@@ -59,7 +60,7 @@ class SortedSpikesIndicatorSelection(dj.Lookup):
 
 
 @schema
-class SortedSpikesIndicator(dj.Computed):
+class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
     """Bins spike times into regular intervals given by the sampling rate.
     Useful for GLMs and for decoding.
 
@@ -146,11 +147,6 @@ class SortedSpikesIndicator(dj.Computed):
         n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
 
         return np.linspace(start_time, end_time, n_samples)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         return self.fetch_dataframe()[0]

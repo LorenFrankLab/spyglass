@@ -1,7 +1,8 @@
 import copy
+
 import datajoint as dj
-from datajoint.utils import to_camel_case
 import numpy as np
+from datajoint.utils import to_camel_case
 from track_linearization import (
     get_linearized_position,
     make_track_graph,
@@ -12,6 +13,7 @@ from track_linearization import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("position_linearization_v1")
 
@@ -102,7 +104,7 @@ class LinearizationSelection(dj.Lookup):
 
 
 @schema
-class LinearizedPositionV1(dj.Computed):
+class LinearizedPositionV1(SpyglassMixin, dj.Computed):
     """Linearized position for a given interval"""
 
     definition = """
@@ -176,11 +178,6 @@ class LinearizedPositionV1(dj.Computed):
 
         LinearizedPositionOutput._merge_insert(
             [orig_key], part_name=part_name, skip_duplicates=True
-        )
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
         )
 
     def fetch1_dataframe(self):

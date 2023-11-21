@@ -5,6 +5,7 @@ import pandas as pd
 import pynwb
 
 from ..utils.dj_helper_fn import fetch_nwb  # dj_replace
+from ..utils.dj_mixin import SpyglassMixin  # dj_replace
 from ..utils.nwb_helper_fn import get_data_interface, get_nwb_file
 from .common_ephys import Raw
 from .common_interval import IntervalList
@@ -15,7 +16,7 @@ schema = dj.schema("common_dio")
 
 
 @schema
-class DIOEvents(dj.Imported):
+class DIOEvents(SpyglassMixin, dj.Imported):
     definition = """
     -> Session
     dio_event_name: varchar(80)   # the name assigned to this DIO event
@@ -23,6 +24,8 @@ class DIOEvents(dj.Imported):
     dio_object_id: varchar(40)    # the object id of the data in the NWB file
     -> IntervalList               # the list of intervals for this object
     """
+
+    nwb_table = Nwbfile
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]
@@ -47,9 +50,6 @@ class DIOEvents(dj.Imported):
             key["dio_event_name"] = event_series.name
             key["dio_object_id"] = event_series.object_id
             self.insert1(key, skip_duplicates=True)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
 
     def plot_all_dio_events(self):
         """Plot all DIO events in the session.

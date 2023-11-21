@@ -8,7 +8,7 @@ from position_tools import get_distance, get_velocity
 
 from ...common.common_behav import RawPosition
 from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_helper_fn import fetch_nwb
+from ...utils.dj_mixin import SpyglassMixin
 from .dlc_utils import _key_to_smooth_func_dict, get_span_start_stop, interp_pos
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_position import DLCSmoothInterpParams
@@ -167,7 +167,7 @@ class DLCCentroidSelection(dj.Manual):
 
 
 @schema
-class DLCCentroid(dj.Computed):
+class DLCCentroid(SpyglassMixin, dj.Computed):
     """
     Table to calculate the centroid of a group of bodyparts
     """
@@ -421,11 +421,6 @@ class DLCCentroid(dj.Computed):
             )
             self.insert1(key)
             logger.logger.info("inserted entry into DLCCentroid")
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]

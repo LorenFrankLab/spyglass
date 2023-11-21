@@ -38,7 +38,7 @@ def apply_merge_groups_to_sorting(
 
 
 @schema
-class Curation(dj.Manual):
+class Curation(SpyglassMixin, dj.Manual):
     definition = """
     # Stores each spike sorting; similar to IntervalList
     curation_id: int # a number corresponding to the index of this curation
@@ -51,6 +51,8 @@ class Curation(dj.Manual):
     description='': varchar(1000) #optional description for this curated sort
     time_of_creation: int   # in Unix time, to the nearest second
     """
+
+    nwb_table = AnalysisNwbfile
 
     @staticmethod
     def insert_curation(
@@ -250,11 +252,6 @@ class Curation(dj.Manual):
             units_object_id = object_ids[0]
 
         return analysis_file_name, units_object_id
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
 
 @schema
@@ -878,7 +875,7 @@ class CuratedSpikeSortingSelection(dj.Manual):
 
 
 @schema
-class CuratedSpikeSorting(dj.Computed):
+class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
     definition = """
     -> CuratedSpikeSortingSelection
     ---
@@ -1000,11 +997,6 @@ class CuratedSpikeSorting(dj.Computed):
         unit_fields.remove("label")
         return unit_fields
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
 
 @schema
 class UnitInclusionParameters(dj.Manual):
@@ -1068,7 +1060,7 @@ class UnitInclusionParameters(dj.Manual):
             "KEY"
         )
         # get a list of the metrics in the units table
-        metrics_list = CuratedSpikeSorting().metrics_fields()
+        CuratedSpikeSorting().metrics_fields()
         # get the list of labels to exclude if there is one
         if "exclude_labels" in inc_param_dict:
             exclude_labels = inc_param_dict["exclude_labels"]
@@ -1089,10 +1081,8 @@ class UnitInclusionParameters(dj.Manual):
 
         # now exclude by label if it is specified
         if len(exclude_labels):
-            included_units = []
             for unit_ind in np.ravel(np.argwhere(keep)):
                 labels = units[unit_ind]["label"].split(",")
-                exclude = False
                 for label in labels:
                     if label in exclude_labels:
                         keep[unit_ind] = False

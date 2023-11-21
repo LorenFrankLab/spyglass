@@ -7,6 +7,7 @@ import pandas as pd
 import pynwb
 
 from ..utils.dj_helper_fn import fetch_nwb  # dj_replace
+from ..utils.dj_mixin import SpyglassMixin
 from ..utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
@@ -217,7 +218,7 @@ class Electrode(dj.Imported):
 
 
 @schema
-class Raw(dj.Imported):
+class Raw(SpyglassMixin, dj.Imported):
     definition = """
     # Raw voltage timeseries data, ElectricalSeries in NWB.
     -> Session
@@ -228,6 +229,8 @@ class Raw(dj.Imported):
     comments: varchar(2000)
     description: varchar(2000)
     """
+
+    nwb_table = Nwbfile
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]
@@ -295,18 +298,17 @@ class Raw(dj.Imported):
         )
         return nwbf.objects[raw_object_id]
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
-
 
 @schema
-class SampleCount(dj.Imported):
+class SampleCount(SpyglassMixin, dj.Imported):
     definition = """
     # Sample count :s timestamp timeseries
     -> Session
     ---
     sample_count_object_id: varchar(40)      # the NWB object ID for loading this object from the file
     """
+
+    nwb_table = Nwbfile
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]
@@ -322,9 +324,6 @@ class SampleCount(dj.Imported):
             return
         key["sample_count_object_id"] = sample_count.object_id
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
 
 
 @schema
@@ -376,7 +375,7 @@ class LFPSelection(dj.Manual):
 
 
 @schema
-class LFP(dj.Imported):
+class LFP(SpyglassMixin, dj.Imported):
     definition = """
     -> LFPSelection
     ---
@@ -486,11 +485,6 @@ class LFP(dj.Imported):
             "lfp_object_id"
         )
         return lfp_nwbf.objects[nwb_object_id]
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self, *attrs, **kwargs):
         nwb_lfp = self.fetch_nwb()[0]
@@ -631,7 +625,7 @@ class LFPBandSelection(dj.Manual):
 
 
 @schema
-class LFPBand(dj.Computed):
+class LFPBand(SpyglassMixin, dj.Computed):
     definition = """
     -> LFPBandSelection
     ---
@@ -828,11 +822,6 @@ class LFPBand(dj.Computed):
             )
 
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self, *attrs, **kwargs):
         filtered_nwb = self.fetch_nwb()[0]

@@ -5,6 +5,7 @@ import pynwb
 
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
+from ...utils.dj_mixin import SpyglassMixin
 from .dlc_utils import _key_to_smooth_func_dict, get_span_start_stop, interp_pos
 from .position_dlc_pose_estimation import DLCPoseEstimation
 
@@ -168,7 +169,7 @@ class DLCSmoothInterpSelection(dj.Manual):
 
 
 @schema
-class DLCSmoothInterp(dj.Computed):
+class DLCSmoothInterp(SpyglassMixin, dj.Computed):
     """
     Interpolates across low likelihood periods and smooths the position
     Can take a few minutes.
@@ -293,11 +294,6 @@ class DLCSmoothInterp(dj.Computed):
             )
             self.insert1(key)
             logger.logger.info("inserted entry into DLCSmoothInterp")
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
@@ -490,6 +486,6 @@ def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
     nand_inds = np.where(np.isnan(dlc_df["x"]))[0]
     all_nan_inds = list(set(sub_thresh_inds).union(set(nand_inds)))
     all_nan_inds.sort()
-    sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
+    (len(sub_thresh_inds) / len(dlc_df)) * 100
     # TODO: add option to return sub_thresh_percent
     return all_nan_inds

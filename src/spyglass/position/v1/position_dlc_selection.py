@@ -8,11 +8,11 @@ import pynwb
 from datajoint.utils import to_camel_case
 from tqdm import tqdm as tqdm
 
-from ...common.common_nwbfile import AnalysisNwbfile
 from ...common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
 )
-from ...utils.dj_helper_fn import fetch_nwb
+from ...common.common_nwbfile import AnalysisNwbfile
+from ...utils.dj_mixin import SpyglassMixin
 from .dlc_utils import get_video_path, make_video
 from .position_dlc_centroid import DLCCentroid
 from .position_dlc_cohort import DLCSmoothInterpCohort
@@ -40,7 +40,7 @@ class DLCPosSelection(dj.Manual):
 
 
 @schema
-class DLCPosV1(dj.Computed):
+class DLCPosV1(SpyglassMixin, dj.Computed):
     """
     Combines upstream DLCCentroid and DLCOrientation
     entries into a single entry with a single Analysis NWB file
@@ -138,11 +138,6 @@ class DLCPosV1(dj.Computed):
         # TODO: The next line belongs in a merge table function
         PositionOutput._merge_insert(
             [orig_key], part_name=part_name, skip_duplicates=True
-        )
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
         )
 
     def fetch1_dataframe(self):
