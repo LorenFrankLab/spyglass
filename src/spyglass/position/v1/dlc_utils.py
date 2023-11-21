@@ -1023,11 +1023,8 @@ def make_video(
         position_mean = position_mean["DLC"]
         orientation_mean = orientation_mean["DLC"]
         video_slowdown = 1
-        # frame_offset = -1
-        # time_slice = []
-        # vmax = 0.07  # ?
-        # Set up formatting for the movie files
 
+        # Set up formatting for the movie files
         window_size = 501
         if likelihoods:
             plot_likelihood = True
@@ -1136,15 +1133,6 @@ def make_video(
                 fontsize=8,
             )
             _ = fm.FontProperties(size=12)
-            #     scalebar = AnchoredSizeBar(axes[0].transData,
-            #                                20, '20 cm', 'lower right',
-            #                                pad=0.1,
-            #                                color='white',
-            #                                frameon=False,
-            #                                size_vertical=1,
-            #                                fontproperties=fontprops)
-
-            #     axes[0].add_artist(scalebar)
             axes[0].axis("off")
             if plot_likelihood:
                 likelihood_objs = {
@@ -1274,10 +1262,6 @@ def make_video(
                     centroid_position_dot,
                     orientation_line,
                     title,
-                    # redC_likelihood,
-                    # green_likelihood,
-                    # redL_likelihood,
-                    # redR_likelihood,
                 )
 
             movie = animation.FuncAnimation(

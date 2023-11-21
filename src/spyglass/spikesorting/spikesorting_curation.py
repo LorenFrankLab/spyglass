@@ -950,7 +950,6 @@ class CuratedSpikeSorting(dj.Computed):
         recording = Curation.get_recording(key)
 
         # get the sort_interval and sorting interval list
-        _ = (SpikeSortingRecording & key).fetch1("sort_interval_name")
         sort_interval = (SortInterval & key).fetch1("sort_interval")
         sort_interval_list_name = (SpikeSorting & key).fetch1(
             "artifact_removed_interval_list_name"
@@ -1067,8 +1066,6 @@ class UnitInclusionParameters(dj.Manual):
         units_key = (CuratedSpikeSorting().Unit() & curated_sortings).fetch(
             "KEY"
         )
-        # get a list of the metrics in the units table
-        _ = CuratedSpikeSorting().metrics_fields()
         # get the list of labels to exclude if there is one
         if "exclude_labels" in inc_param_dict:
             exclude_labels = inc_param_dict["exclude_labels"]

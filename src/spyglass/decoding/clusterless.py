@@ -666,56 +666,6 @@ class MultiunitHighSynchronyEventsParameters(dj.Manual):
         )
 
 
-# NOTE: Table decommissioned. See #630, #664. Excessive key length.
-#
-# class MultiunitHighSynchronyEvents(dj.Computed):
-#     "Finds times of high mulitunit activity during immobility."
-#
-#     definition = "
-#     -> MultiunitHighSynchronyEventsParameters
-#     -> UnitMarksIndicator
-#     -> IntervalPositionInfo
-#     ---
-#     -> AnalysisNwbfile
-#     multiunit_hse_times_object_id: varchar(40)
-#     "
-#
-#     def make(self, key):
-#         marks = (UnitMarksIndicator & key).fetch_xarray()
-#         multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(
-#             float
-#         )
-#         position_info = (IntervalPositionInfo() & key).fetch1_dataframe()
-#
-#         params = (MultiunitHighSynchronyEventsParameters & key).fetch1()
-#
-#         multiunit_high_synchrony_times = multiunit_HSE_detector(
-#             marks.time.values,
-#             multiunit_spikes,
-#             position_info.head_speed.values,
-#             sampling_frequency=key["sampling_rate"],
-#             **params,
-#         )
-#
-#         # Insert into analysis nwb file
-#         nwb_analysis_file = AnalysisNwbfile()
-#         key["analysis_file_name"] = nwb_analysis_file.create(
-#             key["nwb_file_name"]
-#         )
-#
-#         key["multiunit_hse_times_object_id"] = nwb_analysis_file.add_nwb_object(
-#             analysis_file_name=key["analysis_file_name"],
-#             nwb_object=multiunit_high_synchrony_times.reset_index(),
-#         )
-#
-#         nwb_analysis_file.add(
-#             nwb_file_name=key["nwb_file_name"],
-#             analysis_file_name=key["analysis_file_name"],
-#         )
-#
-#         self.insert1(key)
-
-
 def get_decoding_data_for_epoch(
     nwb_file_name: str,
     interval_list_name: str,

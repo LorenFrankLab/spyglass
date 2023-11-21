@@ -55,8 +55,6 @@ def _create_spikesortingview_workspace(
                 sorting_id=sorting_id, label=label, unit_ids=[int(unit_id)]
             )
 
-    _ = workspace.get_unit_metrics_for_sorting(sorting_id)
-
     return workspace.uri, recording_id, sorting_id
 
 

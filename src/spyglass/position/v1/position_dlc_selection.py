@@ -232,18 +232,6 @@ class DLCPosV1(dj.Computed):
             for bodypart in bodyparts
             if bodypart in pose_estimation_df.columns
         }
-        # sub_thresh_ind_dict = {
-        #     bodypart: {
-        #         "inds": np.where(
-        #             ~np.isnan(
-        #                 pose_estimation_df[bodypart]["likelihood"].where(
-        #                     df_filter[bodypart]
-        #                 )
-        #             )
-        #         )[0],
-        #     }
-        #     for bodypart in bodyparts
-        # }
         sub_thresh_percent_dict = {
             bodypart: (
                 len(
