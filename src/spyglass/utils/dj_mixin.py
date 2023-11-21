@@ -15,6 +15,10 @@ class SpyglassMixin:
 
         Impleminting class must have a foreign key to Nwbfile or
         AnalysisNwbfile or a nwb_table attribute.
+
+        A class that does not have with either '-> Nwbfile' or
+        '-> AnalysisNwbfile' in its definition can use a nwb_table attribute to
+        specify which table to use.
         """
 
         if not hasattr(self, "nwb_table"):
