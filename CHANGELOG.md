@@ -1,5 +1,9 @@
 # Change Log
 
+## [0.4.4] (November 7, 2023)
+
+- Additional documentation. #686
+
 ## [0.4.3] (November 7, 2023)
 
 - Migrate `config` helper scripts to Spyglass codebase. #662
@@ -95,6 +99,8 @@
 - Allow creation and linkage of device metadata from YAML #400
 - Move helper functions to utils directory #386
 
+[0.4.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.4
+[0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
 [0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
 [0.4.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.1
 [0.4.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.0
