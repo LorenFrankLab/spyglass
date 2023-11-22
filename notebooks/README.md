@@ -18,7 +18,7 @@ For folks running ephys analysis, one could use the either one or both of the
 following...
 
 1. Spike Sorting, and optionally the Curation notebooks
-1. LFP, and optionally Theta notebooks
+2. LFP, and optionally Theta notebooks
 
 ## 2. Position
 

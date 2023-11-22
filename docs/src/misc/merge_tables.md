@@ -28,7 +28,7 @@ pipeline. By convention...
     one secondary attribute, `source`, which gives the part table name. Both
     are managed with the custom `insert` function of this class.
 
-1. Each part table has inherits the final table in its respective pipeline, and
+2. Each part table has inherits the final table in its respective pipeline, and
     shares the same name as this table.
 
 ```python

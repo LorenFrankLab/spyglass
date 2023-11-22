@@ -243,10 +243,10 @@ Spyglass follows [Semantic Versioning](https://semver.org/) with versioning of
 the form `X.Y.Z` (e.g., `0.4.2`).
 
 1. In `CITATION.cff`, update the `version` key.
-1. Make a pull request with changes.
-1. After the pull request is merged, pull this merge commit and tag it with
+2. Make a pull request with changes.
+3. After the pull request is merged, pull this merge commit and tag it with
     `git tag {version}`
-1. Publish the new release tag. Run `git push origin {version}`. This will
+4. Publish the new release tag. Run `git push origin {version}`. This will
     rebuild docs and push updates to PyPI.
-1. Make a new
+5. Make a new
     [release on GitHub](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository).

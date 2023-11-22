@@ -4,7 +4,7 @@ exclude: (^.github/|^docs/site/|^images/)
 repos:
   - repo: https://github.com/executablebooks/mdformat
     # Do this before other tools "fixing" the line endings
-    rev: 0.7.16
+    rev: 0.7.17
     hooks:
       - id: mdformat
         name: Format Markdown
@@ -22,7 +22,7 @@ repos:
           - mdformat-gfm
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v4.5.0
     hooks:
       - id: check-toml
       - id: check-yaml
@@ -43,7 +43,7 @@ repos:
       - id: fix-byte-order-marker
 
   - repo: https://github.com/adrienverge/yamllint.git
-    rev: v1.29.0
+    rev: v1.33.0
     hooks:
       - id: yamllint
         args:
@@ -52,7 +52,7 @@ repos:
           - "{extends: relaxed, rules: {line-length: {max: 80}}}"
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.0.254
+    rev: v0.1.6
     hooks:
       - id: ruff
         args: [
@@ -64,12 +64,12 @@ repos:
         # E501: Line too long - Allow longer lines in table definitions
 
   - repo: https://github.com/PyCQA/autoflake
-    rev: v2.0.1
+    rev: v2.2.1
     hooks:
       - id: autoflake
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.2.2
+    rev: v2.2.6
     hooks:
       - id: codespell
         args: [--toml, pyproject.toml]

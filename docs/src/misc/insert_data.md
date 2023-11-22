@@ -34,7 +34,7 @@ particular probe is stored in the `ProbeType` and `Probe` tables of
     )
     ```
 
-1. define these entries in a special YAML file called `entries.yaml` that is
+2. define these entries in a special YAML file called `entries.yaml` that is
     processed when `spyglass` is imported. One can think of `entries.yaml` as a
     place to define information that the database should come pre-equipped
     prior to ingesting any NWB files. The `entries.yaml` file should be placed
@@ -43,9 +43,11 @@ particular probe is stored in the `ProbeType` and `Probe` tables of
 
     ```yaml
     TableName:
-    - TableEntry1Field1: Value
-    TableEntry1Field2: Value
-    - TableEntry2Field1: Value
+        - TableEntry1Field1: Value
+
+    TableEntry1Field2:
+        - TableEntry2Field1: Value
+
     TableEntry2Field2: Value
     ```
 
