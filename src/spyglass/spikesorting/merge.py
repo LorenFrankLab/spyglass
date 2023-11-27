@@ -10,7 +10,7 @@ schema = dj.schema("spikesorting_merge")
 @schema
 class SpikeSortingOutput(_Merge):
     definition = """
-    merge_id: varchar(36)
+    merge_id: uuid
     ---
     source: varchar(32)
     """
@@ -42,7 +42,9 @@ class SpikeSortingOutput(_Merge):
         key["source"] = "CurationV1"
         cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
         cls.CurationV1.insert1(
-            key, ignore_extra_fields=True, skip_duplicates=True
+            key,
+            skip_duplicates=True,
+            ignore_extra_fields=True,
         )
         return key
 
@@ -58,7 +60,7 @@ class SpikeSortingOutput(_Merge):
         key["merge_id"] = str(uuid.uuid4())
         key["source"] = "ImportedSpikeSorting"
         cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
-        cls.CurationV1.insert1(
+        cls.ImportedSpikeSorting1.insert1(
             key, ignore_extra_fields=True, skip_duplicates=True
         )
         return key

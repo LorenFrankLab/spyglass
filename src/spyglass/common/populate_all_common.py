@@ -9,7 +9,7 @@ from .common_ephys import Electrode, ElectrodeGroup, Raw, SampleCount
 from .common_nwbfile import Nwbfile
 from .common_session import Session
 from .common_task import TaskEpoch
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.imported import ImportedSpikeSorting
 
 
 def populate_all_common(nwb_file_name):
@@ -51,5 +51,5 @@ def populate_all_common(nwb_file_name):
     PositionSource.insert_from_nwbfile(nwb_file_name)
     RawPosition.populate(fp)
 
-    print("Populate SpikeSortingOutput...")
-    SpikeSortingOutput.populate(fp)
+    print("Populate ImportedSpikeSorting...")
+    ImportedSpikeSorting.populate(fp)
