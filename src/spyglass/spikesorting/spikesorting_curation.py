@@ -84,7 +84,8 @@ class Curation(dj.Manual):
 
         """
         if parent_curation_id == -1:
-            # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
+            # check to see if this sorting with a parent of -1 has already been
+            # inserted and if so, warn the user
             inserted_curation = (Curation & sorting_key).fetch("KEY")
             if len(inserted_curation) > 0:
                 Warning(
@@ -546,7 +547,7 @@ class QualityMetrics(dj.Computed):
             else:
                 raise Exception(
                     f"{peak_sign_metrics} metrics require peak_sign",
-                    f"to be defined in the metric parameters",
+                    "to be defined in the metric parameters",
                 )
         else:
             metric = {}
@@ -949,9 +950,6 @@ class CuratedSpikeSorting(dj.Computed):
         recording = Curation.get_recording(key)
 
         # get the sort_interval and sorting interval list
-        sort_interval_name = (SpikeSortingRecording & key).fetch1(
-            "sort_interval_name"
-        )
         sort_interval = (SortInterval & key).fetch1("sort_interval")
         sort_interval_list_name = (SpikeSorting & key).fetch1(
             "artifact_removed_interval_list_name"
@@ -1044,7 +1042,8 @@ class UnitInclusionParameters(dj.Manual):
     def get_included_units(
         self, curated_sorting_key, unit_inclusion_param_name
     ):
-        """given a reference to a set of curated sorting units and the name of a unit inclusion parameter list, returns
+        """Given a reference to a set of curated sorting units and the name of
+        a unit inclusion parameter list, returns unit key
 
         Parameters
         ----------
@@ -1054,7 +1053,7 @@ class UnitInclusionParameters(dj.Manual):
             name of a unit inclusion parameter entry
 
         Returns
-        ------unit key
+        -------
         dict
             key to select all of the included units
         """
@@ -1067,8 +1066,6 @@ class UnitInclusionParameters(dj.Manual):
         units_key = (CuratedSpikeSorting().Unit() & curated_sortings).fetch(
             "KEY"
         )
-        # get a list of the metrics in the units table
-        metrics_list = CuratedSpikeSorting().metrics_fields()
         # get the list of labels to exclude if there is one
         if "exclude_labels" in inc_param_dict:
             exclude_labels = inc_param_dict["exclude_labels"]
@@ -1079,7 +1076,8 @@ class UnitInclusionParameters(dj.Manual):
         # create a list of the units to kepp.
         keep = np.asarray([True] * len(units))
         for metric in inc_param_dict:
-            # for all units, go through each metric, compare it to the value specified, and update the list to be kept
+            # for all units, go through each metric, compare it to the value
+            # specified, and update the list to be kept
             keep = np.logical_and(
                 keep,
                 _comparison_to_function[inc_param_dict[metric][0]](
@@ -1089,14 +1087,13 @@ class UnitInclusionParameters(dj.Manual):
 
         # now exclude by label if it is specified
         if len(exclude_labels):
-            included_units = []
             for unit_ind in np.ravel(np.argwhere(keep)):
                 labels = units[unit_ind]["label"].split(",")
-                exclude = False
                 for label in labels:
                     if label in exclude_labels:
                         keep[unit_ind] = False
                         break
+
         # return units that passed all of the tests
         # TODO: Make this more efficient
         return {i: units_key[i] for i in np.ravel(np.argwhere(keep))}

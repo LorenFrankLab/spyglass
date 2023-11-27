@@ -15,12 +15,12 @@ cp -r ./notebook-images ./docs/src/notebooks/
 cp -r ./notebook-images ./docs/src/
 
 # Get major version
-FULL_VERSION=$(hatch version) # Most recent tag, may include periods 
-export MAJOR_VERSION="${FULL_VERSION:0:3}" # First 3 chars of tag 
+FULL_VERSION=$(hatch version) # Most recent tag, may include periods
+export MAJOR_VERSION="${FULL_VERSION:0:3}" # First 3 chars of tag
 echo "$MAJOR_VERSION"
 
-# Get ahead of errors 
-export JUPYTER_PLATFORM_DIRS=1 
+# Get ahead of errors
+export JUPYTER_PLATFORM_DIRS=1
 # jupyter notebook --generate-config
 
 # Generate site docs

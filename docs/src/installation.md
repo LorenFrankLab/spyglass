@@ -71,10 +71,9 @@ specified, the subfolder names below are included as defaults.
 }
 ```
 
-`dj_local_conf_example.json` can be copied and saved as `dj_local_conf.json`
-to set the configuration for a given folder. Alternatively, it can be saved as
-`.datajoint_config.json` in a user's home directory to be accessed globally.
-See
+`dj_local_conf_example.json` can be copied and saved as `dj_local_conf.json` to
+set the configuration for a given folder. Alternatively, it can be saved as
+`.datajoint_config.json` in a user's home directory to be accessed globally. See
 [DataJoint docs](https://datajoint.com/docs/core/datajoint-python/0.14/quick-start/#connection)
 for more details.
 
@@ -100,8 +99,8 @@ To load variables from a `.bashrc` file, run `source ~/.bashrc` in a terminal.
 #### Temporary directory
 
 A temporary directory will speed up spike sorting. If unspecified by either
-method above, it will be assumed as a `tmp` subfolder relative to the base
-path. Be sure it has enough free space (ideally at least 500GB).
+method above, it will be assumed as a `tmp` subfolder relative to the base path.
+Be sure it has enough free space (ideally at least 500GB).
 
 ## File manager
 
