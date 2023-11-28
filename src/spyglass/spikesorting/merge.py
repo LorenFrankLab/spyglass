@@ -1,5 +1,5 @@
 import datajoint as dj
-
+import uuid
 from spyglass.spikesorting.v1.curation import CurationV1  # noqa: F401
 from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
 from spyglass.utils.dj_merge_tables import _Merge
@@ -28,3 +28,39 @@ class SpikeSortingOutput(_Merge):
         ---
         -> ImportedSpikeSorting
         """
+
+    @classmethod
+    def insert_from_CurationV1(cls, key):
+        """Insert a row from CurationV1 into SpikeSortingOutput
+
+        Parameters
+        ----------
+        key : dict
+            primary key of CurationV1 table
+        """
+        key["merge_id"] = str(uuid.uuid4())
+        key["source"] = "CurationV1"
+        cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
+        cls.CurationV1.insert1(
+            key,
+            skip_duplicates=True,
+            ignore_extra_fields=True,
+        )
+        return key
+
+    @classmethod
+    def insert_from_ImportedSpikeSorting(cls, key):
+        """Insert a row from ImportedSpikeSorting into SpikeSortingOutput
+
+        Parameters
+        ----------
+        key : dict
+            primary key of ImportedSpikeSorting table
+        """
+        key["merge_id"] = str(uuid.uuid4())
+        key["source"] = "ImportedSpikeSorting"
+        cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
+        cls.ImportedSpikeSorting1.insert1(
+            key, ignore_extra_fields=True, skip_duplicates=True
+        )
+        return key

@@ -47,28 +47,34 @@ class SortGroup(dj.Manual):
         omit_ref_electrode_group=False,
         omit_unitrode=True,
     ):
-        """Create sort group for each shank.
-        - Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
+        """Divides electrodes into groups based on their shank position.
+
+        * Electrodes from probes with 1 shank (e.g. tetrodes) are placed in a
           single group
-        - Electrodes from probes with multiple shanks (e.g. polymer probes) are
+        * Electrodes from probes with multiple shanks (e.g. polymer probes) are
           placed in one group per shank
-        - Bad channels are omitted
+        * Bad channels are omitted
 
         Parameters
         ----------
         nwb_file_name : str
-            the name of the NWB file whose electrodes should be put into sorting groups
+            the name of the NWB file whose electrodes should be put into
+            sorting groups
         references : dict, optional
             If passed, used to set references. Otherwise, references set using
-            original reference electrodes from config. Keys: electrode groups. Values: reference electrode.
-        omit_ref_electrode_group : bool, optional
-            If True, no sort group is defined for electrode group of reference.
-        omit_unitrode : bool, optional
-            If True, no sort groups are defined for unitrodes.
+            original reference electrodes from config. Keys: electrode groups.
+            Values: reference electrode.
+        omit_ref_electrode_group : bool
+            Optional. If True, no sort group is defined for electrode group of
+            reference.
+        omit_unitrode : bool
+            Optional. If True, no sort groups are defined for unitrodes.
         """
+        # delete any current groups
+        # (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
         # get the electrodes from this NWB file
         electrodes = (
-            Electrode
+            Electrode()
             & {"nwb_file_name": nwb_file_name}
             & {"bad_channel": "False"}
         ).fetch()
@@ -88,9 +94,7 @@ class SortGroup(dj.Manual):
             sge_key["electrode_group_name"] = e_group
             # get the indices of all electrodes in this group / shank and set their sorting group
             for shank in shank_list:
-                sg_key["sort_group_name"] = sge_key[
-                    "sort_group_name"
-                ] = sort_group
+                sg_key["sort_group_name"] = sge_key["sort_group_name"] = sort_group
                 # specify reference electrode. Use 'references' if passed, otherwise use reference from config
                 if not references:
                     shank_elect_ref = electrodes[
@@ -107,12 +111,14 @@ class SortGroup(dj.Manual):
                         ]
                     else:
                         ValueError(
-                            f"Error in electrode group {e_group}: reference electrodes are not all the same"
+                            f"Error in electrode group {e_group}: reference "
+                            + "electrodes are not all the same"
                         )
                 else:
                     if e_group not in references.keys():
                         raise Exception(
-                            f"electrode group {e_group} not a key in references, so cannot set reference"
+                            f"electrode group {e_group} not a key in "
+                            + "references, so cannot set reference"
                         )
                     else:
                         sg_key["sort_reference_electrode_id"] = references[
@@ -133,14 +139,16 @@ class SortGroup(dj.Manual):
                     len(reference_electrode_group) != 1
                 ):
                     raise Exception(
-                        f"Should have found exactly one electrode group for reference electrode,"
-                        f"but found {len(reference_electrode_group)}."
+                        "Should have found exactly one electrode group for "
+                        + "reference electrode, but found "
+                        + f"{len(reference_electrode_group)}."
                     )
                 if omit_ref_electrode_group and (
                     str(e_group) == str(reference_electrode_group)
                 ):
                     print(
-                        f"Omitting electrode group {e_group} from sort groups because contains reference."
+                        f"Omitting electrode group {e_group} from sort groups "
+                        + "because contains reference."
                     )
                     continue
                 shank_elect = electrodes["electrode_id"][
@@ -159,9 +167,7 @@ class SortGroup(dj.Manual):
                 cls.insert1(sg_key, skip_duplicates=True)
                 for elect in shank_elect:
                     sge_key["electrode_id"] = elect
-                    cls.SortGroupElectrode.insert1(
-                        sge_key, skip_duplicates=True
-                    )
+                    cls.SortGroupElectrode().insert1(sge_key, skip_duplicates=True)
                 sort_group += 1
 
 
@@ -451,11 +457,14 @@ class SpikeSortingRecording(dj.Computed):
         recording = se.read_nwb_recording(
             nwb_file_abs_path, load_time_vector=True
         )
+        all_timestamps = recording.get_times()
+
         # TODO: make sure the following works for recordings that don't have explicit timestamps
         valid_sort_times = self._get_sort_interval_valid_times(key)
         valid_sort_times_indices = _consolidate_intervals(
-            valid_sort_times, recording.get_times()
+            valid_sort_times, all_timestamps
         )
+
         # slice in time; concatenate disjoint sort intervals
         if len(valid_sort_times_indices) > 1:
             recordings_list = []
@@ -467,7 +476,7 @@ class SpikeSortingRecording(dj.Computed):
                 )
                 recordings_list.append(recording_single)
                 timestamps.append(
-                    recording.get_times()[
+                    all_timestamps[
                         interval_indices[0] : interval_indices[1]
                     ]
                 )
@@ -477,9 +486,10 @@ class SpikeSortingRecording(dj.Computed):
                 start_frame=valid_sort_times_indices[0][0],
                 end_frame=valid_sort_times_indices[0][1],
             )
-            timestamps = recording.get_times()[
+            timestamps = all_timestamps[
                 valid_sort_times_indices[0][0] : valid_sort_times_indices[0][1]
             ]
+
         # slice in channels; include ref channel in first slice, then exclude it in second slice
         if ref_channel_id >= 0:
             recording = recording.channel_slice(channel_ids=channel_ids)
@@ -631,7 +641,7 @@ def _write_recording_to_nwb(
             description="Sort group",
         )
         data_iterator = SpikeInterfaceRecordingDataChunkIterator(
-            recording=recording, return_scaled=False, buffer_gb=7
+            recording=recording, return_scaled=False, buffer_gb=5
         )
         timestamps_iterator = TimestampsDataChunkIterator(
             recording=TimestampsExtractor(timestamps), buffer_gb=5

@@ -1,6 +1,7 @@
 from typing import List, Union, Dict
 
 import datajoint as dj
+import numpy as np
 import pynwb
 import spikeinterface as si
 import spikeinterface.extractors as se
@@ -159,6 +160,7 @@ class CurationV1(dj.Manual):
         recording = se.read_nwb_recording(
             analysis_file_abs_path, load_time_vector=True
         )
+        recording.annotate(is_filtered=True)
 
         return recording
 
@@ -177,14 +179,27 @@ class CurationV1(dj.Manual):
 
         """
         recording = cls.get_recording(key)
-
+        sampling_frequency = recording.get_sampling_frequency()
         analysis_file_name = (CurationV1 & key).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
-        sorting = se.read_nwb_sorting(
-            analysis_file_abs_path,
-            sampling_frequency=recording.get_sampling_frequency(),
+        with pynwb.NWBHDF5IO(
+            analysis_file_abs_path, "r", load_namespaces=True
+        ) as io:
+            nwbf = io.read()
+            units = nwbf.units.to_dataframe()
+        units_dict_list = [
+            {
+                unit_id: np.searchsorted(recording.get_times(), spike_times)
+                for unit_id, spike_times in zip(
+                    units.index, units["spike_times"]
+                )
+            }
+        ]
+
+        sorting = si.NumpySorting.from_unit_dict(
+            units_dict_list, sampling_frequency=sampling_frequency
         )
 
         return sorting
@@ -271,19 +286,40 @@ def _write_sorting_to_nwb_with_curation(
     sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
         (SpikeSorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
     )
-    sorting = se.read_nwb_sorting(
-        sorting_analysis_file_abs_path,
-        sampling_frequency=(Raw & {"nwb_file_name": nwb_file_name}).fetch1(
-            "sampling_rate"
-        ),
-    )
+    with pynwb.NWBHDF5IO(
+        sorting_analysis_file_abs_path, "r", load_namespaces=True
+    ) as io:
+        nwbf = io.read()
+        units = nwbf.units.to_dataframe()
+    units_dict = {
+        unit_id: spike_times
+        for unit_id, spike_times in zip(units.index, units["spike_times"])
+    }
+
     if apply_merge:
-        sorting = sc.MergeUnitsSorting(
-            parent_sorting=sorting, units_to_merge=merge_groups
-        )
+        for merge_group in merge_groups:
+            new_unit_id = np.max(list(units_dict.keys())) + 1
+            units_dict[new_unit_id] = np.concatenate(
+                [units_dict[merge_unit_id] for merge_unit_id in merge_group]
+            )
+            for merge_unit_id in merge_group:
+                units_dict.pop(merge_unit_id, None)
         merge_groups = None
 
-    unit_ids = sorting.get_unit_ids()
+    # sorting = se.read_nwb_sorting(
+    #     sorting_analysis_file_abs_path,
+    #     sampling_frequency=(Raw & {"nwb_file_name": nwb_file_name}).fetch1(
+    #         "sampling_rate"
+    #     ),
+    # )
+
+    # if apply_merge:
+    #     sorting = sc.MergeUnitsSorting(
+    #         parent_sorting=sorting, units_to_merge=merge_groups
+    #     )
+    #     merge_groups = None
+
+    unit_ids = list(units_dict.keys())
 
     # create new analysis nwb file
     analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
@@ -296,9 +332,9 @@ def _write_sorting_to_nwb_with_curation(
         nwbf = io.read()
         # write sorting to the nwb file
         for unit_id in unit_ids:
-            spike_times = sorting.get_unit_spike_train(unit_id)
+            # spike_times = sorting.get_unit_spike_train(unit_id)
             nwbf.add_unit(
-                spike_times=spike_times,
+                spike_times=units_dict[unit_id],
                 id=unit_id,
             )
         # add labels, merge groups, metrics
@@ -306,13 +342,14 @@ def _write_sorting_to_nwb_with_curation(
             label_values = []
             for unit_id in unit_ids:
                 if unit_id not in labels:
-                    label_values.append([""])
+                    label_values.append([])
                 else:
                     label_values.append(labels[unit_id])
             nwbf.add_unit_column(
                 name="curation_label",
                 description="curation label",
                 data=label_values,
+                index=True,
             )
         if merge_groups is not None:
             merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
@@ -324,6 +361,7 @@ def _write_sorting_to_nwb_with_curation(
                 name="merge_groups",
                 description="merge groups",
                 data=merge_groups_list,
+                index=True,
             )
         if metrics is not None:
             for metric, metric_dict in metrics.items():
@@ -367,33 +405,44 @@ def _union_intersecting_lists(lists):
     return result
 
 
-def _list_to_merge_dict(lists_of_strings: List, target_strings: List) -> dict:
+def _list_to_merge_dict(
+    merge_group_list: List[List], all_unit_ids: List
+) -> dict:
     """Converts a list of merge groups to a dict.
-    The keys of the dict (unit ids) are provided separately in case
-    the merge groups do not contain all the unit ids.
-    Example: [[1,2,3],[4,5]], [1,2,3,4,5,6] -> {1: [2, 3], 2:[1,3], 3:[1,2] 4: [5], 5: [4], 6: []}
 
     Parameters
     ----------
-    lists_of_strings : _type_
-        _description_
-    target_strings : _type_
-        _description_
+    merge_group_list : list of list
+        list of merge groups (list of unit IDs to be merged)
+    all_unit_ids : list
+        list of unit IDs for all units in the sorting
 
     Returns
     -------
-    _type_
-        _description_
+    merge_dict : dict
+        dict of merge groups;
+        keys are unit IDs and values are the units to be merged
+
+    Example
+    -------
+    [[1,2,3],[4,5]], [1,2,3,4,5,6] -> {1: [2, 3], 2:[1,3], 3:[1,2] 4: [5], 5: [4], 6: []}
+
     """
-    lists_of_strings = _union_intersecting_lists(lists_of_strings)
-    result = {string: [] for string in target_strings}
+    merge_group_list = _union_intersecting_lists(merge_group_list)
+    merge_dict = {unit_id: [] for unit_id in all_unit_ids}
 
-    for lst in lists_of_strings:
-        for string in target_strings:
-            if string in lst:
-                result[string].extend([item for item in lst if item != string])
+    for merge_group in merge_group_list:
+        for unit_id in all_unit_ids:
+            if unit_id in merge_group:
+                merge_dict[unit_id].extend(
+                    [
+                        str(merge_unit_id)
+                        for merge_unit_id in merge_group
+                        if merge_unit_id != unit_id
+                    ]
+                )
 
-    return result
+    return merge_dict
 
 
 def _reverse_associations(assoc_dict):
@@ -410,7 +459,22 @@ def _reverse_associations(assoc_dict):
 
 def _merge_dict_to_list(merge_groups: dict) -> List:
     """Converts dict of merge groups to list of merge groups.
-    Example: {1: [2, 3], 4: [5]} -> [[1, 2, 3], [4, 5]]
+    Undoes `_list_to_merge_dict`.
+
+    Parameters
+    ----------
+    merge_dict : dict
+        dict of merge groups;
+        keys are unit IDs and values are the units to be merged
+
+    Returns
+    -------
+    merge_group_list : list of list
+        list of merge groups (list of unit IDs to be merged)
+
+    Example
+    -------
+    {1: [2, 3], 4: [5]} -> [[1, 2, 3], [4, 5]]
     """
     units_to_merge = _union_intersecting_lists(
         _reverse_associations(merge_groups)

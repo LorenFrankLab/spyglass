@@ -7,6 +7,6 @@
   "git.confirmSync": false,
   "python.analysis.typeCheckingMode": "off",
   "[python]": {
-      "editor.defaultFormatter": "ms-python.black-formatter"
+    "editor.defaultFormatter": "ms-python.black-formatter"
   },
 }

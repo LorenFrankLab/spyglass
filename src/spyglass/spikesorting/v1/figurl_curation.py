@@ -6,7 +6,7 @@ import pynwb
 import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v1.sorting import SpikeSorting
+from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
 from spyglass.spikesorting.v1.curation import CurationV1, _merge_dict_to_list
 
 import kachery_cloud as kcl
@@ -19,6 +19,7 @@ schema = dj.schema("spikesorting_v1_figurl_curation")
 @schema
 class FigURLCurationSelection(dj.Manual):
     definition = """
+    # Use `generate_curation_uri` method to generate a curation uri.
     -> CurationV1
     curation_uri: varchar(1000)     # GitHub-based URI to a file to which the manual curation will be saved
     ---
@@ -42,20 +43,25 @@ class FigURLCurationSelection(dj.Manual):
             analysis_file_abs_path, "r", load_namespaces=True
         ) as io:
             nwbfile = io.read()
-            nwb_sorting = nwbfile.objects[curation_key["object_id"]]
-            unit_ids = nwb_sorting["id"][:]
-            labels = nwb_sorting["labels"][:]
-            merge_groups = nwb_sorting["merge_groups"][:]
+            nwb_sorting = nwbfile.objects[
+                curation_key["object_id"]
+            ].to_dataframe()
+            unit_ids = list(nwb_sorting.index)
+            labels = list(nwb_sorting["curation_label"])
+            merge_groups = list(nwb_sorting["merge_groups"])
 
         unit_ids = [str(unit_id) for unit_id in unit_ids]
 
         if labels:
-            labels_dict = dict(zip(unit_ids, labels))
+            labels_dict = {
+                unit_id: list(label) for unit_id, label in zip(unit_ids, labels)
+            }
         else:
             labels_dict = {}
 
         if merge_groups:
-            merge_groups_list = _merge_dict_to_list(merge_groups)
+            merge_groups_dict = dict(zip(unit_ids, merge_groups))
+            merge_groups_list = _merge_dict_to_list(merge_groups_dict)
             merge_groups_list = [
                 [str(unit_id) for unit_id in merge_group]
                 for merge_group in merge_groups_list
@@ -86,7 +92,10 @@ class FigURLCuration(dj.Computed):
             "analysis_file_name"
         )
         object_id = (CurationV1 & key).fetch1("object_id")
-        recording_label = (SpikeSorting & key).fetch1("recording_id")
+        recording_label = (SpikeSortingSelection & key).fetch1("recording_id")
+        metrics_figurl = (FigURLCurationSelection & key).fetch1(
+            "metrics_figurl"
+        )
 
         # DO
         sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
@@ -102,12 +111,10 @@ class FigURLCuration(dj.Computed):
             sorting_analysis_file_abs_path, "r", load_namespaces=True
         ) as io:
             nwbf = io.read()
-            nwb_sorting = nwbf.objects[object_id]
-            unit_ids = nwb_sorting["id"][:]
-            for metric in key["metrics_figurl"]:
-                metric_dict[metric] = dict(
-                    zip(unit_ids, nwb_sorting[metric][:])
-                )
+            nwb_sorting = nwbf.objects[object_id].to_dataframe()
+            unit_ids = nwb_sorting.index
+            for metric in metrics_figurl:
+                metric_dict[metric] = dict(zip(unit_ids, nwb_sorting[metric]))
 
         unit_metrics = _reformat_metrics(metric_dict)
 
@@ -127,12 +134,25 @@ class FigURLCuration(dj.Computed):
         self.insert1(key, skip_duplicates=True)
 
     @classmethod
-    def get_labels(cls):
-        return NotImplementedError
+    def get_labels(cls, curation_json):
+        curation_dict = kcl.load_json(curation_json)
+        if "labelsByUnit" in curation_dict:
+            return {
+                int(unit_id): curation_label_list
+                for unit_id, curation_label_list in curation_dict[
+                    "labelsByUnit"
+                ].items()
+            }
+        else:
+            return {}
 
     @classmethod
-    def get_merge_groups(cls):
-        return NotImplementedError
+    def get_merge_groups(cls, curation_json):
+        curation_dict = kcl.load_json(curation_json)
+        if "mergeGroups" in curation_dict:
+            return curation_dict["mergeGroups"]
+        else:
+            return {}
 
 
 def _generate_figurl(
