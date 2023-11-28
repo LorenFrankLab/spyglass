@@ -94,7 +94,9 @@ class SortGroup(dj.Manual):
             sge_key["electrode_group_name"] = e_group
             # get the indices of all electrodes in this group / shank and set their sorting group
             for shank in shank_list:
-                sg_key["sort_group_name"] = sge_key["sort_group_name"] = sort_group
+                sg_key["sort_group_name"] = sge_key[
+                    "sort_group_name"
+                ] = sort_group
                 # specify reference electrode. Use 'references' if passed, otherwise use reference from config
                 if not references:
                     shank_elect_ref = electrodes[
@@ -167,7 +169,9 @@ class SortGroup(dj.Manual):
                 cls.insert1(sg_key, skip_duplicates=True)
                 for elect in shank_elect:
                     sge_key["electrode_id"] = elect
-                    cls.SortGroupElectrode().insert1(sge_key, skip_duplicates=True)
+                    cls.SortGroupElectrode().insert1(
+                        sge_key, skip_duplicates=True
+                    )
                 sort_group += 1
 
 
@@ -475,10 +479,8 @@ class SpikeSortingRecording(dj.Computed):
                     end_frame=interval_indices[1],
                 )
                 recordings_list.append(recording_single)
-                timestamps.append(
-                    all_timestamps[
-                        interval_indices[0] : interval_indices[1]
-                    ]
+                timestamps.extend(
+                    all_timestamps[interval_indices[0] : interval_indices[1]]
                 )
             recording = si.concatenate_recordings(recordings_list)
         else:
