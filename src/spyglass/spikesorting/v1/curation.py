@@ -43,7 +43,7 @@ class CurationV1(dj.Manual):
         metrics: Union[None, Dict[str, Dict[str, float]]] = None,
         description: str = "",
     ):
-        """Insert an row into CurationV1.
+        """Insert a row into CurationV1.
 
         Parameters
         ----------
