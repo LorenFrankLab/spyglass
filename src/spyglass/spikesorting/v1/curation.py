@@ -162,15 +162,19 @@ class CurationV1(dj.Manual):
         )
         labels = MetricCuration.get_labels(key)
         merge_groups = MetricCuration.get_merge_groups(key)
-        description = f"metric curation of sorting id {sorting_id} , curation id {parent_curation_id}"
+        description = f"metric curation of sorting id {sorting_id}, curation id {parent_curation_id}"
+        if not labels:
+            labels = None
+        if not merge_groups:
+            merge_groups = None
 
         curation_key = cls.insert_curation(
-            sorting_id,
-            parent_curation_id,
-            labels,
-            merge_groups,
-            apply_merge,
-            description,
+            sorting_id=sorting_id,
+            parent_curation_id=parent_curation_id,
+            labels=labels,
+            merge_groups=merge_groups,
+            apply_merge=apply_merge,
+            description=description,
         )
 
         return curation_key
