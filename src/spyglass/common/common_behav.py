@@ -166,7 +166,7 @@ class RawPosition(dj.Imported):
         raw_position_object_id: varchar(40) # id of spatial series in NWB file
         """
 
-        nwb_table = Nwbfile
+        _nwb_table = Nwbfile
 
         def fetch1_dataframe(self):
             INDEX_ADJUST = 1  # adjust 0-index to 1-index (e.g., xloc0 -> xloc1)
@@ -258,7 +258,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
     file_object_id: varchar(40)  # the object id of the file object
     """
 
-    nwb_table = Nwbfile
+    _nwb_table = Nwbfile
 
     def make(self, key):
         """Add a new row to the StateScriptFile table."""
@@ -329,7 +329,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
     video_file_object_id: varchar(40)  # the object id of the file object
     """
 
-    nwb_table = Nwbfile
+    _nwb_table = Nwbfile
 
     def make(self, key):
         self._no_transaction_make(key)

@@ -230,7 +230,7 @@ class Raw(SpyglassMixin, dj.Imported):
     description: varchar(2000)
     """
 
-    nwb_table = Nwbfile
+    _nwb_table = Nwbfile
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]
@@ -308,7 +308,7 @@ class SampleCount(SpyglassMixin, dj.Imported):
     sample_count_object_id: varchar(40)      # the NWB object ID for loading this object from the file
     """
 
-    nwb_table = Nwbfile
+    _nwb_table = Nwbfile
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]

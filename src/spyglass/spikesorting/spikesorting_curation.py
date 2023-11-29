@@ -15,7 +15,7 @@ import spikeinterface.qualitymetrics as sq
 
 from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
-from ..utils.dj_helper_fn import fetch_nwb
+from ..utils.dj_helper_fn import SpyglassMixin
 from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SortInterval, SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
@@ -52,7 +52,7 @@ class Curation(SpyglassMixin, dj.Manual):
     time_of_creation: int   # in Unix time, to the nearest second
     """
 
-    nwb_table = AnalysisNwbfile
+    _nwb_table = AnalysisNwbfile
 
     @staticmethod
     def insert_curation(

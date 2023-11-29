@@ -22,7 +22,7 @@ class SensorData(SpyglassMixin, dj.Imported):
     -> IntervalList                     # the list of intervals for this object
     """
 
-    nwb_table = Nwbfile
+    _nwb_table = Nwbfile
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]

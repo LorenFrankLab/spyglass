@@ -14,15 +14,15 @@ class SpyglassMixin:
         """Fetch NWBFile object from relevant table.
 
         Impleminting class must have a foreign key to Nwbfile or
-        AnalysisNwbfile or a nwb_table attribute.
+        AnalysisNwbfile or a _nwb_table attribute.
 
         A class that does not have with either '-> Nwbfile' or
-        '-> AnalysisNwbfile' in its definition can use a nwb_table attribute to
+        '-> AnalysisNwbfile' in its definition can use a _nwb_table attribute to
         specify which table to use.
         """
 
-        if not hasattr(self, "nwb_table"):
-            self.nwb_table = (
+        if not hasattr(self, "_nwb_table"):
+            self._nwb_table = (
                 AnalysisNwbfile
                 if "-> AnalysisNwbfile" in self.definition
                 else Nwbfile
@@ -30,15 +30,15 @@ class SpyglassMixin:
                 else None
             )
 
-        if getattr(self, "nwb_table", None) is None:
+        if getattr(self, "_nwb_table", None) is None:
             raise NotImplementedError(
                 f"{self.__class__.__name__} does not have a (Analysis)Nwbfile "
-                "foreign key or nwb_table attribute."
+                "foreign key or _nwb_table attribute."
             )
 
         return fetch_nwb(
             self,
-            (self.nwb_table, self._nwb_table_dict[self.nwb_table]),
+            (self._nwb_table, self._nwb_table_dict[self._nwb_table]),
             *attrs,
             **kwargs,
         )

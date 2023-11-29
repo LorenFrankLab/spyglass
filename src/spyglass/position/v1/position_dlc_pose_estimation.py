@@ -142,7 +142,7 @@ class DLCPoseEstimation(dj.Computed):
         dlc_pose_estimation_likelihood_object_id : varchar(80)
         """
 
-        nwb_table = AnalysisNwbfile
+        _nwb_table = AnalysisNwbfile
 
         def fetch1_dataframe(self):
             nwb_data = self.fetch_nwb()[0]

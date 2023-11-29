@@ -4,8 +4,7 @@ import numpy as np
 import pandas as pd
 import pynwb
 
-from ..utils.dj_helper_fn import fetch_nwb  # dj_replace
-from ..utils.dj_mixin import SpyglassMixin  # dj_replace
+from ..utils.dj_mixin import SpyglassMixin
 from ..utils.nwb_helper_fn import get_data_interface, get_nwb_file
 from .common_ephys import Raw
 from .common_interval import IntervalList
@@ -25,7 +24,7 @@ class DIOEvents(SpyglassMixin, dj.Imported):
     -> IntervalList               # the list of intervals for this object
     """
 
-    nwb_table = Nwbfile
+    _nwb_table = Nwbfile
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]
