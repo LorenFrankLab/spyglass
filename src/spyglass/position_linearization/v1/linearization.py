@@ -117,9 +117,9 @@ class LinearizedPositionV1(dj.Computed):
         orig_key = copy.deepcopy(key)
         print(f"Computing linear position for: {key}")
 
-        position_nwb = PositionOutput.fetch_nwb({"merge_id": key["merge_id"]})[
-            0
-        ]
+        position_nwb = PositionOutput.fetch_nwb(
+            {"merge_id": key["pos_merge_id"]}
+        )[0]
         key["analysis_file_name"] = AnalysisNwbfile().create(
             position_nwb["nwb_file_name"]
         )
