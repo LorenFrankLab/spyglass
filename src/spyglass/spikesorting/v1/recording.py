@@ -1,22 +1,22 @@
-from typing import Tuple, Iterable, Optional, Union, List
+from typing import Iterable, List, Optional, Tuple, Union
 
 import datajoint as dj
 import numpy as np
-import pynwb
 import probeinterface as pi
+import pynwb
 import spikeinterface as si
 import spikeinterface.extractors as se
 from hdmf.data_utils import GenericDataChunkIterator
 
 from spyglass.common import Session  # noqa: F401
-from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
 from spyglass.common.common_device import Probe
-from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
 from spyglass.common.common_interval import (
     IntervalList,
     interval_list_intersect,
 )
 from spyglass.common.common_lab import LabTeam
+from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.spikesorting.v1.utils import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_recording")
@@ -424,9 +424,7 @@ class SpikeSortingRecording(dj.Computed):
             }
         ).fetch1("sort_reference_electrode_id")
         recording_channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
-        all_channel_ids = np.unique(
-            np.concatenate((channel_ids, ref_channel_id))
-        )
+        all_channel_ids = np.unique(channel_ids + ref_channel_id)
 
         probe_type_by_channel = []
         electrode_group_by_channel = []
