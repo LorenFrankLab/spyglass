@@ -5,6 +5,7 @@
 - Additional documentation. #686
 - Refactor input validation in DLC pipeline.
 - Clean up following pre-commit checks.
+- Minor fixes to LinearizedPositionV1 pipeline #695
 
 ## [0.4.3] (November 7, 2023)
 
