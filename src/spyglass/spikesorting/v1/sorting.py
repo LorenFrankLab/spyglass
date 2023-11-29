@@ -193,17 +193,33 @@ class SpikeSorting(dj.Computed):
         )
 
         # if the artifact removed intervals do not span the entire time range
-        if (len(artifact_removed_intervals_ind)>1) or (artifact_removed_intervals_ind[0][0]>0) or (artifact_removed_intervals_ind[-1][1]<len(timestamps)):
+        if (
+            (len(artifact_removed_intervals_ind) > 1)
+            or (artifact_removed_intervals_ind[0][0] > 0)
+            or (artifact_removed_intervals_ind[-1][1] < len(timestamps))
+        ):
             # set the artifact intervals to zero
             list_triggers = []
-            if artifact_removed_intervals_ind[0][0]>0:
-                list_triggers.append(np.array([0, artifact_removed_intervals_ind[0][0]]))
-            for interval_ind in range(len(artifact_removed_intervals_ind)-1):
+            if artifact_removed_intervals_ind[0][0] > 0:
                 list_triggers.append(
-                    np.arange((artifact_removed_intervals_ind[interval_ind][1]+1),artifact_removed_intervals_ind[interval_ind+1][0])
+                    np.array([0, artifact_removed_intervals_ind[0][0]])
                 )
-            if artifact_removed_intervals_ind[-1][1]<len(timestamps):
-                list_triggers.append(np.array([artifact_removed_intervals_ind[-1][1], len(timestamps)-1]))
+            for interval_ind in range(len(artifact_removed_intervals_ind) - 1):
+                list_triggers.append(
+                    np.arange(
+                        (artifact_removed_intervals_ind[interval_ind][1] + 1),
+                        artifact_removed_intervals_ind[interval_ind + 1][0],
+                    )
+                )
+            if artifact_removed_intervals_ind[-1][1] < len(timestamps):
+                list_triggers.append(
+                    np.array(
+                        [
+                            artifact_removed_intervals_ind[-1][1],
+                            len(timestamps) - 1,
+                        ]
+                    )
+                )
 
             list_triggers = [list(np.concatenate(list_triggers))]
             recording = sip.remove_artifacts(

@@ -20,12 +20,12 @@ def compute_isi_violation_fractions(
 
     # Extract the total number of spikes that violated the isi_threshold for each unit
     _, isi_violation_counts = sq.compute_isi_violations(
-            waveform_extractor,
-            isi_threshold_ms=isi_threshold_ms,
-            min_isi_ms=min_isi_ms,
-        )
+        waveform_extractor,
+        isi_threshold_ms=isi_threshold_ms,
+        min_isi_ms=min_isi_ms,
+    )
     num_spikes = sq.compute_num_spikes(waveform_extractor)
-    return isi_violation_counts[this_unit_id] / (num_spikes[this_unit_id]- 1)
+    return isi_violation_counts[this_unit_id] / (num_spikes[this_unit_id] - 1)
 
 
 def get_peak_offset(

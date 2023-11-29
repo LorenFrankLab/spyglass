@@ -297,7 +297,9 @@ class MetricCuration(dj.Computed):
         """
         analysis_file_name = (cls & key).fetch1("analysis_file_name")
         object_id = (cls & key).fetch1("object_id")
-        metric_param_name = (MetricCurationSelection & key).fetch1("metric_param_name")
+        metric_param_name = (MetricCurationSelection & key).fetch1(
+            "metric_param_name"
+        )
         metric_params = (
             MetricParameters & {"metric_param_name": metric_param_name}
         ).fetch1("metric_params")
