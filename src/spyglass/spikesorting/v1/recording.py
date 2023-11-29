@@ -424,6 +424,9 @@ class SpikeSortingRecording(dj.Computed):
             }
         ).fetch1("sort_reference_electrode_id")
         recording_channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
+        all_channel_ids = np.unique(
+            np.concatenate((channel_ids, ref_channel_id))
+        )
 
         probe_type_by_channel = []
         electrode_group_by_channel = []
@@ -494,7 +497,7 @@ class SpikeSortingRecording(dj.Computed):
 
         # slice in channels; include ref channel in first slice, then exclude it in second slice
         if ref_channel_id >= 0:
-            recording = recording.channel_slice(channel_ids=channel_ids)
+            recording = recording.channel_slice(channel_ids=all_channel_ids)
             recording = si.preprocessing.common_reference(
                 recording,
                 reference="single",
