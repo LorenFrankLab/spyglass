@@ -4,3 +4,10 @@ from spyglass.linearization.v1.main import (
     LinearizedV1,
     TrackGraph,
 )
+
+__all__ = [
+    "LinearizationParams",
+    "LinearizedPosition",
+    "LinearizedSelection",
+    "TrackGraph",
+]

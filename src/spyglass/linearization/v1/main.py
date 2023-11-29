@@ -111,7 +111,7 @@ class TrackGraph(dj.Manual):
 
 
 @schema
-class LinearizationSelection(dj.Lookup):
+class LinearizedSelection(dj.Lookup):
     definition = """
     -> PositionOutput.proj(pos_merge_id='merge_id')
     -> TrackGraph
@@ -124,7 +124,7 @@ class LinearizedV1(dj.Computed):
     """Linearized position for a given interval"""
 
     definition = """
-    -> LinearizationSelection
+    -> LinearizedSelection
     ---
     -> AnalysisNwbfile
     linearized_position_object_id : varchar(40)

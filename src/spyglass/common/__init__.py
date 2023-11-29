@@ -70,9 +70,9 @@ from .populate_all_common import populate_all_common
 from .prepopulate import populate_from_yaml, prepopulate_default
 
 from spyglass.linearization.v0 import (  # isort:skip
-    IntervalLinearizationSelection,
-    IntervalLinearizedPosition,
-    LinearizationParameters,
+    LinearizationParams,
+    LinearizedSelection,
+    LinearizedV0,
     TrackGraph,
 )
 
@@ -89,8 +89,6 @@ __all__ = [
     "ElectrodeGroup",
     "FirFilterParameters",
     "Institution",
-    "IntervalLinearizationSelection",
-    "IntervalLinearizedPosition",
     "IntervalList",
     "IntervalPositionInfo",
     "IntervalPositionInfoSelection",
@@ -101,7 +99,9 @@ __all__ = [
     "Lab",
     "LabMember",
     "LabTeam",
-    "LinearizationParameters",
+    "LinearizationParams",
+    "LinearizedV0",
+    "LinearizedSelection",
     "Nwbfile",
     "NwbfileKachery",
     "PositionInfoParameters",

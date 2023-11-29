@@ -37,7 +37,7 @@ def deprecated_factory(classes: list, old_module: str = "") -> list:
 def _subclass_factory(
     old_name: str, new_class: Type, old_module: str = ""
 ) -> Type:
-    """Creates a sublcass with a deprecation warning on __init__
+    """Creates a subclass with a deprecation warning on __init__
 
     Old class is a subclass of new class, so it will inherit all of the new
     class's methods. Old class retains its original name and module. Use
