@@ -3,18 +3,20 @@
 ## Why
 
 A pipeline may diverge when we want to process the same data in different ways.
-Merge Tables allow us to join divergent pipelines together, and unify
-downstream processing steps. For a more in depth discussion, please refer to
+Merge Tables allow us to join divergent pipelines together, and unify downstream
+processing steps. For a more in depth discussion, please refer to
 [this notebook](https://github.com/ttngu207/db-programming-with-datajoint/blob/master/notebooks/pipelines_merging_design_master_part.ipynb)
-and related discussions [here](https://github.com/datajoint/datajoint-python/issues/151)
-and [here](https://github.com/LorenFrankLab/spyglass/issues/469).
+and related discussions
+[here](https://github.com/datajoint/datajoint-python/issues/151) and
+[here](https://github.com/LorenFrankLab/spyglass/issues/469).
 
 **Note:** Deleting entries upstream of Merge Tables will throw errors related to
 deleting a part entry before the master. To circumvent this, you can add
 `force_parts=True` to the
 [`delete` function](https://datajoint.com/docs/core/datajoint-python/0.14/api/datajoint/__init__/#datajoint.table.Table.delete)
 call, but this will leave and orphaned primary key in the master. Instead, use
-`spyglass.utils.dj_merge_tables.delete_downstream_merge` to delete master/part pairs.
+`spyglass.utils.dj_merge_tables.delete_downstream_merge` to delete master/part
+pairs.
 
 ## What
 
@@ -22,15 +24,16 @@ A Merge Table is fundamentally a master table with one part for each divergent
 pipeline. By convention...
 
 1. The master table has one primary key, `merge_id`, a
-   [UUID](https://en.wikipedia.org/wiki/Universally_unique_identifier), and one
-   secondary attribute, `source`, which gives the part table name. Both are
-   managed with the custom `insert` function of this class.
+    [UUID](https://en.wikipedia.org/wiki/Universally_unique_identifier), and
+    one secondary attribute, `source`, which gives the part table name. Both
+    are managed with the custom `insert` function of this class.
 
 2. Each part table has inherits the final table in its respective pipeline, and
-   shares the same name as this table.
+    shares the same name as this table.
 
 ```python
 from spyglass.utils.dj_merge_tables import _Merge
+
 
 @schema
 class MergeOutput(_Merge):
@@ -66,12 +69,11 @@ table itself.
 
 ### Merging
 
-The Merge class in Spyglass's utils is a subclass of DataJoint's [Manual
-Table](https://datajoint.com/docs/core/design/tables/tiers/#data-entry-lookup-and-manual)
-and adds functions to make the awkwardness of part tables more manageable.
-These functions are described in the
-[API section](../api/utils/dj_merge_tables.md), under
-`utils.dj_merge_tables`.
+The Merge class in Spyglass's utils is a subclass of DataJoint's
+[Manual Table](https://datajoint.com/docs/core/design/tables/tiers/#data-entry-lookup-and-manual)
+and adds functions to make the awkwardness of part tables more manageable. These
+functions are described in the [API section](../api/utils/dj_merge_tables.md),
+under `utils.dj_merge_tables`.
 
 ### Restricting
 
@@ -100,7 +102,7 @@ downstream Computed table could do the following:
 ```python
 def make(self, key):
     try:
-        params = MergeTable.merge_get_parent(restriction=key).fetch('params')
+        params = MergeTable.merge_get_parent(restriction=key).fetch("params")
     except DataJointError:
         params = default_params
     processed_data = self.processing_func(key, params)

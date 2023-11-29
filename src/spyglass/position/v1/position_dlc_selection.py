@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import pynwb
 from datajoint.utils import to_camel_case
-from tqdm import tqdm as tqdm
 
 from ...common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
@@ -227,18 +226,6 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             bodypart: pose_estimation_df[bodypart]["likelihood"] < like_thresh
             for bodypart in bodyparts
             if bodypart in pose_estimation_df.columns
-        }
-        sub_thresh_ind_dict = {
-            bodypart: {
-                "inds": np.where(
-                    ~np.isnan(
-                        pose_estimation_df[bodypart]["likelihood"].where(
-                            df_filter[bodypart]
-                        )
-                    )
-                )[0],
-            }
-            for bodypart in bodyparts
         }
         sub_thresh_percent_dict = {
             bodypart: (

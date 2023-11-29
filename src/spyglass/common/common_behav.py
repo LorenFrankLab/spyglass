@@ -606,7 +606,7 @@ def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
 
     if len(interval_names) != 1:
         print(
-            f"Found {len(interval_name)} interval list names found for "
+            f"Found {len(interval_names)} interval list names found for "
             + f"{nwb_file_name} epoch {epoch}"
         )
         return None

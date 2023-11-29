@@ -33,17 +33,17 @@ processing.
 
 - Ripple Detection: Uses LFP and Position information
 - Extract Marks: Comparing actual and mental position using unclustered spikes
-  and spike waveform features.
+    and spike waveform features.
 - Decoding: Uses either spike sorted of clusterless ephys analysis to look at
-  mental position.
+    mental position.
 
 <!-- CBroz: Did I get this right? -->
 
 ## Developer note
 
 The `py_scripts` directory contains the same notebook data in `.py` form to
-facilitate GitHub PR reviews. To update them, run the following from the
-root Spyglass directory
+facilitate GitHub PR reviews. To update them, run the following from the root
+Spyglass directory
 
 ```bash
 pip install jupytext

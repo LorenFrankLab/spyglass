@@ -1,5 +1,3 @@
-import os
-
 import spyglass as sg
 
 from ..utils.nwb_helper_fn import (
@@ -12,11 +10,11 @@ from ..utils.nwb_helper_fn import (
     get_valid_intervals,
 )
 from .common_behav import (
+    PositionIntervalMap,
     PositionSource,
     RawPosition,
     StateScriptFile,
     VideoFile,
-    PositionIntervalMap,
     convert_epoch_interval_name_to_position_interval_name,
 )
 from .common_device import (

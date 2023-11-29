@@ -3,8 +3,9 @@
 While Spyglass can help you organize your data, there are a number of things
 you'll need to do to manage users, database backups, and file cleanup.
 
-Some these tasks should be set to run regularly. [Cron jobs](https://www.hostinger.com/tutorials/cron-job)
-can help with automation.
+Some these tasks should be set to run regularly.
+[Cron jobs](https://www.hostinger.com/tutorials/cron-job) can help with
+automation.
 
 ## MySQL Version
 
@@ -41,8 +42,7 @@ execeute MySQL commands.
 
 Shared schema prefixes are those defined in the Spyglass package (e.g.,
 `common`, `lfp`, etc.). A 'user schema' is any schema with the username as
-prefix. User types differ in the privileges they are granted on  
-these prifixes.
+prefix. User types differ in the privileges they are granted on these prifixes.
 
 ### Users types
 
@@ -63,7 +63,8 @@ pip install ./datajoint-python
 Then, you the user can reset within Python:
 
 ```python
-import datajoint as dj 
+import datajoint as dj
+
 dj.set_password()
 ```
 
@@ -75,7 +76,7 @@ migrate the contents to another server. Some conventions to note:
 - `.host`: files used in the host's context
 - `.container`: files used inside the database Docker container
 - `.env`: files used to set environment variables used by the scripts for
-  database name, backup name, and backup credentials
+    database name, backup name, and backup credentials
 
 This backup process uses a dedicated backup user, that an admin would need to
 criate with the relevant permissions.
@@ -214,14 +215,16 @@ mysqldump --all-databases --max_allowed_packet=512M --user=${back_user} --passwo
 ## File Cleanup
 
 Spyglass is designed to hold metadata for analyses that reference NWB files on
-disk. There are several tables that retain lists of files that have been generated
-during analyses. If someone deletes analysis entries, files will still be on disk.
+disk. There are several tables that retain lists of files that have been
+generated during analyses. If someone deletes analysis entries, files will still
+be on disk.
 
 To remove orphaned files, we run the following commands in our cron jobs:
 
 ```python
 from spyglass.common import AnalysisNwbfile
 from spyglass.spikesorting import SpikeSorting
+
 
 def main():
     AnalysisNwbfile().nightly_cleanup()

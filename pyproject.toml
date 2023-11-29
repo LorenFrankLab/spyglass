@@ -78,7 +78,7 @@ test = [
     "kachery-cloud",
 ]
 docs = [
-    "hatch",                 # Get version from env 
+    "hatch",                 # Get version from env
     "mike",                  # Docs versioning
     "mkdocs",                # Docs core
     "mkdocs-exclude",        # Docs exclude files
