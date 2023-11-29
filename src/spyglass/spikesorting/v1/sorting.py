@@ -1,26 +1,26 @@
-from typing import Iterable
-
 import os
 import tempfile
 import time
+from typing import Iterable
 
 import datajoint as dj
 import numpy as np
 import pynwb
 import spikeinterface as si
+import spikeinterface.curation as sic
 import spikeinterface.extractors as se
 import spikeinterface.preprocessing as sip
-import spikeinterface.curation as sic
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
-from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
+
 from .recording import _consolidate_intervals
 from .utils import generate_nwb_uuid
 
@@ -379,7 +379,7 @@ def _write_sorting_to_nwb(
         nwbf = io.read()
         nwbf.add_unit_column(
             name="curation_label",
-            description="curation label applyed to a unit",
+            description="curation label applied to a unit",
         )
         for unit_id in sorting.get_unit_ids():
             spike_times = sorting.get_unit_spike_train(unit_id)
