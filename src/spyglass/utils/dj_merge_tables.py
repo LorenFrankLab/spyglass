@@ -204,7 +204,7 @@ class Merge(dj.Manual):
             for p in cls._merge_restrict_parts(
                 restriction=restriction,
                 add_invalid_restrict=False,
-                return_empties=False,
+                return_empties=True,
             )
         ]
 

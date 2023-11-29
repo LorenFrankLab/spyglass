@@ -1,27 +1,25 @@
 import datajoint as dj
 
-from spyglass.position_linearization.v1.linearization import (  # noqa F401
-    LinearizedPositionV1,
-)
+from spyglass.linearization.v1.main import LinearizedV1  # noqa F401
 
 from ..utils.dj_merge_tables import _Merge
 
-schema = dj.schema("position_linearization_merge")
+schema = dj.schema("linearization_merge")
 
 
 @schema
-class LinearizedPositionOutput(_Merge):
+class LinearizedOutput(_Merge):
     definition = """
     merge_id: uuid
     ---
     source: varchar(32)
     """
 
-    class LinearizedPositionV1(dj.Part):  # noqa: F811
+    class LinearizedV1(dj.Part):  # noqa F811
         definition = """
-        -> LinearizedPositionOutput
+        -> master
         ---
-        -> LinearizedPositionV1
+        -> LinearizedV1
         """
 
     def fetch1_dataframe(self):
