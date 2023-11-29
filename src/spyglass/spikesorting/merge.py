@@ -38,7 +38,7 @@ class SpikeSortingOutput(_Merge):
         key : dict
             primary key of CurationV1 table
         """
-        key["merge_id"] = str(uuid.uuid4())
+        key["merge_id"] = uuid.uuid4()
         key["source"] = "CurationV1"
         cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
         cls.CurationV1.insert1(
@@ -57,7 +57,7 @@ class SpikeSortingOutput(_Merge):
         key : dict
             primary key of ImportedSpikeSorting table
         """
-        key["merge_id"] = str(uuid.uuid4())
+        key["merge_id"] = uuid.uuid4()
         key["source"] = "ImportedSpikeSorting"
         cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
         cls.ImportedSpikeSorting1.insert1(

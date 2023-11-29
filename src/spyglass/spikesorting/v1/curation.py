@@ -1,17 +1,15 @@
-from typing import List, Union, Dict
+from typing import Dict, List, Union
 
 import datajoint as dj
 import numpy as np
 import pynwb
 import spikeinterface as si
-import spikeinterface.extractors as se
 import spikeinterface.curation as sc
+import spikeinterface.extractors as se
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_ephys import Raw
-from spyglass.spikesorting.v1.recording import (
-    SpikeSortingRecording,
-)
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
 
 schema = dj.schema("spikesorting_v1_curation")
@@ -139,6 +137,43 @@ class CurationV1(dj.Manual):
         )
 
         return key
+
+    @classmethod
+    def insert_metric_curation(cls, key: Dict, apply_merge=False):
+        """Insert a row into CurationV1.
+
+        Parameters
+        ----------
+        key : Dict
+            primary key of MetricCuration
+
+        Returns
+        -------
+        curation_key : Dict
+        """
+        from spyglass.spikesorting.v1.metric_curation import (
+            MetricCuration,
+            MetricCurationSelection,
+        )
+
+        sorting_id = (MetricCurationSelection & key).fetch1("sorting_id")
+        parent_curation_id = (MetricCurationSelection & key).fetch1(
+            "curation_id"
+        )
+        labels = MetricCuration.get_labels(key)
+        merge_groups = MetricCuration.get_merge_groups(key)
+        description = f"metric curation of sorting id {sorting_id} , curation id {parent_curation_id}"
+
+        curation_key = cls.insert_curation(
+            sorting_id,
+            parent_curation_id,
+            labels,
+            merge_groups,
+            apply_merge,
+            description,
+        )
+
+        return curation_key
 
     @classmethod
     def get_recording(cls, key: dict) -> si.BaseRecording:
