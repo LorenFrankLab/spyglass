@@ -1,7 +1,8 @@
 import copy
+
 import datajoint as dj
-from datajoint.utils import to_camel_case
 import numpy as np
+from datajoint.utils import to_camel_case
 from track_linearization import (
     get_linearized_position,
     make_track_graph,
@@ -94,7 +95,7 @@ class TrackGraph(dj.Manual):
 @schema
 class LinearizationSelection(dj.Lookup):
     definition = """
-    -> PositionOutput
+    -> PositionOutput.proj(pos_merge_id='merge_id')
     -> TrackGraph
     -> LinearizationParameters
     ---
