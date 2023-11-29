@@ -7,13 +7,21 @@
 # Copy top-level repo files for docs display
 cp ./CHANGELOG.md ./docs/src/
 cp ./LICENSE ./docs/src/LICENSE.md
-cp -r ./notebooks/ ./docs/src/
-cp -r ./notebook-images ./docs/src/notebooks
+mkdir -p ./docs/src/notebooks
+cp ./notebooks/*ipynb ./docs/src/notebooks/
+cp ./notebooks/*md ./docs/src/notebooks/
+cp ./docs/src/notebooks/README.md ./docs/src/notebooks/index.md
+cp -r ./notebook-images ./docs/src/notebooks/
+cp -r ./notebook-images ./docs/src/
 
 # Get major version
-FULL_VERSION=$(hatch version) # Most recent tag
-export MAJOR_VERSION="${FULL_VERSION%.*}"
+FULL_VERSION=$(hatch version) # Most recent tag, may include periods
+export MAJOR_VERSION="${FULL_VERSION:0:3}" # First 3 chars of tag
 echo "$MAJOR_VERSION"
+
+# Get ahead of errors
+export JUPYTER_PLATFORM_DIRS=1
+# jupyter notebook --generate-config
 
 # Generate site docs
 mike deploy "$MAJOR_VERSION" --config ./docs/mkdocs.yml -b documentation

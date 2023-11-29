@@ -6,26 +6,26 @@ import numpy as np
 import pandas as pd
 import pynwb
 
+from ..utils.dj_helper_fn import fetch_nwb  # dj_replace
+from ..utils.nwb_helper_fn import (
+    estimate_sampling_rate,
+    get_config,
+    get_data_interface,
+    get_electrode_indices,
+    get_nwb_file,
+    get_valid_intervals,
+)
 from .common_device import Probe  # noqa: F401
 from .common_filter import FirFilterParameters
+from .common_interval import interval_list_censor  # noqa: F401
 from .common_interval import (
     IntervalList,
-    interval_list_censor,  # noqa: F401
     interval_list_contains_ind,
     interval_list_intersect,
 )
 from .common_nwbfile import AnalysisNwbfile, Nwbfile
 from .common_region import BrainRegion  # noqa: F401
 from .common_session import Session  # noqa: F401
-from ..utils.dj_helper_fn import fetch_nwb  # dj_replace
-from ..utils.nwb_helper_fn import (
-    estimate_sampling_rate,
-    get_data_interface,
-    get_electrode_indices,
-    get_nwb_file,
-    get_valid_intervals,
-    get_config,
-)
 
 schema = dj.schema("common_ephys")
 
@@ -251,9 +251,8 @@ class Raw(dj.Imported):
             print("Estimating sampling rate...")
             # NOTE: Only use first 1e6 timepoints to save time
             sampling_rate = estimate_sampling_rate(
-                np.asarray(rawdata.timestamps[: int(1e6)]), 1.5
+                np.asarray(rawdata.timestamps[: int(1e6)]), 1.5, verbose=True
             )
-            print(f"Estimated sampling rate: {sampling_rate}")
         key["sampling_rate"] = sampling_rate
 
         interval_dict = dict()

@@ -6,14 +6,13 @@ import numpy as np
 import pandas as pd
 import pynwb
 from datajoint.utils import to_camel_case
-from tqdm import tqdm as tqdm
 
-from ...common.common_nwbfile import AnalysisNwbfile
 from ...common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
 )
+from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
-from .dlc_utils import get_video_path, make_video
+from .dlc_utils import make_video
 from .position_dlc_centroid import DLCCentroid
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_orient import DLCOrientation
@@ -232,18 +231,6 @@ class DLCPosV1(dj.Computed):
             bodypart: pose_estimation_df[bodypart]["likelihood"] < like_thresh
             for bodypart in bodyparts
             if bodypart in pose_estimation_df.columns
-        }
-        sub_thresh_ind_dict = {
-            bodypart: {
-                "inds": np.where(
-                    ~np.isnan(
-                        pose_estimation_df[bodypart]["likelihood"].where(
-                            df_filter[bodypart]
-                        )
-                    )
-                )[0],
-            }
-            for bodypart in bodyparts
         }
         sub_thresh_percent_dict = {
             bodypart: (

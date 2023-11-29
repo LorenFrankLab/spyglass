@@ -140,12 +140,14 @@ class ArtifactRemovedIntervalList(dj.Manual):
     definition = """
     # Stores intervals without detected artifacts.
     # Note that entries can come from either ArtifactDetection() or alternative artifact removal analyses.
-    artifact_removed_interval_list_name: varchar(200)
+    artifact_removed_interval_list_name: varchar(170)
     ---
     -> ArtifactDetectionSelection
     artifact_removed_valid_times: longblob
     artifact_times: longblob # np array of artifact intervals
     """
+
+    # See #630, #664. Excessive key length.
 
 
 def _get_artifact_times(
@@ -197,7 +199,7 @@ def _get_artifact_times(
     # if both thresholds are None, we skip artifract detection
     if (amplitude_thresh is None) and (zscore_thresh is None):
         recording_interval = np.asarray(
-            [valid_timestamps[0], valid_timestamps[-1]]
+            [[valid_timestamps[0], valid_timestamps[-1]]]
         )
         artifact_times_empty = np.asarray([])
         print(
@@ -300,7 +302,7 @@ def _get_artifact_times(
             (valid_timestamps[i[0]], valid_timestamps[i[1]])
         )
 
-    return artifact_removed_valid_times, artifact_intervals_s
+    return np.asarray(artifact_removed_valid_times), artifact_intervals_s
 
 
 def _init_artifact_worker(

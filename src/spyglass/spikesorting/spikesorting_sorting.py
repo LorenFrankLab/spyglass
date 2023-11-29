@@ -14,8 +14,7 @@ from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
 from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import AnalysisNwbfile
-from ..settings import load_config
-from ..utils.dj_helper_fn import fetch_nwb
+from ..settings import sorting_dir, temp_dir
 from .spikesorting_artifact import ArtifactRemovedIntervalList
 from .spikesorting_recording import (
     SpikeSortingRecording,
@@ -28,11 +27,13 @@ schema = dj.schema("spikesorting_sorting")
 @schema
 class SpikeSorterParameters(dj.Manual):
     definition = """
-    sorter: varchar(200)
-    sorter_params_name: varchar(200)
+    sorter: varchar(32)
+    sorter_params_name: varchar(64)
     ---
     sorter_params: blob
     """
+
+    # NOTE: See #630, #664. Excessive key length.
 
     def insert_default(self):
         """Default params from spike sorters available via spikeinterface"""
@@ -141,7 +142,7 @@ class SpikeSorting(dj.Computed):
 
         # first, get the timestamps
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
-        fs = recording.get_sampling_frequency()
+        _ = recording.get_sampling_frequency()
         # then concatenate the recordings
         # Note: the timestamps are lost upon concatenation,
         # i.e. concat_recording.get_times() doesn't return true timestamps anymore.
@@ -192,9 +193,7 @@ class SpikeSorting(dj.Computed):
             "sorter", "sorter_params"
         )
 
-        sorter_temp_dir = tempfile.TemporaryDirectory(
-            dir=os.getenv("SPYGLASS_TEMP_DIR")
-        )
+        sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
         # add tempdir option for mountainsort
         sorter_params["tempdir"] = sorter_temp_dir.name
 
@@ -229,7 +228,7 @@ class SpikeSorting(dj.Computed):
 
         print("Saving sorting results...")
 
-        sorting_folder = Path(load_config().get("SPYGLASS_SORTING_DIR"))
+        sorting_folder = Path(sorting_dir)
 
         sorting_name = self._get_sorting_name(key)
         key["sorting_path"] = str(sorting_folder / Path(sorting_name))
@@ -239,10 +238,11 @@ class SpikeSorting(dj.Computed):
         self.insert1(key)
 
     def delete(self):
-        """Extends the delete method of base class to implement permission checking.
-        Note that this is NOT a security feature, as anyone that has access to source code
-        can disable it; it just makes it less likely to accidentally delete entries.
-        """
+        """Extends the delete method of base class to implement permission
+        checking. Note that this is NOT a security feature, as anyone that has
+        access to source code can disable it; it just makes it less likely to
+        accidentally delete entries."""
+
         current_user_name = dj.config["database.user"]
         entries = self.fetch()
         permission_bool = np.zeros((len(entries),))
@@ -290,16 +290,14 @@ class SpikeSorting(dj.Computed):
         This should be run after AnalysisNwbFile().nightly_cleanup()
         """
         # get a list of the files in the spike sorting storage directory
-        dir_names = next(os.walk(os.environ["SPYGLASS_SORTING_DIR"]))[1]
+        dir_names = next(os.walk(sorting_dir))[1]
         # now retrieve a list of the currently used analysis nwb files
         analysis_file_names = self.fetch("analysis_file_name")
         for dir in dir_names:
             if dir not in analysis_file_names:
-                full_path = str(Path(os.environ["SPYGLASS_SORTING_DIR"]) / dir)
+                full_path = str(Path(sorting_dir) / dir)
                 print(f"removing {full_path}")
-                shutil.rmtree(
-                    str(Path(os.environ["SPYGLASS_SORTING_DIR"]) / dir)
-                )
+                shutil.rmtree(str(Path(sorting_dir) / dir))
 
     @staticmethod
     def _get_sorting_name(key):
