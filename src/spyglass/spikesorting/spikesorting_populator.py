@@ -82,7 +82,7 @@ def spikesorting_pipeline_populator(
         If provided, will lookup pipeline parameters from the
         SpikeSortingPipelineParameters table, supersedes other values provided,
         by default None
-    restrict_probe_type : dict, optional
+    probe_restriction : dict, optional
         Restricts analysis to sort groups with matching keys. Can use keys from
         the SortGroup and ElectrodeGroup Tables (e.g. electrode_group_name,
         probe_id, target_hemisphere), by default {}

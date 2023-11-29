@@ -1,12 +1,11 @@
 "Sortingview helper functions"
 
-from typing import Dict, List, Union, Any, Tuple
-
-import spikeinterface as si
+from typing import Any, List, Tuple, Union
 
 import kachery_cloud as kcl
 import sortingview as sv
 import sortingview.views as vv
+import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
 from .merged_sorting_extractor import MergedSortingExtractor
@@ -55,8 +54,6 @@ def _create_spikesortingview_workspace(
             workspace.sorting_curation_add_label(
                 sorting_id=sorting_id, label=label, unit_ids=[int(unit_id)]
             )
-
-    unit_metrics = workspace.get_unit_metrics_for_sorting(sorting_id)
 
     return workspace.uri, recording_id, sorting_id
 

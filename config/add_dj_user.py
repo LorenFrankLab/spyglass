@@ -1,33 +1,12 @@
 #!/usr/bin/env python
-import os
 import sys
-import tempfile
+from warnings import warn
 
-shared_modules = ["common\_%", "spikesorting\_%", "decoding\_%"]
-
-
-def add_user(user_name):
-    if os.path.isdir(f"/home/{user_name}"):
-        print("Creating database user ", user_name)
-    else:
-        sys.exit(f"Error: user_name {user_name} does not exist in /home.")
-
-    # create a tempoary file for the command
-    file = tempfile.NamedTemporaryFile(mode="w")
-
-    file.write(
-        f"GRANT ALL PRIVILEGES ON `{user_name}\_%`.* TO `{user_name}`@'%' IDENTIFIED BY 'temppass';\n"
-    )
-    for module in shared_modules:
-        file.write(
-            f"GRANT ALL PRIVILEGES ON `{module}`.* TO `{user_name}`@'%';\n"
-        )
-    file.write(f"GRANT SELECT ON `%`.* TO `{user_name}`@'%';\n")
-    file.flush()
-
-    # run those commands in sql
-    os.system(f"mysql -p -h lmf-db.cin.ucsf.edu < {file.name}")
-
+from spyglass.utils.database_settings import DatabaseSettings
 
 if __name__ == "__main__":
-    add_user(sys.argv[1])
+    warn(
+        "This script is deprecated. "
+        + "Use spyglass.utils.database_settings.DatabaseSettings instead."
+    )
+    DatabaseSettings(user_name=sys.argv[1]).add_dj_user()

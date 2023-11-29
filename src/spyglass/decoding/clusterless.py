@@ -5,7 +5,6 @@ References
 ----------
 [1] Denovellis, E. L. et al. Hippocampal replay of experience at real-world
 speeds. eLife 10, e64505 (2021).
-
 """
 
 import os
@@ -32,18 +31,18 @@ from replay_trajectory_classification.discrete_state_transitions import (
 from replay_trajectory_classification.initial_conditions import (
     UniformInitialConditions,
 )
-
 from ripple_detection import (
     get_multiunit_population_firing_rate,
     multiunit_HSE_detector,
 )
-from spyglass.common.common_interval import IntervalList
-from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from tqdm.auto import tqdm
+
 from spyglass.common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
 )
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.decoding.core import (
     convert_valid_times_to_slice,
     get_valid_ephys_position_times_by_epoch,
@@ -61,7 +60,7 @@ from spyglass.spikesorting.spikesorting_sorting import (
     SpikeSorting,
     SpikeSortingSelection,
 )
-from tqdm.auto import tqdm
+from spyglass.utils.dj_helper_fn import fetch_nwb
 
 schema = dj.schema("decoding_clusterless")
 
@@ -72,12 +71,14 @@ class MarkParameters(dj.Manual):
     time."""
 
     definition = """
-    mark_param_name : varchar(80) # a name for this set of parameters
+    mark_param_name : varchar(32) # a name for this set of parameters
     ---
     # the type of mark. Currently only 'amplitude' is supported
     mark_type = 'amplitude':  varchar(40)
     mark_param_dict:    BLOB    # dictionary of parameters for the mark extraction function
     """
+
+    # NOTE: See #630, #664. Excessive key length.
 
     def insert_default(self):
         """Insert the default parameter set
@@ -386,7 +387,9 @@ class UnitMarksIndicator(dj.Computed):
         return np.linspace(start_time, end_time, n_samples)
 
     @staticmethod
-    def plot_all_marks(marks_indicators: xr.DataArray, plot_size=5, s=10):
+    def plot_all_marks(
+        marks_indicators: xr.DataArray, plot_size=5, s=10, plot_limit=None
+    ):
         """Plots 2D slices of each of the spike features against each other
         for all electrodes.
 
@@ -394,8 +397,17 @@ class UnitMarksIndicator(dj.Computed):
         ----------
         marks_indicators : xr.DataArray, shape (n_time, n_electrodes, n_features)
             Spike times and associated spike waveform features binned into
+        plot_size : int, optional
+            Default 5. Matplotlib figure size for each mark.
+        s : int, optional
+            Default 10. Marker size
+        plot_limit : int, optional
+            Default None. Limits to first N electrodes.
         """
-        for electrode_ind in marks_indicators.electrodes:
+        if not plot_limit:
+            plot_limit = len(marks_indicators.electrodes)
+
+        for electrode_ind in marks_indicators.electrodes[:plot_limit]:
             marks = (
                 marks_indicators.sel(electrodes=electrode_ind)
                 .dropna("time", how="all")
@@ -652,55 +664,6 @@ class MultiunitHighSynchronyEventsParameters(dj.Manual):
             },
             skip_duplicates=True,
         )
-
-
-@schema
-class MultiunitHighSynchronyEvents(dj.Computed):
-    """Finds times of high mulitunit activity during immobility."""
-
-    definition = """
-    -> MultiunitHighSynchronyEventsParameters
-    -> UnitMarksIndicator
-    -> IntervalPositionInfo
-    ---
-    -> AnalysisNwbfile
-    multiunit_hse_times_object_id: varchar(40)
-    """
-
-    def make(self, key):
-        marks = (UnitMarksIndicator & key).fetch_xarray()
-        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(
-            float
-        )
-        position_info = (IntervalPositionInfo() & key).fetch1_dataframe()
-
-        params = (MultiunitHighSynchronyEventsParameters & key).fetch1()
-
-        multiunit_high_synchrony_times = multiunit_HSE_detector(
-            marks.time.values,
-            multiunit_spikes,
-            position_info.head_speed.values,
-            sampling_frequency=key["sampling_rate"],
-            **params,
-        )
-
-        # Insert into analysis nwb file
-        nwb_analysis_file = AnalysisNwbfile()
-        key["analysis_file_name"] = nwb_analysis_file.create(
-            key["nwb_file_name"]
-        )
-
-        key["multiunit_hse_times_object_id"] = nwb_analysis_file.add_nwb_object(
-            analysis_file_name=key["analysis_file_name"],
-            nwb_object=multiunit_high_synchrony_times.reset_index(),
-        )
-
-        nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=key["analysis_file_name"],
-        )
-
-        self.insert1(key)
 
 
 def get_decoding_data_for_epoch(

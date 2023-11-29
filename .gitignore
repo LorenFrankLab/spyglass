@@ -6,23 +6,7 @@ mysql_config
 
 # Notebooks
 *.ipynb
-
-!notebooks/00_intro.ipynb
-!notebooks/01_spikesorting.ipynb
-!notebooks/02_curation.ipynb
-!notebooks/03_lfp.ipynb
-!notebooks/04_Trodes_position.ipynb
-!notebooks/05_DLC_from_scratch.ipynb
-!notebooks/06_DLC_from_dir.ipynb
-!notebooks/4_position_info.ipynb
-!notebooks/07_linearization.ipynb
-!notebooks/08_Extract_Mark_indicators.ipynb
-!notebooks/09_Decoding_with_GPUs_on_the_GPU_cluster.ipynb
-!notebooks/10_1D_Clusterless_Decoding.ipynb
-!notebooks/11_2D_Clusterless_Decoding.ipynb
-!notebooks/12_Ripple_Detection.ipynb
-!notebooks/13_Theta_phase_and_power.ipynb
-
+!notebooks/[0-9]*.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -167,7 +151,7 @@ temp_nwb/*s
 *.json
 *.gz
 *.pdf
-dj_local_conf.json
+dj_local_conf*
 !dj_local_conf_example.json
 
 !/.vscode/extensions.json

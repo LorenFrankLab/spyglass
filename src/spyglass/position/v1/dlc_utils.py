@@ -18,6 +18,105 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
+from ...settings import raw_dir
+
+
+def validate_option(
+    option=None,
+    options: list = None,
+    name="option",
+    types: tuple = None,
+    val_range: tuple = None,
+    permit_none=False,
+):
+    """Validate that option is in a list options or a list of types.
+
+    Parameters
+    ----------
+    option : str, optional
+        If none, runs no checks.
+    options : lis, optional
+        If provided, option must be in options.
+    name : st, optional
+        If provided, name of option to use in error message.
+    types : tuple, optional
+        If provided, option must be an instance of one of the types in types.
+    val_range : tuple, optional
+        If provided, option must be in range (min, max)
+    permit_none : bool, optional
+        If True, permit option to be None. Default False.
+
+    Raises
+    ------
+    ValueError
+        If option is not in options.
+    """
+    if option is None and not permit_none:
+        raise ValueError(f"{name} cannot be None")
+
+    if options and option not in options:
+        raise KeyError(
+            f"Unknown {name}: {option} " f"Available options: {options}"
+        )
+
+    if types and not isinstance(option, tuple(types)):
+        raise TypeError(f"{name} is {type(option)}. Available types {types}")
+
+    if val_range and not (val_range[0] <= option <= val_range[1]):
+        raise ValueError(f"{name} must be in range {val_range}")
+
+
+def validate_list(
+    required_items: list,
+    option_list: list = None,
+    name="List",
+    condition="",
+    permit_none=False,
+):
+    """Validate that option_list contains all items in required_items.
+
+    Parameters
+    ---------
+    required_items : list
+    option_list : list, optional
+        If provided, option_list must contain all items in required_items.
+    name : str, optional
+        If provided, name of option_list to use in error message.
+    condition : str, optional
+        If provided, condition in error message as 'when using X'.
+    permit_none : bool, optional
+        If True, permit option_list to be None. Default False.
+    """
+    if option_list is None:
+        if permit_none:
+            return
+        else:
+            raise ValueError(f"{name} cannot be None")
+    if condition:
+        condition = f" when using {condition}"
+    if any(x not in required_items for x in option_list):
+        raise KeyError(
+            f"{name} must contain all items in {required_items}{condition}."
+        )
+
+
+def validate_smooth_params(params):
+    """If params['smooth'], validate method is in list and duration type"""
+    if not params.get("smooth"):
+        return
+    smoothing_params = params.get("smoothing_params")
+    validate_option(smoother=smoothing_params, name="smoothing_params")
+    validate_option(
+        option=smoothing_params.get("smooth_method"),
+        name="smooth_method",
+        options=_key_to_smooth_func_dict,
+    )
+    validate_option(
+        option=smoothing_params.get("smoothing_duration"),
+        name="smoothing_duration",
+        types=(int, float),
+    )
+
 
 def _set_permissions(directory, mode, username: str, groupname: str = None):
     """
@@ -321,13 +420,17 @@ def get_video_path(key):
 
     from ...common.common_behav import VideoFile
 
-    video_info = (
-        VideoFile()
-        & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
-    ).fetch1()
-    nwb_path = (
-        f"{os.getenv('SPYGLASS_BASE_DIR')}/raw/{video_info['nwb_file_name']}"
-    )
+    vf_key = {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
+    VideoFile()._no_transaction_make(vf_key, verbose=False)
+    video_query = VideoFile & vf_key
+
+    if len(video_query) != 1:
+        print(f"Found {len(video_query)} videos for {vf_key}")
+        return None, None, None, None
+
+    video_info = video_query.fetch1()
+    nwb_path = f"{raw_dir}/{video_info['nwb_file_name']}"
+
     with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
         nwb_file = in_out.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
@@ -338,6 +441,7 @@ def get_video_path(key):
         video_filename = video_filepath.split(video_dir)[-1]
         meters_per_pixel = nwb_video.device.meters_per_pixel
         timestamps = np.asarray(nwb_video.timestamps)
+
     return video_dir, video_filename, meters_per_pixel, timestamps
 
 
@@ -526,7 +630,9 @@ def get_gpu_memory():
         if subproccess command errors.
     """
 
-    output_to_list = lambda x: x.decode("ascii").split("\n")[:-1]
+    def output_to_list(x):
+        return x.decode("ascii").split("\n")[:-1]
+
     query_cmd = "nvidia-smi --query-gpu=memory.used --format=csv"
     try:
         memory_use_info = output_to_list(
@@ -534,7 +640,8 @@ def get_gpu_memory():
         )[1:]
     except subprocess.CalledProcessError as err:
         raise RuntimeError(
-            f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+            f"command {err.cmd} return with error (code {err.returncode}): "
+            + f"{err.output}"
         ) from err
     memory_use_values = {
         i: int(x.split()[0]) for i, x in enumerate(memory_use_info)
@@ -694,7 +801,7 @@ def make_video(
 
     RGB_PINK = (234, 82, 111)
     RGB_YELLOW = (253, 231, 76)
-    RGB_WHITE = (255, 255, 255)
+    # RGB_WHITE = (255, 255, 255)
     RGB_BLUE = (30, 144, 255)
     RGB_ORANGE = (255, 127, 80)
     #     "#29ff3e",
@@ -741,10 +848,12 @@ def make_video(
                 key: fill_nan(
                     position_mean[key]["orientation"], video_time, position_time
                 )
-                for key in orientation_mean.keys()
+                for key in position_mean.keys()
+                # CBroz: Bug was here, using nonexistent orientation_mean dict
             }
         print(
-            f"frames start: {frames[0]}\nvideo_frames start: {video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
+            f"frames start: {frames[0]}\nvideo_frames start: "
+            + f"{video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
         )
         for time_ind in tqdm(
             frames, desc="frames", disable=disable_progressbar
@@ -913,12 +1022,9 @@ def make_video(
 
         position_mean = position_mean["DLC"]
         orientation_mean = orientation_mean["DLC"]
-        frame_offset = -1
-        time_slice = []
         video_slowdown = 1
-        vmax = 0.07  # ?
-        # Set up formatting for the movie files
 
+        # Set up formatting for the movie files
         window_size = 501
         if likelihoods:
             plot_likelihood = True
@@ -1026,16 +1132,7 @@ def make_video(
                 f"time = {time_delta:3.4f}s\n frame = {frame_ind}",
                 fontsize=8,
             )
-            fontprops = fm.FontProperties(size=12)
-            #     scalebar = AnchoredSizeBar(axes[0].transData,
-            #                                20, '20 cm', 'lower right',
-            #                                pad=0.1,
-            #                                color='white',
-            #                                frameon=False,
-            #                                size_vertical=1,
-            #                                fontproperties=fontprops)
-
-            #     axes[0].add_artist(scalebar)
+            _ = fm.FontProperties(size=12)
             axes[0].axis("off")
             if plot_likelihood:
                 likelihood_objs = {
@@ -1165,10 +1262,6 @@ def make_video(
                     centroid_position_dot,
                     orientation_line,
                     title,
-                    # redC_likelihood,
-                    # green_likelihood,
-                    # redL_likelihood,
-                    # redR_likelihood,
                 )
 
             movie = animation.FuncAnimation(

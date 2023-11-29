@@ -34,11 +34,12 @@ class DIOEvents(dj.Imported):
         )
         if behav_events is None:
             print(
-                f"No conforming behavioral events data interface found in {nwb_file_name}\n"
+                "No conforming behavioral events data interface found in "
+                + f"{nwb_file_name}\n"
             )
             return
 
-        # the times for these events correspond to the valid times for the raw data
+        # Times for these events correspond to the valid times for the raw data
         key["interval_list_name"] = (
             Raw() & {"nwb_file_name": nwb_file_name}
         ).fetch1("interval_list_name")
@@ -55,8 +56,10 @@ class DIOEvents(dj.Imported):
 
         Examples
         --------
-        > (DIOEvents & {'nwb_file_name': 'arthur20220314_.nwb'}).plot_all_dio_events()
-        > (DIOEvents & [{'nwb_file_name': "arthur20220314_.nwb"}, {"nwb_file_name": "arthur20220316_.nwb"}]).plot_all_dio_events()
+        > restr1 = {'nwb_file_name': 'arthur20220314_.nwb'}
+        > restr2 = {'nwb_file_name': 'arthur20220316_.nwb'}
+        > (DIOEvents & restr1).plot_all_dio_events()
+        > (DIOEvents & [restr1, restr2]).plot_all_dio_events()
 
         """
         behavioral_events = self.fetch_nwb()

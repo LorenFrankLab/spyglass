@@ -25,8 +25,8 @@ class LabMember(dj.Manual):
         # Information about lab member in the context of Frank lab network
         -> LabMember
         ---
-        google_user_name: varchar(200)              # used for permission to curate
-        datajoint_user_name = "": varchar(200)      # used for permission to delete entries
+        google_user_name: varchar(200)         # For permission to curate
+        datajoint_user_name = "": varchar(200) # For permission to delete ns
         """
 
     @classmethod
@@ -39,7 +39,7 @@ class LabMember(dj.Manual):
             The NWB file with experimenter information.
         """
         if isinstance(nwbf, str):
-            nwb_file_abspath = Nwbfile.get_abs_path(nwbf)
+            nwb_file_abspath = Nwbfile.get_abs_path(nwbf, new_file=True)
             nwbf = get_nwb_file(nwb_file_abspath)
 
         if nwbf.experimenter is None:
@@ -108,9 +108,10 @@ class LabTeam(dj.Manual):
         team_description: str
             The description of the team.
         """
-        labteam_dict = dict()
-        labteam_dict["team_name"] = team_name
-        labteam_dict["team_description"] = team_description
+        labteam_dict = {
+            "team_name": team_name,
+            "team_description": team_description,
+        }
         cls.insert1(labteam_dict, skip_duplicates=True)
 
         for team_member in team_members:
@@ -120,12 +121,13 @@ class LabTeam(dj.Manual):
             ).fetch("google_user_name")
             if not query:
                 print(
-                    f"Please add the Google user ID for {team_member} in the "
-                    + "LabMember.LabMemberInfo table to help manage permissions."
+                    f"Please add the Google user ID for {team_member} in "
+                    + "LabMember.LabMemberInfo to help manage permissions."
                 )
-            labteammember_dict = dict()
-            labteammember_dict["team_name"] = team_name
-            labteammember_dict["lab_member_name"] = team_member
+            labteammember_dict = {
+                "team_name": team_name,
+                "lab_member_name": team_member,
+            }
             cls.LabTeamMember.insert1(labteammember_dict, skip_duplicates=True)
 
 
@@ -133,7 +135,6 @@ class LabTeam(dj.Manual):
 class Institution(dj.Manual):
     definition = """
     institution_name: varchar(80)
-    ---
     """
 
     @classmethod
@@ -148,6 +149,7 @@ class Institution(dj.Manual):
         if nwbf.institution is None:
             print("No institution metadata found.\n")
             return
+
         cls.insert1(
             dict(institution_name=nwbf.institution), skip_duplicates=True
         )
@@ -157,7 +159,6 @@ class Institution(dj.Manual):
 class Lab(dj.Manual):
     definition = """
     lab_name: varchar(80)
-    ---
     """
 
     @classmethod
@@ -198,5 +199,7 @@ def decompose_name(full_name: str) -> tuple:
         last, first = full_name.title().split(", ")
     else:
         first, last = full_name.title().split(" ")
+
     full = f"{first} {last}"
+
     return full, first, last

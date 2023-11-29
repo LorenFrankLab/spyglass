@@ -9,7 +9,7 @@ import pytest
 from hdmf.backends.warnings import BrokenLinkWarning
 
 from spyglass.data_import.insert_sessions import copy_nwb_link_raw_ephys
-from spyglass.settings import load_config
+from spyglass.settings import raw_dir
 
 
 @pytest.fixture()
@@ -48,8 +48,6 @@ def new_nwbfile_raw_file_name(tmp_path):
     nwbfile.add_acquisition(es)
 
     _ = tmp_path  # CBroz: Changed to match testing base directory
-
-    raw_dir = load_config()["SPYGLASS_RAW_DIR"]
 
     file_name = "raw.nwb"
     file_path = raw_dir + "/" + file_name
@@ -93,8 +91,10 @@ def test_copy_nwb(
             new_nwbfile_raw_file_name_abspath
         )
 
-    # test readability after moving the linking raw file (paths are stored as relative paths in NWB)
-    # so this should break the link (moving the linked-to file should also break the link)
+    # test readability after moving the linking raw file (paths are stored as
+    # relative paths in NWB) so this should break the link (moving the linked-to
+    # file should also break the link)
+
     shutil.move(out_nwb_file_abspath, moved_nwbfile_no_ephys_file_path)
     with pynwb.NWBHDF5IO(
         path=str(moved_nwbfile_no_ephys_file_path), mode="r"

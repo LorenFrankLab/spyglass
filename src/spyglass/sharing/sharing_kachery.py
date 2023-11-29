@@ -2,6 +2,7 @@ import os
 
 import datajoint as dj
 import kachery_cloud as kcl
+from datajoint.errors import DataJointError
 
 from ..common.common_lab import Lab  # noqa
 from ..common.common_nwbfile import AnalysisNwbfile
@@ -56,7 +57,7 @@ class KacheryZone(dj.Manual):
             kachery_zone_name, kachery_cloud_dir = (KacheryZone & key).fetch1(
                 "kachery_zone_name", "kachery_cloud_dir"
             )
-        except:
+        except DataJointError:
             raise Exception(
                 f"{key} does not correspond to a single entry in KacheryZone."
             )
@@ -75,7 +76,8 @@ class KacheryZone(dj.Manual):
 
     @staticmethod
     def set_resource_url(key: dict):
-        """Sets the KACHERY_RESOURCE_URL based on the key corresponding to a single Kachery Zone
+        """Sets the KACHERY_RESOURCE_URL based on the key corresponding to a
+        single Kachery Zone
 
         Parameters
         ----------
@@ -86,7 +88,7 @@ class KacheryZone(dj.Manual):
             kachery_zone_name, kachery_proxy = (KacheryZone & key).fetch1(
                 "kachery_zone_name", "kachery_proxy"
             )
-        except:
+        except DataJointError:
             raise Exception(
                 f"{key} does not correspond to a single entry in KacheryZone."
             )
@@ -130,12 +132,17 @@ class AnalysisNwbfileKachery(dj.Computed):
         """
 
     def make(self, key):
-        # note that we're assuming that the user has initialized a kachery-cloud client with kachery-cloud-init
-        # uncomment the line below once we are sharing linked files as well.
+        # note that we're assuming that the user has initialized a kachery-cloud
+        # client with kachery-cloud-init. Uncomment the line below once we are
+        # sharing linked files as well.
+
         # linked_key = copy.deepcopy(key)
+
         print(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
         # set the kachery zone
+
         KacheryZone.set_zone(key)
+
         key["analysis_file_uri"] = kcl.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )
@@ -155,7 +162,8 @@ class AnalysisNwbfileKachery(dj.Computed):
 
     @staticmethod
     def download_file(analysis_file_name: str) -> bool:
-        """Download the specified analysis file and associated linked files from kachery-cloud if possible
+        """Download the specified analysis file and associated linked files
+        from kachery-cloud if possible
 
         Parameters
         ----------
