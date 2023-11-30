@@ -5,13 +5,8 @@ import pynwb
 
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_helper_fn import fetch_nwb
-from .dlc_utils import (
-    _key_to_smooth_func_dict,
-    get_span_start_stop,
-    interp_pos,
-    validate_option,
-    validate_smooth_params,
-)
+from ...utils.dj_mixin import SpyglassMixin
+from .dlc_utils import _key_to_smooth_func_dict, get_span_start_stop, interp_pos
 from .position_dlc_pose_estimation import DLCPoseEstimation
 
 schema = dj.schema("position_v1_dlc_position")
@@ -141,7 +136,7 @@ class DLCSmoothInterpSelection(dj.Manual):
 
 
 @schema
-class DLCSmoothInterp(dj.Computed):
+class DLCSmoothInterp(SpyglassMixin, dj.Computed):
     """
     Interpolates across low likelihood periods and smooths the position
     Can take a few minutes.
@@ -266,11 +261,6 @@ class DLCSmoothInterp(dj.Computed):
             )
             self.insert1(key)
             logger.logger.info("inserted entry into DLCSmoothInterp")
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]

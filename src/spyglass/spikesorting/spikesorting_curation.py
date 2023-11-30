@@ -15,7 +15,7 @@ import spikeinterface.qualitymetrics as sq
 
 from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
-from ..utils.dj_helper_fn import fetch_nwb
+from ..utils.dj_helper_fn import SpyglassMixin
 from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SortInterval, SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
@@ -38,7 +38,7 @@ def apply_merge_groups_to_sorting(
 
 
 @schema
-class Curation(dj.Manual):
+class Curation(SpyglassMixin, dj.Manual):
     definition = """
     # Stores each spike sorting; similar to IntervalList
     curation_id: int # a number corresponding to the index of this curation
@@ -51,6 +51,8 @@ class Curation(dj.Manual):
     description='': varchar(1000) #optional description for this curated sort
     time_of_creation: int   # in Unix time, to the nearest second
     """
+
+    _nwb_table = AnalysisNwbfile
 
     @staticmethod
     def insert_curation(
@@ -251,11 +253,6 @@ class Curation(dj.Manual):
             units_object_id = object_ids[0]
 
         return analysis_file_name, units_object_id
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
 
 @schema
@@ -879,7 +876,7 @@ class CuratedSpikeSortingSelection(dj.Manual):
 
 
 @schema
-class CuratedSpikeSorting(dj.Computed):
+class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
     definition = """
     -> CuratedSpikeSortingSelection
     ---
@@ -997,11 +994,6 @@ class CuratedSpikeSorting(dj.Computed):
         unit_fields = [column for column in unit_info.columns]
         unit_fields.remove("label")
         return unit_fields
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
 
 @schema

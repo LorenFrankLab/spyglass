@@ -11,7 +11,7 @@ from tqdm import tqdm as tqdm
 from ...common.common_behav import RawPosition
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...common.common_position import IntervalPositionInfo
-from ...utils.dj_helper_fn import fetch_nwb
+from ...utils.dj_mixin import SpyglassMixin
 from .dlc_utils import check_videofile, get_video_path
 
 schema = dj.schema("position_v1_trodes_position")
@@ -143,7 +143,7 @@ class TrodesPosSelection(dj.Manual):
 
 
 @schema
-class TrodesPosV1(dj.Computed):
+class TrodesPosV1(SpyglassMixin, dj.Computed):
     """
     Table to calculate the position based on Trodes tracking
     """
@@ -211,11 +211,6 @@ class TrodesPosV1(dj.Computed):
     def calculate_position_info(*args, **kwargs):
         """Calculate position info from 2D spatial series."""
         return IntervalPositionInfo().calculate_position_info(*args, **kwargs)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         return IntervalPositionInfo._data_to_df(
