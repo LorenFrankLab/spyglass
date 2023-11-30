@@ -2,26 +2,61 @@
 so that datajoint can store them in tables."""
 
 
-from replay_trajectory_classification.continuous_state_transitions import (
-    Identity,
+from non_local_detector.continuous_state_transitions import (
+    Discrete,
+    EmpiricalMovement,
     RandomWalk,
     RandomWalkDirection1,
     RandomWalkDirection2,
     Uniform,
 )
-from replay_trajectory_classification.discrete_state_transitions import (
-    DiagonalDiscrete,
-    RandomDiscrete,
-    UniformDiscrete,
-    UserDefinedDiscrete,
+from non_local_detector.discrete_state_transitions import (
+    DiscreteNonStationaryCustom,
+    DiscreteNonStationaryDiagonal,
+    DiscreteStationaryCustom,
+    DiscreteStationaryDiagonal,
 )
-from replay_trajectory_classification.environments import Environment
-from replay_trajectory_classification.initial_conditions import (
+from non_local_detector.environment import Environment
+from non_local_detector.initial_conditions import (
     UniformInitialConditions,
-    UniformOneEnvironmentInitialConditions,
 )
-from replay_trajectory_classification.observation_model import ObservationModel
+from non_local_detector.observation_models import ObservationModel
 from track_linearization import make_track_graph
+
+import datajoint as dj
+from non_local_detector import ContFragClusterlessClassifier
+
+from spyglass.decoding.v1.dj_decoder_conversion import (
+    convert_classes_to_dict,
+    restore_classes,
+)
+
+schema = dj.schema("decoding_clusterless_v1")
+
+
+from non_local_detector.environment import Environment
+from track_linearization import make_track_graph
+from non_local_detector.continuous_state_transitions import (
+    Discrete,
+    EmpiricalMovement,
+    RandomWalk,
+    RandomWalkDirection1,
+    RandomWalkDirection2,
+    Uniform,
+)
+from non_local_detector.discrete_state_transitions import (
+    DiscreteNonStationaryCustom,
+    DiscreteNonStationaryDiagonal,
+    DiscreteStationaryCustom,
+    DiscreteStationaryDiagonal,
+)
+from non_local_detector.environment import Environment
+from non_local_detector.initial_conditions import (
+    UniformInitialConditions,
+)
+from non_local_detector.observation_models import ObservationModel
+from non_local_detector import ContFragClusterlessClassifier
+import copy
 
 
 def _convert_dict_to_class(d: dict, class_conversion: dict) -> object:
@@ -38,6 +73,8 @@ def _convert_dict_to_class(d: dict, class_conversion: dict) -> object:
 
     """
     class_name = d.pop("class_name")
+    if class_name not in class_conversion:
+        raise ValueError(f"Invalid class name: {class_name}")
     return class_conversion[class_name](**d)
 
 
@@ -80,24 +117,26 @@ def _convert_transitions_to_dict(
 
 def restore_classes(params: dict) -> dict:
     """Converts a dictionary of parameters into a dictionary of classes since datajoint cannot handle classes"""
+
+    params = copy.deepcopy(params)
     continuous_state_transition_types = {
+        "Discrete": Discrete,
+        "EmpiricalMovement": EmpiricalMovement,
         "RandomWalk": RandomWalk,
         "RandomWalkDirection1": RandomWalkDirection1,
         "RandomWalkDirection2": RandomWalkDirection2,
         "Uniform": Uniform,
-        "Identity": Identity,
     }
 
     discrete_state_transition_types = {
-        "DiagonalDiscrete": DiagonalDiscrete,
-        "UniformDiscrete": UniformDiscrete,
-        "RandomDiscrete": RandomDiscrete,
-        "UserDefinedDiscrete": UserDefinedDiscrete,
+        "DiscreteNonStationaryCustom": DiscreteNonStationaryCustom,
+        "DiscreteNonStationaryDiagonal": DiscreteNonStationaryDiagonal,
+        "DiscreteStationaryCustom": DiscreteStationaryCustom,
+        "DiscreteStationaryDiagonal": DiscreteStationaryDiagonal,
     }
 
-    initial_conditions_types = {
+    continuous_initial_conditions_types = {
         "UniformInitialConditions": UniformInitialConditions,
-        "UniformOneEnvironmentInitialConditions": UniformOneEnvironmentInitialConditions,
     }
 
     params["classifier_params"]["continuous_transition_types"] = [
@@ -117,12 +156,12 @@ def restore_classes(params: dict) -> dict:
         params["classifier_params"]["discrete_transition_type"],
         discrete_state_transition_types,
     )
-    params["classifier_params"][
-        "initial_conditions_type"
-    ] = _convert_dict_to_class(
-        params["classifier_params"]["initial_conditions_type"],
-        initial_conditions_types,
-    )
+    params["classifier_params"]["continuous_initial_conditions_types"] = [
+        _convert_dict_to_class(cont_ic, continuous_initial_conditions_types)
+        for cont_ic in params["classifier_params"][
+            "continuous_initial_conditions_types"
+        ]
+    ]
 
     if params["classifier_params"]["observation_models"] is not None:
         params["classifier_params"]["observation_models"] = [
@@ -154,11 +193,23 @@ def _convert_environment_to_dict(env: Environment) -> dict:
             ],
             "edges": list(track_graph.edges),
         }
+    try:
+        if env.track_graphDD is not None:
+            track_graphDD = env.track_graphDD
+            env.track_graphDD = {
+                "node_positions": [
+                    v["pos"] for v in dict(track_graphDD.nodes).values()
+                ],
+                "edges": list(track_graphDD.edges),
+            }
+    except AttributeError:
+        pass
 
     return vars(env)
 
 
 def convert_classes_to_dict(key: dict) -> dict:
+    key = copy.deepcopy(key)
     """Converts the classifier parameters into a dictionary so that datajoint can store it."""
     try:
         key["classifier_params"]["environments"] = [
@@ -179,9 +230,12 @@ def convert_classes_to_dict(key: dict) -> dict:
     key["classifier_params"]["discrete_transition_type"] = _to_dict(
         key["classifier_params"]["discrete_transition_type"]
     )
-    key["classifier_params"]["initial_conditions_type"] = _to_dict(
-        key["classifier_params"]["initial_conditions_type"]
-    )
+    key["classifier_params"]["continuous_initial_conditions_types"] = [
+        _to_dict(cont_ic)
+        for cont_ic in key["classifier_params"][
+            "continuous_initial_conditions_types"
+        ]
+    ]
 
     if key["classifier_params"]["observation_models"] is not None:
         key["classifier_params"]["observation_models"] = [
@@ -198,3 +252,31 @@ def convert_classes_to_dict(key: dict) -> dict:
         pass
 
     return key
+
+
+@schema
+class DecodingParameters(dj.Lookup):
+    """Parameters for decoding the animal's mental position and some category of interest"""
+
+    definition = """
+    classifier_param_name : varchar(80) # a name for this set of parameters
+    ---
+    classifier_params :   BLOB        # initialization parameters for model
+    estimate_parameters_kwargs : BLOB # keyword arguments for estimate_parameters
+    """
+
+    def insert_default(self):
+        self.insert1(
+            {
+                "classifier_param_name": "contfrag_clusterless",
+                "classifier_params": vars(ContFragClusterlessClassifier()),
+                "estimate_parameters_kwargs": dict(),
+            },
+            skip_duplicates=True,
+        )
+
+    def insert1(self, key, **kwargs):
+        super().insert1(convert_classes_to_dict(key), **kwargs)
+
+    def fetch1(self, *args, **kwargs):
+        return restore_classes(super().fetch1(*args, **kwargs))
