@@ -79,7 +79,7 @@ class FigURLCurationSelection(dj.Manual):
 @schema
 class FigURLCuration(dj.Computed):
     definition = """
-    # URL to the FigURL for manual curation of spike sortings.
+    # URL to the FigURL for manual curation of a spike sorting.
     -> FigURLCurationSelection
     ---
     url: varchar(1000)
@@ -168,7 +168,7 @@ def _generate_figurl(
     channel_neighborhood_size=5,
     raster_plot_subsample_max_firing_rate=50,
     spike_amplitudes_subsample_max_firing_rate=50,
-)->str:
+) -> str:
     print("Preparing spikesortingview data")
     sampling_frequency = R.get_sampling_frequency()
     X = SpikeSortingView.create(
