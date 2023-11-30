@@ -24,22 +24,23 @@ from replay_trajectory_classification.discrete_state_transitions import (
 from replay_trajectory_classification.initial_conditions import (
     UniformInitialConditions,
 )
-from spyglass.common.common_interval import IntervalList
-from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.utils.dj_helper_fn import fetch_nwb
+
 from spyglass.common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
 )
-from spyglass.decoding.core import (
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_position import IntervalPositionInfo
+from spyglass.decoding.v1.core import (
     convert_valid_times_to_slice,
     get_valid_ephys_position_times_by_epoch,
 )
-from spyglass.decoding.dj_decoder_conversion import (
+from spyglass.decoding.v1.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
 )
 from spyglass.spikesorting.spikesorting_curation import CuratedSpikeSorting
+from spyglass.utils.dj_helper_fn import fetch_nwb
 
 schema = dj.schema("decoding_sortedspikes")
 

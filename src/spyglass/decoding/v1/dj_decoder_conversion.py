@@ -2,6 +2,8 @@
 so that datajoint can store them in tables."""
 
 
+import datajoint as dj
+from non_local_detector import ContFragClusterlessClassifier
 from non_local_detector.continuous_state_transitions import (
     Discrete,
     EmpiricalMovement,
@@ -17,14 +19,9 @@ from non_local_detector.discrete_state_transitions import (
     DiscreteStationaryDiagonal,
 )
 from non_local_detector.environment import Environment
-from non_local_detector.initial_conditions import (
-    UniformInitialConditions,
-)
+from non_local_detector.initial_conditions import UniformInitialConditions
 from non_local_detector.observation_models import ObservationModel
 from track_linearization import make_track_graph
-
-import datajoint as dj
-from non_local_detector import ContFragClusterlessClassifier
 
 from spyglass.decoding.v1.dj_decoder_conversion import (
     convert_classes_to_dict,
@@ -34,8 +31,9 @@ from spyglass.decoding.v1.dj_decoder_conversion import (
 schema = dj.schema("decoding_clusterless_v1")
 
 
-from non_local_detector.environment import Environment
-from track_linearization import make_track_graph
+import copy
+
+from non_local_detector import ContFragClusterlessClassifier
 from non_local_detector.continuous_state_transitions import (
     Discrete,
     EmpiricalMovement,
@@ -51,12 +49,9 @@ from non_local_detector.discrete_state_transitions import (
     DiscreteStationaryDiagonal,
 )
 from non_local_detector.environment import Environment
-from non_local_detector.initial_conditions import (
-    UniformInitialConditions,
-)
+from non_local_detector.initial_conditions import UniformInitialConditions
 from non_local_detector.observation_models import ObservationModel
-from non_local_detector import ContFragClusterlessClassifier
-import copy
+from track_linearization import make_track_graph
 
 
 def _convert_dict_to_class(d: dict, class_conversion: dict) -> object:

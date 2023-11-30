@@ -1,20 +1,21 @@
 import os
 import shutil
 import uuid
+from pathlib import Path
+
+import datajoint as dj
 import numpy as np
 import pandas as pd
-import datajoint as dj
 import pynwb
 import spikeinterface as si
-from pathlib import Path
-from spyglass.spikesorting import (
-    SpikeSortingOutput,
-    CurationV1,
-    CuratedSpikeSortingV1,
-)
+
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting import (
+    CuratedSpikeSortingV1,
+    CurationV1,
+    SpikeSortingOutput,
+)
 from spyglass.utils.dj_helper_fn import fetch_nwb
-from spyglass.spikesorting.v1.metric_utils import get_peak_channel
 
 schema = dj.schema("waveform_features")
 
