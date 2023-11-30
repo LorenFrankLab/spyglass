@@ -1,17 +1,15 @@
-from typing import Any, Union, List, Dict
+from typing import Any, Dict, List, Union
 
 import datajoint as dj
+import kachery_cloud as kcl
 import pynwb
-
+import sortingview.views as vv
 import spikeinterface as si
+from sortingview.SpikeSortingView import SpikeSortingView
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
 from spyglass.spikesorting.v1.curation import CurationV1, _merge_dict_to_list
-
-import kachery_cloud as kcl
-import sortingview.views as vv
-from sortingview.SpikeSortingView import SpikeSortingView
+from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
 
 schema = dj.schema("spikesorting_v1_figurl_curation")
 
@@ -81,6 +79,7 @@ class FigURLCurationSelection(dj.Manual):
 @schema
 class FigURLCuration(dj.Computed):
     definition = """
+    # URL to the FigURL for manual curation of spike sortings.
     -> FigURLCurationSelection
     ---
     url: varchar(1000)
@@ -169,7 +168,7 @@ def _generate_figurl(
     channel_neighborhood_size=5,
     raster_plot_subsample_max_firing_rate=50,
     spike_amplitudes_subsample_max_firing_rate=50,
-):
+)->str:
     print("Preparing spikesortingview data")
     sampling_frequency = R.get_sampling_frequency()
     X = SpikeSortingView.create(
@@ -183,23 +182,6 @@ def _generate_figurl(
         max_num_snippets_per_segment=max_num_snippets_per_segment,
         channel_neighborhood_size=channel_neighborhood_size,
     )
-
-    # create a fake unit similarity matrix (for future reference)
-    # similarity_scores = []
-    # for u1 in X.unit_ids:
-    #     for u2 in X.unit_ids:
-    #         similarity_scores.append(
-    #             vv.UnitSimilarityScore(
-    #                 unit_id1=u1,
-    #                 unit_id2=u2,
-    #                 similarity=similarity_matrix[(X.unit_ids==u1),(X.unit_ids==u2)]
-    #             )
-    #         )
-    # # Create the similarity matrix view
-    # unit_similarity_matrix_view = vv.UnitSimilarityMatrix(
-    #    unit_ids=X.unit_ids,
-    #    similarity_scores=similarity_scores
-    #    )
 
     # Assemble the views in a layout
     # You can replace this with other layouts

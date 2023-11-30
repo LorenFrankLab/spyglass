@@ -1,6 +1,6 @@
 import warnings
 from functools import reduce
-from typing import Union, List
+from typing import List, Union
 
 import datajoint as dj
 import numpy as np
@@ -9,18 +9,18 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 from spikeinterface.core.job_tools import ChunkRecordingExecutor, ensure_n_jobs
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_interval import (
     IntervalList,
     _union_concat,
     interval_from_inds,
     interval_list_complement,
 )
-from spyglass.spikesorting.v1.utils import generate_nwb_uuid
+from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
+from spyglass.spikesorting.v1.utils import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_artifact")
 
@@ -28,7 +28,7 @@ schema = dj.schema("spikesorting_v1_artifact")
 @schema
 class ArtifactDetectionParameters(dj.Lookup):
     definition = """
-    # Parameter for detecting artifacts (non-neural high amplitude events)
+    # Parameters for detecting artifacts (non-neural high amplitude events).
     artifact_param_name : varchar(200)
     ---
     artifact_params : blob
@@ -106,7 +106,7 @@ class ArtifactDetectionSelection(dj.Manual):
 @schema
 class ArtifactDetection(dj.Computed):
     definition = """
-    # Detects artifacts (e.g. large transients from movement) and saves artifact-free intervals in IntervalList.
+    # Detected artifacts (e.g. large transients from movement). Intervals are stored in IntervalList with `artifact_id` as `interval_list_name`.
     -> ArtifactDetectionSelection
     """
 

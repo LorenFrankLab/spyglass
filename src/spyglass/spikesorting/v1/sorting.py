@@ -30,6 +30,7 @@ schema = dj.schema("spikesorting_v1_sorting")
 @schema
 class SpikeSorterParameters(dj.Lookup):
     definition = """
+    # Spike sorting algorithm and associated parameters.
     sorter: varchar(200)
     sorter_param_name: varchar(200)
     ---
@@ -101,7 +102,7 @@ class SpikeSorterParameters(dj.Lookup):
 @schema
 class SpikeSortingSelection(dj.Manual):
     definition = """
-    # Processed recording and parameters. Use `insert_selection` method to insert rows.
+    # Processed recording and spike sorting parameters. Use `insert_selection` method to insert rows.
     sorting_id: varchar(50)
     ---
     -> SpikeSortingRecording
@@ -278,48 +279,6 @@ class SpikeSorting(dj.Computed):
             key["analysis_file_name"],
         )
         self.insert1(key, skip_duplicates=True)
-
-    # def delete(self):
-    #     """Extends the delete method of base class to implement permission checking.
-    #     Note that this is NOT a security feature, as anyone that has access to source code
-    #     can disable it; it just makes it less likely to accidentally delete entries.
-    #     """
-    #     current_user_name = dj.config["database.user"]
-    #     entries = self.fetch()
-    #     permission_bool = np.zeros((len(entries),))
-    #     print(
-    #         f"Attempting to delete {len(entries)} entries, checking permission..."
-    #     )
-
-    #     for entry_idx in range(len(entries)):
-    #         # check the team name for the entry, then look up the members in that team,
-    #         # then get their datajoint user names
-    #         team_name = (
-    #             SpikeSortingRecordingSelection
-    #             & (SpikeSortingRecordingSelection & entries[entry_idx]).proj()
-    #         ).fetch1()["team_name"]
-    #         lab_member_name_list = (
-    #             LabTeam.LabTeamMember & {"team_name": team_name}
-    #         ).fetch("lab_member_name")
-    #         datajoint_user_names = []
-    #         for lab_member_name in lab_member_name_list:
-    #             datajoint_user_names.append(
-    #                 (
-    #                     LabMember.LabMemberInfo
-    #                     & {"lab_member_name": lab_member_name}
-    #                 ).fetch1("datajoint_user_name")
-    #             )
-    #         permission_bool[entry_idx] = (
-    #             current_user_name in datajoint_user_names
-    #         )
-    #     if np.sum(permission_bool) == len(entries):
-    #         print("Permission to delete all specified entries granted.")
-    #         super().delete()
-    #     else:
-    #         raise Exception(
-    #             "You do not have permission to delete all specified"
-    #             "entries. Not deleting anything."
-    #         )
 
     @classmethod
     def get_sorting(cls, key: dict) -> si.BaseSorting:

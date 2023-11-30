@@ -1,5 +1,5 @@
 import os
-from typing import List, Union, Dict, Any
+from typing import Any, Dict, List, Union
 
 import datajoint as dj
 import numpy as np
@@ -9,18 +9,18 @@ import spikeinterface.preprocessing as sp
 import spikeinterface.qualitymetrics as sq
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
 from spyglass.spikesorting.v1.curation import (
     CurationV1,
     _list_to_merge_dict,
     _merge_dict_to_list,
 )
 from spyglass.spikesorting.v1.metric_utils import (
+    compute_isi_violation_fractions,
     get_num_spikes,
     get_peak_channel,
     get_peak_offset,
-    compute_isi_violation_fractions,
 )
+from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
 from spyglass.spikesorting.v1.utils import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_metric_curation")
@@ -48,6 +48,7 @@ _comparison_to_function = {
 @schema
 class WaveformParameters(dj.Lookup):
     definition = """
+    # Parameters for extracting waveforms from the recording based on the sorting.
     waveform_param_name: varchar(80) # name of waveform extraction parameters
     ---
     waveform_params: blob # a dict of waveform extraction parameters
@@ -86,7 +87,7 @@ class WaveformParameters(dj.Lookup):
 @schema
 class MetricParameters(dj.Lookup):
     definition = """
-    # Parameters for computing quality metrics of sorted units
+    # Parameters for computing quality metrics of sorted units.
     metric_param_name: varchar(200)
     ---
     metric_params: blob
@@ -137,6 +138,7 @@ class MetricParameters(dj.Lookup):
 @schema
 class MetricCurationParameters(dj.Lookup):
     definition = """
+    # Parameters for curating a spike sorting based on the metrics.
     metric_curation_param_name: varchar(200)
     ---
     label_params: blob   # dict of param to label units
@@ -156,6 +158,7 @@ class MetricCurationParameters(dj.Lookup):
 @schema
 class MetricCurationSelection(dj.Manual):
     definition = """
+    # Spike sorting and parameters for metric curation. Use `insert_selection` to insert a row into this table.
     metric_curation_id: varchar(32)
     ---
     -> CurationV1
@@ -196,6 +199,7 @@ class MetricCurationSelection(dj.Manual):
 @schema
 class MetricCuration(dj.Computed):
     definition = """
+    # Results of applying curation based on quality metrics. To do additional curation, insert another row in `CurationV1`
     -> MetricCurationSelection
     ---
     -> AnalysisNwbfile
