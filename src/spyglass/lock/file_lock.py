@@ -4,6 +4,8 @@ import datajoint as dj
 
 schema = dj.schema("file_lock")
 
+from ..common.common_nwbfile import AnalysisNwbfile, Nwbfile
+
 
 @schema
 class NwbfileLock(dj.Manual):

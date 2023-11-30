@@ -215,17 +215,20 @@ class DLCProject(dj.Manual):
         lab_team: str,
         frames_per_video: int,
         video_list: List,
+        groupname: str = None,
         project_directory: str = os.getenv("DLC_PROJECT_PATH"),
         output_path: str = os.getenv("DLC_VIDEO_PATH"),
         set_permissions=False,
         **kwargs,
     ):
-        """
-        insert a new project into DLCProject table.
+        """Insert a new project into DLCProject table.
+
         Parameters
         ----------
         project_name : str
             user-friendly name of project
+        groupname : str, optional
+            Name for project group. If None, defaults to username
         bodyparts : list
             list of bodyparts to label. Should match bodyparts in BodyPart table
         lab_team : str
@@ -236,9 +239,9 @@ class DLCProject(dj.Manual):
         frames_per_video : int
             number of frames to extract from each video
         video_list : list
-            list of dicts of form [{'nwb_file_name': nwb_file_name, 'epoch': epoch #},...]
-            to query VideoFile table for videos to train on.
-            Can also be list of absolute paths to import videos from
+            list of (a) dicts of to query VideoFile table for or (b) absolute
+            paths to videos to train on. If dict, use format:
+            [{'nwb_file_name': nwb_file_name, 'epoch': epoch #},...]
         output_path : str
             target path to output converted videos
             (Default is '/nimbus/deeplabcut/videos/')

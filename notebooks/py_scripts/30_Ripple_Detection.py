@@ -36,10 +36,8 @@
 
 # +
 import os
-import copy
 import datajoint as dj
 import numpy as np
-import pandas as pd
 
 # change to the upper level folder to detect dj_local_conf.json
 if os.path.basename(os.getcwd()) == "notebooks":

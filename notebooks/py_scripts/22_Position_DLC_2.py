@@ -40,7 +40,6 @@
 # +
 import os
 import datajoint as dj
-from pprint import pprint
 
 # change to the upper level folder to detect dj_local_conf.json
 if os.path.basename(os.getcwd()) == "notebooks":
