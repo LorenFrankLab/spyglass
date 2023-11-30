@@ -96,7 +96,7 @@ class TrackGraph(dj.Manual):
 @schema
 class LinearizationSelection(dj.Lookup):
     definition = """
-    -> PositionOutput
+    -> PositionOutput.proj(pos_merge_id='merge_id')
     -> TrackGraph
     -> LinearizationParameters
     ---
@@ -118,9 +118,11 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
         orig_key = copy.deepcopy(key)
         print(f"Computing linear position for: {key}")
 
-        position_nwb = PositionOutput.fetch_nwb(key)[0]
+        position_nwb = PositionOutput.fetch_nwb(
+            {"merge_id": key["pos_merge_id"]}
+        )[0]
         key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
+            position_nwb["nwb_file_name"]
         )
         position = np.asarray(
             position_nwb["position"].get_spatial_series().data
@@ -166,7 +168,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
         )
 
         nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
+            nwb_file_name=position_nwb["nwb_file_name"],
             analysis_file_name=key["analysis_file_name"],
         )
 

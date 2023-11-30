@@ -6,6 +6,7 @@
 - Refactor input validation in DLC pipeline. #688
 - Clean up following pre-commit checks. #688
 - Add Mixin class to centralize `fetch_nwb` functionality. #692
+- Minor fixes to LinearizedPositionV1 pipeline #695
 
 ## [0.4.3] (November 7, 2023)
 
