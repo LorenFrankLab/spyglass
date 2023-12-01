@@ -346,9 +346,7 @@ class MetricCuration(dj.Computed):
         ) as io:
             nwbf = io.read()
             units = nwbf.objects[object_id].to_dataframe()
-        labels = dict(zip(units.index, units["curation_label"]))
-
-        return labels
+        return dict(zip(units.index, units["curation_label"]))
 
     @classmethod
     def get_merge_groups(cls, key: dict):
