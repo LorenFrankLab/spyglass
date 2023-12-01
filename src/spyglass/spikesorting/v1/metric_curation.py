@@ -320,10 +320,10 @@ class MetricCuration(dj.Computed):
         ) as io:
             nwbf = io.read()
             units = nwbf.objects[object_id].to_dataframe()
-        for metric_name in metric_names:
-            metrics[metric_name] = dict(zip(units.index, units[metric_name]))
-
-        return metrics
+       return {
+           name: dict(zip(units.index, units[name]))
+           for name in metric_params
+       }
 
     @classmethod
     def get_labels(cls, key: dict):
