@@ -27,7 +27,7 @@ class SortGroup(dj.Manual):
     definition = """
     # Set of electrodes to spike sort together
     -> Session
-    sort_group_name: varchar(30)
+    sort_group_id: int
     ---
     sort_reference_electrode_id = -1: int  # the electrode to use for referencing
                                            # -1: no reference, -2: common median
@@ -94,9 +94,7 @@ class SortGroup(dj.Manual):
             sge_key["electrode_group_name"] = e_group
             # get the indices of all electrodes in this group / shank and set their sorting group
             for shank in shank_list:
-                sg_key["sort_group_name"] = sge_key[
-                    "sort_group_name"
-                ] = sort_group
+                sg_key["sort_group_id"] = sge_key["sort_group_id"] = sort_group
                 # specify reference electrode. Use 'references' if passed, otherwise use reference from config
                 if not references:
                     shank_elect_ref = electrodes[
@@ -404,22 +402,22 @@ class SpikeSortingRecording(dj.Computed):
         nwb_file_name = (SpikeSortingRecordingSelection & key).fetch1(
             "nwb_file_name"
         )
-        sort_group_name = (SpikeSortingRecordingSelection & key).fetch1(
-            "sort_group_name"
+        sort_group_id = (SpikeSortingRecordingSelection & key).fetch1(
+            "sort_group_id"
         )
         nwb_file_abs_path = Nwbfile().get_abs_path(nwb_file_name)
         channel_ids = (
             SortGroup.SortGroupElectrode
             & {
                 "nwb_file_name": nwb_file_name,
-                "sort_group_name": sort_group_name,
+                "sort_group_id": sort_group_id,
             }
         ).fetch("electrode_id")
         ref_channel_id = (
             SortGroup
             & {
                 "nwb_file_name": nwb_file_name,
-                "sort_group_name": sort_group_name,
+                "sort_group_id": sort_group_id,
             }
         ).fetch1("sort_reference_electrode_id")
         recording_channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
