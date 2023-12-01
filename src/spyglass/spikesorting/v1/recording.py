@@ -562,10 +562,6 @@ def _consolidate_intervals(intervals, timestamps):
     timestamps : numpy.ndarray
         _description_
 
-    Returns
-    -------
-    _type_
-        _description_
     """
     # Convert intervals to a numpy array if it's not
     intervals = np.array(intervals)
