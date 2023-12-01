@@ -9,6 +9,7 @@ import pandas as pd
 import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
+from pathlib import Path
 
 from ..settings import raw_dir
 from ..utils.dj_helper_fn import get_child_tables
