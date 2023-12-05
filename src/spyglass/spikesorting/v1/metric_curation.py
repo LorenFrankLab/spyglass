@@ -1,4 +1,5 @@
 import os
+import uuid
 from typing import Any, Dict, List, Union
 
 import datajoint as dj
@@ -9,6 +10,7 @@ import spikeinterface.preprocessing as sp
 import spikeinterface.qualitymetrics as sq
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.settings import temp_dir
 from spyglass.spikesorting.v1.curation import (
     CurationV1,
     _list_to_merge_dict,
@@ -21,7 +23,6 @@ from spyglass.spikesorting.v1.metric_utils import (
     get_peak_offset,
 )
 from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
-from spyglass.spikesorting.v1.utils import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_metric_curation")
 
@@ -159,7 +160,7 @@ class MetricCurationParameters(dj.Lookup):
 class MetricCurationSelection(dj.Manual):
     definition = """
     # Spike sorting and parameters for metric curation. Use `insert_selection` to insert a row into this table.
-    metric_curation_id: varchar(32)
+    metric_curation_id: uuid
     ---
     -> CurationV1
     -> WaveformParameters
@@ -187,11 +188,7 @@ class MetricCurationSelection(dj.Manual):
                 "This row has already been inserted into MetricCurationSelection."
             )
             return (cls & key).fetch1()
-        key["metric_curation_id"] = generate_nwb_uuid(
-            (SpikeSortingSelection & key).fetch1("nwb_file_name"),
-            "MC",
-            6,
-        )
+        key["metric_curation_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)
         return key
 
@@ -237,11 +234,7 @@ class MetricCuration(dj.Computed):
             if waveform_params.pop("whiten"):
                 recording = sp.whiten(recording, dtype=np.float64)
 
-        waveforms_dir = (
-            os.environ.get("SPYGLASS_TEMP_DIR")
-            + "/"
-            + key["metric_curation_id"]
-        )
+        waveforms_dir = temp_dir + "/" + str(key["metric_curation_id"])
         try:
             os.mkdir(waveforms_dir)
         except FileExistsError:
@@ -320,10 +313,9 @@ class MetricCuration(dj.Computed):
         ) as io:
             nwbf = io.read()
             units = nwbf.objects[object_id].to_dataframe()
-       return {
-           name: dict(zip(units.index, units[name]))
-           for name in metric_params
-       }
+        return {
+            name: dict(zip(units.index, units[name])) for name in metric_params
+        }
 
     @classmethod
     def get_labels(cls, key: dict):

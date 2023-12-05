@@ -1,3 +1,4 @@
+import uuid
 from typing import Iterable, List, Optional, Tuple, Union
 
 import datajoint as dj
@@ -17,7 +18,6 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.spikesorting.v1.utils import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_recording")
 
@@ -204,7 +204,7 @@ class SpikeSortingPreprocessingParameters(dj.Lookup):
 class SpikeSortingRecordingSelection(dj.Manual):
     definition = """
     # Raw voltage traces and parameters. Use `insert_selection` method to insert rows.
-    recording_id: varchar(50)
+    recording_id: uuid
     ---
     -> Raw
     -> SortGroup
@@ -221,19 +221,18 @@ class SpikeSortingRecordingSelection(dj.Manual):
         Parameters
         ----------
         key : dict
-            primary key of Raw, SortGroup, IntervalList, SpikeSortingPreprocessingParameters, LabTeam tables
+            primary key of Raw, SortGroup, IntervalList,
+            SpikeSortingPreprocessingParameters, LabTeam tables
 
         Returns
         -------
-        recording_id : str
-            the unique recording ID serving as primary key for SpikeSortingRecordingSelection
+            primary key of SpikeSortingRecordingSelection table
         """
-        if len((cls & key).fetch()) > 0:
-            print(
-                "This row has already been inserted into SpikeSortingRecordingSelection."
-            )
-            return (cls & key).fetch1()
-        key["recording_id"] = generate_nwb_uuid(key["nwb_file_name"], "R", 6)
+        query = cls & key
+        if query:
+            print("Similar row(s) already inserted.")
+            return query.fetch(as_dict=True)
+        key["recording_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)
         return key
 

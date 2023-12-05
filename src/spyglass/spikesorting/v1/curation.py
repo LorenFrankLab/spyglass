@@ -156,25 +156,20 @@ class CurationV1(dj.Manual):
             MetricCurationSelection,
         )
 
-        sorting_id = (MetricCurationSelection & key).fetch1("sorting_id")
-        parent_curation_id = (MetricCurationSelection & key).fetch1(
-            "curation_id"
+        sorting_id, parent_curation_id = (MetricCurationSelection & key).fetch1(
+            "sorting_id", "curation_id"
         )
-        labels = MetricCuration.get_labels(key)
-        merge_groups = MetricCuration.get_merge_groups(key)
-        description = f"metric curation of sorting id {sorting_id}, curation id {parent_curation_id}"
-        if not labels:
-            labels = None
-        if not merge_groups:
-            merge_groups = None
 
         curation_key = cls.insert_curation(
             sorting_id=sorting_id,
             parent_curation_id=parent_curation_id,
-            labels=labels,
-            merge_groups=merge_groups,
+            labels=MetricCuration.get_labels(key) or None,
+            merge_groups=MetricCuration.get_merge_groups(key) or None,
             apply_merge=apply_merge,
-            description=description,
+            description=(
+                "metric curation of sorting id "
+                + f"{sorting_id}, curation id {parent_curation_id}"
+            ),
         )
 
         return curation_key
@@ -344,19 +339,6 @@ def _write_sorting_to_nwb_with_curation(
             for merge_unit_id in merge_group:
                 units_dict.pop(merge_unit_id, None)
         merge_groups = None
-
-    # sorting = se.read_nwb_sorting(
-    #     sorting_analysis_file_abs_path,
-    #     sampling_frequency=(Raw & {"nwb_file_name": nwb_file_name}).fetch1(
-    #         "sampling_rate"
-    #     ),
-    # )
-
-    # if apply_merge:
-    #     sorting = sc.MergeUnitsSorting(
-    #         parent_sorting=sorting, units_to_merge=merge_groups
-    #     )
-    #     merge_groups = None
 
     unit_ids = list(units_dict.keys())
 

@@ -1,3 +1,4 @@
+import uuid
 import warnings
 from functools import reduce
 from typing import List, Union
@@ -20,7 +21,6 @@ from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
-from spyglass.spikesorting.v1.utils import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_artifact")
 
@@ -68,7 +68,7 @@ class ArtifactDetectionParameters(dj.Lookup):
 class ArtifactDetectionSelection(dj.Manual):
     definition = """
     # Processed recording and artifact detection parameters. Use `insert_selection` method to insert new rows.
-    artifact_id: varchar(30)
+    artifact_id: uuid
     ---
     -> SpikeSortingRecording
     -> ArtifactDetectionParameters
@@ -89,16 +89,11 @@ class ArtifactDetectionSelection(dj.Manual):
         artifact_id : str
             the unique artifact ID serving as primary key for ArtifactDetectionSelection
         """
-        if len((cls & key).fetch()) > 0:
-            print(
-                "This row has already been inserted into ArtifactDetectionSelection."
-            )
-            return (cls & key).fetch1()
-        key["artifact_id"] = generate_nwb_uuid(
-            (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
-            "A",
-            6,
-        )
+        query = cls & key
+        if query:
+            print("Similar row(s) already inserted.")
+            return query.fetch(as_dict=True)
+        key["artifact_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)
         return key
 
@@ -106,7 +101,8 @@ class ArtifactDetectionSelection(dj.Manual):
 @schema
 class ArtifactDetection(dj.Computed):
     definition = """
-    # Detected artifacts (e.g. large transients from movement). Intervals are stored in IntervalList with `artifact_id` as `interval_list_name`.
+    # Detected artifacts (e.g. large transients from movement).
+    # Intervals are stored in IntervalList with `artifact_id` as `interval_list_name`.
     -> ArtifactDetectionSelection
     """
 
@@ -157,7 +153,7 @@ class ArtifactDetection(dj.Computed):
                     SpikeSortingRecordingSelection * ArtifactDetectionSelection
                     & key
                 ).fetch1("nwb_file_name"),
-                interval_list_name=key["artifact_id"],
+                interval_list_name=str(key["artifact_id"]),
                 valid_times=artifact_removed_valid_times,
             ),
             skip_duplicates=True,

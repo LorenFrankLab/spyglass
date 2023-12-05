@@ -15,27 +15,27 @@ schema = dj.schema("spikesorting_merge")
 @schema
 class SpikeSortingOutput(_Merge):
     definition = """
-    # Output of spike sorting pipelines. Use `insert_from_TableName` method to insert rows.
+    # Output of spike sorting pipelines. Use `insert_from_sourcee` method to insert rows.
     merge_id: uuid
     ---
     source: varchar(32)
     """
 
-    class CurationV1(dj.Part):
+    class CurationV1(dj.Part):  # noqa: F811
         definition = """
         -> master
         ---
         -> CurationV1
         """
 
-    class ImportedSpikeSorting(dj.Part):
+    class ImportedSpikeSorting(dj.Part):  # noqa: F811
         definition = """
         -> master
         ---
         -> ImportedSpikeSorting
         """
 
-    class CuratedSpikeSorting(dj.Part):
+    class CuratedSpikeSorting(dj.Part):  # noqa: F811
         definition = """
         -> master
         ---
@@ -43,54 +43,27 @@ class SpikeSortingOutput(_Merge):
         """
 
     @classmethod
-    def insert_from_CurationV1(cls, key):
-        """Insert a row from CurationV1 of v1 into SpikeSortingOutput
+    def insert_from_source(cls, key, source="CurationV1"):
+        """Insert a row from part table into SpikeSortingOutput
 
         Parameters
         ----------
         key : dict
             primary key of CurationV1 table
+        Source : str (optional)
+            Default is "CurationV1". Other options are "ImportedSpikeSorting"
+            and "CuratedSpikeSorting". Also accepts the part-parent class.
         """
-        key["merge_id"] = uuid.uuid4()
-        key["source"] = "CurationV1"
+        if not isinstance(source, str):
+            source = source.__name__
+
+        insert_to = getattr(cls, source, None)
+        if insert_to is None:
+            raise ValueError(f"Source {source} is not a valid part table")
+
+        key.update({"merge_id": uuid.uuid4(), "source": source})
         cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
-        cls.CurationV1.insert1(
-            key,
-            skip_duplicates=True,
-            ignore_extra_fields=True,
-        )
-        return key
-
-    @classmethod
-    def insert_from_ImportedSpikeSorting(cls, key):
-        """Insert a row from ImportedSpikeSorting into SpikeSortingOutput
-
-        Parameters
-        ----------
-        key : dict
-            primary key of ImportedSpikeSorting table
-        """
-        key["merge_id"] = uuid.uuid4()
-        key["source"] = "ImportedSpikeSorting"
-        cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
-        cls.ImportedSpikeSorting.insert1(
-            key, ignore_extra_fields=True, skip_duplicates=True
-        )
-        return key
-
-    @classmethod
-    def insert_from_CuratedSpikeSorting(cls, key):
-        """Insert a row from CuratedSpikeSorting of v0 into SpikeSortingOutput
-
-        Parameters
-        ----------
-        key : dict
-            primary key of CuratedSpikeSorting table
-        """
-        key["merge_id"] = uuid.uuid4()
-        key["source"] = "CuratedSpikeSorting"
-        cls.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
-        cls.CuratedSpikeSorting.insert1(
+        insert_to.insert1(
             key,
             skip_duplicates=True,
             ignore_extra_fields=True,

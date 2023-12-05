@@ -1,7 +1,9 @@
+import uuid
 from typing import Any, Dict, List, Union
 
 import datajoint as dj
 import kachery_cloud as kcl
+import numpy as np
 import pynwb
 import sortingview.views as vv
 import spikeinterface as si
@@ -17,12 +19,42 @@ schema = dj.schema("spikesorting_v1_figurl_curation")
 @schema
 class FigURLCurationSelection(dj.Manual):
     definition = """
-    # Use `generate_curation_uri` method to generate a curation uri.
+    # Use `insert_selection` method to insert a row. Use `generate_curation_uri` method to generate a curation uri.
+    figurl_curation_id: uuid
+    ---
     -> CurationV1
     curation_uri: varchar(1000)     # GitHub-based URI to a file to which the manual curation will be saved
-    ---
     metrics_figurl: blob            # metrics to display in the figURL
     """
+
+    @classmethod
+    def insert_selection(cls, key: dict):
+        """Insert a row into FigURLCurationSelection.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of `CurationV1`, `curation_uri`, and `metrics_figurl`.
+            - If `curation_uri` is not provided, it will be generated from `generate_curation_uri` method.
+            - If `metrics_figurl` is not provided, it will be set to [].
+
+        Returns
+        -------
+        key : dict
+            primary key of `FigURLCurationSelection` table.
+        """
+        if "curation_uri" not in key:
+            key["curation_uri"] = cls.generate_curation_uri(key)
+        if "metrics_figurl" not in key:
+            key["metrics_figurl"] = []
+        if "figurl_curation_id" in key:
+            query = cls & {"figurl_curation_id": key["figurl_curation_id"]}
+            if query:
+                print("Similar row(s) already inserted.")
+                return query.fetch(as_dict=True)
+        key["figurl_curation_id"] = uuid.uuid4()
+        cls.insert1(key, skip_duplicates=True)
+        return key
 
     @staticmethod
     def generate_curation_uri(key: Dict) -> str:
@@ -87,10 +119,12 @@ class FigURLCuration(dj.Computed):
 
     def make(self, key: dict):
         # FETCH
-        sorting_analysis_file_name = (CurationV1 & key).fetch1(
-            "analysis_file_name"
+        sorting_analysis_file_name = (
+            FigURLCurationSelection * CurationV1 & key
+        ).fetch1("analysis_file_name")
+        object_id = (FigURLCurationSelection * CurationV1 & key).fetch1(
+            "object_id"
         )
-        object_id = (CurationV1 & key).fetch1("object_id")
         recording_label = (SpikeSortingSelection & key).fetch1("recording_id")
         metrics_figurl = (FigURLCurationSelection & key).fetch1(
             "metrics_figurl"
@@ -100,10 +134,14 @@ class FigURLCuration(dj.Computed):
         sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             sorting_analysis_file_name
         )
-        recording = CurationV1.get_recording(key)
-        sorting = CurationV1.get_sorting(key)
-        sorting_label = key["sorting_id"]
-        curation_uri = key["curation_uri"]
+        recording = CurationV1.get_recording(
+            (FigURLCurationSelection & key).fetch1()
+        )
+        sorting = CurationV1.get_sorting(
+            (FigURLCurationSelection & key).fetch1()
+        )
+        sorting_label = (FigURLCurationSelection & key).fetch1("sorting_id")
+        curation_uri = (FigURLCurationSelection & key).fetch1("curation_uri")
 
         metric_dict = {}
         with pynwb.NWBHDF5IO(

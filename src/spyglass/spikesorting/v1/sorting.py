@@ -1,6 +1,7 @@
 import os
 import tempfile
 import time
+import uuid
 from typing import Iterable
 
 import datajoint as dj
@@ -22,7 +23,6 @@ from spyglass.spikesorting.v1.recording import (
 )
 
 from .recording import _consolidate_intervals
-from .utils import generate_nwb_uuid
 
 schema = dj.schema("spikesorting_v1_sorting")
 
@@ -103,7 +103,7 @@ class SpikeSorterParameters(dj.Lookup):
 class SpikeSortingSelection(dj.Manual):
     definition = """
     # Processed recording and spike sorting parameters. Use `insert_selection` method to insert rows.
-    sorting_id: varchar(50)
+    sorting_id: uuid
     ---
     -> SpikeSortingRecording
     -> SpikeSorterParameters
@@ -122,19 +122,14 @@ class SpikeSortingSelection(dj.Manual):
 
         Returns
         -------
-        sorting_id : str
+        sorting_id : uuid
             the unique sorting ID serving as primary key for SpikeSorting
         """
-        if len((cls & key).fetch()) > 0:
-            print(
-                "This row has already been inserted into SpikeSortingSelection."
-            )
-            return (cls & key).fetch1()
-        key["sorting_id"] = generate_nwb_uuid(
-            key["nwb_file_name"],
-            "S",
-            6,
-        )
+        query = cls & key
+        if query:
+            print("Similar row(s) already inserted.")
+            return query.fetch(as_dict=True)
+        key["sorting_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)
         return key
 
