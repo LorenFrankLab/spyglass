@@ -27,7 +27,7 @@ class CurationV1(dj.Manual):
     parent_curation_id=-1: int
     -> AnalysisNwbfile
     object_id: varchar(72)
-    merges_applied: enum("True", "False")
+    merges_applied: bool
     description: varchar(100)
     """
 
