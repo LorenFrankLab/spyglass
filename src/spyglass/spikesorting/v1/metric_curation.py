@@ -422,27 +422,29 @@ class MetricCuration(dj.Computed):
         """
         if not label_params:
             return {}
-        else:
-            unit_ids = [
-                unit_id for unit_id in metrics[list(metrics.keys())[0]].keys()
-            ]
-            labels = {unit_id: [] for unit_id in unit_ids}
-            for metric in label_params:
-                if metric not in metrics:
-                    Warning(f"{metric} not found in quality metrics; skipping")
-                else:
-                    condition = label_params[metric]
-                    assert (
-                        len(condition) == 3
-                    ), f"Condition {condition} must be of length 3"
-                    compare = _comparison_to_function[condition[0]]
-                    for unit_id in unit_ids:
-                        if compare(
-                            metrics[metric][unit_id],
-                            condition[1],
-                        ):
-                            labels[unit_id].extend(label_params[metric][2])
-            return labels
+
+        unit_ids = [
+            unit_id for unit_id in metrics[list(metrics.keys())[0]].keys()
+        ]
+        labels = {unit_id: [] for unit_id in unit_ids}
+
+        for metric in label_params:
+            if metric not in metrics:
+                Warning(f"{metric} not found in quality metrics; skipping")
+                continue
+
+            condition = label_params[metric]
+            if not len(condition) == 3:
+                raise ValueError(f"Condition {condition} must be of length 3")
+
+            compare = _comparison_to_function[condition[0]]
+            for unit_id in unit_ids:
+                if compare(
+                    metrics[metric][unit_id],
+                    condition[1],
+                ):
+                    labels[unit_id].extend(label_params[metric][2])
+        return labels
 
     @staticmethod
     def _compute_merge_groups(
