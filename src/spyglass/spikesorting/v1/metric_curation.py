@@ -292,17 +292,14 @@ class MetricCuration(dj.Computed):
         key : dict
             primary key to MetricCuration
         """
-        analysis_file_name = (cls & key).fetch1("analysis_file_name")
-        object_id = (cls & key).fetch1("object_id")
-        metric_param_name = (MetricCurationSelection & key).fetch1(
-            "metric_param_name"
+        analysis_file_name, object_id, metric_param_name, metric_params = (
+            cls * MetricCurationSelection * MetricParameters & key
+        ).fetch1(
+            "analysis_file_name",
+            "object_id",
+            "metric_param_name",
+            "metric_params",
         )
-        metric_params = (
-            MetricParameters & {"metric_param_name": metric_param_name}
-        ).fetch1("metric_params")
-        metric_names = list(metric_params.keys())
-
-        metrics = {}
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
