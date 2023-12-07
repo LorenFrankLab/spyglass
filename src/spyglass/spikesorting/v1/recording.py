@@ -583,8 +583,7 @@ def _consolidate_intervals(intervals, timestamps):
     start, stop = start_indices[0], stop_indices[0]
 
     # Loop through the rest of the intervals to join them if needed
-    for i in range(1, len(start_indices)):
-        next_start, next_stop = start_indices[i], stop_indices[i]
+    for next_start, next_stop in zip(start_indices, stop_indices):
 
         # If the stop time of the current interval is equal to or greater than the next start time minus 1
         if stop >= next_start - 1:
