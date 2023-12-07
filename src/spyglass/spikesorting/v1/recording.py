@@ -555,9 +555,7 @@ def _consolidate_intervals(intervals, timestamps):
     Parameters
     ----------
     intervals : iterable of tuples
-        _description_
     timestamps : numpy.ndarray
-        _description_
 
     """
     # Convert intervals to a numpy array if it's not
