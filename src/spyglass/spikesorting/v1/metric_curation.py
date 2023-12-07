@@ -183,7 +183,7 @@ class MetricCurationSelection(dj.Manual):
         key : dict
             key for the inserted row
         """
-        if len((cls & key).fetch()) > 0:
+        if cls & key:
             print(
                 "This row has already been inserted into MetricCurationSelection."
             )
