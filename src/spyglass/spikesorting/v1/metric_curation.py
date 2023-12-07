@@ -367,29 +367,25 @@ class MetricCuration(dj.Computed):
 
     @staticmethod
     def _compute_metric(waveform_extractor, metric_name, **metric_params):
-        peak_sign_metrics = ["snr", "peak_offset", "peak_channel"]
         metric_func = _metric_name_to_func[metric_name]
-        # Not sure what this is doing; leaving in case someone is using them
+
+        peak_sign_metrics = ["snr", "peak_offset", "peak_channel"]
         if metric_name in peak_sign_metrics:
-            if "peak_sign" in metric_params:
-                metric = metric_func(
-                    waveform_extractor,
-                    peak_sign=metric_params.pop("peak_sign"),
-                    **metric_params,
-                )
-                # metric = {str(unit_id): val for unit_id, val in metric.items()}
-            else:
+            if "peak_sign" not in metric_params:
                 raise Exception(
                     f"{peak_sign_metrics} metrics require peak_sign",
-                    f"to be defined in the metric parameters",
+                    "to be defined in the metric parameters",
                 )
-        else:
-            metric = {}
-            for unit_id in waveform_extractor.sorting.get_unit_ids():
-                metric[unit_id] = metric_func(
-                    waveform_extractor, this_unit_id=unit_id, **metric_params
-                )
-        return metric
+            return metric_func(
+                waveform_extractor,
+                peak_sign=metric_params.pop("peak_sign"),
+                **metric_params,
+            )
+
+        return {
+            unit_id: metric_func(waveform_extractor, this_unit_id=unit_id)
+            for unit_id in waveform_extractor.sorting.get_unit_ids()
+        }
 
     @staticmethod
     def _compute_labels(
