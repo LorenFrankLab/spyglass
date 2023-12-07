@@ -360,12 +360,11 @@ def _write_sorting_to_nwb_with_curation(
             )
         # add labels, merge groups, metrics
         if labels is not None:
-            label_values = []
-            for unit_id in unit_ids:
-                if unit_id not in labels:
-                    label_values.append([])
-                else:
-                    label_values.append(labels[unit_id])
+            label_values = [
+                labels.get(unit_id, [])
+                for unit_id in unit_ids
+                if unit_id in labels
+            ]
             nwbf.add_unit_column(
                 name="curation_label",
                 description="curation label",
