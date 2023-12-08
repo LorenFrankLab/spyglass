@@ -47,8 +47,7 @@ def get_peak_offset(
         peak_sign=peak_sign,
         **metric_params,
     )
-    peak_offset = {key: int(abs(val)) for key, val in peak_offset_inds.items()}
-    return peak_offset
+    return {key: int(abs(val)) for key, val in peak_offset_inds.items()}
 
 
 def get_peak_channel(
