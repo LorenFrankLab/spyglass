@@ -368,6 +368,7 @@ class SpikeSortingRecording(dj.Computed):
 
     def _get_preprocessed_recording(self, key: dict):
         """Filters and references a recording.
+        
         - Loads the NWB file created during insertion as a spikeinterface Recording
         - Slices recording in time (interval) and space (channels);
           recording chunks from disjoint intervals are concatenated
