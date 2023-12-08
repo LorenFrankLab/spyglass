@@ -34,4 +34,3 @@ def compute_metric(data, metric):
         max_val = np.abs(data.max())
         min_val = np.abs(data.min())
         return max_val - min_val
-

@@ -1,7 +1,7 @@
 import datajoint as dj
 import numpy as np
 import pandas as pd
-import scipy.signal butter, filtfilt, hilbert
+from scipy.signal import butter, filtfilt, hilbert
 from spyglass.common import get_electrode_indices
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.v1 import LFPV1
@@ -35,7 +35,6 @@ class SWDSelection(dj.Manual):
         electrode_ids,
         filter_sampling_rate,
     ):
-
         for elec_id in electrode_ids:
             key = {
                 "nwb_file_name": nwb_file,
@@ -64,7 +63,6 @@ class SWDSelection(dj.Manual):
             insert_list,
             skip_duplicates=True,
         )
-
 
 
 @schema
@@ -103,25 +101,22 @@ class SWDDetection(SpyglassMixin, dj.Computed):
         "ratios",
         "diffs",
     ]
-    
-    def _butter_bandpass(lowcut, highcut, fs, order=2):
-    """Butterworth bandpass filter."""
-    nyq = 0.5 * fs
-    low = lowcut / nyq
-    high = highcut / nyq
-    b, a = butter(order, [low, high], btype="band")
-    return b, a
 
+    def _butter_bandpass(lowcut, highcut, fs, order=2):
+        """Butterworth bandpass filter."""
+        nyq = 0.5 * fs
+        low = lowcut / nyq
+        high = highcut / nyq
+        b, a = butter(order, [low, high], btype="band")
+        return b, a
 
     def _bandpass_filter(data, lowcut, highcut, fs, order=2):
         b, a = butter_bandpass(lowcut, highcut, fs, order=order)
         y = filtfilt(b, a, data)
         return y
 
-
     def _z_score(arr):
         return (arr - arr.mean()) / arr.std()
-
 
     # Compute metrics
     def _compute_metric(data, n, metric):
