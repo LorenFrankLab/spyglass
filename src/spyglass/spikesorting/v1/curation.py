@@ -184,9 +184,8 @@ class CurationV1(dj.Manual):
             primary key of CurationV1 table
         """
 
-        recording_id = (SpikeSortingSelection & key).fetch1("recording_id")
-        analysis_file_name = (
-            SpikeSortingRecording & {"recording_id": recording_id}
+        analysis_file_abs_path = (
+            SpikeSortingRecording * SpikeSortingSelection & key
         ).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
