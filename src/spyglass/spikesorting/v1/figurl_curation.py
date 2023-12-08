@@ -172,16 +172,15 @@ class FigURLCuration(dj.Computed):
 
     @classmethod
     def get_labels(cls, curation_json):
-        curation_dict = kcl.load_json(curation_json)
-        if "labelsByUnit" in curation_dict:
-            return {
+        labels_by_unit = kcl.load_json(curation_json).get("labelsByUnit")
+        return (
+            {
                 int(unit_id): curation_label_list
-                for unit_id, curation_label_list in curation_dict[
-                    "labelsByUnit"
-                ].items()
+                for unit_id, curation_label_list in labels_by_unit.items()
             }
-        else:
-            return {}
+            if labels_by_unit
+            else {}
+        )
 
     @classmethod
     def get_merge_groups(cls, curation_json):
