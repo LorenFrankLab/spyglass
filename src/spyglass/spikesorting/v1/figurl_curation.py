@@ -203,10 +203,14 @@ def _generate_figurl(
     spike_amplitudes_subsample_max_firing_rate=50,
 ) -> str:
     print("Preparing spikesortingview data")
-    sampling_frequency = R.get_sampling_frequency()
-    X = SpikeSortingView.create(
-        recording=R,
-        sorting=S,
+    recording = R
+    sorting = S
+
+    sampling_frequency = recording.get_sampling_frequency()
+
+    this_view = SpikeSortingView.create(
+        recording=recording,
+        sorting=sorting,
         segment_duration_sec=segment_duration_sec,
         snippet_len=(
             int(snippet_ms_before * sampling_frequency / 1000),
@@ -216,70 +220,62 @@ def _generate_figurl(
         channel_neighborhood_size=channel_neighborhood_size,
     )
 
-    # Assemble the views in a layout
-    # You can replace this with other layouts
-    raster_plot_subsample_max_firing_rate = (
-        raster_plot_subsample_max_firing_rate
+    # Assemble the views in a layout. Can be replaced with other layouts.
+    raster_max_fire = raster_plot_subsample_max_firing_rate
+    spike_amp_max_fire = spike_amplitudes_subsample_max_firing_rate
+
+    sort_items = [
+        vv.MountainLayoutItem(
+            label="Summary", view=this_view.sorting_summary_view()
+        ),
+        vv.MountainLayoutItem(
+            label="Units table",
+            view=this_view.units_table_view(
+                unit_ids=this_view.unit_ids, unit_metrics=unit_metrics
+            ),
+        ),
+        vv.MountainLayoutItem(
+            label="Raster plot",
+            view=this_view.raster_plot_view(
+                unit_ids=this_view.unit_ids,
+                _subsample_max_firing_rate=raster_max_fire,
+            ),
+        ),
+        vv.MountainLayoutItem(
+            label="Spike amplitudes",
+            view=this_view.spike_amplitudes_view(
+                unit_ids=this_view.unit_ids,
+                _subsample_max_firing_rate=spike_amp_max_fire,
+            ),
+        ),
+        vv.MountainLayoutItem(
+            label="Autocorrelograms",
+            view=this_view.autocorrelograms_view(unit_ids=this_view.unit_ids),
+        ),
+        vv.MountainLayoutItem(
+            label="Cross correlograms",
+            view=this_view.cross_correlograms_view(unit_ids=this_view.unit_ids),
+        ),
+        vv.MountainLayoutItem(
+            label="Avg waveforms",
+            view=this_view.average_waveforms_view(unit_ids=this_view.unit_ids),
+        ),
+        vv.MountainLayoutItem(
+            label="Electrode geometry",
+            view=this_view.electrode_geometry_view(),
+        ),
+        vv.MountainLayoutItem(
+            label="Curation", view=vv.SortingCuration2(), is_control=True
+        ),
+    ]
+
+    return vv.MountainLayout(items=sort_items).url(
+        label=f"{recording_label} {sorting_label}",
+        state={
+            "initialSortingCuration": initial_curation_uri,
+            "sortingCuration": initial_curation_uri,
+        },
     )
-    spike_amplitudes_subsample_max_firing_rate = (
-        spike_amplitudes_subsample_max_firing_rate
-    )
-    view = vv.MountainLayout(
-        items=[
-            vv.MountainLayoutItem(
-                label="Summary", view=X.sorting_summary_view()
-            ),
-            vv.MountainLayoutItem(
-                label="Units table",
-                view=X.units_table_view(
-                    unit_ids=X.unit_ids, unit_metrics=unit_metrics
-                ),
-            ),
-            vv.MountainLayoutItem(
-                label="Raster plot",
-                view=X.raster_plot_view(
-                    unit_ids=X.unit_ids,
-                    _subsample_max_firing_rate=raster_plot_subsample_max_firing_rate,
-                ),
-            ),
-            vv.MountainLayoutItem(
-                label="Spike amplitudes",
-                view=X.spike_amplitudes_view(
-                    unit_ids=X.unit_ids,
-                    _subsample_max_firing_rate=spike_amplitudes_subsample_max_firing_rate,
-                ),
-            ),
-            vv.MountainLayoutItem(
-                label="Autocorrelograms",
-                view=X.autocorrelograms_view(unit_ids=X.unit_ids),
-            ),
-            vv.MountainLayoutItem(
-                label="Cross correlograms",
-                view=X.cross_correlograms_view(unit_ids=X.unit_ids),
-            ),
-            vv.MountainLayoutItem(
-                label="Avg waveforms",
-                view=X.average_waveforms_view(unit_ids=X.unit_ids),
-            ),
-            vv.MountainLayoutItem(
-                label="Electrode geometry", view=X.electrode_geometry_view()
-            ),
-            # vv.MountainLayoutItem(
-            #    label='Unit similarity matrix',
-            #    view=unit_similarity_matrix_view
-            # ),
-            vv.MountainLayoutItem(
-                label="Curation", view=vv.SortingCuration2(), is_control=True
-            ),
-        ]
-    )
-    url_state = {
-        "initialSortingCuration": initial_curation_uri,
-        "sortingCuration": initial_curation_uri,
-    }
-    label = f"{recording_label} {sorting_label}"
-    url = view.url(label=label, state=url_state)
-    return url
 
 
 def _reformat_metrics(metrics: Dict[str, Dict[str, float]]) -> List[Dict]:
