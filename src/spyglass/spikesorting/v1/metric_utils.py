@@ -61,8 +61,7 @@ def get_peak_channel(
         peak_sign=peak_sign,
         **metric_params,
     )
-    peak_channel = {key: int(val) for key, val in peak_channel_dict.items()}
-    return peak_channel
+    return {key: int(val) for key, val in peak_channel_dict.items()}
 
 
 def get_num_spikes(waveform_extractor: si.WaveformExtractor, this_unit_id: str):
