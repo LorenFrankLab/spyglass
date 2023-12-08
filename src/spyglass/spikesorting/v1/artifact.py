@@ -315,13 +315,14 @@ def _init_artifact_worker(
     """Create a local dict per worker"""
     worker_ctx = {}
     if isinstance(recording, dict):
-        worker_ctx["recording"] = si.load_extractor(recording)
+        return dict(recording=si.load_extractor(recording))
     else:
-        worker_ctx["recording"] = recording
-    worker_ctx["zscore_thresh"] = zscore_thresh
-    worker_ctx["amplitude_thresh_uV"] = amplitude_thresh_uV
-    worker_ctx["proportion_above_thresh"] = proportion_above_thresh
-    return worker_ctx
+        return dict(
+            recording=recording,
+            zscore_thresh=zscore_thresh,
+            amplitude_thresh_uV=amplitude_thresh_uV,
+            proportion_above_thresh=proportion_above_thresh,
+        )
 
 
 def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
@@ -341,7 +342,7 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     )
 
     # find the artifact occurrences using one or both thresholds, across channels
-    if (amplitude_thresh_uV is not None) and (zscore_thresh is None):
+    if amplitude_thresh_uV and not zscore_thresh:
         above_a = np.abs(traces) > amplitude_thresh_uV
         above_thresh = (
             np.ravel(np.argwhere(np.sum(above_a, axis=1) >= nelect_above))

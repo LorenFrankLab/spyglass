@@ -428,7 +428,7 @@ def _list_to_merge_dict(
 
     Example
     -------
-    Input: [[1,2,3],[4,5]], [1,2,3,4,5,6] 
+    Input: [[1,2,3],[4,5]], [1,2,3,4,5,6]
     Output: {1: [2, 3], 2:[1,3], 3:[1,2] 4: [5], 5: [4], 6: []}
     """
     merge_group_list = _union_intersecting_lists(merge_group_list)
@@ -449,10 +449,10 @@ def _list_to_merge_dict(
 
 
 def _reverse_associations(assoc_dict):
-        return [
-            [key] + values if values else [key]
-            for key, values in assoc_dict.items()
-        ]
+    return [
+        [key] + values if values else [key]
+        for key, values in assoc_dict.items()
+    ]
 
 
 def _merge_dict_to_list(merge_groups: dict) -> List:
