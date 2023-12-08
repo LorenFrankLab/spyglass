@@ -57,7 +57,7 @@ class CurationV1(dj.Manual):
         metrics : dict or None, optional
             Computed quality metrics, one for each neuron
         description : str, optional
-            description of this curation or where it originates; e.g. "FigURL", by default ""
+            description of this curation or where it originates; e.g. FigURL
 
         Note
         ----
