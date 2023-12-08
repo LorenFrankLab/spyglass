@@ -477,5 +477,4 @@ def _merge_dict_to_list(merge_groups: dict) -> List:
     units_to_merge = _union_intersecting_lists(
         _reverse_associations(merge_groups)
     )
-    units_to_merge = [lst for lst in units_to_merge if len(lst) >= 2]
-    return units_to_merge
+    return [lst for lst in units_to_merge if len(lst) >= 2]
