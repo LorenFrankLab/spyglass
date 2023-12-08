@@ -312,7 +312,7 @@ def _init_artifact_worker(
     amplitude_thresh_uV=None,
     proportion_above_thresh=1.0,
 ):
-    # create a local dict per worker
+    """Create a local dict per worker"""
     worker_ctx = {}
     if isinstance(recording, dict):
         worker_ctx["recording"] = si.load_extractor(recording)
