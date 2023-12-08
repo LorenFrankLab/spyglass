@@ -10,7 +10,7 @@ from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.dj_helper_fn import fetch_nwb
 
 
-schema = dj.schema("swd_detection_v1")
+schema = dj.schema("bsharma_swd_detection_v1")
 
 
 @schema
@@ -29,7 +29,6 @@ class SWDSelection(dj.Manual):
         electrode_ids,
         filter_sampling_rate,
     ):
-
         for elec_id in electrode_ids:
             key = {
                 "nwb_file_name": nwb_file,
@@ -58,7 +57,6 @@ class SWDSelection(dj.Manual):
             insert_list,
             skip_duplicates=True,
         )
-
 
 
 @schema
@@ -97,7 +95,7 @@ class SWDDetection(SpyglassMixin, dj.Computed):
         "ratios",
         "diffs",
     ]
-    
+
     def _butter_bandpass(lowcut, highcut, fs, order=2):
         """Butterworth bandpass filter."""
         nyq = 0.5 * fs
@@ -106,16 +104,13 @@ class SWDDetection(SpyglassMixin, dj.Computed):
         b, a = butter(order, [low, high], btype="band")
         return b, a
 
-
     def _bandpass_filter(data, lowcut, highcut, fs, order=2):
         b, a = butter_bandpass(lowcut, highcut, fs, order=order)
         y = filtfilt(b, a, data)
         return y
 
-
     def _z_score(arr):
         return (arr - arr.mean()) / arr.std()
-
 
     # Compute metrics
     def _compute_metric(data, n, metric):
@@ -133,9 +128,7 @@ class SWDDetection(SpyglassMixin, dj.Computed):
         window_len = int(6 * SIGMA * lfp_sampling_rate)
         if window_len % 2 == 0:
             window_len += 1
-        window = gaussian(
-            window_len, std=SIGMA * lfp_sampling_rate
-        )
+        window = gaussian(window_len, std=SIGMA * lfp_sampling_rate)
         window /= window.sum()
         return np.convolve(envelope, window, mode="same")
 

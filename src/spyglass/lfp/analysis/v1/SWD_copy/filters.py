@@ -2,7 +2,7 @@ import numpy as np
 from scipy.signal import butter, filtfilt
 
 # CBroz: what's here vs in the swd_detection schema is arbitrary. I would
-# keep things here that are usefull across schemas/analyses and make the
+# keep things here that are useful across schemas/analyses and make the
 # rest private methods on whatever table they're used with
 
 
