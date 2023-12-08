@@ -261,7 +261,7 @@ def _get_artifact_times(
     # turn ms to remove total into s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms / 2 / 1000
 
-    if len(artifact_frames) == 0:
+    if not artifact_frames:
         recording_interval = np.asarray(
             [[valid_timestamps[0], valid_timestamps[-1]]]
         )
