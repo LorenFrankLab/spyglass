@@ -575,12 +575,10 @@ def _write_metric_curation_to_nwb(
             )
         if metrics is not None:
             for metric, metric_dict in metrics.items():
-                metric_values = []
-                for unit_id in unit_ids:
-                    if unit_id not in metric_dict:
-                        metric_values.append([])
-                    else:
-                        metric_values.append(metric_dict[unit_id])
+                metric_values = [
+                    metric_dict[unit_id] if unit_id in metric_dict else []
+                    for unit_id in unit_ids
+                ]
                 nwbf.add_unit_column(
                     name=metric,
                     description=metric,

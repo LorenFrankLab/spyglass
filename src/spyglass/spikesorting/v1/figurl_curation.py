@@ -58,7 +58,7 @@ class FigURLCurationSelection(dj.Manual):
 
     @staticmethod
     def generate_curation_uri(key: Dict) -> str:
-        """Generates a kachery-cloud URI containing curation info from a row in CurationV1 table
+        """Generates a kachery-cloud URI from a row in CurationV1 table
 
         Parameters
         ----------
@@ -82,30 +82,29 @@ class FigURLCurationSelection(dj.Manual):
 
         unit_ids = [str(unit_id) for unit_id in unit_ids]
 
-        if labels:
-            labels_dict = {
-                unit_id: list(label) for unit_id, label in zip(unit_ids, labels)
-            }
-        else:
-            labels_dict = {}
+        labels_dict = (
+            {unit_id: list(label) for unit_id, label in zip(unit_ids, labels)}
+            if labels
+            else {}
+        )
 
-        if merge_groups:
-            merge_groups_dict = dict(zip(unit_ids, merge_groups))
-            merge_groups_list = _merge_dict_to_list(merge_groups_dict)
-            merge_groups_list = [
+        merge_groups_list = (
+            [
                 [str(unit_id) for unit_id in merge_group]
-                for merge_group in merge_groups_list
+                for merge_group in _merge_dict_to_list(
+                    dict(zip(unit_ids, merge_groups))
+                )
             ]
-        else:
-            merge_groups_list = []
+            if merge_groups
+            else []
+        )
 
-        curation_dict = {
-            "labelsByUnit": labels_dict,
-            "mergeGroups": merge_groups_list,
-        }
-        curation_uri = kcl.store_json(curation_dict)
-
-        return curation_uri
+        return kcl.store_json(
+            {
+                "labelsByUnit": labels_dict,
+                "mergeGroups": merge_groups_list,
+            }
+        )
 
 
 @schema
@@ -279,18 +278,16 @@ def _generate_figurl(
 
 
 def _reformat_metrics(metrics: Dict[str, Dict[str, float]]) -> List[Dict]:
-    for metric_name in metrics:
-        metrics[metric_name] = {
-            str(unit_id): metric_value
-            for unit_id, metric_value in metrics[metric_name].items()
-        }
-    new_external_metrics = [
+    return [
         {
             "name": metric_name,
             "label": metric_name,
             "tooltip": metric_name,
-            "data": metric,
+            "data": {
+                str(unit_id): metric_value
+                for unit_id, metric_value in metric.items()
+            },
         }
         for metric_name, metric in metrics.items()
     ]
-    return new_external_metrics
+
