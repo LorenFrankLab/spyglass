@@ -508,7 +508,9 @@ class SpikeSortingRecording(dj.Computed):
             )
         else:
             raise ValueError(
-                "Invalid reference channel ID. Use -1 to skip referencing. Use -2 to reference via global median. Use positive integer to reference to a specific channel."
+                "Invalid reference channel ID. Use -1 to skip referencing. Use "
+                + "-2 to reference via global median. Use positive integer to "
+                + "reference to a specific channel."
             )
 
         recording = si.preprocessing.bandpass_filter(
