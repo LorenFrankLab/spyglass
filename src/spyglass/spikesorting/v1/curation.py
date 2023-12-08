@@ -449,15 +449,10 @@ def _list_to_merge_dict(
 
 
 def _reverse_associations(assoc_dict):
-    result = []
-
-    for key, values in assoc_dict.items():
-        if values:
-            result.append([key] + values)
-        else:
-            result.append([key])
-
-    return result
+        return [
+            [key] + values if values else [key]
+            for key, values in assoc_dict.items()
+        ]
 
 
 def _merge_dict_to_list(merge_groups: dict) -> List:
