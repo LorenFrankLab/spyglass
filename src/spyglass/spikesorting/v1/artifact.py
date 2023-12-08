@@ -397,9 +397,9 @@ def _check_artifact_thresholds(
         return value < 0 if value is not None else False
 
     if is_negative(amplitude_thresh_uV) or is_negative(zscore_thresh):
-            raise ValueError(
-                "Amplitude and Z-Score thresholds must be >= 0, or None"
-            )
+        raise ValueError(
+            "Amplitude and Z-Score thresholds must be >= 0, or None"
+        )
 
     # proportion_above_threshold should be in [0:1] inclusive
     if proportion_above_thresh < 0:

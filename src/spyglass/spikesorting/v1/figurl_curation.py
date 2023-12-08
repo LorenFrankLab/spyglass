@@ -290,4 +290,3 @@ def _reformat_metrics(metrics: Dict[str, Dict[str, float]]) -> List[Dict]:
         }
         for metric_name, metric in metrics.items()
     ]
-
