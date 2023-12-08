@@ -58,7 +58,7 @@ class FigURLCurationSelection(dj.Manual):
 
     @staticmethod
     def generate_curation_uri(key: Dict) -> str:
-        """Generates a kachery-cloud URI containing curation info from a row in CurationV1 table
+        """Generates a kachery-cloud URI from a row in CurationV1 table
 
         Parameters
         ----------
