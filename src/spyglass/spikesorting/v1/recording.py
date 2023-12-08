@@ -176,7 +176,7 @@ class SortGroup(dj.Manual):
 @schema
 class SpikeSortingPreprocessingParameters(dj.Lookup):
     definition = """
-    # Parameters for denoising (filtering and referencing/whitening) a recording prior to spike sorting.
+    # Parameters for denoising a recording prior to spike sorting.
     preproc_param_name: varchar(200)
     ---
     preproc_params: blob
