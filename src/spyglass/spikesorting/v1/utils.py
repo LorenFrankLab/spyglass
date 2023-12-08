@@ -1,11 +1,12 @@
 import uuid
+
 import numpy as np
 
-from spyglass.spikesorting.v1.recording import SpikeSortingRecordingSelection
-from spyglass.spikesorting.v1.artifact import ArtifactDetectionSelection
-from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
-from spyglass.spikesorting.v1.curation import CurationV1
 from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.v1.artifact import ArtifactDetectionSelection
+from spyglass.spikesorting.v1.curation import CurationV1
+from spyglass.spikesorting.v1.recording import SpikeSortingRecordingSelection
+from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
 
 
 def generate_nwb_uuid(nwb_file_name: str, initial: str, len_uuid: int = 6):
@@ -25,9 +26,9 @@ def generate_nwb_uuid(nwb_file_name: str, initial: str, len_uuid: int = 6):
     return nwb_uuid
 
 
-def get_spiking_v1_merge_ids(restriction: dict):
+def get_spiking_sorting_v1_merge_ids(restriction: dict):
     """
-    Parses the Spiking V1 pipeline to get a list of merge ids for a given restriction.
+    Parses the SpikingSorting V1 pipeline to get a list of merge ids for a given restriction.
 
     Parameters
     ----------
