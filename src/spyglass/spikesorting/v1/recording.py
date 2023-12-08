@@ -337,44 +337,34 @@ class SpikeSortingRecording(dj.Computed):
             (start, end) times for valid intervals in the sort interval
 
         """
-        # FETCH:
-        # - sort interval
-        # - valid times
-        # - preprocessing parameters
+        # FETCH: - sort interval - valid times - preprocessing parameters
+        nwb_file_name, sort_interval_name, params = (
+            SpikeSortingPreprocessingParameters * SpikeSortingRecordingSelection
+            & key
+        ).fetch1("nwb_file_name", "interval_list_name", "preproc_params")
+
         sort_interval = (
             IntervalList
             & {
-                "nwb_file_name": (SpikeSortingRecordingSelection & key).fetch1(
-                    "nwb_file_name"
-                ),
-                "interval_list_name": (
-                    SpikeSortingRecordingSelection & key
-                ).fetch1("interval_list_name"),
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": sort_interval_name,
             }
         ).fetch1("valid_times")
+
         valid_interval_times = (
             IntervalList
             & {
-                "nwb_file_name": (SpikeSortingRecordingSelection & key).fetch1(
-                    "nwb_file_name"
-                ),
+                "nwb_file_name": nwb_file_name,
                 "interval_list_name": "raw data valid times",
             }
         ).fetch1("valid_times")
-        params = (
-            SpikeSortingPreprocessingParameters * SpikeSortingRecordingSelection
-            & key
-        ).fetch1("preproc_params")
 
-        # DO:
-        # - take intersection between sort interval and valid times
-        valid_sort_times = interval_list_intersect(
+        # DO: - take intersection between sort interval and valid times
+        return interval_list_intersect(
             sort_interval,
             valid_interval_times,
             min_length=params["min_segment_length"],
         )
-
-        return valid_sort_times
 
     def _get_preprocessed_recording(self, key: dict):
         """Filters and references a recording.
