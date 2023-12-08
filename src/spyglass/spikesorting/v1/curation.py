@@ -73,40 +73,23 @@ class CurationV1(dj.Manual):
         -------
         curation_key : dict
         """
-        if parent_curation_id <= -1:
+        sort_query = cls & {"sorting_id": sorting_id}
+        parent_curation_id = max(parent_curation_id, -1)
+        if parent_curation_id == -1:
             parent_curation_id = -1
-            # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
-            if (
-                len(
-                    (
-                        cls
-                        & {
-                            "sorting_id": sorting_id,
-                            "parent_curation_id": parent_curation_id,
-                        }
-                    ).fetch("KEY")
-                )
-                > 0
-            ):
-                Warning(f"Sorting has already been inserted.")
-                return (
-                    cls
-                    & {
-                        "sorting_id": sorting_id,
-                        "parent_curation_id": parent_curation_id,
-                    }
-                ).fetch("KEY")
+            # check to see if this sorting with a parent of -1
+            # has already been inserted and if so, warn the user
+            query = sort_query & {"parent_curation_id": -1}
+            if query:
+                Warning("Sorting has already been inserted.")
+                return query.fetch("KEY")
 
         # generate curation ID
-        existing_curation_ids = (cls & {"sorting_id": sorting_id}).fetch(
-            "curation_id"
-        )
-        if len(existing_curation_ids) > 0:
-            curation_id = max(existing_curation_ids) + 1
-        else:
-            curation_id = 0
+        existing_curation_ids = sort_query.fetch("curation_id")
+        curation_id = max(existing_curation_ids, default=-1) + 1
 
-        # write the curation labels, merge groups, and metrics as columns in the units table of NWB
+        # write the curation labels, merge groups,
+        # and metrics as columns in the units table of NWB
         analysis_file_name, object_id = _write_sorting_to_nwb_with_curation(
             sorting_id=sorting_id,
             labels=labels,
@@ -114,6 +97,7 @@ class CurationV1(dj.Manual):
             metrics=metrics,
             apply_merge=apply_merge,
         )
+
         # INSERT
         AnalysisNwbfile().add(
             (SpikeSortingSelection & {"sorting_id": sorting_id}).fetch1(
