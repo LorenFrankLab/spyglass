@@ -184,11 +184,7 @@ class FigURLCuration(dj.Computed):
 
     @classmethod
     def get_merge_groups(cls, curation_json):
-        curation_dict = kcl.load_json(curation_json)
-        if "mergeGroups" in curation_dict:
-            return curation_dict["mergeGroups"]
-        else:
-            return {}
+        return kcl.load_json(curation_json).get("mergeGroups", {})
 
 
 def _generate_figurl(
