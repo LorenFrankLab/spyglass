@@ -346,8 +346,9 @@ class MetricCuration(dj.Computed):
         key : dict
             primary key to MetricCuration
         """
-        analysis_file_name = (cls & key).fetch1("analysis_file_name")
-        object_id = (cls & key).fetch1("object_id")
+        analysis_file_name, object_id = (cls & key).fetch1(
+            "analysis_file_name", "object_id"
+        )
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
