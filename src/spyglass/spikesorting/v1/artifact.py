@@ -394,11 +394,10 @@ def _check_artifact_thresholds(
     ValueError: if signal thresholds are negative
     """
     # amplitude or zscore thresholds should be negative, as they are applied to an absolute signal
-    signal_thresholds = [
-        t for t in [amplitude_thresh_uV, zscore_thresh] if t is not None
-    ]
-    for t in signal_thresholds:
-        if t < 0:
+    def is_negative(value):
+        return value < 0 if value is not None else False
+
+    if is_negative(amplitude_thresh_uV) or is_negative(zscore_thresh):
             raise ValueError(
                 "Amplitude and Z-Score thresholds must be >= 0, or None"
             )
