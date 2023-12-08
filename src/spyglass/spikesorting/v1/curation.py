@@ -428,8 +428,8 @@ def _list_to_merge_dict(
 
     Example
     -------
-    [[1,2,3],[4,5]], [1,2,3,4,5,6] -> {1: [2, 3], 2:[1,3], 3:[1,2] 4: [5], 5: [4], 6: []}
-
+    Input: [[1,2,3],[4,5]], [1,2,3,4,5,6] 
+    Output: {1: [2, 3], 2:[1,3], 3:[1,2] 4: [5], 5: [4], 6: []}
     """
     merge_group_list = _union_intersecting_lists(merge_group_list)
     merge_dict = {unit_id: [] for unit_id in all_unit_ids}
