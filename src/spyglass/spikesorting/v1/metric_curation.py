@@ -474,27 +474,27 @@ class MetricCuration(dj.Computed):
 
         if not merge_params:
             return []
-        else:
-            unit_ids = list(metrics[list(metrics.keys())[0]].keys())
-            merge_groups = {unit_id: [] for unit_id in unit_ids}
-            for metric in merge_params:
-                if metric not in metrics:
-                    Warning(f"{metric} not found in quality metrics; skipping")
-                else:
-                    compare = _comparison_to_function[merge_params[metric][0]]
-                    for unit_id in unit_ids:
-                        other_unit_ids = [
-                            other_unit_id
-                            for other_unit_id in unit_ids
-                            if other_unit_id != unit_id
-                        ]
-                        for other_unit_id in other_unit_ids:
-                            if compare(
-                                metrics[metric][unit_id][other_unit_id],
-                                merge_params[metric][1],
-                            ):
-                                merge_groups[unit_id].extend(other_unit_id)
-            return merge_groups
+
+        unit_ids = list(metrics[list(metrics.keys())[0]].keys())
+        merge_groups = {unit_id: [] for unit_id in unit_ids}
+        for metric in merge_params:
+            if metric not in metrics:
+                Warning(f"{metric} not found in quality metrics; skipping")
+                continue
+            compare = _comparison_to_function[merge_params[metric][0]]
+            for unit_id in unit_ids:
+                other_unit_ids = [
+                    other_unit_id
+                    for other_unit_id in unit_ids
+                    if other_unit_id != unit_id
+                ]
+                for other_unit_id in other_unit_ids:
+                    if compare(
+                        metrics[metric][unit_id][other_unit_id],
+                        merge_params[metric][1],
+                    ):
+                        merge_groups[unit_id].extend(other_unit_id)
+        return merge_groups
 
 
 def _write_metric_curation_to_nwb(
