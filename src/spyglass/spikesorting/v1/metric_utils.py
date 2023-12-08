@@ -67,5 +67,4 @@ def get_peak_channel(
 
 def get_num_spikes(waveform_extractor: si.WaveformExtractor, this_unit_id: str):
     """Computes the number of spikes for each unit."""
-    num_spikes = sq.compute_num_spikes(waveform_extractor)
-    return num_spikes[this_unit_id]
+    return sq.compute_num_spikes(waveform_extractor)[this_unit_id]
