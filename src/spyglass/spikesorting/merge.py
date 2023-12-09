@@ -15,7 +15,7 @@ schema = dj.schema("spikesorting_merge")
 @schema
 class SpikeSortingOutput(_Merge):
     definition = """
-    # Output of spike sorting pipelines. Use `insert_from_source` method to insert rows.
+    # Output of spike sorting pipelines.
     merge_id: uuid
     ---
     source: varchar(32)

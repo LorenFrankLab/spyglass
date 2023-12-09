@@ -261,7 +261,7 @@ def _get_artifact_times(
     # turn ms to remove total into s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms / 2 / 1000
 
-    if not artifact_frames:
+    if len(artifact_frames) == 0:
         recording_interval = np.asarray(
             [[valid_timestamps[0], valid_timestamps[-1]]]
         )
@@ -312,16 +312,16 @@ def _init_artifact_worker(
     amplitude_thresh_uV=None,
     proportion_above_thresh=1.0,
 ):
-    """Create a local dict per worker"""
+    # create a local dict per worker
+    worker_ctx = {}
     if isinstance(recording, dict):
-        return dict(recording=si.load_extractor(recording))
+        worker_ctx["recording"] = si.load_extractor(recording)
     else:
-        return dict(
-            recording=recording,
-            zscore_thresh=zscore_thresh,
-            amplitude_thresh_uV=amplitude_thresh_uV,
-            proportion_above_thresh=proportion_above_thresh,
-        )
+        worker_ctx["recording"] = recording
+    worker_ctx["zscore_thresh"] = zscore_thresh
+    worker_ctx["amplitude_thresh_uV"] = amplitude_thresh_uV
+    worker_ctx["proportion_above_thresh"] = proportion_above_thresh
+    return worker_ctx
 
 
 def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
@@ -341,7 +341,7 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     )
 
     # find the artifact occurrences using one or both thresholds, across channels
-    if amplitude_thresh_uV and not zscore_thresh:
+    if (amplitude_thresh_uV is not None) and (zscore_thresh is None):
         above_a = np.abs(traces) > amplitude_thresh_uV
         above_thresh = (
             np.ravel(np.argwhere(np.sum(above_a, axis=1) >= nelect_above))
@@ -393,13 +393,14 @@ def _check_artifact_thresholds(
     ValueError: if signal thresholds are negative
     """
     # amplitude or zscore thresholds should be negative, as they are applied to an absolute signal
-    def is_negative(value):
-        return value < 0 if value is not None else False
-
-    if is_negative(amplitude_thresh_uV) or is_negative(zscore_thresh):
-        raise ValueError(
-            "Amplitude and Z-Score thresholds must be >= 0, or None"
-        )
+    signal_thresholds = [
+        t for t in [amplitude_thresh_uV, zscore_thresh] if t is not None
+    ]
+    for t in signal_thresholds:
+        if t < 0:
+            raise ValueError(
+                "Amplitude and Z-Score thresholds must be >= 0, or None"
+            )
 
     # proportion_above_threshold should be in [0:1] inclusive
     if proportion_above_thresh < 0:

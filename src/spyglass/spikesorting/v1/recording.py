@@ -575,7 +575,6 @@ def _consolidate_intervals(intervals, timestamps):
 
     # Loop through the rest of the intervals to join them if needed
     for next_start, next_stop in zip(start_indices, stop_indices):
-
         # If the stop time of the current interval is equal to or greater than the next start time minus 1
         if stop >= next_start - 1:
             stop = max(

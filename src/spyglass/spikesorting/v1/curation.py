@@ -112,7 +112,7 @@ class CurationV1(dj.Manual):
             "parent_curation_id": parent_curation_id,
             "analysis_file_name": analysis_file_name,
             "object_id": object_id,
-            "merges_applied": str(apply_merge),
+            "merges_applied": apply_merge,
             "description": description,
         }
         cls.insert1(
@@ -168,7 +168,7 @@ class CurationV1(dj.Manual):
             primary key of CurationV1 table
         """
 
-        analysis_file_abs_path = (
+        analysis_file_name = (
             SpikeSortingRecording * SpikeSortingSelection & key
         ).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
@@ -343,11 +343,12 @@ def _write_sorting_to_nwb_with_curation(
             )
         # add labels, merge groups, metrics
         if labels is not None:
-            label_values = [
-                labels.get(unit_id, [])
-                for unit_id in unit_ids
-                if unit_id in labels
-            ]
+            label_values = []
+            for unit_id in unit_ids:
+                if unit_id not in labels:
+                    label_values.append([])
+                else:
+                    label_values.append(labels[unit_id])
             nwbf.add_unit_column(
                 name="curation_label",
                 description="curation label",
