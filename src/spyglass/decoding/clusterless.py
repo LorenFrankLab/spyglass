@@ -31,10 +31,7 @@ from replay_trajectory_classification.discrete_state_transitions import (
 from replay_trajectory_classification.initial_conditions import (
     UniformInitialConditions,
 )
-from ripple_detection import (
-    get_multiunit_population_firing_rate,
-    multiunit_HSE_detector,
-)
+from ripple_detection import get_multiunit_population_firing_rate
 from tqdm.auto import tqdm
 
 from spyglass.common.common_behav import (
@@ -61,6 +58,7 @@ from spyglass.spikesorting.spikesorting_sorting import (
     SpikeSortingSelection,
 )
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("decoding_clusterless")
 
@@ -119,7 +117,7 @@ class UnitMarkParameters(dj.Manual):
 
 
 @schema
-class UnitMarks(dj.Computed):
+class UnitMarks(SpyglassMixin, dj.Computed):
     """For each spike time, compute a spike waveform feature associated with that
     spike. Used for clusterless decoding.
     """
@@ -225,11 +223,6 @@ class UnitMarks(dj.Computed):
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
         self.insert1(key)
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
     def fetch1_dataframe(self):
         """Convenience function for returning the marks in a readable format"""
         return self.fetch_dataframe()[0]
@@ -325,7 +318,7 @@ class UnitMarksIndicatorSelection(dj.Lookup):
 
 
 @schema
-class UnitMarksIndicator(dj.Computed):
+class UnitMarksIndicator(SpyglassMixin, dj.Computed):
     """Bins the spike times and associated spike waveform features into regular
     time bins according to the sampling rate. Features that fall into the same
     time bin are averaged.
@@ -436,11 +429,6 @@ class UnitMarksIndicator(dj.Computed):
                             marks.sel(marks=feature2),
                             s=s,
                         )
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         return self.fetch_dataframe()[0]
@@ -583,7 +571,7 @@ class ClusterlessClassifierParameters(dj.Manual):
 
 
 @schema
-class MultiunitFiringRate(dj.Computed):
+class MultiunitFiringRate(SpyglassMixin, dj.Computed):
     """Computes the population multiunit firing rate from the spikes in
     MarksIndicator."""
 
@@ -626,11 +614,6 @@ class MultiunitFiringRate(dj.Computed):
         )
 
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         return self.fetch_dataframe()[0]
