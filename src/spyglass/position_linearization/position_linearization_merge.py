@@ -1,8 +1,8 @@
 import datajoint as dj
 
-from spyglass.position_linearization.v1.linearization import (
+from spyglass.position_linearization.v1.linearization import (  # noqa F401
     LinearizedPositionV1,
-)  # noqa F401
+)
 
 from ..utils.dj_merge_tables import _Merge
 
@@ -17,7 +17,7 @@ class LinearizedPositionOutput(_Merge):
     source: varchar(32)
     """
 
-    class LinearizedPositionV1(dj.Part):
+    class LinearizedPositionV1(dj.Part):  # noqa: F811
         definition = """
         -> LinearizedPositionOutput
         ---

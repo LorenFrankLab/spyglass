@@ -1,9 +1,7 @@
 import os
-import pathlib
 import random
 import stat
 import string
-from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -11,6 +9,7 @@ import pandas as pd
 import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
+from pathlib import Path
 
 from ..settings import raw_dir
 from ..utils.dj_helper_fn import get_child_tables
@@ -309,7 +308,7 @@ class AnalysisNwbfile(dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
+        base_dir = Path(os.getenv("SPYGLASS_BASE_DIR", None))
         assert (
             base_dir is not None
         ), "You must set SPYGLASS_BASE_DIR environment variable."
@@ -658,6 +657,8 @@ class NwbfileKachery(dj.Computed):
     """
 
     def make(self, key):
+        import kachery_client as kc
+
         print(f'Linking {key["nwb_file_name"]} and storing in kachery...')
         key["nwb_file_uri"] = kc.link_file(
             Nwbfile().get_abs_path(key["nwb_file_name"])
@@ -674,6 +675,8 @@ class AnalysisNwbfileKachery(dj.Computed):
     """
 
     def make(self, key):
+        import kachery_client as kc
+
         print(f'Linking {key["analysis_file_name"]} and storing in kachery...')
         key["analysis_file_uri"] = kc.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])

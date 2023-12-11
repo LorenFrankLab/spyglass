@@ -8,7 +8,7 @@ import ndx_franklab_novela
 import pandas as pd
 import pynwb
 
-from ..utils.dj_helper_fn import fetch_nwb
+from ..utils.dj_mixin import SpyglassMixin
 from ..utils.nwb_helper_fn import (
     get_all_spatial_series,
     get_data_interface,
@@ -158,7 +158,7 @@ class RawPosition(dj.Imported):
     -> PositionSource
     """
 
-    class PosObject(dj.Part):
+    class PosObject(SpyglassMixin, dj.Part):
         definition = """
         -> master
         -> PositionSource.SpatialSeries.proj('id')
@@ -166,10 +166,7 @@ class RawPosition(dj.Imported):
         raw_position_object_id: varchar(40) # id of spatial series in NWB file
         """
 
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs
-            )
+        _nwb_table = Nwbfile
 
         def fetch1_dataframe(self):
             INDEX_ADJUST = 1  # adjust 0-index to 1-index (e.g., xloc0 -> xloc1)
@@ -254,12 +251,14 @@ class RawPosition(dj.Imported):
 
 
 @schema
-class StateScriptFile(dj.Imported):
+class StateScriptFile(SpyglassMixin, dj.Imported):
     definition = """
     -> TaskEpoch
     ---
     file_object_id: varchar(40)  # the object id of the file object
     """
+
+    _nwb_table = Nwbfile
 
     def make(self, key):
         """Add a new row to the StateScriptFile table."""
@@ -309,12 +308,9 @@ class StateScriptFile(dj.Imported):
             else:
                 print("not a statescript file")
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
-
 
 @schema
-class VideoFile(dj.Imported):
+class VideoFile(SpyglassMixin, dj.Imported):
     """
 
     Notes
@@ -332,6 +328,8 @@ class VideoFile(dj.Imported):
     camera_name: varchar(80)
     video_file_object_id: varchar(40)  # the object id of the file object
     """
+
+    _nwb_table = Nwbfile
 
     def make(self, key):
         self._no_transaction_make(key)
@@ -394,9 +392,6 @@ class VideoFile(dj.Imported):
                 f"No video found corresponding to file {nwb_file_name}, "
                 + f"epoch {interval_list_name}"
             )
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
 
     @classmethod
     def update_entries(cls, restrict={}):

@@ -1,5 +1,3 @@
-import os
-
 import datajoint as dj
 
 from ..settings import config, debug_mode

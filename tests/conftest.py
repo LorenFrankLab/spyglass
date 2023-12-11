@@ -1,6 +1,5 @@
 # directory-specific hook implementations
 import os
-import pathlib
 import shutil
 import sys
 import tempfile
@@ -47,11 +46,13 @@ def pytest_configure(config):
 
     _set_env()
 
-    # note that in this configuration, every test will use the same datajoint server
-    # this may create conflicts and dependencies between tests
-    # it may be better but significantly slower to start a new server for every test
-    # but the server needs to be started before tests are collected because datajoint runs when the source
-    # files are loaded, not when the tests are run. one solution might be to restart the server after every test
+    # note that in this configuration, every test will use the same datajoint
+    # server this may create conflicts and dependencies between tests it may be
+    # better but significantly slower to start a new server for every test but
+    # the server needs to be started before tests are collected because
+    # datajoint runs when the source files are loaded, not when the tests are
+    # run. one solution might be to restart the server after every test
+
     global __PROCESS
     __PROCESS = run_datajoint_server()
 

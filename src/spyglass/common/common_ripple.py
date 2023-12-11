@@ -4,13 +4,11 @@ import numpy as np
 import pandas as pd
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
-from spyglass.common import (
-    IntervalList,  # noqa
-    IntervalPositionInfo,
-)
-from spyglass.common import LFPBand, LFPBandSelection
+
+from spyglass.common import IntervalList  # noqa
+from spyglass.common import IntervalPositionInfo, LFPBand, LFPBandSelection
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("common_ripple")
 
@@ -129,7 +127,7 @@ class RippleParameters(dj.Lookup):
 
 
 @schema
-class RippleTimes(dj.Computed):
+class RippleTimes(SpyglassMixin, dj.Computed):
     definition = """
     -> RippleParameters
     -> RippleLFPSelection
@@ -177,11 +175,6 @@ class RippleTimes(dj.Computed):
         )
 
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         """Convenience function for returning the marks in a readable format"""
