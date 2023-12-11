@@ -686,6 +686,7 @@ def make_video(
     video_filename,
     video_frame_inds,
     position_mean,
+    orientation_mean, #added 12/5/23
     centroids,
     likelihoods,
     position_time,
