@@ -2,7 +2,6 @@
     "editor.formatOnSave": true,
     "files.trimTrailingWhitespace": true,
     "files.trimFinalNewlines": true,
-    "editor.multiCursorModifier": "ctrlCmd",
     "autoDocstring.docstringFormat": "numpy",
     "remote.SSH.remoteServerListenOnSocket": true,
     "git.confirmSync": false,

@@ -6,7 +6,7 @@ from position_tools.core import gaussian_smooth
 
 from ...common.common_behav import RawPosition
 from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_helper_fn import fetch_nwb
+from ...utils.dj_mixin import SpyglassMixin
 from .dlc_utils import get_span_start_stop
 from .position_dlc_cohort import DLCSmoothInterpCohort
 
@@ -70,7 +70,7 @@ class DLCOrientationSelection(dj.Manual):
 
 
 @schema
-class DLCOrientation(dj.Computed):
+class DLCOrientation(SpyglassMixin, dj.Computed):
     """
     Determines and smooths orientation of a set of bodyparts given a specified method
     """
@@ -154,11 +154,6 @@ class DLCOrientation(dj.Computed):
         )
 
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]

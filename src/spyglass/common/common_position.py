@@ -24,7 +24,7 @@ from track_linearization import (
 )
 
 from ..settings import raw_dir, video_dir
-from ..utils.dj_helper_fn import fetch_nwb
+from ..utils.dj_mixin import SpyglassMixin
 from .common_behav import RawPosition, VideoFile
 from .common_interval import IntervalList  # noqa F401
 from .common_nwbfile import AnalysisNwbfile
@@ -70,7 +70,7 @@ class IntervalPositionInfoSelection(dj.Lookup):
 
 
 @schema
-class IntervalPositionInfo(dj.Computed):
+class IntervalPositionInfo(SpyglassMixin, dj.Computed):
     """Computes the smoothed head position, orientation and velocity for a given
     interval."""
 
@@ -449,11 +449,6 @@ class IntervalPositionInfo(dj.Computed):
             "speed": speed,
         }
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
     def fetch1_dataframe(self):
         return self._data_to_df(self.fetch_nwb()[0])
 
@@ -598,7 +593,7 @@ class IntervalLinearizationSelection(dj.Lookup):
 
 
 @schema
-class IntervalLinearizedPosition(dj.Computed):
+class IntervalLinearizedPosition(SpyglassMixin, dj.Computed):
     """Linearized position for a given interval"""
 
     definition = """
@@ -673,11 +668,6 @@ class IntervalLinearizedPosition(dj.Computed):
         )
 
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")
