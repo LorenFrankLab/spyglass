@@ -33,7 +33,7 @@ class LFPSelection(dj.Manual):
     filtered.  The user can also specify the filter to be used.
 
     The LFP data is filtered and downsampled to the user-defined sampling rate, specified
-    as lfp_sampling_rate.  The filtered data is stored in the AnalysisNwbfile table.  
+    as lfp_sampling_rate.  The filtered data is stored in the AnalysisNwbfile table.
     The valid times for the filtered data are stored in the IntervalList table.
     """
 
