@@ -60,7 +60,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        DECIMATION_FACTOR = key["lfp_sampling_rate"] #1000
+        DECIMATION_FACTOR = key["lfp_sampling_rate"]
         # get the NWB object with the data
         nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
         rawdata = (Raw & nwbf_key).fetch_nwb()[0]["raw"]
