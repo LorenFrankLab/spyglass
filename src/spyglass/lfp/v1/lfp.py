@@ -42,7 +42,7 @@ class LFPSelection(dj.Manual):
      -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
      -> FirFilterParameters                                                # the filter to be used
      ---
-     lfp_sampling_rate: float                                              # the desired output sampling rate, in HZ                                                                                                                                                                                                                
+     lfp_sampling_rate = 1000 : float                                              # the desired output sampling rate, in HZ                                                                                                                                                                                                                
      """
 
 
@@ -60,7 +60,6 @@ class LFPV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        DECIMATION_FACTOR = key["lfp_sampling_rate"]
         # get the NWB object with the data
         nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
         rawdata = (Raw & nwbf_key).fetch_nwb()[0]["raw"]
@@ -96,8 +95,8 @@ class LFPV1(SpyglassMixin, dj.Computed):
             f"LFP: found {len(valid_times)} intervals > {MIN_LFP_INTERVAL_DURATION} sec long."
         )
 
-        # target 1 KHz sampling rate
-        decimation = sampling_rate // DECIMATION_FACTOR
+        # target user-specified sampling rate
+        decimation = sampling_rate // key["lfp_sampling_rate"]
 
         # get the LFP filter that matches the raw data
         filter = (
