@@ -461,7 +461,8 @@ class FirFilterParameters(dj.Manual):
             frm, to = self._time_bound_check(
                 a_start, a_stop, timestamps, n_samples
             )
-
+            if frm == to:
+                continue
             indices.append((frm, to))
 
             shape, _ = gsp.filter_data_fir(
