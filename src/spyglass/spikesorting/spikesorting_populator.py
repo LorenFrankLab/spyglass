@@ -214,7 +214,8 @@ def spikesorting_pipeline_populator(
     # initial curation
     print("Beginning curation")
     for sorting_key in (SpikeSorting() & sort_dict).fetch("KEY"):
-        Curation.insert_curation(sorting_key)
+        if not (Curation() & sorting_key):
+            Curation.insert_curation(sorting_key)
 
     # Calculate quality metrics and perform automatic curation if specified
     if (
@@ -226,7 +227,7 @@ def spikesorting_pipeline_populator(
         print("Extracting waveforms")
         curation_keys = [
             {**k, "waveform_params_name": waveform_params_name}
-            for k in (Curation() & sort_dict).fetch("KEY")
+            for k in (Curation() & sort_dict & {"curation_id": 0}).fetch("KEY")
         ]
         WaveformSelection.insert(curation_keys, skip_duplicates=True)
         Waveforms.populate(sort_dict)
