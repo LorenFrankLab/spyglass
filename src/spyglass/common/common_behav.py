@@ -596,13 +596,9 @@ def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
     interval_list_name : str
         The interval list name.
     """
-    interval_names = [
-        x
-        for x in (IntervalList() & {"nwb_file_name": nwb_file_name}).fetch(
-            "interval_list_name"
-        )
-        if (x.split("_")[0] == f"{epoch:02}")
-    ]
+    interval_names = (
+        TaskEpoch & {"nwb_file_name": nwb_file_name, "epoch": epoch}
+    ).fetch("interval_list_name")
 
     if len(interval_names) != 1:
         print(
