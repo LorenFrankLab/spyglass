@@ -96,7 +96,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
         )
 
         # target user-specified sampling rate
-        decimation = sampling_rate // key["lfp_sampling_rate"]
+        decimation = sampling_rate // key["target_sampling_rate"]
 
         # get the LFP filter that matches the raw data
         filter = (
