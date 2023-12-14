@@ -18,17 +18,14 @@ class SpyglassConfig:
     facilitate testing.
     """
 
-    def __init__(self, base_dir=None, **kwargs):
+    def __init__(self, base_dir: str = None, **kwargs):
         """
         Initializes a new instance of the class.
 
         Parameters
         ----------
-            base_dir (str): The base directory.
-
-        Returns
-        -------
-            None
+        base_dir (str)
+            The base directory.
         """
         self.supplied_base_dir = base_dir
         self._config = dict()
@@ -441,4 +438,5 @@ temp_dir = sg_config.temp_dir
 analysis_dir = sg_config.analysis_dir
 sorting_dir = sg_config.sorting_dir
 waveform_dir = sg_config.waveform_dir
+video_dir = sg_config.video_dir
 debug_mode = sg_config.debug_mode

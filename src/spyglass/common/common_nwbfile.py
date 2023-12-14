@@ -1,9 +1,7 @@
 import os
-import pathlib
 import random
 import stat
 import string
-from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -11,6 +9,7 @@ import pandas as pd
 import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
+from pathlib import Path
 
 from ..settings import raw_dir
 from ..utils.dj_helper_fn import get_child_tables
@@ -42,13 +41,15 @@ NWB_KEEP_FIELDS = (
 class Nwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files.
-    nwb_file_name: varchar(255)   # name of the NWB file
+    nwb_file_name: varchar(64)   # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
     INDEX (nwb_file_abs_path)
     """
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
     # so that alter() can work
+
+    # NOTE: See #630, #664. Excessive key length.
 
     @classmethod
     def insert_from_relative_file_name(cls, nwb_file_name):
@@ -149,7 +150,7 @@ class Nwbfile(dj.Manual):
 class AnalysisNwbfile(dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting.
-    analysis_file_name: varchar(255)               # name of the file
+    analysis_file_name: varchar(64)               # name of the file
     ---
     -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
     analysis_file_abs_path: filepath@analysis      # the full path to the file
@@ -160,6 +161,8 @@ class AnalysisNwbfile(dj.Manual):
     """
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
     # so that alter() can work
+
+    # See #630, #664. Excessive key length.
 
     def create(self, nwb_file_name):
         """Open the NWB file, create a copy, write the copy to disk and return the name of the new file.
@@ -305,7 +308,7 @@ class AnalysisNwbfile(dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
+        base_dir = Path(os.getenv("SPYGLASS_BASE_DIR", None))
         assert (
             base_dir is not None
         ), "You must set SPYGLASS_BASE_DIR environment variable."
@@ -654,6 +657,8 @@ class NwbfileKachery(dj.Computed):
     """
 
     def make(self, key):
+        import kachery_client as kc
+
         print(f'Linking {key["nwb_file_name"]} and storing in kachery...')
         key["nwb_file_uri"] = kc.link_file(
             Nwbfile().get_abs_path(key["nwb_file_name"])
@@ -670,6 +675,8 @@ class AnalysisNwbfileKachery(dj.Computed):
     """
 
     def make(self, key):
+        import kachery_client as kc
+
         print(f'Linking {key["analysis_file_name"]} and storing in kachery...')
         key["analysis_file_uri"] = kc.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])

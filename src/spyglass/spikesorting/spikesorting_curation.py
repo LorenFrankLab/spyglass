@@ -15,7 +15,7 @@ import spikeinterface.qualitymetrics as sq
 
 from ..common.common_interval import IntervalList
 from ..common.common_nwbfile import AnalysisNwbfile
-from ..utils.dj_helper_fn import fetch_nwb
+from ..utils.dj_mixin import SpyglassMixin
 from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SortInterval, SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
@@ -38,7 +38,7 @@ def apply_merge_groups_to_sorting(
 
 
 @schema
-class Curation(dj.Manual):
+class Curation(SpyglassMixin, dj.Manual):
     definition = """
     # Stores each spike sorting; similar to IntervalList
     curation_id: int # a number corresponding to the index of this curation
@@ -51,6 +51,8 @@ class Curation(dj.Manual):
     description='': varchar(1000) #optional description for this curated sort
     time_of_creation: int   # in Unix time, to the nearest second
     """
+
+    _nwb_table = AnalysisNwbfile
 
     @staticmethod
     def insert_curation(
@@ -84,7 +86,8 @@ class Curation(dj.Manual):
 
         """
         if parent_curation_id == -1:
-            # check to see if this sorting with a parent of -1 has already been inserted and if so, warn the user
+            # check to see if this sorting with a parent of -1 has already been
+            # inserted and if so, warn the user
             inserted_curation = (Curation & sorting_key).fetch("KEY")
             if len(inserted_curation) > 0:
                 Warning(
@@ -251,11 +254,6 @@ class Curation(dj.Manual):
 
         return analysis_file_name, units_object_id
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
 
 @schema
 class WaveformParameters(dj.Manual):
@@ -385,10 +383,13 @@ class Waveforms(dj.Computed):
 class MetricParameters(dj.Manual):
     definition = """
     # Parameters for computing quality metrics of sorted units
-    metric_params_name: varchar(200)
+    metric_params_name: varchar(64)
     ---
     metric_params: blob
     """
+
+    # NOTE: See #630, #664. Excessive key length.
+
     metric_default_params = {
         "snr": {
             "peak_sign": "neg",
@@ -543,7 +544,7 @@ class QualityMetrics(dj.Computed):
             else:
                 raise Exception(
                     f"{peak_sign_metrics} metrics require peak_sign",
-                    f"to be defined in the metric parameters",
+                    "to be defined in the metric parameters",
                 )
         else:
             metric = {}
@@ -645,11 +646,13 @@ _metric_name_to_func = {
 @schema
 class AutomaticCurationParameters(dj.Manual):
     definition = """
-    auto_curation_params_name: varchar(200)   # name of this parameter set
+    auto_curation_params_name: varchar(36)   # name of this parameter set
     ---
     merge_params: blob   # dictionary of params to merge units
     label_params: blob   # dictionary params to label units
     """
+
+    # NOTE: No existing entries impacted by this change
 
     def insert1(self, key, **kwargs):
         # validate the labels and then insert
@@ -873,7 +876,7 @@ class CuratedSpikeSortingSelection(dj.Manual):
 
 
 @schema
-class CuratedSpikeSorting(dj.Computed):
+class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
     definition = """
     -> CuratedSpikeSortingSelection
     ---
@@ -944,9 +947,6 @@ class CuratedSpikeSorting(dj.Computed):
         recording = Curation.get_recording(key)
 
         # get the sort_interval and sorting interval list
-        sort_interval_name = (SpikeSortingRecording & key).fetch1(
-            "sort_interval_name"
-        )
         sort_interval = (SortInterval & key).fetch1("sort_interval")
         sort_interval_list_name = (SpikeSorting & key).fetch1(
             "artifact_removed_interval_list_name"
@@ -995,11 +995,6 @@ class CuratedSpikeSorting(dj.Computed):
         unit_fields.remove("label")
         return unit_fields
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
 
 @schema
 class UnitInclusionParameters(dj.Manual):
@@ -1039,7 +1034,8 @@ class UnitInclusionParameters(dj.Manual):
     def get_included_units(
         self, curated_sorting_key, unit_inclusion_param_name
     ):
-        """given a reference to a set of curated sorting units and the name of a unit inclusion parameter list, returns
+        """Given a reference to a set of curated sorting units and the name of
+        a unit inclusion parameter list, returns unit key
 
         Parameters
         ----------
@@ -1049,7 +1045,7 @@ class UnitInclusionParameters(dj.Manual):
             name of a unit inclusion parameter entry
 
         Returns
-        ------unit key
+        -------
         dict
             key to select all of the included units
         """
@@ -1062,8 +1058,6 @@ class UnitInclusionParameters(dj.Manual):
         units_key = (CuratedSpikeSorting().Unit() & curated_sortings).fetch(
             "KEY"
         )
-        # get a list of the metrics in the units table
-        metrics_list = CuratedSpikeSorting().metrics_fields()
         # get the list of labels to exclude if there is one
         if "exclude_labels" in inc_param_dict:
             exclude_labels = inc_param_dict["exclude_labels"]
@@ -1074,7 +1068,8 @@ class UnitInclusionParameters(dj.Manual):
         # create a list of the units to kepp.
         keep = np.asarray([True] * len(units))
         for metric in inc_param_dict:
-            # for all units, go through each metric, compare it to the value specified, and update the list to be kept
+            # for all units, go through each metric, compare it to the value
+            # specified, and update the list to be kept
             keep = np.logical_and(
                 keep,
                 _comparison_to_function[inc_param_dict[metric][0]](
@@ -1084,14 +1079,13 @@ class UnitInclusionParameters(dj.Manual):
 
         # now exclude by label if it is specified
         if len(exclude_labels):
-            included_units = []
             for unit_ind in np.ravel(np.argwhere(keep)):
                 labels = units[unit_ind]["label"].split(",")
-                exclude = False
                 for label in labels:
                     if label in exclude_labels:
                         keep[unit_ind] = False
                         break
+
         # return units that passed all of the tests
         # TODO: Make this more efficient
         return {i: units_key[i] for i in np.ravel(np.argwhere(keep))}

@@ -18,10 +18,12 @@ class IntervalList(dj.Manual):
     definition = """
     # Time intervals used for analysis
     -> Session
-    interval_list_name: varchar(200)  # descriptive name of this interval list
+    interval_list_name: varchar(170)  # descriptive name of this interval list
     ---
     valid_times: longblob  # numpy array with start/end times for each interval
     """
+
+    # See #630, #664. Excessive key length.
 
     @classmethod
     def insert_from_nwbfile(cls, nwbf, *, nwb_file_name):
@@ -486,3 +488,44 @@ def interval_set_difference_inds(intervals1, intervals2):
                 i += 1
     result += intervals1[i:]
     return result
+
+
+def interval_list_complement(intervals1, intervals2, min_length=0.0):
+    """
+    Finds intervals in intervals1 that are not in intervals2
+
+    Parameters
+    ----------
+    min_length : float, optional
+        Minimum interval length in seconds. Defaults to 0.0.
+    """
+
+    result = []
+
+    for start1, end1 in intervals1:
+        subtracted = [(start1, end1)]
+
+        for start2, end2 in intervals2:
+            new_subtracted = []
+
+            for s, e in subtracted:
+                if start2 <= s and e <= end2:
+                    continue
+
+                if e <= start2 or end2 <= s:
+                    new_subtracted.append((s, e))
+                    continue
+
+                if start2 > s:
+                    new_subtracted.append((s, start2))
+
+                if end2 < e:
+                    new_subtracted.append((end2, e))
+
+            subtracted = new_subtracted
+
+        result.extend(subtracted)
+
+    return intervals_by_length(
+        np.asarray(result), min_length=min_length, max_length=1e100
+    )

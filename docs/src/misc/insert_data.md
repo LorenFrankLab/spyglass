@@ -20,29 +20,34 @@ particular probe is stored in the `ProbeType` and `Probe` tables of
 `spyglass.common`. The user can either:
 
 1. create these entries programmatically using DataJoint `insert` commands, for
-   example:
+    example:
 
     ```python
-    sgc.ProbeType.insert1({
-    "probe_type": "128c-4s6mm6cm-15um-26um-sl",
-    "probe_description": "A Livermore flexible probe with 128 channels, 4 shanks, 6 mm shank length, 6 cm ribbon length. 15 um contact diameter, 26 um center-to-center distance (pitch), single-line configuration.",
-    "manufacturer": "Lawrence Livermore National Lab",
-    "num_shanks": 4,
-    }, skip_duplicates=True)
+    sgc.ProbeType.insert1(
+        {
+            "probe_type": "128c-4s6mm6cm-15um-26um-sl",
+            "probe_description": "A Livermore flexible probe with 128 channels, 4 shanks, 6 mm shank length, 6 cm ribbon length. 15 um contact diameter, 26 um center-to-center distance (pitch), single-line configuration.",
+            "manufacturer": "Lawrence Livermore National Lab",
+            "num_shanks": 4,
+        },
+        skip_duplicates=True,
+    )
     ```
 
 2. define these entries in a special YAML file called `entries.yaml` that is
-   processed when `spyglass` is imported. One can think of `entries.yaml` as a
-   place to define information that the database should come pre-equipped prior
-   to ingesting any NWB files. The `entries.yaml` file should be placed in the
-   `spyglass` base directory. An example can be found in
-   `examples/config_yaml/entries.yaml`. It has the following structure:
+    processed when `spyglass` is imported. One can think of `entries.yaml` as a
+    place to define information that the database should come pre-equipped
+    prior to ingesting any NWB files. The `entries.yaml` file should be placed
+    in the `spyglass` base directory. An example can be found in
+    `examples/config_yaml/entries.yaml`. It has the following structure:
 
     ```yaml
     TableName:
-    - TableEntry1Field1: Value
-    TableEntry1Field2: Value
-    - TableEntry2Field1: Value
+        - TableEntry1Field1: Value
+
+    TableEntry1Field2:
+        - TableEntry2Field1: Value
+
     TableEntry2Field2: Value
     ```
 
@@ -50,8 +55,10 @@ particular probe is stored in the `ProbeType` and `Probe` tables of
 
     ```yaml
     ProbeType:
-    - probe_type: 128c-4s6mm6cm-15um-26um-sl
-    probe_description: A Livermore flexible probe with 128 channels, 4 shanks, 6 mm shank length, 6 cm ribbon length. 15 um contact diameter, 26 um center-to-center distance (pitch), single-line configuration.
+        - probe_type: 128c-4s6mm6cm-15um-26um-sl
+    probe_description: A Livermore flexible probe with 128 channels, 4 shanks, 6 mm shank
+        length, 6 cm ribbon length. 15 um contact diameter, 26 um center-to-center distance
+        (pitch), single-line configuration.
     manufacturer: Lawrence Livermore National Lab
     num_shanks: 4
     ```
@@ -78,14 +85,14 @@ This is the general format for the config entry:
 
 ```yaml
 TableName:
-- primary_key1: value1
+  - primary_key1: value1
 ```
 
 For example:
 
 ```yaml
 DataAcquisitionDevice:
-- data_acquisition_device_name: Neuropixels Recording Device
+  - data_acquisition_device_name: Neuropixels Recording Device
 ```
 
 In this example, the NWB file that corresponds to this config YAML will become

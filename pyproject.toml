@@ -78,7 +78,7 @@ test = [
     "kachery-cloud",
 ]
 docs = [
-    "hatch",                 # Get version from env 
+    "hatch",                 # Get version from env
     "mike",                  # Docs versioning
     "mkdocs",                # Docs core
     "mkdocs-exclude",        # Docs exclude files
@@ -109,6 +109,6 @@ exclude = []
 line-length = 80
 
 [tool.codespell]
-skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**'
+skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
 # Nevers - name in Citation
 ignore-words-list = 'nevers'

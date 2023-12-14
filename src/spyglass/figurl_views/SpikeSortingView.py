@@ -5,7 +5,7 @@ from sortingview.SpikeSortingView import (
     SpikeSortingView as SortingViewSpikeSortingView,
 )
 
-from ..common.common_spikesorting import SpikeSorting, SpikeSortingRecording
+from ..spikesorting import SpikeSorting, SpikeSortingRecording
 from .prepare_spikesortingview_data import prepare_spikesortingview_data
 
 schema = dj.schema("figurl_view_spike_sorting_recording")

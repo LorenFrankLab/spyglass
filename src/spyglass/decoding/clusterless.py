@@ -5,7 +5,6 @@ References
 ----------
 [1] Denovellis, E. L. et al. Hippocampal replay of experience at real-world
 speeds. eLife 10, e64505 (2021).
-
 """
 
 import os
@@ -32,18 +31,15 @@ from replay_trajectory_classification.discrete_state_transitions import (
 from replay_trajectory_classification.initial_conditions import (
     UniformInitialConditions,
 )
+from ripple_detection import get_multiunit_population_firing_rate
+from tqdm.auto import tqdm
 
-from ripple_detection import (
-    get_multiunit_population_firing_rate,
-    multiunit_HSE_detector,
+from spyglass.common.common_behav import (
+    convert_epoch_interval_name_to_position_interval_name,
 )
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.utils.dj_helper_fn import fetch_nwb
-from spyglass.common.common_behav import (
-    convert_epoch_interval_name_to_position_interval_name,
-)
 from spyglass.decoding.core import (
     convert_valid_times_to_slice,
     get_valid_ephys_position_times_by_epoch,
@@ -61,7 +57,8 @@ from spyglass.spikesorting.spikesorting_sorting import (
     SpikeSorting,
     SpikeSortingSelection,
 )
-from tqdm.auto import tqdm
+from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("decoding_clusterless")
 
@@ -72,12 +69,14 @@ class MarkParameters(dj.Manual):
     time."""
 
     definition = """
-    mark_param_name : varchar(80) # a name for this set of parameters
+    mark_param_name : varchar(32) # a name for this set of parameters
     ---
     # the type of mark. Currently only 'amplitude' is supported
     mark_type = 'amplitude':  varchar(40)
     mark_param_dict:    BLOB    # dictionary of parameters for the mark extraction function
     """
+
+    # NOTE: See #630, #664. Excessive key length.
 
     def insert_default(self):
         """Insert the default parameter set
@@ -118,7 +117,7 @@ class UnitMarkParameters(dj.Manual):
 
 
 @schema
-class UnitMarks(dj.Computed):
+class UnitMarks(SpyglassMixin, dj.Computed):
     """For each spike time, compute a spike waveform feature associated with that
     spike. Used for clusterless decoding.
     """
@@ -224,11 +223,6 @@ class UnitMarks(dj.Computed):
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
         self.insert1(key)
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
     def fetch1_dataframe(self):
         """Convenience function for returning the marks in a readable format"""
         return self.fetch_dataframe()[0]
@@ -324,7 +318,7 @@ class UnitMarksIndicatorSelection(dj.Lookup):
 
 
 @schema
-class UnitMarksIndicator(dj.Computed):
+class UnitMarksIndicator(SpyglassMixin, dj.Computed):
     """Bins the spike times and associated spike waveform features into regular
     time bins according to the sampling rate. Features that fall into the same
     time bin are averaged.
@@ -435,11 +429,6 @@ class UnitMarksIndicator(dj.Computed):
                             marks.sel(marks=feature2),
                             s=s,
                         )
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         return self.fetch_dataframe()[0]
@@ -582,7 +571,7 @@ class ClusterlessClassifierParameters(dj.Manual):
 
 
 @schema
-class MultiunitFiringRate(dj.Computed):
+class MultiunitFiringRate(SpyglassMixin, dj.Computed):
     """Computes the population multiunit firing rate from the spikes in
     MarksIndicator."""
 
@@ -626,11 +615,6 @@ class MultiunitFiringRate(dj.Computed):
 
         self.insert1(key)
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
     def fetch1_dataframe(self):
         return self.fetch_dataframe()[0]
 
@@ -663,55 +647,6 @@ class MultiunitHighSynchronyEventsParameters(dj.Manual):
             },
             skip_duplicates=True,
         )
-
-
-@schema
-class MultiunitHighSynchronyEvents(dj.Computed):
-    """Finds times of high mulitunit activity during immobility."""
-
-    definition = """
-    -> MultiunitHighSynchronyEventsParameters
-    -> UnitMarksIndicator
-    -> IntervalPositionInfo
-    ---
-    -> AnalysisNwbfile
-    multiunit_hse_times_object_id: varchar(40)
-    """
-
-    def make(self, key):
-        marks = (UnitMarksIndicator & key).fetch_xarray()
-        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(
-            float
-        )
-        position_info = (IntervalPositionInfo() & key).fetch1_dataframe()
-
-        params = (MultiunitHighSynchronyEventsParameters & key).fetch1()
-
-        multiunit_high_synchrony_times = multiunit_HSE_detector(
-            marks.time.values,
-            multiunit_spikes,
-            position_info.head_speed.values,
-            sampling_frequency=key["sampling_rate"],
-            **params,
-        )
-
-        # Insert into analysis nwb file
-        nwb_analysis_file = AnalysisNwbfile()
-        key["analysis_file_name"] = nwb_analysis_file.create(
-            key["nwb_file_name"]
-        )
-
-        key["multiunit_hse_times_object_id"] = nwb_analysis_file.add_nwb_object(
-            analysis_file_name=key["analysis_file_name"],
-            nwb_object=multiunit_high_synchrony_times.reset_index(),
-        )
-
-        nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=key["analysis_file_name"],
-        )
-
-        self.insert1(key)
 
 
 def get_decoding_data_for_epoch(

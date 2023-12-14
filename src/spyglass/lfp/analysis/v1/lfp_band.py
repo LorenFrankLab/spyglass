@@ -13,9 +13,9 @@ from spyglass.common.common_interval import (
     interval_list_intersect,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.lfp.lfp_merge import LFPOutput
+from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("lfp_band_v1")
@@ -165,7 +165,7 @@ class LFPBandSelection(dj.Manual):
 
 
 @schema
-class LFPBandV1(dj.Computed):
+class LFPBandV1(SpyglassMixin, dj.Computed):
     definition = """
     -> LFPBandSelection              # the LFP band selection
     ---
@@ -363,11 +363,6 @@ class LFPBandV1(dj.Computed):
             )
 
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self, *attrs, **kwargs):
         """Fetches the filtered data as a dataframe"""

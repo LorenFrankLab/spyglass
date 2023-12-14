@@ -39,6 +39,10 @@
 # 2. [mamba](https://mamba.readthedocs.io/en/latest/installation.html) as a
 #    replacement for conda. Spyglass installation is significantly faster with
 #    mamba.
+#    ```bash
+#    wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+#    bash Miniforge3-$(uname)-$(uname -m).sh
+#    ```
 # 3. [VS Code](https://code.visualstudio.com/docs/python/python-tutorial) with
 #    relevant python extensions, including
 #    [Jupyter](https://code.visualstudio.com/docs/datascience/jupyter-notebooks).
@@ -96,13 +100,25 @@
 # ### Existing Database
 #
 
-# Members of the Frank Lab can run the `dj_config.py` helper script to generate
-# a config like the one below. Outside users should copy/paste `dj_local_conf_example` and adjust values accordingly.
+# Members of the Frank Lab will need to use DataJoint 0.14.2 (currently in
+# pre-release) in order to change their password on the MySQL 8 server. DataJoint
+# 0.14.2
+#
+# ```bash
+# git clone https://github.com/datajoint/datajoint-python
+# pip install ./datajoint-python
+# ```
+#
+# Members of the lab can run the `dj_config.py` helper script to generate a config
+# like the one below.
 #
 # ```bash
 # # cd spyglass
 # python config/dj_config.py <username> <base_path> <output_filename>
 # ```
+#
+# Outside users should copy/paste `dj_local_conf_example` and adjust values
+# accordingly.
 #
 # The base path (formerly `SPYGLASS_BASE_DIR`) is the directory where all data
 # will be saved. See also
@@ -151,6 +167,14 @@
 # }
 # ```
 #
+# If you see an error saying `Could not find SPYGLASS_BASE_DIR`, try loading your
+# config before importing Spyglass.
+#
+# ```python
+# import datajoint as dj
+# dj.load('/path/to/config')
+# import spyglass
+# ```
 
 # ### Running your own database
 #
@@ -161,11 +185,15 @@
 # - Add yourself to the
 #   [`docker` group](https://docs.docker.com/engine/install/linux-postinstall/) so
 #   that you don't have to be sudo to run docker.
-# - Download the docker image for datajoint/mysql
+# - Download the docker image for `datajoint/mysql:8.0`.
 #
 #   ```bash
-#   docker pull datajoint/mysql
+#   docker pull datajoint/mysql:8.0
 #   ```
+#
+# _Note_: For this demo, MySQL version won't matter. Some
+#   [database management](https://lorenfranklab.github.io/spyglass/latest/misc/database_management/#mysql-version)
+#   features of Spyglass, however, expect MySQL >= 8.
 #
 # - When run, this is referred to as a 'Docker container'
 # - Next start the container with a couple additional pieces of info...
@@ -175,7 +203,7 @@
 #   - Port mapping. Here, we map 3306 across the local machine and container.
 #
 #   ```bash
-#   docker run --name spyglass-db -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql
+#   docker run --name spyglass-db -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql:8.0
 #   ```
 #
 # - For data to persist after terminating the container,
@@ -216,6 +244,7 @@
 
 # +
 import os
+
 import datajoint as dj
 
 if os.path.basename(os.getcwd()) == "notebooks":

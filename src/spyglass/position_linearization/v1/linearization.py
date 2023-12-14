@@ -1,7 +1,8 @@
 import copy
+
 import datajoint as dj
-from datajoint.utils import to_camel_case
 import numpy as np
+from datajoint.utils import to_camel_case
 from track_linearization import (
     get_linearized_position,
     make_track_graph,
@@ -12,6 +13,7 @@ from track_linearization import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("position_linearization_v1")
 
@@ -94,7 +96,7 @@ class TrackGraph(dj.Manual):
 @schema
 class LinearizationSelection(dj.Lookup):
     definition = """
-    -> PositionOutput
+    -> PositionOutput.proj(pos_merge_id='merge_id')
     -> TrackGraph
     -> LinearizationParameters
     ---
@@ -102,7 +104,7 @@ class LinearizationSelection(dj.Lookup):
 
 
 @schema
-class LinearizedPositionV1(dj.Computed):
+class LinearizedPositionV1(SpyglassMixin, dj.Computed):
     """Linearized position for a given interval"""
 
     definition = """
@@ -116,9 +118,11 @@ class LinearizedPositionV1(dj.Computed):
         orig_key = copy.deepcopy(key)
         print(f"Computing linear position for: {key}")
 
-        position_nwb = PositionOutput.fetch_nwb(key)[0]
+        position_nwb = PositionOutput.fetch_nwb(
+            {"merge_id": key["pos_merge_id"]}
+        )[0]
         key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
+            position_nwb["nwb_file_name"]
         )
         position = np.asarray(
             position_nwb["position"].get_spatial_series().data
@@ -164,7 +168,7 @@ class LinearizedPositionV1(dj.Computed):
         )
 
         nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
+            nwb_file_name=position_nwb["nwb_file_name"],
             analysis_file_name=key["analysis_file_name"],
         )
 
@@ -176,11 +180,6 @@ class LinearizedPositionV1(dj.Computed):
 
         LinearizedPositionOutput._merge_insert(
             [orig_key], part_name=part_name, skip_duplicates=True
-        )
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
         )
 
     def fetch1_dataframe(self):

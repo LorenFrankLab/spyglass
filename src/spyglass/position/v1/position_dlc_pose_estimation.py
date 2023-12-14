@@ -9,13 +9,13 @@ import pandas as pd
 import pynwb
 from IPython.display import display
 
-from ...common.common_behav import (
+from ...common.common_behav import (  # noqa: F401
     RawPosition,
     VideoFile,
     convert_epoch_interval_name_to_position_interval_name,
-)  # noqa: F401
+)
 from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_helper_fn import fetch_nwb
+from ...utils.dj_mixin import SpyglassMixin
 from .dlc_utils import OutputLogger, infer_output_dir
 from .position_dlc_model import DLCModel
 
@@ -132,7 +132,7 @@ class DLCPoseEstimation(dj.Computed):
     meters_per_pixel : double       # conversion of meters per pixel for analyzed video
     """
 
-    class BodyPart(dj.Part):
+    class BodyPart(SpyglassMixin, dj.Part):
         definition = """ # uses DeepLabCut h5 output for body part position
         -> DLCPoseEstimation
         -> DLCModel.BodyPart
@@ -142,13 +142,7 @@ class DLCPoseEstimation(dj.Computed):
         dlc_pose_estimation_likelihood_object_id : varchar(80)
         """
 
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
+        _nwb_table = AnalysisNwbfile
 
         def fetch1_dataframe(self):
             nwb_data = self.fetch_nwb()[0]

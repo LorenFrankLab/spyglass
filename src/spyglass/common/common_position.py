@@ -23,8 +23,8 @@ from track_linearization import (
     plot_track_graph,
 )
 
-from ..settings import raw_dir
-from ..utils.dj_helper_fn import fetch_nwb
+from ..settings import raw_dir, video_dir
+from ..utils.dj_mixin import SpyglassMixin
 from .common_behav import RawPosition, VideoFile
 from .common_interval import IntervalList  # noqa F401
 from .common_nwbfile import AnalysisNwbfile
@@ -39,7 +39,7 @@ class PositionInfoParameters(dj.Lookup):
     """
 
     definition = """
-    position_info_param_name : varchar(80) # name for this set of parameters
+    position_info_param_name : varchar(32) # name for this set of parameters
     ---
     max_separation = 9.0  : float   # max distance (in cm) between head LEDs
     max_speed = 300.0     : float   # max speed (in cm / s) of animal
@@ -52,6 +52,8 @@ class PositionInfoParameters(dj.Lookup):
     upsampling_interpolation_method = linear : varchar(80) # see
         # pandas.DataFrame.interpolation for list of methods
     """
+
+    # See #630, #664. Excessive key length.
 
 
 @schema
@@ -68,7 +70,7 @@ class IntervalPositionInfoSelection(dj.Lookup):
 
 
 @schema
-class IntervalPositionInfo(dj.Computed):
+class IntervalPositionInfo(SpyglassMixin, dj.Computed):
     """Computes the smoothed head position, orientation and velocity for a given
     interval."""
 
@@ -212,7 +214,97 @@ class IntervalPositionInfo(dj.Computed):
         }
 
     @staticmethod
+    def _fix_kwargs(
+        orient_smoothing_std_dev=None,
+        speed_smoothing_std_dev=None,
+        max_LED_separation=None,
+        max_plausible_speed=None,
+        **kwargs,
+    ):
+        """Handles discrepancies between common and v1 param names."""
+        if not orient_smoothing_std_dev:
+            orient_smoothing_std_dev = kwargs.get(
+                "head_orient_smoothing_std_dev"
+            )
+        if not speed_smoothing_std_dev:
+            speed_smoothing_std_dev = kwargs.get("head_speed_smoothing_std_dev")
+        if not max_LED_separation:
+            max_LED_separation = kwargs.get("max_separation")
+        if not max_plausible_speed:
+            max_plausible_speed = kwargs.get("max_speed")
+        if not all(
+            [speed_smoothing_std_dev, max_LED_separation, max_plausible_speed]
+        ):
+            raise ValueError(
+                "Missing at least one required parameter:\n\t"
+                + f"speed_smoothing_std_dev: {speed_smoothing_std_dev}\n\t"
+                + f"max_LED_separation: {max_LED_separation}\n\t"
+                + f"max_plausible_speed: {max_plausible_speed}"
+            )
+        return (
+            orient_smoothing_std_dev,
+            speed_smoothing_std_dev,
+            max_LED_separation,
+            max_plausible_speed,
+        )
+
+    @staticmethod
+    def _upsample(
+        front_LED,
+        back_LED,
+        time,
+        sampling_rate,
+        upsampling_sampling_rate,
+        upsampling_interpolation_method,
+        **kwargs,
+    ):
+        position_df = pd.DataFrame(
+            {
+                "time": time,
+                "back_LED_x": back_LED[:, 0],
+                "back_LED_y": back_LED[:, 1],
+                "front_LED_x": front_LED[:, 0],
+                "front_LED_y": front_LED[:, 1],
+            }
+        ).set_index("time")
+
+        upsampling_start_time = time[0]
+        upsampling_end_time = time[-1]
+
+        n_samples = (
+            int(
+                np.ceil(
+                    (upsampling_end_time - upsampling_start_time)
+                    * upsampling_sampling_rate
+                )
+            )
+            + 1
+        )
+        new_time = np.linspace(
+            upsampling_start_time, upsampling_end_time, n_samples
+        )
+        new_index = pd.Index(
+            np.unique(np.concatenate((position_df.index, new_time))),
+            name="time",
+        )
+        position_df = (
+            position_df.reindex(index=new_index)
+            .interpolate(method=upsampling_interpolation_method)
+            .reindex(index=new_time)
+        )
+
+        time = np.asarray(position_df.index)
+        back_LED = np.asarray(position_df.loc[:, ["back_LED_x", "back_LED_y"]])
+        front_LED = np.asarray(
+            position_df.loc[:, ["front_LED_x", "front_LED_y"]]
+        )
+
+        sampling_rate = upsampling_sampling_rate
+
+        return front_LED, back_LED, time, sampling_rate
+
     def calculate_position_info(
+        self,
         spatial_df: pd.DataFrame,
         meters_to_pixels: float,
         position_smoothing_duration,
@@ -228,50 +320,20 @@ class IntervalPositionInfo(dj.Computed):
     ):
         CM_TO_METERS = 100
 
-        if not orient_smoothing_std_dev:
-            orient_smoothing_std_dev = kwargs.get(
-                "head_orient_smoothing_std_dev"
-            )
-        if not speed_smoothing_std_dev:
-            speed_smoothing_std_dev = kwargs.get("head_speed_smoothing_std_dev")
-        if not max_LED_separation:
-            max_LED_separation = kwargs.get("max_separation")
-        if not max_plausible_speed:
-            max_plausible_speed = kwargs.get("max_speed")
-        if not all(
-            [speed_smoothing_std_dev, max_LED_separation, max_plausible_speed]
-        ):
-            raise ValueError(
-                "Missing required parameters:\n\t"
-                + f"speed_smoothing_std_dev: {speed_smoothing_std_dev}\n\t"
-                + f"max_LED_separation: {max_LED_separation}\n\t"
-                + f"max_plausible_speed: {max_plausible_speed}"
-            )
+        (
+            orient_smoothing_std_dev,
+            speed_smoothing_std_dev,
+            max_LED_separation,
+            max_plausible_speed,
+        ) = self._fix_kwargs(
+            orient_smoothing_std_dev,
+            speed_smoothing_std_dev,
+            max_LED_separation,
+            max_plausible_speed,
+            **kwargs,
+        )
 
-        # Accepts x/y 'loc' or 'loc1' format for first pos. Renames to 'loc'
-        DEFAULT_COLS = ["xloc", "yloc", "xloc2", "yloc2", "xloc1", "yloc1"]
-        ALTERNATIVE_COLS = ["xloc1", "xloc2", "yloc1", "yloc2"]
-
-        if all([c in spatial_df.columns for c in DEFAULT_COLS[:4]]):
-            # move the 4 position columns to front, continue
-            spatial_df = spatial_df[DEFAULT_COLS[:4]]
-        elif all([c in spatial_df.columns for c in ALTERNATIVE_COLS]):
-            # move the 4 position columns to front, rename to default, continue
-            spatial_df = spatial_df[ALTERNATIVE_COLS]
-            spatial_df.columns = DEFAULT_COLS[:4]
-        else:
-            cols = list(spatial_df.columns)
-            if len(cols) != 4 or not all([c in DEFAULT_COLS for c in cols]):
-                choice = dj.utils.user_choice(
-                    "Unexpected columns in raw position. Assume "
-                    + f"{DEFAULT_COLS[:4]}?\n{spatial_df}\n"
-                )
-                if choice.lower() not in ["yes", "y"]:
-                    raise ValueError(
-                        f"Unexpected columns in raw position: {cols}"
-                    )
-            # rename first 4 columns, keep rest. Rest dropped below
-            spatial_df.columns = DEFAULT_COLS[:4] + cols[4:]
+        spatial_df = _fix_col_names(spatial_df)
         # Get spatial series properties
         time = np.asarray(spatial_df.index)  # seconds
         position = np.asarray(spatial_df.iloc[:, :4])  # meters
@@ -299,6 +361,12 @@ class IntervalPositionInfo(dj.Computed):
         # Set points to NaN where the front and back LEDs are too separated
         dist_between_LEDs = get_distance(back_LED, front_LED)
         is_too_separated = dist_between_LEDs >= max_LED_separation
+        if np.all(is_too_separated):
+            raise ValueError(
+                "All points are too far apart. If this is single LED data,"
+                + "please check that using a parameter set with large max_LED_seperation."
+                + f"Current max_LED_separation: {max_LED_separation}"
+            )
 
         back_LED[is_too_separated] = np.nan
         front_LED[is_too_separated] = np.nan
@@ -338,50 +406,14 @@ class IntervalPositionInfo(dj.Computed):
         )
 
         if is_upsampled:
-            position_df = pd.DataFrame(
-                {
-                    "time": time,
-                    "back_LED_x": back_LED[:, 0],
-                    "back_LED_y": back_LED[:, 1],
-                    "front_LED_x": front_LED[:, 0],
-                    "front_LED_y": front_LED[:, 1],
-                }
-            ).set_index("time")
-
-            upsampling_start_time = time[0]
-            upsampling_end_time = time[-1]
-
-            n_samples = (
-                int(
-                    np.ceil(
-                        (upsampling_end_time - upsampling_start_time)
-                        * upsampling_sampling_rate
-                    )
-                )
-                + 1
+            front_LED, back_LED, time, sampling_rate = self._upsample(
+                front_LED,
+                back_LED,
+                time,
+                sampling_rate,
+                upsampling_sampling_rate,
+                upsampling_interpolation_method,
             )
-            new_time = np.linspace(
-                upsampling_start_time, upsampling_end_time, n_samples
-            )
-            new_index = pd.Index(
-                np.unique(np.concatenate((position_df.index, new_time))),
-                name="time",
-            )
-            position_df = (
-                position_df.reindex(index=new_index)
-                .interpolate(method=upsampling_interpolation_method)
-                .reindex(index=new_time)
-            )
-
-            time = np.asarray(position_df.index)
-            back_LED = np.asarray(
-                position_df.loc[:, ["back_LED_x", "back_LED_y"]]
-            )
-            front_LED = np.asarray(
-                position_df.loc[:, ["front_LED_x", "front_LED_y"]]
-            )
-
-            sampling_rate = upsampling_sampling_rate
 
         # Calculate position, orientation, velocity, speed
         position = get_centriod(back_LED, front_LED)  # cm
@@ -416,11 +448,6 @@ class IntervalPositionInfo(dj.Computed):
             "velocity": velocity,
             "speed": speed,
         }
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         return self._data_to_df(self.fetch_nwb()[0])
@@ -566,7 +593,7 @@ class IntervalLinearizationSelection(dj.Lookup):
 
 
 @schema
-class IntervalLinearizedPosition(dj.Computed):
+class IntervalLinearizedPosition(SpyglassMixin, dj.Computed):
     """Linearized position for a given interval"""
 
     definition = """
@@ -641,11 +668,6 @@ class IntervalLinearizedPosition(dj.Computed):
         )
 
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")
@@ -821,16 +843,25 @@ class PositionVideo(dj.Computed):
             VideoFile()
             & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         ).fetch1()
-        io = pynwb.NWBHDF5IO(raw_dir() + video_info["nwb_file_name"], "r")
+        io = pynwb.NWBHDF5IO(raw_dir + "/" + video_info["nwb_file_name"], "r")
         nwb_file = io.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        video_filename = nwb_video.external_file.value[0]
+        video_filename = nwb_video.external_file[0]
 
         nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
         output_video_filename = (
             f"{nwb_base_filename}_{epoch:02d}_"
             f'{key["position_info_param_name"]}.mp4'
         )
+
+        # ensure standardized column names
+        raw_position_df = _fix_col_names(raw_position_df)
+        # if IntervalPositionInfo supersampled position, downsample to video
+        if position_info_df.shape[0] > raw_position_df.shape[0]:
+            ind = np.digitize(
+                raw_position_df.index, position_info_df.index, right=True
+            )
+            position_info_df = position_info_df.iloc[ind]
 
         centroids = {
             "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
@@ -848,7 +879,7 @@ class PositionVideo(dj.Computed):
 
         print("Making video...")
         self.make_video(
-            video_filename,
+            f"{video_dir}/{video_filename}",
             centroids,
             head_position_mean,
             head_orientation_mean,
@@ -1005,3 +1036,48 @@ class PositionVideo(dj.Computed):
         video.release()
         out.release()
         cv2.destroyAllWindows()
+
+
+def _fix_col_names(spatial_df):
+    """Renames columns in spatial dataframe according to previous norm
+
+    Accepts unnamed first led, 1 or 0 indexed.
+    Prompts user for confirmation of renaming unexpected columns.
+    For backwards compatibility, renames to "xloc", "yloc", "xloc2", "yloc2"
+    """
+
+    DEFAULT_COLS = ["xloc", "yloc", "xloc2", "yloc2"]
+    ONE_IDX_COLS = ["xloc1", "yloc1", "xloc2", "yloc2"]
+    ZERO_IDX_COLS = ["xloc0", "yloc0", "xloc1", "yloc1"]
+
+    input_cols = list(spatial_df.columns)
+
+    has_default = all([c in input_cols for c in DEFAULT_COLS])
+    has_0_idx = all([c in input_cols for c in ZERO_IDX_COLS])
+    has_1_idx = all([c in input_cols for c in ONE_IDX_COLS])
+
+    if has_default:
+        # move the 4 position columns to front, continue
+        spatial_df = spatial_df[DEFAULT_COLS]
+    elif has_0_idx:
+        # move the 4 position columns to front, rename to default, continue
+        spatial_df = spatial_df[ZERO_IDX_COLS]
+        spatial_df.columns = DEFAULT_COLS
+    elif has_1_idx:
+        # move the 4 position columns to front, rename to default, continue
+        spatial_df = spatial_df[ONE_IDX_COLS]
+        spatial_df.columns = DEFAULT_COLS
+    else:
+        if len(input_cols) != 4 or not has_default:
+            choice = dj.utils.user_choice(
+                "Unexpected columns in raw position. Assume "
+                + f"{DEFAULT_COLS[:4]}?\n{spatial_df}\n"
+            )
+            if choice.lower() not in ["yes", "y"]:
+                raise ValueError(
+                    f"Unexpected columns in raw position: {input_cols}"
+                )
+        # rename first 4 columns, keep rest. Rest dropped below
+        spatial_df.columns = DEFAULT_COLS + input_cols[4:]
+
+    return spatial_df

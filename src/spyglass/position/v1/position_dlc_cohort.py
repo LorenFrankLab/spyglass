@@ -1,9 +1,9 @@
+import datajoint as dj
 import numpy as np
 import pandas as pd
-import datajoint as dj
 
 from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_helper_fn import fetch_nwb
+from ...utils.dj_mixin import SpyglassMixin
 from .position_dlc_pose_estimation import DLCPoseEstimation  # noqa: F401
 from .position_dlc_position import DLCSmoothInterp
 
@@ -38,7 +38,7 @@ class DLCSmoothInterpCohort(dj.Computed):
     ---
     """
 
-    class BodyPart(dj.Part):
+    class BodyPart(SpyglassMixin, dj.Part):
         definition = """
         -> DLCSmoothInterpCohort
         -> DLCSmoothInterp
@@ -47,14 +47,6 @@ class DLCSmoothInterpCohort(dj.Computed):
         dlc_smooth_interp_position_object_id : varchar(80)
         dlc_smooth_interp_info_object_id : varchar(80)
         """
-
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
 
         def fetch1_dataframe(self):
             nwb_data = self.fetch_nwb()[0]

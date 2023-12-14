@@ -13,6 +13,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.position import PositionOutput
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("ripple_v1")
@@ -144,7 +145,7 @@ class RippleParameters(dj.Lookup):
 
 
 @schema
-class RippleTimesV1(dj.Computed):
+class RippleTimesV1(SpyglassMixin, dj.Computed):
     definition = """
     -> RippleLFPSelection
     -> RippleParameters
@@ -195,11 +196,6 @@ class RippleTimesV1(dj.Computed):
         )
 
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         """Convenience function for returning the marks in a readable format"""

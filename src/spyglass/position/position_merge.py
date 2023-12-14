@@ -6,7 +6,6 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 from datajoint.utils import to_camel_case
-from tqdm import tqdm as tqdm
 
 from ..common.common_position import IntervalPositionInfo as CommonPos
 from ..utils.dj_merge_tables import _Merge
@@ -88,12 +87,14 @@ class PositionOutput(_Merge):
 class PositionVideoSelection(dj.Manual):
     definition = """
     nwb_file_name           : varchar(255)                 # name of the NWB file
-    interval_list_name      : varchar(200)                 # descriptive name of this interval list
+    interval_list_name      : varchar(170)                 # descriptive name of this interval list
     plot_id                 : int
     plot                    : varchar(40) # Which position info to overlay on video file
     ---
     output_dir              : varchar(255)                 # directory where to save output video
     """
+
+    # NOTE: See #630, #664. Excessive key length.
 
     def insert1(self, key, **kwargs):
         key["plot_id"] = self.get_plotid(key)
@@ -205,6 +206,7 @@ class PositionVideo(dj.Computed):
             )
 
         print("Loading video data...")
+        epoch = int("".join(filter(str.isdigit, key["interval_list_name"]))) + 1
 
         (
             video_path,
@@ -212,13 +214,7 @@ class PositionVideo(dj.Computed):
             meters_per_pixel,
             video_time,
         ) = get_video_path(
-            {
-                "nwb_file_name": key["nwb_file_name"],
-                "epoch": int(
-                    "".join(filter(str.isdigit, key["interval_list_name"]))
-                )
-                + 1,
-            }
+            {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         )
         video_dir = os.path.dirname(video_path) + "/"
         video_frame_col_name = [
