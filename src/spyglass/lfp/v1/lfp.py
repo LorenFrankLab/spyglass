@@ -42,7 +42,7 @@ class LFPSelection(dj.Manual):
      -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
      -> FirFilterParameters                                                # the filter to be used
      ---
-     lfp_sampling_rate = 1000 : float                                              # the desired output sampling rate, in HZ                                                                                                                                                                                                                
+     target_sampling_rate = 1000 : float                                     # the desired output sampling rate, in HZ                                                                                                                                                                                                                
      """
 
 
