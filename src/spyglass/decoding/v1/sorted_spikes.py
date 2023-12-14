@@ -24,23 +24,23 @@ from replay_trajectory_classification.discrete_state_transitions import (
 from replay_trajectory_classification.initial_conditions import (
     UniformInitialConditions,
 )
-
-from spyglass.common.common_behav import (
-    convert_epoch_interval_name_to_position_interval_name,
-)
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.decoding.v1.core import (
+from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.common.common_behav import (
+    convert_epoch_interval_name_to_position_interval_name,
+)
+from spyglass.decoding.core import (
     convert_valid_times_to_slice,
     get_valid_ephys_position_times_by_epoch,
 )
-from spyglass.decoding.v1.dj_decoder_conversion import (
+from spyglass.decoding.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
 )
 from spyglass.spikesorting.spikesorting_curation import CuratedSpikeSorting
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("decoding_sortedspikes")
 
@@ -60,7 +60,7 @@ class SortedSpikesIndicatorSelection(dj.Lookup):
 
 
 @schema
-class SortedSpikesIndicator(dj.Computed):
+class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
     """Bins spike times into regular intervals given by the sampling rate.
     Useful for GLMs and for decoding.
 
@@ -147,11 +147,6 @@ class SortedSpikesIndicator(dj.Computed):
         n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
 
         return np.linspace(start_time, end_time, n_samples)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         return self.fetch_dataframe()[0]
