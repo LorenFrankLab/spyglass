@@ -150,10 +150,7 @@ class CurationV1(dj.Manual):
             labels=MetricCuration.get_labels(key) or None,
             merge_groups=MetricCuration.get_merge_groups(key) or None,
             apply_merge=apply_merge,
-            description=(
-                "metric curation of sorting id "
-                + f"{sorting_id}, curation id {parent_curation_id}"
-            ),
+            description=(f"metric_curation_id: {key['metric_curation_id']}"),
         )
 
         return curation_key
