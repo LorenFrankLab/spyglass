@@ -19,7 +19,7 @@ schema = dj.schema("position_linearization_v1")
 
 
 @schema
-class LinearizationParameters(dj.Lookup):
+class LinearizationParameters(SpyglassMixin, dj.Lookup):
     """Choose whether to use an HMM to linearize position. This can help when
     the eucledian distances between separate arms are too close and the previous
     position has some information about which arm the animal is on."""
@@ -37,7 +37,7 @@ class LinearizationParameters(dj.Lookup):
 
 
 @schema
-class TrackGraph(dj.Manual):
+class TrackGraph(SpyglassMixin, dj.Manual):
     """Graph representation of track representing the spatial environment.
     Used for linearizing position."""
 
@@ -94,7 +94,7 @@ class TrackGraph(dj.Manual):
 
 
 @schema
-class LinearizationSelection(dj.Lookup):
+class LinearizationSelection(SpyglassMixin, dj.Lookup):
     definition = """
     -> PositionOutput.proj(pos_merge_id='merge_id')
     -> TrackGraph

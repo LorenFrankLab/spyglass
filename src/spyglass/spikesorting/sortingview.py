@@ -1,6 +1,8 @@
 import datajoint as dj
-
 import sortingview as sv
+import spikeinterface as si
+
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 from ..common.common_lab import LabMember, LabTeam
 from .sortingview_helper_fn import (
@@ -11,20 +13,18 @@ from .spikesorting_curation import Curation
 from .spikesorting_recording import SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
 
-import spikeinterface as si
-
 schema = dj.schema("spikesorting_sortingview")
 
 
 @schema
-class SortingviewWorkspaceSelection(dj.Manual):
+class SortingviewWorkspaceSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> Curation
     """
 
 
 @schema
-class SortingviewWorkspace(dj.Computed):
+class SortingviewWorkspace(SpyglassMixin, dj.Computed):
     definition = """
     -> SortingviewWorkspaceSelection
     ---
@@ -35,7 +35,7 @@ class SortingviewWorkspace(dj.Computed):
     """
 
     # make class for parts table to hold URLs
-    class URL(dj.Part):
+    class URL(SpyglassMixin, dj.Part):
         # Table for holding URLs
         definition = """
         -> SortingviewWorkspace

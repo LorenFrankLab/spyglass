@@ -9,6 +9,8 @@ import probeinterface as pi
 import spikeinterface as si
 import spikeinterface.extractors as se
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..common.common_device import Probe, ProbeType  # noqa: F401
 from ..common.common_ephys import Electrode, ElectrodeGroup
 from ..common.common_interval import (
@@ -27,7 +29,7 @@ schema = dj.schema("spikesorting_recording")
 
 
 @schema
-class SortGroup(dj.Manual):
+class SortGroup(SpyglassMixin, dj.Manual):
     definition = """
     # Set of electrodes that will be sorted together
     -> Session
@@ -36,7 +38,7 @@ class SortGroup(dj.Manual):
     sort_reference_electrode_id = -1: int  # the electrode to use for reference. -1: no reference, -2: common median
     """
 
-    class SortGroupElectrode(dj.Part):
+    class SortGroupElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> SortGroup
         -> Electrode
@@ -318,7 +320,7 @@ class SortGroup(dj.Manual):
 
 
 @schema
-class SortInterval(dj.Manual):
+class SortInterval(SpyglassMixin, dj.Manual):
     definition = """
     -> Session
     sort_interval_name: varchar(64) # name for this interval
@@ -330,7 +332,7 @@ class SortInterval(dj.Manual):
 
 
 @schema
-class SpikeSortingPreprocessingParameters(dj.Manual):
+class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
     definition = """
     preproc_params_name: varchar(32)
     ---
@@ -358,7 +360,7 @@ class SpikeSortingPreprocessingParameters(dj.Manual):
 
 
 @schema
-class SpikeSortingRecordingSelection(dj.Manual):
+class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Defines recordings to be sorted
     -> SortGroup
@@ -371,7 +373,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
 
 
 @schema
-class SpikeSortingRecording(dj.Computed):
+class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     definition = """
     -> SpikeSortingRecordingSelection
     ---

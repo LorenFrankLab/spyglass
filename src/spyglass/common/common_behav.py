@@ -25,7 +25,7 @@ schema = dj.schema("common_behav")
 
 
 @schema
-class PositionSource(dj.Manual):
+class PositionSource(SpyglassMixin, dj.Manual):
     definition = """
     -> Session
     -> IntervalList
@@ -34,7 +34,7 @@ class PositionSource(dj.Manual):
     import_file_name: varchar(2000)  # path to import file if importing
     """
 
-    class SpatialSeries(dj.Part):
+    class SpatialSeries(SpyglassMixin, dj.Part):
         definition = """
         -> master
         id = 0 : int unsigned            # index of spatial series
@@ -143,7 +143,7 @@ class PositionSource(dj.Manual):
 
 
 @schema
-class RawPosition(dj.Imported):
+class RawPosition(SpyglassMixin, dj.Imported):
     """
 
     Notes
@@ -447,7 +447,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
 
 @schema
-class PositionIntervalMap(dj.Computed):
+class PositionIntervalMap(SpyglassMixin, dj.Computed):
     definition = """
     -> IntervalList
     ---

@@ -23,6 +23,7 @@ from spyglass.spikesorting.v1.metric_utils import (
     get_peak_offset,
 )
 from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("spikesorting_v1_metric_curation")
 
@@ -47,7 +48,7 @@ _comparison_to_function = {
 
 
 @schema
-class WaveformParameters(dj.Lookup):
+class WaveformParameters(SpyglassMixin, dj.Lookup):
     definition = """
     # Parameters for extracting waveforms from the recording based on the sorting.
     waveform_param_name: varchar(80) # name of waveform extraction parameters
@@ -86,7 +87,7 @@ class WaveformParameters(dj.Lookup):
 
 
 @schema
-class MetricParameters(dj.Lookup):
+class MetricParameters(SpyglassMixin, dj.Lookup):
     definition = """
     # Parameters for computing quality metrics of sorted units.
     metric_param_name: varchar(200)
@@ -137,7 +138,7 @@ class MetricParameters(dj.Lookup):
 
 
 @schema
-class MetricCurationParameters(dj.Lookup):
+class MetricCurationParameters(SpyglassMixin, dj.Lookup):
     definition = """
     # Parameters for curating a spike sorting based on the metrics.
     metric_curation_param_name: varchar(200)
@@ -157,7 +158,7 @@ class MetricCurationParameters(dj.Lookup):
 
 
 @schema
-class MetricCurationSelection(dj.Manual):
+class MetricCurationSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Spike sorting and parameters for metric curation. Use `insert_selection` to insert a row into this table.
     metric_curation_id: uuid
@@ -194,7 +195,7 @@ class MetricCurationSelection(dj.Manual):
 
 
 @schema
-class MetricCuration(dj.Computed):
+class MetricCuration(SpyglassMixin, dj.Computed):
     definition = """
     # Results of applying curation based on quality metrics. To do additional curation, insert another row in `CurationV1`
     -> MetricCurationSelection

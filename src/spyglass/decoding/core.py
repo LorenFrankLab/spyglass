@@ -1,16 +1,18 @@
 import numpy as np
 import pandas as pd
-from spyglass.common.common_behav import RawPosition, PositionIntervalMap
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_intersect,
-)
-from replay_trajectory_classification.observation_model import ObservationModel
 from replay_trajectory_classification.continuous_state_transitions import (
     RandomWalk,
     Uniform,
 )
 from replay_trajectory_classification.environments import Environment
+from replay_trajectory_classification.observation_model import ObservationModel
+
+from spyglass.common.common_behav import PositionIntervalMap, RawPosition
+from spyglass.common.common_interval import (
+    IntervalList,
+    interval_list_intersect,
+)
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 
 def get_valid_ephys_position_times_from_interval(

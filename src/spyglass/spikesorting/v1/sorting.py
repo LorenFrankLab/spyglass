@@ -21,6 +21,7 @@ from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 from .recording import _consolidate_intervals
 
@@ -28,7 +29,7 @@ schema = dj.schema("spikesorting_v1_sorting")
 
 
 @schema
-class SpikeSorterParameters(dj.Lookup):
+class SpikeSorterParameters(SpyglassMixin, dj.Lookup):
     definition = """
     # Spike sorting algorithm and associated parameters.
     sorter: varchar(200)
@@ -100,7 +101,7 @@ class SpikeSorterParameters(dj.Lookup):
 
 
 @schema
-class SpikeSortingSelection(dj.Manual):
+class SpikeSortingSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Processed recording and spike sorting parameters. Use `insert_selection` method to insert rows.
     sorting_id: uuid
@@ -135,7 +136,7 @@ class SpikeSortingSelection(dj.Manual):
 
 
 @schema
-class SpikeSorting(dj.Computed):
+class SpikeSorting(SpyglassMixin, dj.Computed):
     definition = """
     -> SpikeSortingSelection
     ---

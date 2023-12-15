@@ -1,6 +1,10 @@
 import datajoint as dj
 
-from spyglass.common.common_device import CameraDevice, DataAcquisitionDevice, Probe
+from spyglass.common.common_device import (
+    CameraDevice,
+    DataAcquisitionDevice,
+    Probe,
+)
 from spyglass.common.common_lab import Institution, Lab, LabMember
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_subject import Subject
@@ -29,7 +33,7 @@ class Session(SpyglassMixin, dj.Imported):
     experiment_description = NULL: varchar(2000)
     """
 
-    class DataAcquisitionDevice(dj.Part):
+    class DataAcquisitionDevice(SpyglassMixin, dj.Part):
         definition = """
         # Part table that allows a Session to be associated with multiple DataAcquisitionDevice entries.
         -> Session
@@ -40,7 +44,7 @@ class Session(SpyglassMixin, dj.Imported):
         # (see https://docs.datajoint.org/python/computation/03-master-part.html),
         # but you can use `delete(force=True)`.
 
-    class Experimenter(dj.Part):
+    class Experimenter(SpyglassMixin, dj.Part):
         definition = """
         # Part table that allows a Session to be associated with multiple LabMember entries.
         -> Session
@@ -171,7 +175,7 @@ class Session(SpyglassMixin, dj.Imported):
 
 
 @schema
-class SessionGroup(dj.Manual):
+class SessionGroup(SpyglassMixin, dj.Manual):
     definition = """
     session_group_name: varchar(200)
     ---
@@ -265,7 +269,7 @@ class SessionGroup(dj.Manual):
 
 
 @schema
-class SessionGroupSession(dj.Manual):
+class SessionGroupSession(SpyglassMixin, dj.Manual):
     definition = """
     -> SessionGroup
     -> Session

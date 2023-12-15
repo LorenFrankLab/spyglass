@@ -1,10 +1,12 @@
 import datajoint as dj
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 schema = dj.schema("common_subject")
 
 
 @schema
-class Subject(dj.Manual):
+class Subject(SpyglassMixin, dj.Manual):
     definition = """
     subject_id: varchar(80)
     ---

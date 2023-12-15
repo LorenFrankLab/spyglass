@@ -8,6 +8,8 @@ import scipy.stats as stats
 import spikeinterface as si
 from spikeinterface.core.job_tools import ChunkRecordingExecutor, ensure_n_jobs
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..common.common_interval import (
     IntervalList,
     _union_concat,
@@ -21,7 +23,7 @@ schema = dj.schema("spikesorting_artifact")
 
 
 @schema
-class ArtifactDetectionParameters(dj.Manual):
+class ArtifactDetectionParameters(SpyglassMixin, dj.Manual):
     definition = """
     # Parameters for detecting artifact times within a sort group.
     artifact_params_name: varchar(200)
@@ -46,7 +48,7 @@ class ArtifactDetectionParameters(dj.Manual):
 
 
 @schema
-class ArtifactDetectionSelection(dj.Manual):
+class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Specifies artifact detection parameters to apply to a sort group's recording.
     -> SpikeSortingRecording
@@ -57,7 +59,7 @@ class ArtifactDetectionSelection(dj.Manual):
 
 
 @schema
-class ArtifactDetection(dj.Computed):
+class ArtifactDetection(SpyglassMixin, dj.Computed):
     definition = """
     # Stores artifact times and valid no-artifact times as intervals.
     -> ArtifactDetectionSelection
@@ -136,7 +138,7 @@ class ArtifactDetection(dj.Computed):
 
 
 @schema
-class ArtifactRemovedIntervalList(dj.Manual):
+class ArtifactRemovedIntervalList(SpyglassMixin, dj.Manual):
     definition = """
     # Stores intervals without detected artifacts.
     # Note that entries can come from either ArtifactDetection() or alternative artifact removal analyses.

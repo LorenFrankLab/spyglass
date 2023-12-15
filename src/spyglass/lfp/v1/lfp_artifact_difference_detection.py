@@ -10,6 +10,7 @@ from spyglass.common.common_interval import (
     interval_from_inds,
     interval_list_intersect,
 )
+from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.nwb_helper_fn import get_valid_intervals
 
 

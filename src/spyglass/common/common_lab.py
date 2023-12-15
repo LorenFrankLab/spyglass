@@ -1,6 +1,8 @@
 """Schema for institution, lab team/name/members. Session-independent."""
 import datajoint as dj
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..utils.nwb_helper_fn import get_nwb_file
 from .common_nwbfile import Nwbfile
 
@@ -8,7 +10,7 @@ schema = dj.schema("common_lab")
 
 
 @schema
-class LabMember(dj.Manual):
+class LabMember(SpyglassMixin, dj.Manual):
     definition = """
     lab_member_name: varchar(80)
     ---
@@ -21,7 +23,7 @@ class LabMember(dj.Manual):
     # incorrect linkage. NWB does not yet provide unique IDs for names.
 
     # NOTE: PR requires table alter.
-    class LabMemberInfo(dj.Part):
+    class LabMemberInfo(SpyglassMixin, dj.Part):
         definition = """
         # Information about lab member in the context of Frank lab network
         -> LabMember
@@ -128,14 +130,14 @@ class LabMember(dj.Manual):
 
 
 @schema
-class LabTeam(dj.Manual):
+class LabTeam(SpyglassMixin, dj.Manual):
     definition = """
     team_name: varchar(80)
     ---
     team_description = "": varchar(2000)
     """
 
-    class LabTeamMember(dj.Part):
+    class LabTeamMember(SpyglassMixin, dj.Part):
         definition = """
         -> LabTeam
         -> LabMember
@@ -211,7 +213,7 @@ class LabTeam(dj.Manual):
 
 
 @schema
-class Institution(dj.Manual):
+class Institution(SpyglassMixin, dj.Manual):
     definition = """
     institution_name: varchar(80)
     """
@@ -235,7 +237,7 @@ class Institution(dj.Manual):
 
 
 @schema
-class Lab(dj.Manual):
+class Lab(SpyglassMixin, dj.Manual):
     definition = """
     lab_name: varchar(80)
     """

@@ -1,6 +1,8 @@
 import datajoint as dj
 import ndx_franklab_novela
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..utils.nwb_helper_fn import get_nwb_file
 from .errors import PopulateException
 
@@ -8,7 +10,7 @@ schema = dj.schema("common_device")
 
 
 @schema
-class DataAcquisitionDeviceSystem(dj.Manual):
+class DataAcquisitionDeviceSystem(SpyglassMixin, dj.Manual):
     definition = """
     # Known data acquisition device system names.
     data_acquisition_device_system: varchar(80)
@@ -17,7 +19,7 @@ class DataAcquisitionDeviceSystem(dj.Manual):
 
 
 @schema
-class DataAcquisitionDeviceAmplifier(dj.Manual):
+class DataAcquisitionDeviceAmplifier(SpyglassMixin, dj.Manual):
     definition = """
     # Known data acquisition device amplifier names.
     data_acquisition_device_amplifier: varchar(80)
@@ -26,7 +28,7 @@ class DataAcquisitionDeviceAmplifier(dj.Manual):
 
 
 @schema
-class DataAcquisitionDevice(dj.Manual):
+class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
     definition = """
     data_acquisition_device_name: varchar(80)
     ---
@@ -292,7 +294,7 @@ class DataAcquisitionDevice(dj.Manual):
 
 
 @schema
-class CameraDevice(dj.Manual):
+class CameraDevice(SpyglassMixin, dj.Manual):
     definition = """
     camera_name: varchar(80)
     ---
@@ -342,7 +344,7 @@ class CameraDevice(dj.Manual):
 
 
 @schema
-class ProbeType(dj.Manual):
+class ProbeType(SpyglassMixin, dj.Manual):
     definition = """
     # Type/category of probe regardless of configuration. Controlled vocabulary
     # of probe type names. e.g., Neuropixels 1.0 or NeuroNexus X-Y-Z, etc.
@@ -358,7 +360,7 @@ class ProbeType(dj.Manual):
 
 
 @schema
-class Probe(dj.Manual):
+class Probe(SpyglassMixin, dj.Manual):
     definition = """
     # A configuration of a ProbeType. For most probe types, there is only one,
     # which should always be used. For Neuropixels, the channel map (which
@@ -371,13 +373,13 @@ class Probe(dj.Manual):
     contact_side_numbering: enum("True", "False")  # Facing you when numbering
     """
 
-    class Shank(dj.Part):
+    class Shank(SpyglassMixin, dj.Part):
         definition = """
         -> Probe
         probe_shank: int              # unique shank number within probe.
         """
 
-    class Electrode(dj.Part):
+    class Electrode(SpyglassMixin, dj.Part):
         definition = """
         # Electrode configuration, with ID, contact size, X/Y/Z coordinates
         -> Probe.Shank
