@@ -355,6 +355,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 }
             )
         else:
+            lfp_band_valid_times = interval_list_censor(
+                lfp_band_valid_times, new_timestamps
+            )
             # check that the valid times are the same
             assert np.isclose(
                 tmp_valid_times[0], lfp_band_valid_times

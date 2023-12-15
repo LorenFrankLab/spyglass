@@ -74,7 +74,7 @@ class DLCPoseEstimationSelection(dj.Manual):
     def insert_estimation_task(
         cls,
         key,
-        task_mode="trigger",
+        task_mode="trigger",  # load or trigger
         params: dict = None,
         check_crop=None,
         skip_duplicates=True,
