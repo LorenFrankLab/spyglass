@@ -221,6 +221,7 @@ class SpikeSorting(dj.Computed):
                 sorter,
                 recording,
                 output_folder=sorter_temp_dir.name,
+                remove_existing_folder=True,
                 delete_output_folder=True,
                 **sorter_params,
             )
