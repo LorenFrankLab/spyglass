@@ -8,11 +8,7 @@ from replay_trajectory_classification.environments import Environment
 from replay_trajectory_classification.observation_model import ObservationModel
 
 from spyglass.common.common_behav import PositionIntervalMap, RawPosition
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_intersect,
-)
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.common.common_interval import IntervalList, interval_list_intersect
 
 
 def get_valid_ephys_position_times_from_interval(

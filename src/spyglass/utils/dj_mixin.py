@@ -98,13 +98,10 @@ class SpyglassMixin:
 
         Used to delay import of tables until needed, avoiding circular imports.
         """
-        print("Getting delete deps")
         if not self._delete_dependencies:
-            print("Importing delete deps")
             from spyglass.common import LabMember, LabTeam, Session  # noqa F401
 
             self._delete_dependencies = [LabMember, LabTeam, Session]
-        print("Returning delete deps")
         return self._delete_dependencies
 
     @property
@@ -158,7 +155,7 @@ class SpyglassMixin:
                 if table:  # table is link, will valid join to Session
                     break
 
-        else:  # if no session ancestor found and limit reached
+        elif search_limit < 1:  # if no session ancestor found and limit reached
             return  # Err kept in parent func to centralize permission logic
 
         return table * Session
@@ -205,7 +202,9 @@ class SpyglassMixin:
         for experimenter in set(experimenters):
             if user_name not in LabTeam().get_team_members(experimenter):
                 raise PermissionError(
-                    f"User {user_name} is not on a team with {experimenter}."
+                    f"User '{user_name}' is not on a team with '{experimenter}'"
+                    + ", an experimenter for session(s):\n"
+                    + f"{sess * Session.Experimenter}"
                 )
 
     # Rename to `delete` when we're ready to use it

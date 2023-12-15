@@ -2,8 +2,6 @@ import numpy as np
 import pynwb
 import scipy.signal as signal
 
-from spyglass.utils.dj_mixin import SpyglassMixin
-
 
 def hilbert_decomp(lfp_band_object, sampling_rate=1):
     """generates the analytical decomposition of the signals in the lfp_band_object
