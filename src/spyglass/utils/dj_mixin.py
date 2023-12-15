@@ -2,20 +2,58 @@ import datajoint as dj
 from datajoint.table import logger as dj_logger
 from datajoint.utils import user_choice
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.utils.dj_helper_fn import fetch_nwb
-from spyglass.utils.dj_merge_tables import delete_downstream_merge
 
 
 class SpyglassMixin:
-    """Mixin for Spyglass DataJoint tables ."""
+    """Mixin for Spyglass DataJoint tables.
+
+    Provides methods for fetching NWBFile objects and checking user permission
+    prior to deleting. As a mixin class, all Spyglass tables can inherit custom
+    methods from a central location.
+
+    Methods
+    -------
+    fetch_nwb(*attrs, **kwargs)
+        Fetch NWBFile object from relevant table. Uses either a foreign key to
+        a NWBFile table (including AnalysisNwbfile) or a _nwb_table attribute to
+        determine which table to use.
+    cautious_delete(force_permission=False, *args, **kwargs)
+        Check user permissions before deleting table rows. Permission is granted
+        to users listed as admin in LabMember table or to users on a team with
+        with the Session experimenter(s). If the table where the delete is
+        executed cannot be linked to a Session, a warning is printed and the
+        delete continues. If the Session has no experimenter, or if the user is
+        not on a team with the Session experimenter(s), a PermissionError is
+        raised. `force_permission` can be set to True to bypass permission check.
+    cdel(*args, **kwargs)
+        Alias for cautious_delete.
+    """
+
+    _nwb_table_dict = {}
+    _delete_dependencies = []
+    _merge_delete_func = None
 
     # ------------------------------- fetch_nwb -------------------------------
 
-    _nwb_table_dict = {
-        AnalysisNwbfile: "analysis_file_abs_path",
-        Nwbfile: "nwb_file_abs_path",
-    }
+    @property
+    def _table_dict(self):
+        """Dict mapping NWBFile table to path attribute name.
+
+        Used to delay import of NWBFile tables until needed, avoiding circular
+        imports.
+        """
+        if not self.__nwb_table_dict:
+            from spyglass.common.common_nwbfile import (  # noqa F401
+                AnalysisNwbfile,
+                Nwbfile,
+            )
+
+            self.__nwb_table_dict = {
+                AnalysisNwbfile: "analysis_file_abs_path",
+                Nwbfile: "nwb_file_abs_path",
+            }
+        return self.__nwb_table_dict
 
     def fetch_nwb(self, *attrs, **kwargs):
         """Fetch NWBFile object from relevant table.
@@ -27,12 +65,14 @@ class SpyglassMixin:
         '-> AnalysisNwbfile' in its definition can use a _nwb_table attribute to
         specify which table to use.
         """
+        _nwb_table_dict = self._table_dict
+        analysis_table, nwb_table = _nwb_table_dict.keys()
 
         if not hasattr(self, "_nwb_table"):
             self._nwb_table = (
-                AnalysisNwbfile
+                analysis_table
                 if "-> AnalysisNwbfile" in self.definition
-                else Nwbfile
+                else nwb_table
                 if "-> Nwbfile" in self.definition
                 else None
             )
@@ -45,12 +85,41 @@ class SpyglassMixin:
 
         return fetch_nwb(
             self,
-            (self._nwb_table, self._nwb_table_dict[self._nwb_table]),
+            (self._nwb_table, _nwb_table_dict[self._nwb_table]),
             *attrs,
             **kwargs,
         )
 
     # -------------------------------- delete ---------------------------------
+
+    @property
+    def _delete_deps(self) -> list:
+        """List of tables required for delete permission check.
+
+        Used to delay import of tables until needed, avoiding circular imports.
+        """
+        print("Getting delete deps")
+        if not self._delete_dependencies:
+            print("Importing delete deps")
+            from spyglass.common import LabMember, LabTeam, Session  # noqa F401
+
+            self._delete_dependencies = [LabMember, LabTeam, Session]
+        print("Returning delete deps")
+        return self._delete_dependencies
+
+    @property
+    def _merge_del_func(self) -> callable:
+        """Callable: delete_downstream_merge function.
+
+        Used to delay import of func until needed, avoiding circular imports.
+        """
+        if not self._merge_delete_func:
+            from spyglass.utils.dj_merge_tables import (  # noqa F401
+                delete_downstream_merge,
+            )
+
+            self._merge_delete_func = delete_downstream_merge
+        return self._merge_delete_func
 
     def _find_session(
         self,
@@ -108,7 +177,7 @@ class SpyglassMixin:
             Permission denied because (a) Session has no experimenter, or (b)
             user is not on a team with Session experimenter(s).
         """
-        from spyglass.common import LabMember, LabTeam, Session  # noqa F401
+        LabMember, LabTeam, Session = self._delete_deps
 
         dj_user = dj.config["database.user"]
         if dj_user in LabMember().admin:  # bypass permission check for admin
@@ -141,13 +210,27 @@ class SpyglassMixin:
 
     # Rename to `delete` when we're ready to use it
     # TODO: Intercept datajoint delete confirmation prompt for merge deletes
-    def cautious_delete(self, force_permission=False, *args, **kwargs):
-        """Delete table rows after checking user permission."""
+    def cautious_delete(self, force_permission: bool = False, *args, **kwargs):
+        """Delete table rows after checking user permission.
+
+        Permission is granted to users listed as admin in LabMember table or to
+        users on a team with with the Session experimenter(s). If the table
+        cannot be linked to Session, a warning is printed and the delete
+        continues. If the Session has no experimenter, or if the user is not on
+        a team with the Session experimenter(s), a PermissionError is raised.
+
+        Parameters
+        ----------
+        force_permission : bool, optional
+            Bypass permission check. Default False.
+        *args, **kwargs : Any
+            Passed to datajoint.table.Table.delete.
+        """
 
         if not force_permission:
             self._check_delete_permission()
 
-        merge_deletes = delete_downstream_merge(
+        merge_deletes = self._merge_del_func(
             self,
             restriction=self.restriction,
             dry_run=True,
