@@ -169,3 +169,8 @@ temp*
 
 # Version
 _version.py
+*.lock
+*.npz
+*.xz
+*.zip
+*.pb
