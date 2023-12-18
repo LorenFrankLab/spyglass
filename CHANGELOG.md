@@ -10,6 +10,7 @@
 - Add SpikeSorting V1 pipeline #651
 - Refactor restriction use in `delete_downstream_merge` #703
 - Minor fixes to LFPBandV1 populator #706
+- Add `cautious_delete` to Mixin class, initial implementation. #711
 
 ## [0.4.3] (November 7, 2023)
 

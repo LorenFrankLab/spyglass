@@ -33,7 +33,7 @@ schema = dj.schema("common_position")
 
 
 @schema
-class PositionInfoParameters(dj.Lookup):
+class PositionInfoParameters(SpyglassMixin, dj.Lookup):
     """
     Parameters for extracting the smoothed position, orientation and velocity.
     """
@@ -57,7 +57,7 @@ class PositionInfoParameters(dj.Lookup):
 
 
 @schema
-class IntervalPositionInfoSelection(dj.Lookup):
+class IntervalPositionInfoSelection(SpyglassMixin, dj.Lookup):
     """Combines the parameters for position extraction and a time interval to
     extract the smoothed position on.
     """
@@ -499,7 +499,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
 
 
 @schema
-class LinearizationParameters(dj.Lookup):
+class LinearizationParameters(SpyglassMixin, dj.Lookup):
     """Choose whether to use an HMM to linearize position.
 
     This can help when the euclidean distances between separate arms are too
@@ -524,7 +524,7 @@ class LinearizationParameters(dj.Lookup):
 
 
 @schema
-class TrackGraph(dj.Manual):
+class TrackGraph(SpyglassMixin, dj.Manual):
     """Graph representation of track representing the spatial environment.
 
     Used for linearizing position.
@@ -583,7 +583,7 @@ class TrackGraph(dj.Manual):
 
 
 @schema
-class IntervalLinearizationSelection(dj.Lookup):
+class IntervalLinearizationSelection(SpyglassMixin, dj.Lookup):
     definition = """
     -> IntervalPositionInfo
     -> TrackGraph
@@ -799,7 +799,7 @@ class NodePicker:
 
 
 @schema
-class PositionVideo(dj.Computed):
+class PositionVideo(SpyglassMixin, dj.Computed):
     """Creates a video of the computed head position and orientation as well as
     the original LED positions overlaid on the video of the animal.
 

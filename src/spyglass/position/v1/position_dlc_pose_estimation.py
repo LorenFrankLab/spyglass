@@ -23,7 +23,7 @@ schema = dj.schema("position_v1_dlc_pose_estimation")
 
 
 @schema
-class DLCPoseEstimationSelection(dj.Manual):
+class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> VideoFile                           # Session -> Recording + File part table
     -> DLCModel                                    # Must specify a DLC project_path
@@ -124,7 +124,7 @@ class DLCPoseEstimationSelection(dj.Manual):
 
 
 @schema
-class DLCPoseEstimation(dj.Computed):
+class DLCPoseEstimation(SpyglassMixin, dj.Computed):
     definition = """
     -> DLCPoseEstimationSelection
     ---

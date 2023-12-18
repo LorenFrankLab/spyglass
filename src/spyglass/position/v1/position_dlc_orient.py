@@ -14,7 +14,7 @@ schema = dj.schema("position_v1_dlc_orient")
 
 
 @schema
-class DLCOrientationParams(dj.Manual):
+class DLCOrientationParams(SpyglassMixin, dj.Manual):
     """
     Parameters for determining and smoothing the orientation of a set of BodyParts
     """
@@ -59,7 +59,7 @@ class DLCOrientationParams(dj.Manual):
 
 
 @schema
-class DLCOrientationSelection(dj.Manual):
+class DLCOrientationSelection(SpyglassMixin, dj.Manual):
     """ """
 
     definition = """

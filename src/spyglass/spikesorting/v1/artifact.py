@@ -21,12 +21,13 @@ from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("spikesorting_v1_artifact")
 
 
 @schema
-class ArtifactDetectionParameters(dj.Lookup):
+class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     definition = """
     # Parameters for detecting artifacts (non-neural high amplitude events).
     artifact_param_name : varchar(200)
@@ -65,7 +66,7 @@ class ArtifactDetectionParameters(dj.Lookup):
 
 
 @schema
-class ArtifactDetectionSelection(dj.Manual):
+class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Processed recording and artifact detection parameters. Use `insert_selection` method to insert new rows.
     artifact_id: uuid
@@ -99,7 +100,7 @@ class ArtifactDetectionSelection(dj.Manual):
 
 
 @schema
-class ArtifactDetection(dj.Computed):
+class ArtifactDetection(SpyglassMixin, dj.Computed):
     definition = """
     # Detected artifacts (e.g. large transients from movement).
     # Intervals are stored in IntervalList with `artifact_id` as `interval_list_name`.

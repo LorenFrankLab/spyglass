@@ -18,7 +18,7 @@ schema = dj.schema("position_v1_trodes_position")
 
 
 @schema
-class TrodesPosParams(dj.Manual):
+class TrodesPosParams(SpyglassMixin, dj.Manual):
     """
     Parameters for calculating the position (centroid, velocity, orientation)
     """
@@ -72,7 +72,7 @@ class TrodesPosParams(dj.Manual):
 
 
 @schema
-class TrodesPosSelection(dj.Manual):
+class TrodesPosSelection(SpyglassMixin, dj.Manual):
     """
     Table to pair an interval with position data
     and position determination parameters
@@ -219,7 +219,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
 
 @schema
-class TrodesPosVideo(dj.Computed):
+class TrodesPosVideo(SpyglassMixin, dj.Computed):
     """Creates a video of the computed head position and orientation as well as
     the original LED positions overlaid on the video of the animal.
 

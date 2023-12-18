@@ -12,12 +12,13 @@ from sortingview.SpikeSortingView import SpikeSortingView
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.curation import CurationV1, _merge_dict_to_list
 from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("spikesorting_v1_figurl_curation")
 
 
 @schema
-class FigURLCurationSelection(dj.Manual):
+class FigURLCurationSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Use `insert_selection` method to insert a row. Use `generate_curation_uri` method to generate a curation uri.
     figurl_curation_id: uuid
@@ -108,7 +109,7 @@ class FigURLCurationSelection(dj.Manual):
 
 
 @schema
-class FigURLCuration(dj.Computed):
+class FigURLCuration(SpyglassMixin, dj.Computed):
     definition = """
     # URL to the FigURL for manual curation of a spike sorting.
     -> FigURLCurationSelection

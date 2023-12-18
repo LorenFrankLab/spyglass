@@ -9,7 +9,14 @@ from position_tools import get_distance, get_velocity
 from ...common.common_behav import RawPosition
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_mixin import SpyglassMixin
-from .dlc_utils import _key_to_smooth_func_dict, get_span_start_stop, interp_pos
+from .dlc_utils import (
+    _key_to_smooth_func_dict,
+    get_span_start_stop,
+    interp_pos,
+    validate_list,
+    validate_option,
+    validate_smooth_params,
+)
 from .position_dlc_cohort import DLCSmoothInterpCohort
 from .position_dlc_position import DLCSmoothInterpParams
 
@@ -17,7 +24,7 @@ schema = dj.schema("position_v1_dlc_centroid")
 
 
 @schema
-class DLCCentroidParams(dj.Manual):
+class DLCCentroidParams(SpyglassMixin, dj.Manual):
     """
     Parameters for calculating the centroid
     """
@@ -97,7 +104,7 @@ class DLCCentroidParams(dj.Manual):
 
 
 @schema
-class DLCCentroidSelection(dj.Manual):
+class DLCCentroidSelection(SpyglassMixin, dj.Manual):
     """
     Table to pair a cohort of bodypart entries with
     the parameters for calculating their centroid
