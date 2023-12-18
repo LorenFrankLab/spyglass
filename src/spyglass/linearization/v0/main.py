@@ -1,10 +1,5 @@
-import cv2
 import datajoint as dj
-import matplotlib.pyplot as plt
 import numpy as np
-import pynwb
-import pynwb.behavior
-from tqdm import tqdm_notebook as tqdm
 from track_linearization import (
     get_linearized_position,
     make_track_graph,
@@ -12,11 +7,11 @@ from track_linearization import (
     plot_track_graph,
 )
 
-from spyglass.common.common_behav import RawPosition, VideoFile
+from spyglass.common.common_behav import RawPosition, VideoFile  # noqa F401
 from spyglass.common.common_interval import IntervalList  # noqa F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo  # noqa F401
-from spyglass.settings import raw_dir, video_dir
+from spyglass.settings import raw_dir
 from spyglass.utils.dj_helper_fn import fetch_nwb
 
 schema = dj.schema("linearization_v0")
@@ -29,17 +24,13 @@ class LinearizationParams(dj.Lookup):
     This can help when the euclidean distances between separate arms are too
     close and the previous position has some information about which arm the
     animal is on.
-
-    route_euclidean_distance_scaling: How much to prefer route distances between
-    successive time points that are closer to the euclidean distance. Smaller
-    numbers mean the route distance is more likely to be close to the euclidean
-    distance.
     """
 
     definition = """
     linearization_param_name : varchar(80)   # name for this set of parameters
     ---
     use_hmm = 0 : int   # use HMM to determine linearization
+    # How much to prefer route distances between successive time points that are closer to the euclidean distance. Smaller numbers mean the route distance is more likely to be close to the euclidean distance.
     route_euclidean_distance_scaling = 1.0 : float # Preference for euclidean.
     sensor_std_dev = 5.0 : float   # Uncertainty of position sensor (in cm).
     # Biases the transition matrix to prefer the current track segment.
