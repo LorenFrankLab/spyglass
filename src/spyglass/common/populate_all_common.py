@@ -1,3 +1,6 @@
+from spyglass.spikesorting.imported import ImportedSpikeSorting
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .common_behav import (
     PositionSource,
     RawPosition,
@@ -51,3 +54,6 @@ def populate_all_common(nwb_file_name):
     print("RawPosition...")
     PositionSource.insert_from_nwbfile(nwb_file_name)
     RawPosition.populate(fp)
+
+    print("Populate ImportedSpikeSorting...")
+    ImportedSpikeSorting.populate(fp)

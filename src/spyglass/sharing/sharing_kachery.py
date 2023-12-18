@@ -4,7 +4,9 @@ import datajoint as dj
 import kachery_cloud as kcl
 from datajoint.errors import DataJointError
 
-from ..common.common_lab import Lab  # noqa
+from spyglass.utils.dj_mixin import SpyglassMixin
+
+from ..common.common_lab import Lab  # noqa: F401
 from ..common.common_nwbfile import AnalysisNwbfile
 
 # define the environment variable name for the kachery zone and the cloud directory
@@ -33,7 +35,7 @@ def kachery_download_file(uri: str, dest: str, kachery_zone_name: str) -> str:
 
 
 @schema
-class KacheryZone(dj.Manual):
+class KacheryZone(SpyglassMixin, dj.Manual):
     definition = """
     kachery_zone_name: varchar(200) # the name of the kachery zone. Note that this is the same as the name of the kachery resource.
     ---
@@ -108,7 +110,7 @@ class KacheryZone(dj.Manual):
 
 
 @schema
-class AnalysisNwbfileKacherySelection(dj.Manual):
+class AnalysisNwbfileKacherySelection(SpyglassMixin, dj.Manual):
     definition = """
     -> KacheryZone
     -> AnalysisNwbfile
@@ -116,14 +118,14 @@ class AnalysisNwbfileKacherySelection(dj.Manual):
 
 
 @schema
-class AnalysisNwbfileKachery(dj.Computed):
+class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
     definition = """
     -> AnalysisNwbfileKacherySelection
     ---
     analysis_file_uri='': varchar(200)  # the uri of the file
     """
 
-    class LinkedFile(dj.Part):
+    class LinkedFile(SpyglassMixin, dj.Part):
         definition = """
         -> AnalysisNwbfileKachery
         linked_file_rel_path: varchar(200) # the path for the linked file relative to the SPYGLASS_BASE_DIR environment variable

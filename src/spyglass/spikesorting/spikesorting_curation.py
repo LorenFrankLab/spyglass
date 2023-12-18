@@ -256,7 +256,7 @@ class Curation(SpyglassMixin, dj.Manual):
 
 
 @schema
-class WaveformParameters(dj.Manual):
+class WaveformParameters(SpyglassMixin, dj.Manual):
     definition = """
     waveform_params_name: varchar(80) # name of waveform extraction parameters
     ---
@@ -291,7 +291,7 @@ class WaveformParameters(dj.Manual):
 
 
 @schema
-class WaveformSelection(dj.Manual):
+class WaveformSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> Curation
     -> WaveformParameters
@@ -300,7 +300,7 @@ class WaveformSelection(dj.Manual):
 
 
 @schema
-class Waveforms(dj.Computed):
+class Waveforms(SpyglassMixin, dj.Computed):
     definition = """
     -> WaveformSelection
     ---
@@ -380,7 +380,7 @@ class Waveforms(dj.Computed):
 
 
 @schema
-class MetricParameters(dj.Manual):
+class MetricParameters(SpyglassMixin, dj.Manual):
     definition = """
     # Parameters for computing quality metrics of sorted units
     metric_params_name: varchar(64)
@@ -459,7 +459,7 @@ class MetricParameters(dj.Manual):
 
 
 @schema
-class MetricSelection(dj.Manual):
+class MetricSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> Waveforms
     -> MetricParameters
@@ -487,7 +487,7 @@ class MetricSelection(dj.Manual):
 
 
 @schema
-class QualityMetrics(dj.Computed):
+class QualityMetrics(SpyglassMixin, dj.Computed):
     definition = """
     -> MetricSelection
     ---
@@ -644,7 +644,7 @@ _metric_name_to_func = {
 
 
 @schema
-class AutomaticCurationParameters(dj.Manual):
+class AutomaticCurationParameters(SpyglassMixin, dj.Manual):
     definition = """
     auto_curation_params_name: varchar(36)   # name of this parameter set
     ---
@@ -703,7 +703,7 @@ class AutomaticCurationParameters(dj.Manual):
 
 
 @schema
-class AutomaticCurationSelection(dj.Manual):
+class AutomaticCurationSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> QualityMetrics
     -> AutomaticCurationParameters
@@ -720,7 +720,7 @@ _comparison_to_function = {
 
 
 @schema
-class AutomaticCuration(dj.Computed):
+class AutomaticCuration(SpyglassMixin, dj.Computed):
     definition = """
     -> AutomaticCurationSelection
     ---
@@ -869,7 +869,7 @@ class AutomaticCuration(dj.Computed):
 
 
 @schema
-class CuratedSpikeSortingSelection(dj.Manual):
+class CuratedSpikeSortingSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> Curation
     """
@@ -884,7 +884,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
     units_object_id: varchar(40)
     """
 
-    class Unit(dj.Part):
+    class Unit(SpyglassMixin, dj.Part):
         definition = """
         # Table for holding sorted units
         -> CuratedSpikeSorting
@@ -997,7 +997,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
 
 
 @schema
-class UnitInclusionParameters(dj.Manual):
+class UnitInclusionParameters(SpyglassMixin, dj.Manual):
     definition = """
     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
     ---

@@ -6,8 +6,9 @@ import numpy as np
 import pandas as pd
 import pynwb
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..utils.dj_helper_fn import fetch_nwb  # dj_replace
-from ..utils.dj_mixin import SpyglassMixin
 from ..utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
@@ -32,7 +33,7 @@ schema = dj.schema("common_ephys")
 
 
 @schema
-class ElectrodeGroup(dj.Imported):
+class ElectrodeGroup(SpyglassMixin, dj.Imported):
     definition = """
     # Grouping of electrodes corresponding to a physical probe.
     -> Session
@@ -73,7 +74,7 @@ class ElectrodeGroup(dj.Imported):
 
 
 @schema
-class Electrode(dj.Imported):
+class Electrode(SpyglassMixin, dj.Imported):
     definition = """
     -> ElectrodeGroup
     electrode_id: int                      # the unique number for this electrode
@@ -327,12 +328,12 @@ class SampleCount(SpyglassMixin, dj.Imported):
 
 
 @schema
-class LFPSelection(dj.Manual):
+class LFPSelection(SpyglassMixin, dj.Manual):
     definition = """
      -> Session
      """
 
-    class LFPElectrode(dj.Part):
+    class LFPElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> LFPSelection
         -> Electrode
@@ -495,7 +496,7 @@ class LFP(SpyglassMixin, dj.Imported):
 
 
 @schema
-class LFPBandSelection(dj.Manual):
+class LFPBandSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> LFP
     -> FirFilterParameters                   # the filter to use for the data
@@ -505,7 +506,7 @@ class LFPBandSelection(dj.Manual):
     min_interval_len = 1: float  # the minimum length of a valid interval to filter
     """
 
-    class LFPBandElectrode(dj.Part):
+    class LFPBandElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> LFPBandSelection
         -> LFPSelection.LFPElectrode  # the LFP electrode to be filtered
@@ -834,7 +835,7 @@ class LFPBand(SpyglassMixin, dj.Computed):
 
 
 @schema
-class ElectrodeBrainRegion(dj.Manual):
+class ElectrodeBrainRegion(SpyglassMixin, dj.Manual):
     definition = """
     # Table with brain region of electrodes determined post-experiment e.g. via histological analysis or CT
     -> Electrode

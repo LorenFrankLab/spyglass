@@ -46,7 +46,7 @@ schema = dj.schema("decoding_sortedspikes")
 
 
 @schema
-class SortedSpikesIndicatorSelection(dj.Lookup):
+class SortedSpikesIndicatorSelection(SpyglassMixin, dj.Lookup):
     """Bins spike times into regular intervals given by the sampling rate.
     Start and stop time of the interval are defined by the interval list.
     """
@@ -207,7 +207,7 @@ def make_default_decoding_parameters_gpu():
 
 
 @schema
-class SortedSpikesClassifierParameters(dj.Manual):
+class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
     """Stores parameters for decoding with sorted spikes"""
 
     definition = """

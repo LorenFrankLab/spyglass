@@ -22,11 +22,11 @@ schema = dj.schema("lfp_band_v1")
 
 
 @schema
-class LFPBandSelection(dj.Manual):
+class LFPBandSelection(SpyglassMixin, dj.Manual):
     """The user's selection of LFP data to be filtered in a given frequency band."""
 
     definition = """
-    -> LFPOutput.proj(lfp_merge_id='merge_id')                                # the LFP data to be filtered
+    -> LFPOutput.proj(lfp_merge_id='merge_id')                            # the LFP data to be filtered
     -> FirFilterParameters                                                # the filter to use for the data
     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
     lfp_band_sampling_rate: int                                           # the sampling rate for this band
@@ -34,7 +34,7 @@ class LFPBandSelection(dj.Manual):
     min_interval_len = 1.0: float  # the minimum length of a valid interval to filter
     """
 
-    class LFPBandElectrode(dj.Part):
+    class LFPBandElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> LFPBandSelection # the LFP band selection
         -> LFPElectrodeGroup.LFPElectrode  # the LFP electrode to be filtered
@@ -355,6 +355,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 }
             )
         else:
+            lfp_band_valid_times = interval_list_censor(
+                lfp_band_valid_times, new_timestamps
+            )
             # check that the valid times are the same
             assert np.isclose(
                 tmp_valid_times[0], lfp_band_valid_times

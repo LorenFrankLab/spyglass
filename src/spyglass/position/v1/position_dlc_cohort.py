@@ -11,7 +11,7 @@ schema = dj.schema("position_v1_dlc_cohort")
 
 
 @schema
-class DLCSmoothInterpCohortSelection(dj.Manual):
+class DLCSmoothInterpCohortSelection(SpyglassMixin, dj.Manual):
     """
     Table to specify which combination of bodyparts from DLCSmoothInterp
     get combined into a cohort
@@ -26,7 +26,7 @@ class DLCSmoothInterpCohortSelection(dj.Manual):
 
 
 @schema
-class DLCSmoothInterpCohort(dj.Computed):
+class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
     """
     Table to combine multiple bodyparts from DLCSmoothInterp
     to enable centroid/orientation calculations

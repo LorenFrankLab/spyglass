@@ -12,7 +12,6 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.position import PositionOutput
-from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
@@ -42,13 +41,13 @@ def interpolate_to_new_time(
 
 
 @schema
-class RippleLFPSelection(dj.Manual):
+class RippleLFPSelection(SpyglassMixin, dj.Manual):
     definition = """
      -> LFPBandV1
      group_name = 'CA1' : varchar(80)
      """
 
-    class RippleLFPElectrode(dj.Part):
+    class RippleLFPElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> RippleLFPSelection
         -> LFPBandSelection.LFPBandElectrode
@@ -118,7 +117,7 @@ class RippleLFPSelection(dj.Manual):
 
 
 @schema
-class RippleParameters(dj.Lookup):
+class RippleParameters(SpyglassMixin, dj.Lookup):
     definition = """
     ripple_param_name : varchar(80) # a name for this set of parameters
     ----

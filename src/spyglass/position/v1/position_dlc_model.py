@@ -5,6 +5,8 @@ from pathlib import Path, PosixPath, PurePath
 import datajoint as dj
 import ruamel.yaml as yaml
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from . import dlc_reader
 from .dlc_decorators import accepts
 from .position_dlc_project import BodyPart, DLCProject  # noqa: F401
@@ -14,7 +16,7 @@ schema = dj.schema("position_v1_dlc_model")
 
 
 @schema
-class DLCModelInput(dj.Manual):
+class DLCModelInput(SpyglassMixin, dj.Manual):
     """Table to hold model path if model is being input
     from local disk instead of Spyglass
     """
@@ -44,7 +46,7 @@ class DLCModelInput(dj.Manual):
 
 
 @schema
-class DLCModelSource(dj.Manual):
+class DLCModelSource(SpyglassMixin, dj.Manual):
     """Table to determine whether model originates from
     upstream DLCModelTraining table, or from local directory
     """
@@ -56,7 +58,7 @@ class DLCModelSource(dj.Manual):
     source         : enum ('FromUpstream', 'FromImport')
     """
 
-    class FromImport(dj.Part):
+    class FromImport(SpyglassMixin, dj.Part):
         definition = """
         -> DLCModelSource
         -> DLCModelInput
@@ -64,7 +66,7 @@ class DLCModelSource(dj.Manual):
         project_path : varchar(255)
         """
 
-    class FromUpstream(dj.Part):
+    class FromUpstream(SpyglassMixin, dj.Part):
         definition = """
         -> DLCModelSource
         -> DLCModelTraining
@@ -107,7 +109,7 @@ class DLCModelSource(dj.Manual):
 
 
 @schema
-class DLCModelParams(dj.Manual):
+class DLCModelParams(SpyglassMixin, dj.Manual):
     definition = """
     dlc_model_params_name: varchar(40)
     ---
@@ -138,7 +140,7 @@ class DLCModelParams(dj.Manual):
 
 
 @schema
-class DLCModelSelection(dj.Manual):
+class DLCModelSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> DLCModelSource
     -> DLCModelParams
@@ -147,7 +149,7 @@ class DLCModelSelection(dj.Manual):
 
 
 @schema
-class DLCModel(dj.Computed):
+class DLCModel(SpyglassMixin, dj.Computed):
     definition = """
     -> DLCModelSelection
     ---
@@ -166,7 +168,7 @@ class DLCModel(dj.Computed):
     """
     # project_path is the only item required downstream in the pose schema
 
-    class BodyPart(dj.Part):  # noqa: F811
+    class BodyPart(SpyglassMixin, dj.Part):  # noqa: F811
         definition = """
         -> DLCModel
         -> BodyPart
@@ -261,7 +263,7 @@ class DLCModel(dj.Computed):
 
 
 @schema
-class DLCModelEvaluation(dj.Computed):
+class DLCModelEvaluation(SpyglassMixin, dj.Computed):
     definition = """
     -> DLCModel
     ---

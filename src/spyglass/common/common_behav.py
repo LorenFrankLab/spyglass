@@ -25,7 +25,7 @@ schema = dj.schema("common_behav")
 
 
 @schema
-class PositionSource(dj.Manual):
+class PositionSource(SpyglassMixin, dj.Manual):
     definition = """
     -> Session
     -> IntervalList
@@ -34,7 +34,7 @@ class PositionSource(dj.Manual):
     import_file_name: varchar(2000)  # path to import file if importing
     """
 
-    class SpatialSeries(dj.Part):
+    class SpatialSeries(SpyglassMixin, dj.Part):
         definition = """
         -> master
         id = 0 : int unsigned            # index of spatial series
@@ -143,7 +143,7 @@ class PositionSource(dj.Manual):
 
 
 @schema
-class RawPosition(dj.Imported):
+class RawPosition(SpyglassMixin, dj.Imported):
     """
 
     Notes
@@ -447,7 +447,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
 
 @schema
-class PositionIntervalMap(dj.Computed):
+class PositionIntervalMap(SpyglassMixin, dj.Computed):
     definition = """
     -> IntervalList
     ---
@@ -596,13 +596,9 @@ def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
     interval_list_name : str
         The interval list name.
     """
-    interval_names = [
-        x
-        for x in (IntervalList() & {"nwb_file_name": nwb_file_name}).fetch(
-            "interval_list_name"
-        )
-        if (x.split("_")[0] == f"{epoch:02}")
-    ]
+    interval_names = (
+        TaskEpoch & {"nwb_file_name": nwb_file_name, "epoch": epoch}
+    ).fetch("interval_list_name")
 
     if len(interval_names) != 1:
         print(

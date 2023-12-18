@@ -4,16 +4,21 @@ import pandas as pd
 import pynwb
 
 from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_helper_fn import fetch_nwb
 from ...utils.dj_mixin import SpyglassMixin
-from .dlc_utils import _key_to_smooth_func_dict, get_span_start_stop, interp_pos
+from .dlc_utils import (
+    _key_to_smooth_func_dict,
+    get_span_start_stop,
+    interp_pos,
+    validate_option,
+    validate_smooth_params,
+)
 from .position_dlc_pose_estimation import DLCPoseEstimation
 
 schema = dj.schema("position_v1_dlc_position")
 
 
 @schema
-class DLCSmoothInterpParams(dj.Manual):
+class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
     """
     Parameters for extracting the smoothed head position.
 
@@ -126,7 +131,7 @@ class DLCSmoothInterpParams(dj.Manual):
 
 
 @schema
-class DLCSmoothInterpSelection(dj.Manual):
+class DLCSmoothInterpSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> DLCPoseEstimation.BodyPart
     -> DLCSmoothInterpParams
