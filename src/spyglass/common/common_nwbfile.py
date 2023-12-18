@@ -310,13 +310,15 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = Path(os.getenv("SPYGLASS_BASE_DIR", None))
-        assert (
-            base_dir is not None
-        ), "You must set SPYGLASS_BASE_DIR environment variable."
+        try:
+            base_dir = Path(dj.config["stores"]["analysis"]["location"])
+        except KeyError as e:
+            raise KeyError(
+                "You must set the 'analysis' store location in dj.config"
+            ) from e
 
         # see if the file exists and is stored in the base analysis dir
-        test_path = str(base_dir / "analysis" / analysis_nwb_file_name)
+        test_path = str(base_dir / analysis_nwb_file_name)
 
         if os.path.exists(test_path):
             return test_path
@@ -324,7 +326,6 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             # use the new path
             analysis_file_base_path = (
                 base_dir
-                / "analysis"
                 / AnalysisNwbfile.__get_analysis_file_dir(
                     analysis_nwb_file_name
                 )
