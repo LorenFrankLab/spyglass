@@ -43,17 +43,17 @@ class SpyglassMixin:
         Used to delay import of NWBFile tables until needed, avoiding circular
         imports.
         """
-        if not self.__nwb_table_dict:
+        if not self._nwb_table_dict:
             from spyglass.common.common_nwbfile import (  # noqa F401
                 AnalysisNwbfile,
                 Nwbfile,
             )
 
-            self.__nwb_table_dict = {
+            self._nwb_table_dict = {
                 AnalysisNwbfile: "analysis_file_abs_path",
                 Nwbfile: "nwb_file_abs_path",
             }
-        return self.__nwb_table_dict
+        return self._nwb_table_dict
 
     def fetch_nwb(self, *attrs, **kwargs):
         """Fetch NWBFile object from relevant table.
