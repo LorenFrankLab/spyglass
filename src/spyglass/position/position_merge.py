@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 from datajoint.utils import to_camel_case
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..common.common_position import IntervalPositionInfo as CommonPos
 from ..utils.dj_merge_tables import _Merge
 from .v1.dlc_utils import check_videofile, get_video_path, make_video
@@ -24,7 +26,7 @@ source_class_dict = {
 
 
 @schema
-class PositionOutput(_Merge):
+class PositionOutput(SpyglassMixin, _Merge):
     """
     Table to identify source of Position Information from upstream options
     (e.g. DLC, Trodes, etc...) To add another upstream option, a new Part table
@@ -37,7 +39,7 @@ class PositionOutput(_Merge):
     source: varchar(32)
     """
 
-    class DLCPosV1(dj.Part):
+    class DLCPosV1(SpyglassMixin, dj.Part):
         """
         Table to pass-through upstream DLC Pose Estimation information
         """
@@ -48,7 +50,7 @@ class PositionOutput(_Merge):
         -> DLCPosV1
         """
 
-    class TrodesPosV1(dj.Part):
+    class TrodesPosV1(SpyglassMixin, dj.Part):
         """
         Table to pass-through upstream Trodes Position Tracking information
         """
@@ -59,7 +61,7 @@ class PositionOutput(_Merge):
         -> TrodesPosV1
         """
 
-    class CommonPos(dj.Part):
+    class CommonPos(SpyglassMixin, dj.Part):
         """
         Table to pass-through upstream Trodes Position Tracking information
         """
@@ -84,7 +86,7 @@ class PositionOutput(_Merge):
 
 
 @schema
-class PositionVideoSelection(dj.Manual):
+class PositionVideoSelection(SpyglassMixin, dj.Manual):
     definition = """
     nwb_file_name           : varchar(255)                 # name of the NWB file
     interval_list_name      : varchar(170)                 # descriptive name of this interval list
@@ -118,7 +120,7 @@ class PositionVideoSelection(dj.Manual):
 
 
 @schema
-class PositionVideo(dj.Computed):
+class PositionVideo(SpyglassMixin, dj.Computed):
     """Creates a video of the computed head position and orientation as well as
     the original LED positions overlaid on the video of the animal.
 

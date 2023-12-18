@@ -5,6 +5,8 @@ from sortingview.SpikeSortingView import (
     SpikeSortingView as SortingViewSpikeSortingView,
 )
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..spikesorting import SpikeSorting, SpikeSortingRecording
 from .prepare_spikesortingview_data import prepare_spikesortingview_data
 
@@ -12,7 +14,7 @@ schema = dj.schema("figurl_view_spike_sorting_recording")
 
 
 @schema
-class SpikeSortingView(dj.Computed):
+class SpikeSortingView(SpyglassMixin, dj.Computed):
     definition = """
     # Schema for storing figurl views of spike sorting
     -> SpikeSorting

@@ -2,6 +2,7 @@ import os
 import random
 import stat
 import string
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -9,7 +10,8 @@ import pandas as pd
 import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
-from pathlib import Path
+
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 from ..settings import raw_dir
 from ..utils.dj_helper_fn import get_child_tables
@@ -38,7 +40,7 @@ NWB_KEEP_FIELDS = (
 
 
 @schema
-class Nwbfile(dj.Manual):
+class Nwbfile(SpyglassMixin, dj.Manual):
     definition = """
     # Table for holding the NWB files.
     nwb_file_name: varchar(64)   # name of the NWB file
@@ -147,7 +149,7 @@ class Nwbfile(dj.Manual):
 # TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
 # We therefore need another way to keep track of the
 @schema
-class AnalysisNwbfile(dj.Manual):
+class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting.
     analysis_file_name: varchar(64)               # name of the file
@@ -649,7 +651,7 @@ class AnalysisNwbfile(dj.Manual):
 
 
 @schema
-class NwbfileKachery(dj.Computed):
+class NwbfileKachery(SpyglassMixin, dj.Computed):
     definition = """
     -> Nwbfile
     ---
@@ -667,7 +669,7 @@ class NwbfileKachery(dj.Computed):
 
 
 @schema
-class AnalysisNwbfileKachery(dj.Computed):
+class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
     definition = """
     -> AnalysisNwbfile
     ---

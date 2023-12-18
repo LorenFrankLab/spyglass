@@ -64,7 +64,7 @@ schema = dj.schema("decoding_clusterless")
 
 
 @schema
-class MarkParameters(dj.Manual):
+class MarkParameters(SpyglassMixin, dj.Manual):
     """Defines the type of spike waveform feature computed for a given spike
     time."""
 
@@ -109,7 +109,7 @@ class MarkParameters(dj.Manual):
 
 
 @schema
-class UnitMarkParameters(dj.Manual):
+class UnitMarkParameters(SpyglassMixin, dj.Manual):
     definition = """
     -> CuratedSpikeSorting
     -> MarkParameters
@@ -305,7 +305,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
 
 
 @schema
-class UnitMarksIndicatorSelection(dj.Lookup):
+class UnitMarksIndicatorSelection(SpyglassMixin, dj.Lookup):
     """Bins the spike times and associated spike waveform features for a given
     time interval into regular time bins determined by the sampling rate."""
 
@@ -519,7 +519,7 @@ def make_default_decoding_parameters_gpu():
 
 
 @schema
-class ClusterlessClassifierParameters(dj.Manual):
+class ClusterlessClassifierParameters(SpyglassMixin, dj.Manual):
     """Decodes the animal's mental position and some category of interest
     from unclustered spikes and spike waveform features
     """
@@ -626,7 +626,7 @@ class MultiunitFiringRate(SpyglassMixin, dj.Computed):
 
 
 @schema
-class MultiunitHighSynchronyEventsParameters(dj.Manual):
+class MultiunitHighSynchronyEventsParameters(SpyglassMixin, dj.Manual):
     """Parameters for extracting times of high mulitunit activity during immobility."""
 
     definition = """

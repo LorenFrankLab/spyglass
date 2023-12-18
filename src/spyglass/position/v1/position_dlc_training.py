@@ -4,6 +4,8 @@ from pathlib import Path
 
 import datajoint as dj
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .dlc_utils import OutputLogger
 from .position_dlc_project import DLCProject
 
@@ -11,7 +13,7 @@ schema = dj.schema("position_v1_dlc_training")
 
 
 @schema
-class DLCModelTrainingParams(dj.Lookup):
+class DLCModelTrainingParams(SpyglassMixin, dj.Lookup):
     definition = """
     # Parameters to specify a DLC model training instance
     # For DLC ≤ v2.0, include scorer_lecacy = True in params
@@ -95,7 +97,7 @@ class DLCModelTrainingParams(dj.Lookup):
 
 
 @schema
-class DLCModelTrainingSelection(dj.Manual):
+class DLCModelTrainingSelection(SpyglassMixin, dj.Manual):
     definition = """      # Specification for a DLC model training instance
     -> DLCProject
     -> DLCModelTrainingParams
@@ -116,7 +118,7 @@ class DLCModelTrainingSelection(dj.Manual):
 
 
 @schema
-class DLCModelTraining(dj.Computed):
+class DLCModelTraining(SpyglassMixin, dj.Computed):
     definition = """
     -> DLCModelTrainingSelection
     ---

@@ -12,6 +12,8 @@ import spikeinterface.preprocessing as sip
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..common.common_lab import LabMember, LabTeam
 from ..common.common_nwbfile import AnalysisNwbfile
 from ..settings import sorting_dir, temp_dir
@@ -25,7 +27,7 @@ schema = dj.schema("spikesorting_sorting")
 
 
 @schema
-class SpikeSorterParameters(dj.Manual):
+class SpikeSorterParameters(SpyglassMixin, dj.Manual):
     definition = """
     sorter: varchar(32)
     sorter_params_name: varchar(64)
@@ -105,7 +107,7 @@ class SpikeSorterParameters(dj.Manual):
 
 
 @schema
-class SpikeSortingSelection(dj.Manual):
+class SpikeSortingSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Table for holding selection of recording and parameters for each spike sorting run
     -> SpikeSortingRecording
@@ -117,7 +119,7 @@ class SpikeSortingSelection(dj.Manual):
 
 
 @schema
-class SpikeSorting(dj.Computed):
+class SpikeSorting(SpyglassMixin, dj.Computed):
     definition = """
     -> SpikeSortingSelection
     ---
@@ -221,6 +223,7 @@ class SpikeSorting(dj.Computed):
                 sorter,
                 recording,
                 output_folder=sorter_temp_dir.name,
+                remove_existing_folder=True,
                 delete_output_folder=True,
                 **sorter_params,
             )

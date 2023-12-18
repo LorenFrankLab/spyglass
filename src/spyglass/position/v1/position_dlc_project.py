@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ...common.common_lab import LabTeam
 from .dlc_utils import _set_permissions, check_videofile, get_video_path
 
@@ -20,7 +22,7 @@ schema = dj.schema("position_v1_dlc_project")
 
 
 @schema
-class BodyPart(dj.Manual):
+class BodyPart(SpyglassMixin, dj.Manual):
     """Holds bodyparts for use in DeepLabCut models"""
 
     definition = """
@@ -55,7 +57,7 @@ class BodyPart(dj.Manual):
 
 
 @schema
-class DLCProject(dj.Manual):
+class DLCProject(SpyglassMixin, dj.Manual):
     """Table to facilitate creation of a new DeepLabCut model.
     With ability to edit config, extract frames, label frames
     """
@@ -71,7 +73,7 @@ class DLCProject(dj.Manual):
     config_path      : varchar(120) # path to config.yaml for model
     """
 
-    class BodyPart(dj.Part):
+    class BodyPart(SpyglassMixin, dj.Part):
         """Part table to hold bodyparts used in each project."""
 
         definition = """
@@ -79,7 +81,7 @@ class DLCProject(dj.Manual):
         -> BodyPart
         """
 
-    class File(dj.Part):
+    class File(SpyglassMixin, dj.Part):
         definition = """
         # Paths of training files (e.g., labeled pngs, CSV or video)
         -> DLCProject

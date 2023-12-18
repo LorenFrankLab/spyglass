@@ -11,6 +11,7 @@ from spyglass.common.common_ephys import Raw
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("spikesorting_v1_curation")
 
@@ -18,7 +19,7 @@ valid_labels = ["reject", "noise", "artifact", "mua", "accept"]
 
 
 @schema
-class CurationV1(dj.Manual):
+class CurationV1(SpyglassMixin, dj.Manual):
     definition = """
     # Curation of a SpikeSorting. Use `insert_curation` to insert rows.
     -> SpikeSorting
@@ -150,10 +151,7 @@ class CurationV1(dj.Manual):
             labels=MetricCuration.get_labels(key) or None,
             merge_groups=MetricCuration.get_merge_groups(key) or None,
             apply_merge=apply_merge,
-            description=(
-                "metric curation of sorting id "
-                + f"{sorting_id}, curation id {parent_curation_id}"
-            ),
+            description=(f"metric_curation_id: {key['metric_curation_id']}"),
         )
 
         return curation_key

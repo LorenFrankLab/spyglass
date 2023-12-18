@@ -1,3 +1,6 @@
+from spyglass.spikesorting.imported import ImportedSpikeSorting
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .common_behav import (
     PositionSource,
     RawPosition,
@@ -9,7 +12,6 @@ from .common_ephys import Electrode, ElectrodeGroup, Raw, SampleCount
 from .common_nwbfile import Nwbfile
 from .common_session import Session
 from .common_task import TaskEpoch
-from spyglass.spikesorting.imported import ImportedSpikeSorting
 
 
 def populate_all_common(nwb_file_name):
