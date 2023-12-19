@@ -11,10 +11,8 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
-from spyglass.settings import analysis_dir
+from spyglass.settings import analysis_dir, rar_dir
 from spyglass.utils.dj_mixin import SpyglassMixin
-
-from ..settings import raw_dir
 from ..utils.dj_helper_fn import get_child_tables
 from ..utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
