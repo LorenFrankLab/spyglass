@@ -310,7 +310,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The absolute path for the given file name.
         """
         # see if the file exists and is stored in the base analysis dir
-        test_path = str(Path(analysis_dir) / analysis_nwb_file_name)
+        test_path = f"{analysis_dir}/{analysis_nwb_file_name}"
 
         if os.path.exists(test_path):
             return test_path
