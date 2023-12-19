@@ -412,7 +412,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             }
         ).fetch1("sort_reference_electrode_id")
         recording_channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
-        all_channel_ids = np.unique(channel_ids + ref_channel_id)
+        all_channel_ids = np.unique(np.append(channel_ids, ref_channel_id))
 
         probe_type_by_channel = []
         electrode_group_by_channel = []
