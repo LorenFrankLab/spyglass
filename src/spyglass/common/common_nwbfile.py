@@ -11,6 +11,7 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
+from spyglass.settings import analysis_dir
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 from ..settings import raw_dir
@@ -298,7 +299,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     def get_abs_path(analysis_nwb_file_name):
         """Return the absolute path for a stored analysis NWB file given just the file name.
 
-        The SPYGLASS_BASE_DIR environment variable must be set.
+        The spyglass config from settings.py must be set.
 
         Parameters
         ----------
@@ -310,26 +311,16 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        try:
-            base_dir = Path(dj.config["stores"]["analysis"]["location"])
-        except KeyError as e:
-            raise KeyError(
-                "You must set the 'analysis' store location in dj.config"
-            ) from e
-
         # see if the file exists and is stored in the base analysis dir
-        test_path = str(base_dir / analysis_nwb_file_name)
+        test_path = str(Path(analysis_dir) / analysis_nwb_file_name)
 
         if os.path.exists(test_path):
             return test_path
         else:
             # use the new path
-            analysis_file_base_path = (
-                base_dir
-                / AnalysisNwbfile.__get_analysis_file_dir(
-                    analysis_nwb_file_name
-                )
-            )
+            analysis_file_base_path = Path(
+                analysis_dir
+            ) / AnalysisNwbfile.__get_analysis_file_dir(analysis_nwb_file_name)
             if not analysis_file_base_path.exists():
                 os.mkdir(str(analysis_file_base_path))
             return str(analysis_file_base_path / analysis_nwb_file_name)
