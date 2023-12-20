@@ -26,7 +26,7 @@ source_class_dict = {
 
 
 @schema
-class PositionOutput(SpyglassMixin, _Merge):
+class PositionOutput(_Merge, SpyglassMixin):
     """
     Table to identify source of Position Information from upstream options
     (e.g. DLC, Trodes, etc...) To add another upstream option, a new Part table
