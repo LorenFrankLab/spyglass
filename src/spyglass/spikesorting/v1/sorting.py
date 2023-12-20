@@ -17,10 +17,12 @@ from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.settings import temp_dir
 from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 from .recording import _consolidate_intervals
 
@@ -28,7 +30,7 @@ schema = dj.schema("spikesorting_v1_sorting")
 
 
 @schema
-class SpikeSorterParameters(dj.Lookup):
+class SpikeSorterParameters(SpyglassMixin, dj.Lookup):
     definition = """
     # Spike sorting algorithm and associated parameters.
     sorter: varchar(200)
@@ -100,7 +102,7 @@ class SpikeSorterParameters(dj.Lookup):
 
 
 @schema
-class SpikeSortingSelection(dj.Manual):
+class SpikeSortingSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Processed recording and spike sorting parameters. Use `insert_selection` method to insert rows.
     sorting_id: uuid
@@ -135,7 +137,7 @@ class SpikeSortingSelection(dj.Manual):
 
 
 @schema
-class SpikeSorting(dj.Computed):
+class SpikeSorting(SpyglassMixin, dj.Computed):
     definition = """
     -> SpikeSortingSelection
     ---
@@ -241,9 +243,7 @@ class SpikeSorting(dj.Computed):
             )
         else:
             # Specify tempdir (expected by some sorters like mountainsort4)
-            sorter_temp_dir = tempfile.TemporaryDirectory(
-                dir=os.getenv("SPYGLASS_TEMP_DIR")
-            )
+            sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
             sorter_params["tempdir"] = sorter_temp_dir.name
             # if whitening is specified in sorter params, apply whitening separately
             # prior to sorting and turn off "sorter whitening"
@@ -335,12 +335,17 @@ def _write_sorting_to_nwb(
             name="curation_label",
             description="curation label applied to a unit",
         )
+        obs_interval = (
+            sort_interval
+            if sort_interval.ndim == 2
+            else sort_interval.reshape(1, 2)
+        )
         for unit_id in sorting.get_unit_ids():
             spike_times = sorting.get_unit_spike_train(unit_id)
             nwbf.add_unit(
                 spike_times=timestamps[spike_times],
                 id=unit_id,
-                obs_intervals=sort_interval,
+                obs_intervals=obs_interval,
                 curation_label="uncurated",
             )
         units_object_id = nwbf.units.object_id

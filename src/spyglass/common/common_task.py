@@ -2,17 +2,19 @@ import datajoint as dj
 import ndx_franklab_novela
 import pynwb
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
+from ..utils.nwb_helper_fn import get_nwb_file
 from .common_device import CameraDevice
 from .common_interval import IntervalList
 from .common_nwbfile import Nwbfile
 from .common_session import Session  # noqa: F401
-from ..utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_task")
 
 
 @schema
-class Task(dj.Manual):
+class Task(SpyglassMixin, dj.Manual):
     definition = """
      task_name: varchar(80)
      ---
@@ -82,7 +84,7 @@ class Task(dj.Manual):
 
 
 @schema
-class TaskEpoch(dj.Imported):
+class TaskEpoch(SpyglassMixin, dj.Imported):
     # Tasks, session and time intervals
     definition = """
      -> Session

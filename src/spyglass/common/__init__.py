@@ -1,5 +1,6 @@
-import spyglass as sg
+from ..utils.dj_mixin import SpyglassMixin  # isort:skip
 
+from ..settings import prepopulate
 from ..utils.nwb_helper_fn import (
     close_nwb_files,
     estimate_sampling_rate,
@@ -73,5 +74,5 @@ from .common_task import Task, TaskEpoch
 from .populate_all_common import populate_all_common
 from .prepopulate import populate_from_yaml, prepopulate_default
 
-if sg.config["prepopulate"]:
+if prepopulate:
     prepopulate_default()

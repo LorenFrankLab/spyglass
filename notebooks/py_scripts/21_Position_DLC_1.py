@@ -7,9 +7,9 @@
 #       format_version: '1.5'
 #       jupytext_version: 1.15.2
 #   kernelspec:
-#     display_name: Python [conda env:spyglass-position] *
+#     display_name: Python 3 (ipykernel)
 #     language: python
-#     name: conda-env-spyglass-position-py
+#     name: python3
 # ---
 
 # # Position - DeepLabCut from Scratch
@@ -92,10 +92,10 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 #     </ul>
 # </div>
 
+# ### Body Parts
+
 # We'll begin by looking at the `BodyPart` table, which stores standard names of body parts used in DLC models throughout the lab with a concise description.
 #
-
-sgp.BodyPart()
 
 # If the bodyparts you plan to use in your model are not yet in the table, here is code to add bodyparts:
 #
@@ -108,28 +108,94 @@ sgp.BodyPart()
 #     skip_duplicates=True,
 # )
 # ```
+#
 
 # To train a model, we'll need to extract frames, which we can label as training data. We can construct a list of videos from which we'll extract frames.
 #
 # The list can either contain dictionaries identifying behavioral videos for NWB files that have already been added to Spyglass, or absolute file paths to the videos you want to use.
 #
 # For this tutorial, we'll use two videos for which we already have frames labeled.
+#
+
+sgp.BodyPart()
+
+# ### Define camera name and videos for training set
+#
+# Defining camera name is optional: it should be done in cases where there are multiple cameras streaming per epoch, but not necessary otherwise.
+#
+
+# example:
+# `camera_name = "HomeBox_camera"
+#    `
+#
+
+# _NOTE:_ The official release of Spyglass does not yet support multicamera
+# projects. You can monitor progress on the effort to add this feature by checking
+# [this PR](https://github.com/LorenFrankLab/spyglass/pull/684) or use
+# [this experimental branch](https://github.com/dpeg22/spyglass/tree/add-multi-camera),
+# which only takes the keys nwb_file_name and epoch in the video_list variable.
+#
 
 video_list = [
     {"nwb_file_name": "J1620210529_.nwb", "epoch": 2},
     {"nwb_file_name": "peanut20201103_.nwb", "epoch": 4},
 ]
 
+# ### Path variables
+#
+# The position pipeline also keeps track of paths for project, video, and output.
+# Just like we saw in [Setup](./00_Setup.ipynb), you can manage these either with
+# environmental variables...
+#
+# ```bash
+# export DLC_PROJECT_DIR="/nimbus/deeplabcut/projects"
+# export DLC_VIDEO_DIR="/nimbus/deeplabcut/video"
+# export DLC_OUTPUT_DIR="/nimbus/deeplabcut/output"
+# ```
+#
+# <!-- NOTE: HDF5_USE_FILE_LOCKING now automatically set to 'FALSE' -->
+#
+# Or these can be set in your datajoint config:
+#
+# ```json
+# {
+#   "custom": {
+#     "dlc_dirs": {
+#       "base": "/nimbus/deeplabcut/",
+#       "project": "/nimbus/deeplabcut/projects",
+#       "video": "/nimbus/deeplabcut/video",
+#       "output": "/nimbus/deeplabcut/output"
+#     }
+#   }
+# }
+# ```
+#
+# _NOTE:_ If only `base` is specified as shown above, spyglass will assume the
+# relative directories shown.
+#
+# You can check the result of this setup process with...
+#
+
+# +
+from spyglass.settings import config
+
+config
+# -
+
+# _NOTE:_ The official release of Spyglass does not yet support master branch only takes the keys nwb_file_name and epoch in the video_list variable. EB is circumventing this by running this on daniel's (dpeg22) branch "add-multi-camera"
+#
+
 # Before creating our project, we need to define a few variables.
 #
 # - A team name, as shown in `LabTeam` for setting permissions. Here, we'll
-#  use "LorenLab".
+#   use "LorenLab".
 # - A `project_name`, as a unique identifier for this DLC project. Here, we'll use
-#  __"tutorial_scratch_yourinitials"__
+#   **"tutorial_scratch_yourinitials"**
 # - `bodyparts` is a list of body parts for which we want to extract position.
 #   The pre-labeled frames we're using include the bodyparts listed below.
 # - Number of frames to extract/label as `frames_per_video`. A true project might
 #   use 200, but we'll use 100 for efficiency.
+#
 
 team_name = "LorenLab"
 project_name = "tutorial_scratch_DG"
@@ -144,12 +210,10 @@ project_key = sgp.DLCProject.insert_new_project(
     skip_duplicates=True,
 )
 
-# After initializing our project, we would typically extract and label frames. This has already been done for this tutorial data, using the following commands to pull up the DLC GUI:
-#
-# ```python
-# sgp.DLCProject().run_extract_frames(project_key)
-# sgp.DLCProject().run_label_frames(project_key)
-# ```
+# After initializing our project, we would typically extract and label frames. Use the following commands to pull up the DLC GUI:
+
+sgp.DLCProject().run_extract_frames(project_key)
+sgp.DLCProject().run_label_frames(project_key)
 
 # In order to use pre-labeled frames, you'll need to change the values in the
 # labeled-data files. You can do that using the `import_labeled_frames` method,

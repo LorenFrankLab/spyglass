@@ -13,9 +13,11 @@ import spikeinterface as si
 import spikeinterface.preprocessing as sip
 import spikeinterface.qualitymetrics as sq
 
-from ..common.common_interval import IntervalList
-from ..common.common_nwbfile import AnalysisNwbfile
-from ..utils.dj_mixin import SpyglassMixin
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.settings import waveform_dir
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SortInterval, SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
@@ -256,7 +258,7 @@ class Curation(SpyglassMixin, dj.Manual):
 
 
 @schema
-class WaveformParameters(dj.Manual):
+class WaveformParameters(SpyglassMixin, dj.Manual):
     definition = """
     waveform_params_name: varchar(80) # name of waveform extraction parameters
     ---
@@ -291,7 +293,7 @@ class WaveformParameters(dj.Manual):
 
 
 @schema
-class WaveformSelection(dj.Manual):
+class WaveformSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> Curation
     -> WaveformParameters
@@ -300,7 +302,7 @@ class WaveformSelection(dj.Manual):
 
 
 @schema
-class Waveforms(dj.Computed):
+class Waveforms(SpyglassMixin, dj.Computed):
     definition = """
     -> WaveformSelection
     ---
@@ -324,8 +326,7 @@ class Waveforms(dj.Computed):
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key["waveform_extractor_path"] = str(
-            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"])
-            / Path(waveform_extractor_name)
+            Path(waveform_dir) / Path(waveform_extractor_name)
         )
         if os.path.exists(key["waveform_extractor_path"]):
             shutil.rmtree(key["waveform_extractor_path"])
@@ -380,7 +381,7 @@ class Waveforms(dj.Computed):
 
 
 @schema
-class MetricParameters(dj.Manual):
+class MetricParameters(SpyglassMixin, dj.Manual):
     definition = """
     # Parameters for computing quality metrics of sorted units
     metric_params_name: varchar(64)
@@ -459,7 +460,7 @@ class MetricParameters(dj.Manual):
 
 
 @schema
-class MetricSelection(dj.Manual):
+class MetricSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> Waveforms
     -> MetricParameters
@@ -487,7 +488,7 @@ class MetricSelection(dj.Manual):
 
 
 @schema
-class QualityMetrics(dj.Computed):
+class QualityMetrics(SpyglassMixin, dj.Computed):
     definition = """
     -> MetricSelection
     ---
@@ -507,7 +508,7 @@ class QualityMetrics(dj.Computed):
             qm[metric_name] = metric
         qm_name = self._get_quality_metrics_name(key)
         key["quality_metrics_path"] = str(
-            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"]) / Path(qm_name + ".json")
+            Path(waveform_dir) / Path(qm_name + ".json")
         )
         # save metrics dict as json
         print(f"Computed all metrics: {qm}")
@@ -548,10 +549,24 @@ class QualityMetrics(dj.Computed):
                 )
         else:
             metric = {}
+            num_spikes = sq.compute_num_spikes(waveform_extractor)
             for unit_id in waveform_extractor.sorting.get_unit_ids():
-                metric[str(unit_id)] = metric_func(
-                    waveform_extractor, this_unit_id=unit_id, **metric_params
-                )
+                # checks to avoid bug in spikeinterface 0.98.2
+                if metric_name == "nn_isolation" and num_spikes[
+                    unit_id
+                ] < metric_params.get("min_spikes", 10):
+                    metric[str(unit_id)] = (np.nan, np.nan)
+                elif metric_name == "nn_noise_overlap" and num_spikes[
+                    unit_id
+                ] < metric_params.get("min_spikes", 10):
+                    metric[str(unit_id)] = np.nan
+
+                else:
+                    metric[str(unit_id)] = metric_func(
+                        waveform_extractor,
+                        this_unit_id=int(unit_id),
+                        **metric_params,
+                    )
                 # nn_isolation returns tuple with isolation and unit number. We only want isolation.
                 if metric_name == "nn_isolation":
                     metric[str(unit_id)] = metric[str(unit_id)][0]
@@ -644,7 +659,7 @@ _metric_name_to_func = {
 
 
 @schema
-class AutomaticCurationParameters(dj.Manual):
+class AutomaticCurationParameters(SpyglassMixin, dj.Manual):
     definition = """
     auto_curation_params_name: varchar(36)   # name of this parameter set
     ---
@@ -703,7 +718,7 @@ class AutomaticCurationParameters(dj.Manual):
 
 
 @schema
-class AutomaticCurationSelection(dj.Manual):
+class AutomaticCurationSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> QualityMetrics
     -> AutomaticCurationParameters
@@ -720,7 +735,7 @@ _comparison_to_function = {
 
 
 @schema
-class AutomaticCuration(dj.Computed):
+class AutomaticCuration(SpyglassMixin, dj.Computed):
     definition = """
     -> AutomaticCurationSelection
     ---
@@ -869,7 +884,7 @@ class AutomaticCuration(dj.Computed):
 
 
 @schema
-class CuratedSpikeSortingSelection(dj.Manual):
+class CuratedSpikeSortingSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> Curation
     """
@@ -884,7 +899,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
     units_object_id: varchar(40)
     """
 
-    class Unit(dj.Part):
+    class Unit(SpyglassMixin, dj.Part):
         definition = """
         # Table for holding sorted units
         -> CuratedSpikeSorting
@@ -997,7 +1012,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
 
 
 @schema
-class UnitInclusionParameters(dj.Manual):
+class UnitInclusionParameters(SpyglassMixin, dj.Manual):
     definition = """
     unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
     ---

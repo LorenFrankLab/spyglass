@@ -8,13 +8,15 @@ import spikeinterface as si
 from sortingview.SpikeSortingView import create_raw_traces_plot
 from sortingview.SpikeSortingView.Figure import Figure
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..spikesorting.spikesorting_recording import SpikeSortingRecording
 
 schema = dj.schema("figurl_view_spike_sorting_recording")
 
 
 @schema
-class SpikeSortingRecordingView(dj.Computed):
+class SpikeSortingRecordingView(SpyglassMixin, dj.Computed):
     definition = """
     # Schema for storing figurl views of spike sorting recordings
     -> SpikeSortingRecording

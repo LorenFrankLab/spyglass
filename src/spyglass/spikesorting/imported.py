@@ -1,13 +1,15 @@
 import datajoint as dj
-from spyglass.common.common_session import Session
-from spyglass.common.common_nwbfile import Nwbfile
 import pynwb
+
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_session import Session
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("spikesorting_imported")
 
 
 @schema
-class ImportedSpikeSorting(dj.Imported):
+class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
     definition = """
     -> Session
     ---

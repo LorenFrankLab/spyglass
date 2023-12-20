@@ -18,12 +18,13 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("spikesorting_v1_recording")
 
 
 @schema
-class SortGroup(dj.Manual):
+class SortGroup(SpyglassMixin, dj.Manual):
     definition = """
     # Set of electrodes to spike sort together
     -> Session
@@ -33,7 +34,7 @@ class SortGroup(dj.Manual):
                                            # -1: no reference, -2: common median
     """
 
-    class SortGroupElectrode(dj.Part):
+    class SortGroupElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> SortGroup
         -> Electrode
@@ -174,7 +175,7 @@ class SortGroup(dj.Manual):
 
 
 @schema
-class SpikeSortingPreprocessingParameters(dj.Lookup):
+class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Lookup):
     definition = """
     # Parameters for denoising a recording prior to spike sorting.
     preproc_param_name: varchar(200)
@@ -201,7 +202,7 @@ class SpikeSortingPreprocessingParameters(dj.Lookup):
 
 
 @schema
-class SpikeSortingRecordingSelection(dj.Manual):
+class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Raw voltage traces and parameters. Use `insert_selection` method to insert rows.
     recording_id: uuid
@@ -238,7 +239,7 @@ class SpikeSortingRecordingSelection(dj.Manual):
 
 
 @schema
-class SpikeSortingRecording(dj.Computed):
+class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     definition = """
     # Processed recording.
     -> SpikeSortingRecordingSelection
@@ -411,7 +412,7 @@ class SpikeSortingRecording(dj.Computed):
             }
         ).fetch1("sort_reference_electrode_id")
         recording_channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
-        all_channel_ids = np.unique(channel_ids + ref_channel_id)
+        all_channel_ids = np.unique(np.append(channel_ids, ref_channel_id))
 
         probe_type_by_channel = []
         electrode_group_by_channel = []
@@ -553,6 +554,8 @@ def _consolidate_intervals(intervals, timestamps):
     """
     # Convert intervals to a numpy array if it's not
     intervals = np.array(intervals)
+    if intervals.ndim == 1:
+        intervals = intervals.reshape(-1, 2)
     if intervals.shape[1] != 2:
         raise ValueError(
             "Input array must have shape (N, 2) where N is the number of intervals."

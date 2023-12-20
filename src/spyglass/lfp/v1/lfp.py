@@ -24,7 +24,7 @@ MIN_LFP_INTERVAL_DURATION = 1.0  # 1 second minimum interval duration
 
 
 @schema
-class LFPSelection(dj.Manual):
+class LFPSelection(SpyglassMixin, dj.Manual):
     """The user's selection of LFP data to be filtered
 
     This table is used to select the LFP data to be filtered.  The user can select
@@ -42,7 +42,7 @@ class LFPSelection(dj.Manual):
      -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
      -> FirFilterParameters                                                # the filter to be used
      ---
-     target_sampling_rate = 1000 : float                                     # the desired output sampling rate, in HZ                                                                                                                                                                                                                
+     target_sampling_rate = 1000 : float                                     # the desired output sampling rate, in HZ
      """
 
 

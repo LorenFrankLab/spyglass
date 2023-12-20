@@ -13,14 +13,17 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml
 
-from ...common.common_lab import LabTeam
+from spyglass.common.common_lab import LabTeam
+from spyglass.settings import dlc_project_dir, dlc_video_dir
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .dlc_utils import _set_permissions, check_videofile, get_video_path
 
 schema = dj.schema("position_v1_dlc_project")
 
 
 @schema
-class BodyPart(dj.Manual):
+class BodyPart(SpyglassMixin, dj.Manual):
     """Holds bodyparts for use in DeepLabCut models"""
 
     definition = """
@@ -55,7 +58,7 @@ class BodyPart(dj.Manual):
 
 
 @schema
-class DLCProject(dj.Manual):
+class DLCProject(SpyglassMixin, dj.Manual):
     """Table to facilitate creation of a new DeepLabCut model.
     With ability to edit config, extract frames, label frames
     """
@@ -71,7 +74,7 @@ class DLCProject(dj.Manual):
     config_path      : varchar(120) # path to config.yaml for model
     """
 
-    class BodyPart(dj.Part):
+    class BodyPart(SpyglassMixin, dj.Part):
         """Part table to hold bodyparts used in each project."""
 
         definition = """
@@ -79,7 +82,7 @@ class DLCProject(dj.Manual):
         -> BodyPart
         """
 
-    class File(dj.Part):
+    class File(SpyglassMixin, dj.Part):
         definition = """
         # Paths of training files (e.g., labeled pngs, CSV or video)
         -> DLCProject
@@ -162,7 +165,7 @@ class DLCProject(dj.Manual):
                 )
         config_path = Path(config_path)
         project_path = config_path.parent
-        dlc_project_path = os.environ["DLC_PROJECT_PATH"]
+        dlc_project_path = dlc_project_dir
         if dlc_project_path not in project_path.as_posix():
             project_dirname = project_path.name
             dest_folder = Path(f"{dlc_project_path}/{project_dirname}/")
@@ -216,8 +219,8 @@ class DLCProject(dj.Manual):
         frames_per_video: int,
         video_list: List,
         groupname: str = None,
-        project_directory: str = os.getenv("DLC_PROJECT_PATH"),
-        output_path: str = os.getenv("DLC_VIDEO_PATH"),
+        project_directory: str = dlc_project_dir,
+        output_path: str = dlc_video_dir,
         set_permissions=False,
         **kwargs,
     ):

@@ -1,4 +1,3 @@
-import os
 import pathlib
 from functools import reduce
 from typing import Dict
@@ -8,24 +7,25 @@ import ndx_franklab_novela
 import pandas as pd
 import pynwb
 
-from ..utils.dj_mixin import SpyglassMixin
-from ..utils.nwb_helper_fn import (
+from spyglass.common.common_device import CameraDevice
+from spyglass.common.common_ephys import Raw  # noqa: F401
+from spyglass.common.common_interval import IntervalList, interval_list_contains
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.common.common_task import TaskEpoch
+from spyglass.settings import video_dir
+from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.nwb_helper_fn import (
     get_all_spatial_series,
     get_data_interface,
     get_nwb_file,
 )
-from .common_device import CameraDevice
-from .common_ephys import Raw  # noqa: F401
-from .common_interval import IntervalList, interval_list_contains
-from .common_nwbfile import Nwbfile
-from .common_session import Session  # noqa: F401
-from .common_task import TaskEpoch
 
 schema = dj.schema("common_behav")
 
 
 @schema
-class PositionSource(dj.Manual):
+class PositionSource(SpyglassMixin, dj.Manual):
     definition = """
     -> Session
     -> IntervalList
@@ -34,7 +34,7 @@ class PositionSource(dj.Manual):
     import_file_name: varchar(2000)  # path to import file if importing
     """
 
-    class SpatialSeries(dj.Part):
+    class SpatialSeries(SpyglassMixin, dj.Part):
         definition = """
         -> master
         id = 0 : int unsigned            # index of spatial series
@@ -143,7 +143,7 @@ class PositionSource(dj.Manual):
 
 
 @schema
-class RawPosition(dj.Imported):
+class RawPosition(SpyglassMixin, dj.Imported):
     """
 
     Notes
@@ -424,30 +424,25 @@ class VideoFile(SpyglassMixin, dj.Imported):
         nwb_video_file_abspath : str
             The absolute path for the given file name.
         """
-        video_dir = pathlib.Path(os.getenv("SPYGLASS_VIDEO_DIR", None))
-        assert video_dir is not None, "You must set SPYGLASS_VIDEO_DIR"
-        if not video_dir.exists():
-            raise OSError("SPYGLASS_VIDEO_DIR does not exist")
+        video_path_obj = pathlib.Path(video_dir)
         video_info = (cls & key).fetch1()
         nwb_path = Nwbfile.get_abs_path(key["nwb_file_name"])
         nwbf = get_nwb_file(nwb_path)
         nwb_video = nwbf.objects[video_info["video_file_object_id"]]
         video_filename = nwb_video.name
         # see if the file exists and is stored in the base analysis dir
-        nwb_video_file_abspath = pathlib.Path(
-            f"{video_dir}/{pathlib.Path(video_filename)}"
-        )
+        nwb_video_file_abspath = pathlib.Path(video_path_obj / video_filename)
         if nwb_video_file_abspath.exists():
             return nwb_video_file_abspath.as_posix()
         else:
             raise FileNotFoundError(
                 f"video file with filename: {video_filename} "
-                f"does not exist in {video_dir}/"
+                f"does not exist in {video_path_obj}/"
             )
 
 
 @schema
-class PositionIntervalMap(dj.Computed):
+class PositionIntervalMap(SpyglassMixin, dj.Computed):
     definition = """
     -> IntervalList
     ---

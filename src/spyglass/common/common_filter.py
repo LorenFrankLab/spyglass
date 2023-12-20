@@ -9,6 +9,8 @@ import psutil
 import pynwb
 import scipy.signal as signal
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_filter")
@@ -28,7 +30,7 @@ def _import_ghostipy():
 
 
 @schema
-class FirFilterParameters(dj.Manual):
+class FirFilterParameters(SpyglassMixin, dj.Manual):
     definition = """
     filter_name: varchar(80)           # descriptive name of this filter
     filter_sampling_rate: int          # sampling rate for this filter

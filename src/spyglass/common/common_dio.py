@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 import pynwb
 
-from ..utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..utils.nwb_helper_fn import get_data_interface, get_nwb_file
 from .common_ephys import Raw
 from .common_interval import IntervalList

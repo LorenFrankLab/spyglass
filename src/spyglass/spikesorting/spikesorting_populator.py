@@ -1,5 +1,7 @@
 import datajoint as dj
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from ..common import ElectrodeGroup, IntervalList
 from .curation_figurl import CurationFigurl, CurationFigurlSelection
 from .spikesorting_artifact import (
@@ -30,7 +32,7 @@ schema = dj.schema("spikesorting_sorting")
 
 
 @schema
-class SpikeSortingPipelineParameters(dj.Manual):
+class SpikeSortingPipelineParameters(SpyglassMixin, dj.Manual):
     definition = """
     pipeline_parameters_name: varchar(200)
     ---
