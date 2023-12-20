@@ -12,7 +12,7 @@ schema = dj.schema("spikesorting_merge")
 
 
 @schema
-class SpikeSortingOutput(_Merge):
+class SpikeSortingOutput(_Merge, SpyglassMixin):
     definition = """
     # Output of spike sorting pipelines.
     merge_id: uuid
