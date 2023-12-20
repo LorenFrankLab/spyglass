@@ -10,7 +10,7 @@ schema = dj.schema("position_linearization_merge")
 
 
 @schema
-class LinearizedPositionOutput(SpyglassMixin, _Merge):
+class LinearizedPositionOutput(_Merge, SpyglassMixin):
     definition = """
     merge_id: uuid
     ---
