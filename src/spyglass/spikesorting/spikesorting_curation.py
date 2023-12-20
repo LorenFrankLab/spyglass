@@ -548,10 +548,24 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
                 )
         else:
             metric = {}
+            num_spikes = sq.compute_num_spikes(waveform_extractor)
             for unit_id in waveform_extractor.sorting.get_unit_ids():
-                metric[str(unit_id)] = metric_func(
-                    waveform_extractor, this_unit_id=unit_id, **metric_params
-                )
+                # checks to avoid bug in spikeinterface 0.98.2
+                if metric_name == "nn_isolation" and num_spikes[
+                    unit_id
+                ] < metric_params.get("min_spikes", 10):
+                    metric[str(unit_id)] = (np.nan, np.nan)
+                elif metric_name == "nn_noise_overlap" and num_spikes[
+                    unit_id
+                ] < metric_params.get("min_spikes", 10):
+                    metric[str(unit_id)] = np.nan
+
+                else:
+                    metric[str(unit_id)] = metric_func(
+                        waveform_extractor,
+                        this_unit_id=int(unit_id),
+                        **metric_params,
+                    )
                 # nn_isolation returns tuple with isolation and unit number. We only want isolation.
                 if metric_name == "nn_isolation":
                     metric[str(unit_id)] = metric[str(unit_id)][0]
