@@ -29,10 +29,13 @@
   },
   "custom": {
     "spyglass_dirs": {
-      "base": "/your/base/path"
+      "base": "/your/path/like/stelmo/nwb/"
     },
     "kachery_dirs": {
-      "cloud": "/your/base/path/.kachery_cloud"
+      "cloud": "/your/path/.kachery_cloud"
+    },
+    "dlc_dirs": {
+      "base": "/your/path/like/nimbus/deeplabcut/"
     },
     "kachery_zone": "franklab.default"
   }

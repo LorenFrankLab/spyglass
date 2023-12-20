@@ -13,9 +13,11 @@ import spikeinterface as si
 import spikeinterface.preprocessing as sip
 import spikeinterface.qualitymetrics as sq
 
-from ..common.common_interval import IntervalList
-from ..common.common_nwbfile import AnalysisNwbfile
-from ..utils.dj_mixin import SpyglassMixin
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.settings import waveform_dir
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SortInterval, SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
@@ -324,8 +326,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key["waveform_extractor_path"] = str(
-            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"])
-            / Path(waveform_extractor_name)
+            Path(waveform_dir) / Path(waveform_extractor_name)
         )
         if os.path.exists(key["waveform_extractor_path"]):
             shutil.rmtree(key["waveform_extractor_path"])
@@ -507,7 +508,7 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             qm[metric_name] = metric
         qm_name = self._get_quality_metrics_name(key)
         key["quality_metrics_path"] = str(
-            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"]) / Path(qm_name + ".json")
+            Path(waveform_dir) / Path(qm_name + ".json")
         )
         # save metrics dict as json
         print(f"Computed all metrics: {qm}")

@@ -17,6 +17,7 @@ from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.settings import temp_dir
 from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
@@ -242,9 +243,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             )
         else:
             # Specify tempdir (expected by some sorters like mountainsort4)
-            sorter_temp_dir = tempfile.TemporaryDirectory(
-                dir=os.getenv("SPYGLASS_TEMP_DIR")
-            )
+            sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
             sorter_params["tempdir"] = sorter_temp_dir.name
             # if whitening is specified in sorter params, apply whitening separately
             # prior to sorting and turn off "sorter whitening"
