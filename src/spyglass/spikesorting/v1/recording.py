@@ -554,6 +554,8 @@ def _consolidate_intervals(intervals, timestamps):
     """
     # Convert intervals to a numpy array if it's not
     intervals = np.array(intervals)
+    if intervals.ndim == 1:
+        intervals = intervals.reshape(-1, 2)
     if intervals.shape[1] != 2:
         raise ValueError(
             "Input array must have shape (N, 2) where N is the number of intervals."
