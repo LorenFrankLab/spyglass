@@ -335,12 +335,17 @@ def _write_sorting_to_nwb(
             name="curation_label",
             description="curation label applied to a unit",
         )
+        obs_interval = (
+            sort_interval
+            if sort_interval.ndim == 2
+            else sort_interval.reshape(1, 2)
+        )
         for unit_id in sorting.get_unit_ids():
             spike_times = sorting.get_unit_spike_train(unit_id)
             nwbf.add_unit(
                 spike_times=timestamps[spike_times],
                 id=unit_id,
-                obs_intervals=sort_interval,
+                obs_intervals=obs_interval,
                 curation_label="uncurated",
             )
         units_object_id = nwbf.units.object_id
