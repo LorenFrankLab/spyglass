@@ -126,6 +126,7 @@ class SpyglassConfig:
             or os.environ.get("DLC_PROJECT_PATH", "").split("projects")[0]
             or str(Path(resolved_base) / "deeplabcut")
         )
+        Path(self._dlc_base).mkdir(exist_ok=True)
 
         config_dirs = {"SPYGLASS_BASE_DIR": resolved_base}
         for prefix, dirs in self.relative_dirs.items():
