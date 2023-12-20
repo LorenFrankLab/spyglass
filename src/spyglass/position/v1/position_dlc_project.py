@@ -13,9 +13,10 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml
 
+from spyglass.common.common_lab import LabTeam
+from spyglass.settings import dlc_project_dir, dlc_video_dir
 from spyglass.utils.dj_mixin import SpyglassMixin
 
-from ...common.common_lab import LabTeam
 from .dlc_utils import _set_permissions, check_videofile, get_video_path
 
 schema = dj.schema("position_v1_dlc_project")
@@ -164,7 +165,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 )
         config_path = Path(config_path)
         project_path = config_path.parent
-        dlc_project_path = os.environ["DLC_PROJECT_PATH"]
+        dlc_project_path = dlc_project_dir
         if dlc_project_path not in project_path.as_posix():
             project_dirname = project_path.name
             dest_folder = Path(f"{dlc_project_path}/{project_dirname}/")
@@ -218,8 +219,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
         frames_per_video: int,
         video_list: List,
         groupname: str = None,
-        project_directory: str = os.getenv("DLC_PROJECT_PATH"),
-        output_path: str = os.getenv("DLC_VIDEO_PATH"),
+        project_directory: str = dlc_project_dir,
+        output_path: str = dlc_video_dir,
         set_permissions=False,
         **kwargs,
     ):
