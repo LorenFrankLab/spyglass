@@ -325,7 +325,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
                 recording = sip.whiten(recording, dtype="float32")
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
-        key["waveform_extractor_pat"] = str(
+        key["waveform_extractor_path"] = str(
             Path(waveform_dir) / Path(waveform_extractor_name)
         )
         if os.path.exists(key["waveform_extractor_path"]):

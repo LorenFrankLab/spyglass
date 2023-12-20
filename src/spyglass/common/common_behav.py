@@ -431,9 +431,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         nwb_video = nwbf.objects[video_info["video_file_object_id"]]
         video_filename = nwb_video.name
         # see if the file exists and is stored in the base analysis dir
-        nwb_video_file_abspath = pathlib.Path(
-            f"{video_path_obj}/{pathlib.Path(video_filename)}"
-        )
+        nwb_video_file_abspath = pathlib.Path(video_path_obj / video_filename)
         if nwb_video_file_abspath.exists():
             return nwb_video_file_abspath.as_posix()
         else:
