@@ -13,13 +13,15 @@
 
 ### Pipelines
 
-- Position: Refactor input validation in DLC pipeline. #688
 - Spike sorting: Add SpikeSorting V1 pipeline. #651
 - LFP: Minor fixes to LFPBandV1 populator. #706
 - Linearization:
     - Minor fixes to LinearizedPositionV1 pipeline #695
     - Rename `position_linearization` -> `linearization`. #717
     - Migrate tables: `common_position` -> `linearization.v0`. #717
+- Position:
+    - Refactor input validation in DLC pipeline. #688
+    - DLC path handling from config, and normailze naming convention. #722
 
 ## [0.4.3] (November 7, 2023)
 

@@ -30,6 +30,8 @@ class SpyglassConfig:
         self.supplied_base_dir = base_dir
         self._config = dict()
         self.config_defaults = dict(prepopulate=True)
+        self._debug_mode = False
+        self._dlc_base = None
 
         self.relative_dirs = {
             # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
@@ -47,6 +49,11 @@ class SpyglassConfig:
                 "storage": "kachery_storage",
                 "temp": "tmp",
             },
+            "dlc": {
+                "project": "projects",
+                "video": "video",
+                "output": "output",
+            },
         }
 
         self.dj_defaults = {
@@ -62,6 +69,7 @@ class SpyglassConfig:
             "FIGURL_CHANNEL": "franklab2",
             "DJ_SUPPORT_FILEPATH_MANAGEMENT": "TRUE",
             "KACHERY_CLOUD_EPHEMERAL": "TRUE",
+            "HD5_USE_FILE_LOCKING": "FALSE",
         }
 
     def load_config(self, force_reload=False):
@@ -95,6 +103,9 @@ class SpyglassConfig:
         dj_custom = dj.config.get("custom", {})
         dj_spyglass = dj_custom.get("spyglass_dirs", {})
         dj_kachery = dj_custom.get("kachery_dirs", {})
+        dj_dlc = dj_custom.get("dlc_dirs", {})
+
+        self._debug_mode = dj_custom.get("debug_mode", False)
 
         resolved_base = (
             self.supplied_base_dir
@@ -109,10 +120,19 @@ class SpyglassConfig:
                 + "\n\tand os.environ['SPYGLASS_BASE_DIR']"
             )
 
+        self._dlc_base = (
+            dj_dlc.get("base")
+            or os.environ.get("DLC_BASE_DIR")
+            or os.environ.get("DLC_PROJECT_PATH", "").split("projects")[0]
+            or str(Path(resolved_base) / "deeplabcut")
+        )
+        Path(self._dlc_base).mkdir(exist_ok=True)
+
         config_dirs = {"SPYGLASS_BASE_DIR": resolved_base}
         for prefix, dirs in self.relative_dirs.items():
+            this_base = self._dlc_base if prefix == "dlc" else resolved_base
             for dir, dir_str in dirs.items():
-                dir_env_fmt = self.dir_to_var(dir, prefix)
+                dir_env_fmt = self.dir_to_var(dir=dir, dir_type=prefix)
 
                 env_loc = (  # Ignore env vars if base was passed to func
                     os.environ.get(dir_env_fmt)
@@ -123,8 +143,9 @@ class SpyglassConfig:
                 dir_location = (
                     dj_spyglass.get(dir)
                     or dj_kachery.get(dir)
+                    or dj_dlc.get(dir)
                     or env_loc
-                    or str(Path(resolved_base) / dir_str)
+                    or str(Path(this_base) / dir_str)
                 ).replace('"', "")
 
                 config_dirs.update({dir_env_fmt: dir_location})
@@ -144,7 +165,7 @@ class SpyglassConfig:
         self._mkdirs_from_dict_vals(config_dirs)
 
         self._config = dict(
-            debug_mode=dj_custom.get("debug_mode", False),
+            debug_mode=self._debug_mode,
             **self.config_defaults,
             **config_dirs,
             **kachery_zone_dict,
@@ -161,14 +182,15 @@ class SpyglassConfig:
             loaded_dict[var] = os.getenv(var, val)
         return loaded_dict
 
-    @staticmethod
-    def _set_env_with_dict(env_dict):
-        # NOTE: Kept for backwards compatibility. Should be removed in future.
+    def _set_env_with_dict(self, env_dict):
+        # NOTE: Kept for backwards compatibility. Should be removed in future
+        # for custom paths. Keep self.env_defaults.
         for var, val in env_dict.items():
             os.environ[var] = str(val)
 
-    @staticmethod
-    def _mkdirs_from_dict_vals(dir_dict):
+    def _mkdirs_from_dict_vals(self, dir_dict):
+        if self._debug_mode:
+            return
         for dir_str in dir_dict.values():
             Path(dir_str).mkdir(exist_ok=True)
 
@@ -216,8 +238,7 @@ class SpyglassConfig:
 
     def dir_to_var(self, dir: str, dir_type: str = "spyglass"):
         """Converts a dir string to an env variable name."""
-        dir_string = self.relative_dirs.get(dir_type, {}).get(dir, "base")
-        return f"{dir_type.upper()}_{dir_string.upper()}_DIR"
+        return f"{dir_type.upper()}_{dir.upper()}_DIR"
 
     def _generate_dj_config(
         self,
@@ -379,6 +400,12 @@ class SpyglassConfig:
                     ),
                     "temp": self.config.get(self.dir_to_var("tmp", "kachery")),
                 },
+                "dlc_dirs": {
+                    "base": self._dlc_base,
+                    "project": self.dlc_project_dir,
+                    "video": self.dlc_video_dir,
+                    "output": self.dlc_output_dir,
+                },
                 "kachery_zone": "franklab.default",
             }
         }
@@ -426,7 +453,19 @@ class SpyglassConfig:
 
     @property
     def debug_mode(self) -> bool:
-        return self.config.get("debug_mode", False)
+        return self._debug_mode
+
+    @property
+    def dlc_project_dir(self) -> str:
+        return self.config.get(self.dir_to_var("project", "dlc"))
+
+    @property
+    def dlc_video_dir(self) -> str:
+        return self.config.get(self.dir_to_var("video", "dlc"))
+
+    @property
+    def dlc_output_dir(self) -> str:
+        return self.config.get(self.dir_to_var("output", "dlc"))
 
 
 sg_config = SpyglassConfig()
@@ -441,3 +480,6 @@ waveform_dir = sg_config.waveform_dir
 video_dir = sg_config.video_dir
 debug_mode = sg_config.debug_mode
 prepopulate = config.get("prepopulate", False)
+dlc_project_dir = sg_config.dlc_project_dir
+dlc_video_dir = sg_config.dlc_video_dir
+dlc_output_dir = sg_config.dlc_output_dir
