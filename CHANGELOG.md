@@ -21,7 +21,7 @@
     - Migrate tables: `common_position` -> `linearization.v0`. #717
 - Position:
     - Refactor input validation in DLC pipeline. #688
-    - DLC path handling from config, and normailze naming convention. #722
+    - DLC path handling from config, and normalize naming convention. #722
 
 ## [0.4.3] (November 7, 2023)
 
