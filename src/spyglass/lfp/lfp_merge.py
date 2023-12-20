@@ -13,7 +13,10 @@ schema = dj.schema("lfp_merge")
 
 
 @schema
-class LFPOutput(SpyglassMixin, _Merge):
+class LFPOutput(
+    _Merge,
+    SpyglassMixin,
+):
     definition = """
     merge_id: uuid
     ---
