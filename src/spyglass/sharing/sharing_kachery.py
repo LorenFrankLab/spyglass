@@ -232,7 +232,9 @@ def share_data_to_kachery(
     table_list : list, optional
         List of tables to share data from, by default []
     zone_name : str, optional
-        What kachery zone to share the data to, by default "franklab.collaborators"
+        What kachery zone to share the data to, by default zone in spyglass.settings.config,
+        which looks for `KACHERY_ZONE` environmental variable, but defaults to
+        'franklab.default'
 
     Raises
     ------
@@ -244,12 +246,13 @@ def share_data_to_kachery(
     kachery_selection_key = {"kachery_zone_name": zone_name}
     if not restriction:
         raise ValueError("Must provide a restriction to the table")
+    selection_inserts = []
     for table in table_list:
         analysis_file_list = (table & restriction).fetch("analysis_file_name")
         for file in analysis_file_list:  # Add all analysis to shared list
             kachery_selection_key["analysis_file_name"] = file
-            AnalysisNwbfileKacherySelection.insert1(
-                kachery_selection_key, skip_duplicates=True
-            )
+            selection_inserts.append(kachery_selection_key)
+    AnalysisNwbfileKacherySelection.insert(
+        selection_inserts, skip_duplicates=True
+    )
     AnalysisNwbfileKachery.populate()
-    return
