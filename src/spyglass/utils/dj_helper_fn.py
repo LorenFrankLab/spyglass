@@ -21,7 +21,7 @@ def deprecated_factory(classes: list, old_module: str = "") -> list:
     Returns
     ------
     list
-        list of classes that will logs a warning when instantiated
+        list of classes that will log a warning when instantiated
     """
 
     if not isinstance(classes, list):
