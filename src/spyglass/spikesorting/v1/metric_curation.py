@@ -23,7 +23,7 @@ from spyglass.spikesorting.v1.metric_utils import (
     get_peak_offset,
 )
 from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_metric_curation")
 
@@ -134,7 +134,7 @@ class MetricParameters(SpyglassMixin, dj.Lookup):
     def show_available_metrics(self):
         for metric in _metric_name_to_func:
             metric_doc = _metric_name_to_func[metric].__doc__.split("\n")[0]
-            print(f"{metric} : {metric_doc}\n")
+            logger.info(f"{metric} : {metric_doc}\n")
 
 
 @schema
@@ -185,9 +185,7 @@ class MetricCurationSelection(SpyglassMixin, dj.Manual):
             key for the inserted row
         """
         if cls & key:
-            print(
-                "This row has already been inserted into MetricCurationSelection."
-            )
+            logger.warn("This row has already been inserted.")
             return (cls & key).fetch1()
         key["metric_curation_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)
@@ -247,7 +245,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
             **waveform_params,
         )
         # compute metrics
-        print("Computing metrics...")
+        logger.info("Computing metrics...")
         metrics = {}
         for metric_name, metric_param_dict in metric_params.items():
             metrics[metric_name] = self._compute_metric(
@@ -259,11 +257,11 @@ class MetricCuration(SpyglassMixin, dj.Computed):
                 for unit_id, value in metrics["nn_isolation"].items()
             }
 
-        print("Applying curation...")
+        logger.info("Applying curation...")
         labels = self._compute_labels(metrics, label_params)
         merge_groups = self._compute_merge_groups(metrics, merge_params)
 
-        print("Saving to NWB...")
+        logger.info("Saving to NWB...")
         (
             key["analysis_file_name"],
             key["object_id"],

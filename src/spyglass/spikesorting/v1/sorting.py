@@ -14,16 +14,14 @@ import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
 from spyglass.common.common_interval import IntervalList
-from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
-from spyglass.spikesorting.v1.recording import (
+from spyglass.spikesorting.v1.recording import (  # noqa: F401
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
+    _consolidate_intervals,
 )
-from spyglass.utils.dj_mixin import SpyglassMixin
-
-from .recording import _consolidate_intervals
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_sorting")
 
@@ -128,7 +126,7 @@ class SpikeSortingSelection(SpyglassMixin, dj.Manual):
         """
         query = cls & key
         if query:
-            print("Similar row(s) already inserted.")
+            logger.info("Similar row(s) already inserted.")
             return query.fetch(as_dict=True)
         key["sorting_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)

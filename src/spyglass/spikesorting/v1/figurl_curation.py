@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Union
 
 import datajoint as dj
 import kachery_cloud as kcl
-import numpy as np
 import pynwb
 import sortingview.views as vv
 import spikeinterface as si
@@ -12,7 +11,7 @@ from sortingview.SpikeSortingView import SpikeSortingView
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.curation import CurationV1, _merge_dict_to_list
 from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_figurl_curation")
 
@@ -51,7 +50,7 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
         if "figurl_curation_id" in key:
             query = cls & {"figurl_curation_id": key["figurl_curation_id"]}
             if query:
-                print("Similar row(s) already inserted.")
+                logger.warn("Similar row(s) already inserted.")
                 return query.fetch(as_dict=True)
         key["figurl_curation_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)
@@ -202,7 +201,7 @@ def _generate_figurl(
     raster_plot_subsample_max_firing_rate=50,
     spike_amplitudes_subsample_max_firing_rate=50,
 ) -> str:
-    print("Preparing spikesortingview data")
+    logger.info("Preparing spikesortingview data")
     recording = R
     sorting = S
 

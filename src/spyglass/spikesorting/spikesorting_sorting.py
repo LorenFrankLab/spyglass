@@ -12,16 +12,16 @@ import spikeinterface.preprocessing as sip
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
-from spyglass.utils.dj_mixin import SpyglassMixin
-
-from ..common.common_lab import LabMember, LabTeam
-from ..common.common_nwbfile import AnalysisNwbfile
-from ..settings import sorting_dir, temp_dir
-from .spikesorting_artifact import ArtifactRemovedIntervalList
-from .spikesorting_recording import (
+from spyglass.common.common_lab import LabMember, LabTeam
+from spyglass.settings import sorting_dir, temp_dir
+from spyglass.spikesorting.spikesorting_artifact import (
+    ArtifactRemovedIntervalList,
+)
+from spyglass.spikesorting.spikesorting_recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_sorting")
 
@@ -190,7 +190,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 mode="zeros",
             )
 
-        print(f"Running spike sorting on {key}...")
+        logger.info(f"Running spike sorting on {key}...")
         sorter, sorter_params = (SpikeSorterParameters & key).fetch1(
             "sorter", "sorter_params"
         )
@@ -229,7 +229,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             )
         key["time_of_sort"] = int(time.time())
 
-        print("Saving sorting results...")
+        logger.info("Saving sorting results...")
 
         sorting_folder = Path(sorting_dir)
 
@@ -249,7 +249,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         current_user_name = dj.config["database.user"]
         entries = self.fetch()
         permission_bool = np.zeros((len(entries),))
-        print(
+        logger.info(
             f"Attempting to delete {len(entries)} entries, checking permission..."
         )
 
@@ -275,7 +275,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 current_user_name in datajoint_user_names
             )
         if np.sum(permission_bool) == len(entries):
-            print("Permission to delete all specified entries granted.")
+            logger.info("Permission to delete all specified entries granted.")
             super().delete()
         else:
             raise Exception(
@@ -286,7 +286,6 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
     def fetch_nwb(self, *attrs, **kwargs):
         raise NotImplementedError
         return None
-        # return fetch_nwb(self, (AnalysisNwbfile, 'analysis_file_abs_path'), *attrs, **kwargs)
 
     def nightly_cleanup(self):
         """Clean up spike sorting directories that are not in the SpikeSorting table.
@@ -299,7 +298,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         for dir in dir_names:
             if dir not in analysis_file_names:
                 full_path = str(Path(sorting_dir) / dir)
-                print(f"removing {full_path}")
+                logger.info(f"removing {full_path}")
                 shutil.rmtree(str(Path(sorting_dir) / dir))
 
     @staticmethod

@@ -3,6 +3,8 @@ from typing import Dict, List, Union
 import numpy as np
 import spikeinterface as si
 
+from spyglass.utils import logger
+
 
 class MergedSortingExtractor(si.BaseSorting):
     extractor_name = "MergedSortingExtractor"
@@ -77,7 +79,7 @@ class MergedSortingExtractor(si.BaseSorting):
         }
         for new_sorting_segment in sorting_segment_list:
             self.add_sorting_segment(new_sorting_segment)
-        print(self)
+        logger.info(self)
 
 
 class MergedSortingSegment(si.BaseSortingSegment):

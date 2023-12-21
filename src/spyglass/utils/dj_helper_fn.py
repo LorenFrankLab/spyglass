@@ -6,11 +6,12 @@ from typing import Type
 import datajoint as dj
 import numpy as np
 
-from .nwb_helper_fn import get_nwb_file
+from spyglass.utils.logging import logger
+from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 
 def deprecated_factory(classes: list, old_module: str = "") -> list:
-    """Creates a list of classes and prints a warning when instantiated
+    """Creates a list of classes and logs a warning when instantiated
 
     Parameters
     ---------
@@ -20,7 +21,7 @@ def deprecated_factory(classes: list, old_module: str = "") -> list:
     Returns
     ------
     list
-        list of classes that will print a warning when instantiated
+        list of classes that will log a warning when instantiated
     """
 
     if not isinstance(classes, list):
@@ -50,8 +51,8 @@ def _subclass_factory(
 
     # Define the __call__ method for the new class
     def init_override(self, *args, **kwargs):
-        print(
-            "Deprecation Warning: this class has been moved out of "
+        logger.warn(
+            "Deprecation: this class has been moved out of "
             + f"{old_module}\n"
             + f"\t{old_name} -> {new_module}.{new_class.__name__}"
             + "\nPlease use the new location."

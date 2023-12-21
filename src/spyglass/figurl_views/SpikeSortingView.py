@@ -5,7 +5,7 @@ from sortingview.SpikeSortingView import (
     SpikeSortingView as SortingViewSpikeSortingView,
 )
 
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 from ..spikesorting import SpikeSorting, SpikeSortingRecording
 from .prepare_spikesortingview_data import prepare_spikesortingview_data
@@ -39,7 +39,7 @@ class SpikeSortingView(SpyglassMixin, dj.Computed):
 
         with kc.TemporaryDirectory() as tmpdir:
             fname = f"{tmpdir}/spikesortingview.h5"
-            print("Preparing spikesortingview data")
+            logger.info("Preparing spikesortingview data")
             prepare_spikesortingview_data(
                 recording=recording,
                 sorting=sorting,
@@ -50,21 +50,21 @@ class SpikeSortingView(SpyglassMixin, dj.Computed):
                 output_file_name=fname,
             )
 
-            print("Creating view object")
+            logger.info("Creating view object")
             X = SortingViewSpikeSortingView(fname)
 
-            print("Creating summary")
+            logger.info("Creating summary")
             f1 = X.create_summary()
             # f2 = X.create_units_table(unit_ids=X.unit_ids, unit_metrics=unit_metrics)
-            print("Creating autocorrelograms")
+            logger.info("Creating autocorrelograms")
             f3 = X.create_autocorrelograms(unit_ids=X.unit_ids)
-            print("Creating raster plot")
+            logger.info("Creating raster plot")
             f4 = X.create_raster_plot(unit_ids=X.unit_ids)
-            print("Creating average waveforms")
+            logger.info("Creating average waveforms")
             f5 = X.create_average_waveforms(unit_ids=X.unit_ids)
-            print("Creating spike amplitudes")
+            logger.info("Creating spike amplitudes")
             f6 = X.create_spike_amplitudes(unit_ids=X.unit_ids)
-            print("Creating electrode geometry")
+            logger.info("Creating electrode geometry")
             f7 = X.create_electrode_geometry()
             # f8 = X.create_live_cross_correlograms()
 
@@ -76,16 +76,16 @@ class SpikeSortingView(SpyglassMixin, dj.Computed):
             sorter = sorting_record["sorter"]
             sorter_params_name = sorting_record["sorter_params_name"]
             label = f"{nwb_file_name}:{sort_group_id}:{sort_interval_name}:{sorter}:{sorter_params_name}"
-            print(label)
+            logger.info(label)
 
-            print("Creating mountain layout")
+            logger.info("Creating mountain layout")
             mountain_layout = X.create_mountain_layout(
                 figures=[f1, f3, f4, f5, f6, f7],
                 label=label,
                 sorting_curation_uri=sorting_curation_uri,
             )
 
-            print("Making URL")
+            logger.info("Making URL")
             url = mountain_layout.url()
 
             # Insert row into table

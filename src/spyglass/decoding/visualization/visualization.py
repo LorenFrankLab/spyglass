@@ -12,6 +12,7 @@ from tqdm.auto import tqdm
 
 from spyglass.decoding.visualization_1D_view import create_1D_decode_view
 from spyglass.decoding.visualization_2D_view import create_2D_decode_view
+from spyglass.utils import logger
 
 
 def make_single_environment_movie(
@@ -243,7 +244,7 @@ def setup_subplots(
             mosaic[-1].append(env_name)
         else:
             mosaic[-1].append(env_name)
-        print("\n")
+        logger.info("\n")
 
     mosaic.append(["multiunit"] * len(env_names))
 
