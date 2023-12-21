@@ -12,8 +12,7 @@ from track_linearization import (
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
-from spyglass.utils.dj_helper_fn import fetch_nwb
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_linearization_v1")
 
@@ -116,7 +115,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         orig_key = copy.deepcopy(key)
-        print(f"Computing linear position for: {key}")
+        logger.info(f"Computing linear position for: {key}")
 
         position_nwb = PositionOutput.fetch_nwb(
             {"merge_id": key["pos_merge_id"]}

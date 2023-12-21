@@ -12,9 +12,9 @@ import spikeinterface as si
 from hdmf.common import DynamicTable
 
 from spyglass.settings import analysis_dir, raw_dir
-from spyglass.utils.dj_mixin import SpyglassMixin
-from ..utils.dj_helper_fn import get_child_tables
-from ..utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
 schema = dj.schema("common_nwbfile")
 
@@ -196,7 +196,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
             analysis_file_name = self.__get_new_file_name(nwb_file_name)
             # write the new file
-            print(f"Writing new NWB file {analysis_file_name}")
+            logger.info(f"Writing new NWB file {analysis_file_name}")
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
                 analysis_file_name
             )
@@ -262,7 +262,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             original_nwb_file_name = query.fetch("nwb_file_name")[0]
             analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
             # write the new file
-            print(f"Writing new NWB file {analysis_file_name}...")
+            logger.info(f"Writing new NWB file {analysis_file_name}...")
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
                 analysis_file_name
             )
@@ -429,7 +429,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                             )
                             # sort by unit_ids and apply that sorting to values to ensure that things go in the right order
                             metric_values = metric_values[np.argsort(unit_ids)]
-                            print(f"Adding metric {metric} : {metric_values}")
+                            logger.info(
+                                f"Adding metric {metric} : {metric_values}"
+                            )
                             nwbf.add_unit_column(
                                 name=metric,
                                 description=f"{metric} metric",
@@ -542,7 +544,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             # If metrics were specified, add one column per metric
             if metrics is not None:
                 for metric_name, metric_dict in metrics.items():
-                    print(f"Adding metric {metric_name} : {metric_dict}")
+                    logger.info(f"Adding metric {metric_name} : {metric_dict}")
                     metric_data = metric_dict.values().to_list()
                     nwbf.add_unit_column(
                         name=metric_name,
@@ -586,7 +588,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 nwbf.add_unit(id=id)
 
             for metric_name, metric_dict in metrics.items():
-                print(f"Adding metric {metric_name} : {metric_dict}")
+                logger.info(f"Adding metric {metric_name} : {metric_dict}")
                 metric_data = list(metric_dict.values())
                 nwbf.add_unit_column(
                     name=metric_name, description=metric_name, data=metric_data
@@ -651,7 +653,7 @@ class NwbfileKachery(SpyglassMixin, dj.Computed):
     def make(self, key):
         import kachery_client as kc
 
-        print(f'Linking {key["nwb_file_name"]} and storing in kachery...')
+        logger.info(f'Linking {key["nwb_file_name"]} and storing in kachery...')
         key["nwb_file_uri"] = kc.link_file(
             Nwbfile().get_abs_path(key["nwb_file_name"])
         )
@@ -669,7 +671,9 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
     def make(self, key):
         import kachery_client as kc
 
-        print(f'Linking {key["analysis_file_name"]} and storing in kachery...')
+        logger.info(
+            f'Linking {key["analysis_file_name"]} and storing in kachery...'
+        )
         key["analysis_file_uri"] = kc.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )

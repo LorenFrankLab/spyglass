@@ -6,11 +6,10 @@ import sortingview.views as vv
 import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
-from spyglass.utils.dj_mixin import SpyglassMixin
-
-from .spikesorting_curation import Curation
-from .spikesorting_recording import SpikeSortingRecording
-from .spikesorting_sorting import SpikeSorting
+from spyglass.spikesorting.spikesorting_curation import Curation
+from spyglass.spikesorting.spikesorting_recording import SpikeSortingRecording
+from spyglass.spikesorting.spikesorting_sorting import SpikeSorting
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_curation_figurl")
 
@@ -116,7 +115,7 @@ def _generate_the_figurl(
     sorting_label: str,
     new_curation_uri: str,
 ):
-    print("Preparing spikesortingview data")
+    logger.info("Preparing spikesortingview data")
     X = SpikeSortingView.create(
         recording=R,
         sorting=S,
@@ -125,22 +124,6 @@ def _generate_the_figurl(
         max_num_snippets_per_segment=100,
         channel_neighborhood_size=7,
     )
-    # create a fake unit similarity matrix (for future reference)
-    # similarity_scores = []
-    # for u1 in X.unit_ids:
-    #     for u2 in X.unit_ids:
-    #         similarity_scores.append(
-    #             vv.UnitSimilarityScore(
-    #                 unit_id1=u1,
-    #                 unit_id2=u2,
-    #                 similarity=similarity_matrix[(X.unit_ids==u1),(X.unit_ids==u2)]
-    #             )
-    #         )
-    # Create the similarity matrix view
-    # unit_similarity_matrix_view = vv.UnitSimilarityMatrix(
-    #    unit_ids=X.unit_ids,
-    #    similarity_scores=similarity_scores
-    #    )
 
     # Assemble the views in a layout
     # You can replace this with other layouts

@@ -3,6 +3,7 @@ from datajoint.table import logger as dj_logger
 from datajoint.utils import user_choice
 
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.logging import logger
 
 
 class SpyglassMixin:
@@ -22,7 +23,7 @@ class SpyglassMixin:
         Check user permissions before deleting table rows. Permission is granted
         to users listed as admin in LabMember table or to users on a team with
         with the Session experimenter(s). If the table where the delete is
-        executed cannot be linked to a Session, a warning is printed and the
+        executed cannot be linked to a Session, a warning is logged and the
         delete continues. If the Session has no experimenter, or if the user is
         not on a team with the Session experimenter(s), a PermissionError is
         raised. `force_permission` can be set to True to bypass permission check.
@@ -182,7 +183,7 @@ class SpyglassMixin:
 
         sess = self._find_session(self, Session)
         if not sess:  # Permit delete if not linked to a session
-            print(
+            logger.warn(
                 "Could not find lab team associated with "
                 + f"{self.__class__.__name__}."
                 + "\nBe careful not to delete others' data."
@@ -214,7 +215,7 @@ class SpyglassMixin:
 
         Permission is granted to users listed as admin in LabMember table or to
         users on a team with with the Session experimenter(s). If the table
-        cannot be linked to Session, a warning is printed and the delete
+        cannot be linked to Session, a warning is logged and the delete
         continues. If the Session has no experimenter, or if the user is not on
         a team with the Session experimenter(s), a PermissionError is raised.
 
@@ -253,7 +254,7 @@ class SpyglassMixin:
                 for merge_table, _ in merge_deletes:
                     merge_table.delete({**kwargs, "safemode": False})
             else:
-                print("Delete aborted.")
+                logger.info("Delete aborted.")
                 return
 
         super().delete(*args, **kwargs)  # Additional confirm here

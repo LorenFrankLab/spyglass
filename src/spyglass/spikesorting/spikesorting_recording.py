@@ -9,21 +9,20 @@ import probeinterface as pi
 import spikeinterface as si
 import spikeinterface.extractors as se
 
-from spyglass.utils.dj_mixin import SpyglassMixin
-
-from ..common.common_device import Probe, ProbeType  # noqa: F401
-from ..common.common_ephys import Electrode, ElectrodeGroup
-from ..common.common_interval import (
+from spyglass.common.common_device import Probe, ProbeType  # noqa: F401
+from spyglass.common.common_ephys import Electrode, ElectrodeGroup
+from spyglass.common.common_interval import (
     IntervalList,
     interval_list_intersect,
     intervals_by_length,
     union_adjacent_index,
 )
-from ..common.common_lab import LabTeam  # noqa: F401
-from ..common.common_nwbfile import Nwbfile
-from ..common.common_session import Session  # noqa: F401
-from ..settings import recording_dir
-from ..utils.dj_helper_fn import dj_replace
+from spyglass.common.common_lab import LabTeam  # noqa: F401
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.settings import recording_dir
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import dj_replace
 
 schema = dj.schema("spikesorting_recording")
 
@@ -150,7 +149,7 @@ class SortGroup(SpyglassMixin, dj.Manual):
                 if omit_ref_electrode_group and (
                     str(e_group) == str(reference_electrode_group)
                 ):
-                    print(
+                    logger.warn(
                         f"Omitting electrode group {e_group} from sort groups "
                         + "because contains reference."
                     )
@@ -164,8 +163,9 @@ class SortGroup(SpyglassMixin, dj.Manual):
                 if (
                     omit_unitrode and len(shank_elect) == 1
                 ):  # omit unitrodes if indicated
-                    print(
-                        f"Omitting electrode group {e_group}, shank {shank} from sort groups because unitrode."
+                    logger.warn(
+                        f"Omitting electrode group {e_group}, shank {shank} "
+                        + "from sort groups because unitrode."
                     )
                     continue
                 self.insert1(sg_key)

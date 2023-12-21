@@ -16,7 +16,7 @@ import spikeinterface.qualitymetrics as sq
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import waveform_dir
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 from .merged_sorting_extractor import MergedSortingExtractor
 from .spikesorting_recording import SortInterval, SpikeSortingRecording
@@ -246,7 +246,7 @@ class Curation(SpyglassMixin, dj.Manual):
         AnalysisNwbfile().add(key["nwb_file_name"], analysis_file_name)
 
         if object_ids == "":
-            print(
+            logger.warn(
                 "Sorting contains no units."
                 "Created an empty analysis nwb file anyway."
             )
@@ -318,7 +318,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
 
         sorting = Curation.get_curated_sorting(key)
 
-        print("Extracting waveforms...")
+        logger.info("Extracting waveforms...")
         waveform_params = (WaveformParameters & key).fetch1("waveform_params")
         if "whiten" in waveform_params:
             if waveform_params.pop("whiten"):
@@ -448,7 +448,7 @@ class MetricParameters(SpyglassMixin, dj.Manual):
                 metric_string = ("{metric_name} : {metric_doc}").format(
                     metric_name=metric, metric_doc=metric_doc
                 )
-                print(metric_string + "\n")
+                logger.info(metric_string + "\n")
 
     # TODO
     def _validate_metrics_list(self, key):
@@ -511,7 +511,7 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             Path(waveform_dir) / Path(qm_name + ".json")
         )
         # save metrics dict as json
-        print(f"Computed all metrics: {qm}")
+        logger.info(f"Computed all metrics: {qm}")
         self._dump_to_json(qm, key["quality_metrics_path"])
 
         key["analysis_file_name"] = AnalysisNwbfile().create(
@@ -955,7 +955,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
                 if int(unit_id) in accepted_units
             }
 
-        print(f"Found {len(accepted_units)} accepted units")
+        logger.info(f"Found {len(accepted_units)} accepted units")
 
         # get the sorting and save it in the NWB file
         sorting = Curation.get_curated_sorting(key)

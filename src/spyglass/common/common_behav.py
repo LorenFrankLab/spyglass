@@ -14,7 +14,7 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
 from spyglass.settings import video_dir
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     get_all_spatial_series,
     get_data_interface,
@@ -174,7 +174,7 @@ class RawPosition(SpyglassMixin, dj.Imported):
             id_rp = [(n["id"], n["raw_position"]) for n in self.fetch_nwb()]
 
             if len(set(rp.interval for _, rp in id_rp)) > 1:
-                print("WARNING: loading DataFrame with multiple intervals.")
+                logger.warn("Loading DataFrame with multiple intervals.")
 
             df_list = [
                 pd.DataFrame(
@@ -270,7 +270,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
             "associated_files"
         ) or nwbf.processing.get("associated files")
         if associated_files is None:
-            print(
+            logger.info(
                 "Unable to import StateScriptFile: no processing module named "
                 + '"associated_files" found in {nwb_file_name}.'
             )
@@ -280,7 +280,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
             if not isinstance(
                 associated_file_obj, ndx_franklab_novela.AssociatedFiles
             ):
-                print(
+                logger.info(
                     f"Data interface {associated_file_obj.name} within "
                     + '"associated_files" processing module is not '
                     + "of expected type ndx_franklab_novela.AssociatedFiles\n"
@@ -293,7 +293,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
 
             epoch_list = associated_file_obj.task_epochs.split(",")
             # only insert if this is the statescript file
-            print(associated_file_obj.description)
+            logger.info(associated_file_obj.description)
             if (
                 "statescript".upper() in associated_file_obj.description.upper()
                 or "state_script".upper()
@@ -306,7 +306,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
                     key["file_object_id"] = associated_file_obj.object_id
                     self.insert1(key)
             else:
-                print("not a statescript file")
+                logger.info("not a statescript file")
 
 
 @schema
@@ -347,7 +347,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         )
 
         if videos is None:
-            print(f"No video data interface found in {nwb_file_name}\n")
+            logger.warn(f"No video data interface found in {nwb_file_name}\n")
             return
         else:
             videos = videos.time_series
@@ -388,7 +388,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
                     is_found = True
 
         if not is_found and verbose:
-            print(
+            logger.info(
                 f"No video found corresponding to file {nwb_file_name}, "
                 + f"epoch {interval_list_name}"
             )
@@ -471,7 +471,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Skip populating if no pos interval list names
         if len(pos_intervals) == 0:
-            print(f"NO POS INTERVALS FOR {key}; {no_pop_msg}")
+            logger.error(f"NO POS INTERVALS FOR {key}; {no_pop_msg}")
             return
 
         valid_times = (IntervalList & key).fetch1("valid_times")
@@ -508,7 +508,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
-            print(
+            logger.error(
                 f"Found {len(matching_pos_intervals)} pos intervals for {key}; "
                 + f"{no_pop_msg}\n{matching_pos_intervals}"
             )
@@ -517,7 +517,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
         # Insert into table
         key["position_interval_name"] = matching_pos_intervals[0]
         self.insert1(key, allow_direct_insert=True)
-        print(
+        logger.info(
             "Populated PosIntervalMap for "
             + f'{nwb_file_name}, {key["interval_list_name"]}'
         )
@@ -569,7 +569,7 @@ def convert_epoch_interval_name_to_position_interval_name(
             )
 
     if len(pos_query) == 0:
-        print(f"No position intervals found for {key}")
+        logger.info(f"No position intervals found for {key}")
         return []
 
     if len(pos_query) == 1:
@@ -596,7 +596,7 @@ def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
     ).fetch("interval_list_name")
 
     if len(interval_names) != 1:
-        print(
+        logger.info(
             f"Found {len(interval_names)} interval list names found for "
             + f"{nwb_file_name} epoch {epoch}"
         )

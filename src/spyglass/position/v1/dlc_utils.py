@@ -156,7 +156,7 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
             os.chmod(os.path.join(dirpath, filename), mode)
 
 
-class OutputLogger:
+class OutputLogger:  # TODO: migrate to spyglass.utils.logger
     """
     A class to wrap a logging.Logger object in order to provide context manager capabilities.
 

@@ -4,8 +4,8 @@ import datajoint as dj
 import kachery_cloud as kcl
 from datajoint.errors import DataJointError
 
-from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.settings import config
+from spyglass.utils import SpyglassMixin, logger
 
 from ..common.common_lab import Lab  # noqa: F401
 from ..common.common_nwbfile import AnalysisNwbfile
@@ -141,7 +141,7 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
 
         # linked_key = copy.deepcopy(key)
 
-        print(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
+        logger.info(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
         # set the kachery zone
 
         KacheryZone.set_zone(key)
@@ -149,11 +149,11 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
         key["analysis_file_uri"] = kcl.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )
-        print(
+        logger.info(
             os.environ[kachery_zone_envar], os.environ[kachery_cloud_dir_envar]
         )
-        print(AnalysisNwbfile().get_abs_path(key["analysis_file_name"]))
-        print(kcl.load_file(key["analysis_file_uri"]))
+        logger.info(AnalysisNwbfile().get_abs_path(key["analysis_file_name"]))
+        logger.info(kcl.load_file(key["analysis_file_uri"]))
         self.insert1(key)
 
         # we also need to insert any linked files
@@ -185,7 +185,7 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
         for uri, kachery_zone_name in zip(fetched_list[0], fetched_list[1]):
             if len(uri) == 0:
                 return False
-            print("uri:", uri)
+            logger.info("uri:", uri)
             if kachery_download_file(
                 uri=uri,
                 dest=AnalysisNwbfile.get_abs_path(analysis_file_name),
@@ -199,7 +199,7 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
                 ).fetch(as_dict=True)
                 for file in linked_files:
                     uri = file["linked_file_uri"]
-                    print(f"attempting to download linked file uri {uri}")
+                    logger.info(f"attempting to download linked file uri {uri}")
                     linked_file_path = (
                         os.environ["SPYGLASS_BASE_DIR"]
                         + file["linked_file_rel_path"]

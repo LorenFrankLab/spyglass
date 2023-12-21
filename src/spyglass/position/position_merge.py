@@ -7,14 +7,18 @@ import numpy as np
 import pandas as pd
 from datajoint.utils import to_camel_case
 
-from spyglass.utils.dj_mixin import SpyglassMixin
-
-from ..common.common_position import IntervalPositionInfo as CommonPos
-from ..utils.dj_merge_tables import _Merge
-from .v1.dlc_utils import check_videofile, get_video_path, make_video
-from .v1.position_dlc_pose_estimation import DLCPoseEstimationSelection
-from .v1.position_dlc_selection import DLCPosV1
-from .v1.position_trodes_position import TrodesPosV1
+from spyglass.common.common_position import IntervalPositionInfo as CommonPos
+from spyglass.position.v1.dlc_utils import (
+    check_videofile,
+    get_video_path,
+    make_video,
+)
+from spyglass.position.v1.position_dlc_pose_estimation import (
+    DLCPoseEstimationSelection,
+)
+from spyglass.position.v1.position_dlc_selection import DLCPosV1
+from spyglass.position.v1.position_trodes_position import TrodesPosV1
+from spyglass.utils import SpyglassMixin, _Merge, logger
 
 schema = dj.schema("position_merge")
 
@@ -142,7 +146,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         M_TO_CM = 100
         output_dir = (PositionVideoSelection & key).fetch1("output_dir")
 
-        print("Loading position data...")
+        logger.info("Loading position data...")
         # raw_position_df = (
         #     RawPosition()
         #     & {
@@ -207,7 +211,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
                 pos_df[["orientation"]]
             )
 
-        print("Loading video data...")
+        logger.info("Loading video data...")
         epoch = int("".join(filter(str.isdigit, key["interval_list_name"]))) + 1
 
         (
@@ -242,7 +246,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         # centroids = {'red': np.asarray(raw_position_df[['xloc', 'yloc']]),
         #              'green':  np.asarray(raw_position_df[['xloc2', 'yloc2']])}
 
-        print("Making video...")
+        logger.info("Making video...")
 
         make_video(
             video_path,
