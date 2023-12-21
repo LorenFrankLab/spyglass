@@ -21,7 +21,7 @@ schema = dj.schema("decoding_clusterless_v1")
 
 
 @schema
-class DecodingParameters(dj.Lookup):
+class DecodingParameters(SpyglassMixin, dj.Lookup):
     """Parameters for decoding the animal's mental position and some category of interest"""
 
     definition = """
