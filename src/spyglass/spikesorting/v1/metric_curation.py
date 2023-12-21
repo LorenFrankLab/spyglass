@@ -236,10 +236,8 @@ class MetricCuration(SpyglassMixin, dj.Computed):
                 recording = sp.whiten(recording, dtype=np.float64)
 
         waveforms_dir = temp_dir + "/" + str(key["metric_curation_id"])
-        try:
-            os.mkdir(waveforms_dir)
-        except FileExistsError:
-            pass
+        os.makedirs(waveforms_dir, exist_ok=True)
+
         print("Extracting waveforms...")
         waveforms = si.extract_waveforms(
             recording=recording,
