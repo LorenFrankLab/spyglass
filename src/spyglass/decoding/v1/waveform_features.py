@@ -1,7 +1,4 @@
 import os
-import shutil
-import uuid
-from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -10,9 +7,9 @@ import pynwb
 import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.settings import temp_dir
 from spyglass.spikesorting.merge import SpikeSortingOutput
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.settings import temp_dir
 
 schema = dj.schema("waveform_features")
 
@@ -47,7 +44,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
             "amplitude": {"peak_sign": "neg", "estimate_peak_time": False}
         }
         return {
-        **cls().default_pk,
+            **cls().default_pk,
             "waveform_features": ["amplitude"],
             "waveform_features_params": waveform_feature_params,
             "waveform_extraction_params": waveform_extraction_params,
