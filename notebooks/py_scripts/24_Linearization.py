@@ -13,8 +13,10 @@
 # ---
 
 # # Position - Linearization
+#
 
 # ## Overview
+#
 
 # _Developer Note:_ if you may make a PR in the future, be sure to copy this
 # notebook, and use the `gitignore` prefix `temp` to avoid future conflicts.
@@ -32,6 +34,7 @@
 # input data with either the [Trodes](./20_Position_Trodes.ipynb) or DLC notebooks
 # ([1](./21_Position_DLC_1.ipynb), [2](./22_Position_DLC_2.ipynb),
 # [3](./23_Position_DLC_3.ipynb)).
+#
 
 # ## Imports
 #
@@ -53,7 +56,7 @@ dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 import spyglass.common as sgc
 import spyglass.position.v1 as sgp
-import spyglass.position_linearization.v1 as sgpl
+import spyglass.linearization.v1 as sgpl
 
 # ignore datajoint+jupyter async warnings
 import warnings
@@ -63,17 +66,22 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # -
 
 # ## Retrieve 2D position
+#
 
 # To retrieve 2D position data, we'll specify an nwb file, a position time
 # interval, and the set of parameters used to compute the position info.
+#
 
+# +
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
 nwb_file_name = "chimi20200216_new.nwb"
 nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
 nwb_copy_file_name
+# -
 
 # We will fetch the pandas dataframe from the `PositionOutput` table.
+#
 
 # +
 from spyglass.position import PositionOutput
@@ -92,6 +100,7 @@ position_info
 # -
 
 # Before linearizing, plotting the head position will help us understand the data.
+#
 
 fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 ax.plot(
@@ -103,7 +112,6 @@ ax.set_xlabel("x-position [cm]", fontsize=18)
 ax.set_ylabel("y-position [cm]", fontsize=18)
 ax.set_title("Head Position", fontsize=28)
 
-
 # ## Specifying the track
 #
 
@@ -113,10 +121,10 @@ ax.set_title("Head Position", fontsize=28)
 # - `node_positions` (cm): the 2D positions of the graph
 # - `edges`: how the nodes are connected, as pairs of node indices, labeled by
 #   their respective index in `node_positions`.
-# - `linear_edge_order`: layout of edges in linear space in *order*, as tuples.
+# - `linear_edge_order`: layout of edges in linear space in _order_, as tuples.
 # - `linear_edge_spacing`: spacing between each edge, as either a single number
-# for all gaps or an array with a number for each gap. Gaps may be important for
-# edges not connected in 2D space.
+#   for all gaps or an array with a number for each gap. Gaps may be important for
+#   edges not connected in 2D space.
 #
 # For example, (79.910, 216.720) is the 2D position of node 0 and (183.784,
 # 45.375) is the 2D position of node 8. Edge (0, 8) means there is an edge between
@@ -126,6 +134,7 @@ ax.set_title("Head Position", fontsize=28)
 #
 # For more examples, see
 # [this notebook](https://github.com/LorenFrankLab/track_linearization/blob/master/notebooks/).
+#
 
 # +
 node_positions = np.array(
@@ -173,6 +182,7 @@ linear_edge_spacing = 15
 
 # With these variables, we then add a `track_graph_name` and the corresponding
 # `environment`.
+#
 
 # +
 sgpl.TrackGraph.insert1(
@@ -193,6 +203,7 @@ graph
 
 # `TrackGraph` has several methods for visualizing in 2D and 1D space.
 # `plot_track_graph` plots in 2D to make sure our layout makes sense.
+#
 
 fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 ax.plot(
@@ -207,6 +218,7 @@ ax.set_ylabel("y-position [cm]", fontsize=18)
 graph.plot_track_graph(ax=ax)
 
 # `plot_track_graph_as_1D` shows what this looks like in 1D.
+#
 
 fig, ax = plt.subplots(1, 1, figsize=(10, 1))
 graph.plot_track_graph_as_1D(ax=ax)
@@ -214,7 +226,6 @@ graph.plot_track_graph_as_1D(ax=ax)
 # ## Parameters
 #
 
-#
 # By default, linearization assigns each 2D position to its nearest point on the
 # track graph. This is then translated into 1D space.
 #
@@ -223,6 +234,7 @@ graph.plot_track_graph_as_1D(ax=ax)
 # position from suddenly jumping to another. Position jumping like this may occur
 # at intersections or the head position swings closer to a non-target reward well
 # while on another edge.
+#
 
 sgpl.LinearizationParameters.insert1(
     {"linearization_param_name": "default"}, skip_duplicates=True
@@ -230,9 +242,11 @@ sgpl.LinearizationParameters.insert1(
 sgpl.LinearizationParameters()
 
 # ## Linearization
+#
 
 # With linearization parameters, we specify the position interval we wish to
 # linearize from the `PositionOutput` table and create an entry in `LinearizationSelection`
+#
 
 sgc.Session & {"nwb_file_name": nwb_copy_file_name}
 
@@ -250,6 +264,7 @@ sgpl.LinearizationSelection()
 # -
 
 # And then run linearization by populating `LinearizedPositionV1`.
+#
 
 sgpl.LinearizedPositionV1().populate()
 sgpl.LinearizedPositionV1()
@@ -265,6 +280,7 @@ sgpl.LinearizedPositionV1()
 # - `linear_position`: 1D linearized position
 # - `track_segment_id`: index number of the edges given to track graph
 # - `projected_{x,y}_position`: 2D position projected to the track graph
+#
 
 # +
 linear_key = {
@@ -273,15 +289,15 @@ linear_key = {
     "linearization_param_name": "default",
 }
 
-from spyglass.position_linearization import LinearizedPositionOutput
+from spyglass.linearization.merge import LinearizedPositionOutput
 
 linear_position_df = (LinearizedPositionOutput & linear_key).fetch1_dataframe()
 linear_position_df
-
 # -
 
 # We'll plot the 1D position over time, colored by edge, and use the 1D track
 # graph layout on the y-axis.
+#
 
 # +
 fig, ax = plt.subplots(figsize=(20, 13))
@@ -301,6 +317,7 @@ ax.set_title("Linear Position", fontsize=28)
 # -
 
 # We can also plot the 2D position projected to the track graph
+#
 
 fig, ax = plt.subplots(1, 1, figsize=(10, 10))
 ax.plot(

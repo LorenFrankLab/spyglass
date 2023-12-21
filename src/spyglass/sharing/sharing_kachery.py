@@ -5,6 +5,7 @@ import kachery_cloud as kcl
 from datajoint.errors import DataJointError
 
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.settings import config
 
 from ..common.common_lab import Lab  # noqa: F401
 from ..common.common_nwbfile import AnalysisNwbfile
@@ -215,3 +216,43 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
             raise Exception(f"{analysis_file_name} cannot be downloaded")
 
         return True
+
+
+def share_data_to_kachery(
+    restriction={},
+    table_list=[],
+    zone_name=None,
+):
+    """Share data to kachery
+
+    Parameters
+    ----------
+    restriction : dict, optional
+        restriction to select what data should be shared from table, by default {}
+    table_list : list, optional
+        List of tables to share data from, by default []
+    zone_name : str, optional
+        What kachery zone to share the data to, by default zone in spyglass.settings.config,
+        which looks for `KACHERY_ZONE` environmental variable, but defaults to
+        'franklab.default'
+
+    Raises
+    ------
+    ValueError
+        Does not allow sharing of all data in table
+    """
+    if not zone_name:
+        zone_name = config["KACHERY_ZONE"]
+    kachery_selection_key = {"kachery_zone_name": zone_name}
+    if not restriction:
+        raise ValueError("Must provide a restriction to the table")
+    selection_inserts = []
+    for table in table_list:
+        analysis_file_list = (table & restriction).fetch("analysis_file_name")
+        for file in analysis_file_list:  # Add all analysis to shared list
+            kachery_selection_key["analysis_file_name"] = file
+            selection_inserts.append(kachery_selection_key)
+    AnalysisNwbfileKacherySelection.insert(
+        selection_inserts, skip_duplicates=True
+    )
+    AnalysisNwbfileKachery.populate()
