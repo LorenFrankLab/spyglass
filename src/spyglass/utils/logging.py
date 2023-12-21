@@ -1,11 +1,12 @@
 """Logging configuration based on datajoint/logging.py"""
 import logging
-import os
 import sys
+
+import datajoint as dj
 
 logger = logging.getLogger(__name__.split(".")[0])
 
-log_level = os.getenv("DJ_LOG_LEVEL", "info").upper()
+log_level = dj.config.get("loglevel", "INFO").upper()
 
 log_format = logging.Formatter(
     "[%(asctime)s][%(levelname)s] Spyglass: %(message)s", datefmt="%H:%M:%S"
