@@ -11,13 +11,14 @@ import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.merge import SpikeSortingOutput
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.settings import temp_dir
 
 schema = dj.schema("waveform_features")
 
 
 @schema
-class WaveformFeaturesParams(SpyglassMixin, dj.Manual):
+class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
     """Defines the types of spike waveform features computed for a given spike
     time."""
 
@@ -46,7 +47,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Manual):
             "amplitude": {"peak_sign": "neg", "estimate_peak_time": False}
         }
         return {
-            "waveform_features_param_name": "default",
+        **cls().default_pk,
             "waveform_features": ["amplitude"],
             "waveform_features_params": waveform_feature_params,
             "waveform_extraction_params": waveform_extraction_params,
@@ -58,7 +59,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Manual):
         Insert default parameter set for position determination
         """
         cls.insert1(
-            {**cls().default_pk, **cls().default_params},
+            cls().default_params,
             skip_duplicates=True,
         )
 
@@ -67,7 +68,6 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Manual):
         query = cls & cls().default_pk
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
-            return (cls & cls().default_pk).fetch1()
 
         return query.fetch1()
 
@@ -81,8 +81,8 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Manual):
         mark_type : str
 
         """
-        SUPPORTED_FEATURES = set(WAVEFORM_FEATURE_FUNCTIONS)
-        return set(waveform_features).issubset(SUPPORTED_FEATURES)
+        supported_features = set(WAVEFORM_FEATURE_FUNCTIONS)
+        return set(waveform_features).issubset(supported_features)
 
     @property
     def supported_waveform_features(self) -> list[str]:
@@ -124,13 +124,10 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             )
 
         # retrieve the units from the NWB file
-        nwb_units = SpikeSortingOutput.fetch_nwb({"merge_id": key["merge_id"]})[
-            0
-        ]["object_id"]
+        merge_dict = {"merge_id": key["merge_id"]}
+        nwb_units = SpikeSortingOutput.fetch_nwb(merge_dict)[0]["object_id"]
 
-        curation_key = (
-            SpikeSortingOutput.CurationV1() & {"merge_id": key["merge_id"]}
-        ).fetch1()
+        curation_key = (SpikeSortingOutput.CurationV1() & merge_dict).fetch1()
         recording = sgs.CurationV1.get_recording(curation_key)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
@@ -139,7 +136,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         waveforms_dir = temp_dir + "/" + str(curation_key["sorting_id"])
         os.makedirs(waveforms_dir, exist_ok=True)
 
-        print("Extracting waveforms...")
+        logger.info("Extracting waveforms...")
         waveform_extractor = si.extract_waveforms(
             recording=recording,
             sorting=sorting,

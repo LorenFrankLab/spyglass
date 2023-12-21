@@ -236,7 +236,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         waveforms_dir = temp_dir + "/" + str(key["metric_curation_id"])
         os.makedirs(waveforms_dir, exist_ok=True)
 
-        print("Extracting waveforms...")
+        logger.info("Extracting waveforms...")
         waveforms = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
