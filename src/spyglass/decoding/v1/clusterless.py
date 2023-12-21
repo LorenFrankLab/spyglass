@@ -62,7 +62,7 @@ class DecodingElectrodeSelection(SpyglassMixin, dj.Manual):
 
 
 @schema
-class ClusterlessDecodingV1(dj.Computed):
+class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     definition = """
     -> DecodingSelection
     -> PositionOutput.proj(pos_merge_id='merge_id')
