@@ -5,6 +5,7 @@ import kachery_cloud as kcl
 from datajoint.errors import DataJointError
 
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.settings import config
 
 from ..common.common_lab import Lab  # noqa: F401
 from ..common.common_nwbfile import AnalysisNwbfile
@@ -220,7 +221,7 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
 def share_data_to_kachery(
     restriction={},
     table_list=[],
-    zone_name="franklab.default",
+    zone_name=None,
 ):
     """Share data to kachery
 
@@ -238,6 +239,8 @@ def share_data_to_kachery(
     ValueError
         Does not allow sharing of all data in table
     """
+    if not zone_name:
+        zone_name = config["KACHERY_ZONE"]
     kachery_selection_key = {"kachery_zone_name": zone_name}
     if not restriction:
         raise ValueError("Must provide a restriction to the table")
