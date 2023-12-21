@@ -1,17 +1,15 @@
 import datajoint as dj
 import sortingview as sv
-import spikeinterface as si
 
-from spyglass.utils.dj_mixin import SpyglassMixin
-
-from ..common.common_lab import LabMember, LabTeam
-from .sortingview_helper_fn import (
+from spyglass.common.common_lab import LabMember, LabTeam
+from spyglass.spikesorting.sortingview_helper_fn import (
     _create_spikesortingview_workspace,
     _generate_url,
 )
-from .spikesorting_curation import Curation
-from .spikesorting_recording import SpikeSortingRecording
-from .spikesorting_sorting import SpikeSorting
+from spyglass.spikesorting.spikesorting_curation import Curation
+from spyglass.spikesorting.spikesorting_recording import SpikeSortingRecording
+from spyglass.spikesorting.spikesorting_sorting import SpikeSorting
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_sortingview")
 
@@ -72,7 +70,7 @@ class SortingviewWorkspace(SpyglassMixin, dj.Computed):
                 LabMember.LabMemberInfo & {"lab_member_name": team_member}
             ).fetch("google_user_name")
             if len(google_user_id) != 1:
-                print(
+                logger.warn(
                     f"Google user ID for {team_member} does not exist or more than one ID detected;\
                         permission not given to {team_member}, skipping..."
                 )
@@ -110,8 +108,6 @@ class SortingviewWorkspace(SpyglassMixin, dj.Computed):
 
         # generate URLs and add to key
         url = self.url_trythis(key)
-        # url = _generate_url(key)
-        # print("URL:", url)
         key["curation_url"] = url
         key["curation_jot"] = "not ready yet"
 

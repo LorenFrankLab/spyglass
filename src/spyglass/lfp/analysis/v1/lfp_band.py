@@ -15,7 +15,7 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.lfp.lfp_merge import LFPOutput
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("lfp_band_v1")
@@ -275,8 +275,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
 
         filter_coeff = filter[0]["filter_coeff"]
         if len(filter_coeff) == 0:
-            print(
-                f"Error in LFPBand: no filter found with data sampling rate of {lfp_band_sampling_rate}"
+            logger.error(
+                "LFPBand: no filter found with data "
+                + f"sampling rate of {lfp_band_sampling_rate}"
             )
             return None
 

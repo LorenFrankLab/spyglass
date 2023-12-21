@@ -57,7 +57,6 @@ from spyglass.spikesorting.spikesorting_sorting import (
     SpikeSorting,
     SpikeSortingSelection,
 )
-from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("decoding_clusterless")

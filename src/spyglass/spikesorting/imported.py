@@ -2,8 +2,8 @@ import datajoint as dj
 import pynwb
 
 from spyglass.common.common_nwbfile import Nwbfile
-from spyglass.common.common_session import Session
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_imported")
 
@@ -27,4 +27,4 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
                 key["object_id"] = nwbfile.units.object_id
                 self.insert1(key, skip_duplicates=True)
             else:
-                print("No units found in NWB file")
+                logger.warn("No units found in NWB file")

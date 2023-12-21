@@ -10,6 +10,7 @@ from spyglass.common.common_interval import (
     interval_from_inds,
     interval_list_intersect,
 )
+from spyglass.utils import logger
 from spyglass.utils.nwb_helper_fn import get_valid_intervals
 
 
@@ -66,7 +67,7 @@ def difference_artifact_detector(
     # numpy array before referencing check for referencing flag
 
     if referencing == 1:
-        print("referencing activated. may be set to -1")
+        logger.info("referencing activated. may be set to -1")
 
     # valid_timestamps = recording.timestamps
     valid_timestamps = timestamps
@@ -79,7 +80,7 @@ def difference_artifact_detector(
             [valid_timestamps[0], valid_timestamps[-1]]
         )
         artifact_times_empty = np.asarray([])
-        print("Amplitude threshold is None, skipping artifact detection")
+        logger.info("Amplitude threshold is None, skipping artifact detection")
         return recording_interval, artifact_times_empty
 
     # verify threshold parameters
@@ -99,8 +100,8 @@ def difference_artifact_detector(
     # compute the number of electrodes that have to be above threshold
     nelect_above_1st = np.ceil(proportion_above_thresh_1st * recording.shape[1])
     nelect_above_2nd = np.ceil(proportion_above_thresh_2nd * recording.shape[1])
-    print("num tets 1", nelect_above_1st, "num tets 2", nelect_above_2nd)
-    print("data shape", recording.shape)
+    logger.info("num tets 1", nelect_above_1st, "num tets 2", nelect_above_2nd)
+    logger.info("data shape", recording.shape)
 
     # find the artifact occurrences using one or both thresholds, across
     # channels
@@ -127,7 +128,7 @@ def difference_artifact_detector(
         above_thresh_1st = np.where(artifact_times_all_5 >= nelect_above_1st)[0]
 
         # second, find artifacts with large baseline change
-        print("thresh", amplitude_thresh_2nd, "window", local_window)
+        logger.info("thresh", amplitude_thresh_2nd, "window", local_window)
 
         big_artifacts = np.zeros(
             (recording.shape[1], above_thresh_1st.shape[0])
@@ -164,7 +165,7 @@ def difference_artifact_detector(
         ]
 
     artifact_frames = above_thresh.copy()
-    print("detected ", artifact_frames.shape[0], " artifacts")
+    logger.info("detected ", artifact_frames.shape[0], " artifacts")
 
     # Convert to s to remove from either side of each detected artifact
     half_removal_window_s = removal_window_ms / 1000 * 0.5
@@ -174,7 +175,7 @@ def difference_artifact_detector(
             [[valid_timestamps[0], valid_timestamps[-1]]]
         )
         artifact_times_empty = np.asarray([])
-        print("No artifacts detected.")
+        logger.info("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
     artifact_intervals = interval_from_inds(artifact_frames)

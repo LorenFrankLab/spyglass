@@ -9,9 +9,8 @@ import psutil
 import pynwb
 import scipy.signal as signal
 
-from spyglass.utils.dj_mixin import SpyglassMixin
-
-from ..utils.nwb_helper_fn import get_electrode_indices
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_filter")
 
@@ -90,14 +89,16 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         #   high pass: [low stop low pass]
         #   band pass: [low_stop low_pass high_pass high_stop].
         if filter_type not in VALID_FILTERS:
-            print(
+            logger.error(
                 FILTER_ERR
                 + f"{filter_type} not valid type: {VALID_FILTERS.keys()}"
             )
             return None
 
         if not len(band_edges) == VALID_FILTERS[filter_type]:
-            print(FILTER_N_ERR.format(filter_name, VALID_FILTERS[filter_type]))
+            logger.error(
+                FILTER_N_ERR.format(filter_name, VALID_FILTERS[filter_type])
+            )
             return None
 
         gsp = _import_ghostipy()
@@ -352,7 +353,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             # Filter and write the output dataset
             ts_offset = 0
 
-            print("Filtering data")
+            logger.info("Filtering data")
             for ii, (start, stop) in enumerate(indices):
                 # Calc size of timestamps + data, check if < 90% of RAM
                 interval_samples = stop - start
@@ -361,7 +362,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                     + n_electrodes * data_on_disk[0][0].itemsize
                 )
                 if req_mem < MEM_USE_LIMIT * psutil.virtual_memory().available:
-                    print(f"Interval {ii}: loading data into memory")
+                    logger.info(f"Interval {ii}: loading data into memory")
                     timestamps = np.asarray(
                         timestamps_on_disk[start:stop],
                         dtype=timestamps_on_disk[0].dtype,
@@ -382,7 +383,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                     input_index_bounds = [0, interval_samples - 1]
 
                 else:
-                    print(f"Interval {ii}: leaving data on disk")
+                    logger.info(f"Interval {ii}: leaving data on disk")
                     data = data_on_disk
                     timestamps = timestamps_on_disk
                     extracted_ts = timestamps[start:stop:decimation]
@@ -495,7 +496,6 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         for ii, (start, stop) in enumerate(indices):
             extracted_ts = timestamps[start:stop:decimation]
 
-            # print(f"Diffs {np.diff(extracted_ts)}")
             new_timestamps[
                 ts_offset : ts_offset + len(extracted_ts)
             ] = extracted_ts

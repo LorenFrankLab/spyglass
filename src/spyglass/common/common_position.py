@@ -27,8 +27,8 @@ from spyglass.common.common_behav import RawPosition, VideoFile
 from spyglass.common.common_interval import IntervalList  # noqa F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import raw_dir, video_dir
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import deprecated_factory
-from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("common_position")
 
@@ -85,7 +85,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        print(f"Computing position for: {key}")
+        logger.info(f"Computing position for: {key}")
 
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
@@ -187,7 +187,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
                     **time_comments,
                 )
             else:
-                print(
+                logger.info(
                     "No video frame index found. Assuming all camera frames "
                     + "are present."
                 )
@@ -513,7 +513,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
     def make(self, key):
         M_TO_CM = 100
 
-        print("Loading position data...")
+        logger.info("Loading position data...")
         raw_position_df = (
             RawPosition()
             & {
@@ -530,7 +530,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
             }
         ).fetch1_dataframe()
 
-        print("Loading video data...")
+        logger.info("Loading video data...")
         epoch = (
             int(
                 key["interval_list_name"]
@@ -577,7 +577,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         position_time = np.asarray(position_info_df.index)
         cm_per_pixel = nwb_video.device.meters_per_pixel * M_TO_CM
 
-        print("Making video...")
+        logger.info("Making video...")
         self.make_video(
             f"{video_dir}/{video_filename}",
             centroids,

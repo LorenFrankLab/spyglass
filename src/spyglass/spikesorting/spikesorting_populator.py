@@ -1,15 +1,16 @@
 import datajoint as dj
 
-from spyglass.utils.dj_mixin import SpyglassMixin
-
-from ..common import ElectrodeGroup, IntervalList
-from .curation_figurl import CurationFigurl, CurationFigurlSelection
-from .spikesorting_artifact import (
+from spyglass.common import ElectrodeGroup, IntervalList
+from spyglass.spikesorting.curation_figurl import (
+    CurationFigurl,
+    CurationFigurlSelection,
+)
+from spyglass.spikesorting.spikesorting_artifact import (
     ArtifactDetection,
     ArtifactDetectionSelection,
     ArtifactRemovedIntervalList,
 )
-from .spikesorting_curation import (
+from spyglass.spikesorting.spikesorting_curation import (
     AutomaticCuration,
     AutomaticCurationSelection,
     CuratedSpikeSorting,
@@ -20,13 +21,17 @@ from .spikesorting_curation import (
     Waveforms,
     WaveformSelection,
 )
-from .spikesorting_recording import (
+from spyglass.spikesorting.spikesorting_recording import (
     SortGroup,
     SortInterval,
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
-from .spikesorting_sorting import SpikeSorting, SpikeSortingSelection
+from spyglass.spikesorting.spikesorting_sorting import (
+    SpikeSorting,
+    SpikeSortingSelection,
+)
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_sorting")
 
@@ -113,7 +118,7 @@ def spikesorting_pipeline_populator(
     nwbf_dict = dict(nwb_file_name=nwb_file_name)
     # Define pipeline parameters
     if pipeline_parameters_name is not None:
-        print(f"Using pipeline parameters {pipeline_parameters_name}")
+        logger.info(f"Using pipeline parameters {pipeline_parameters_name}")
         (
             artifact_parameters,
             preproc_params_name,
@@ -138,14 +143,14 @@ def spikesorting_pipeline_populator(
     # make sort groups only if not currently available
     # don't overwrite existing ones!
     if not SortGroup() & nwbf_dict:
-        print("Generating sort groups")
+        logger.info("Generating sort groups")
         SortGroup().set_group_by_shank(nwb_file_name)
 
     # Define sort interval
     interval_dict = dict(**nwbf_dict, interval_list_name=interval_list_name)
 
     if sort_interval_name is not None:
-        print(f"Using sort interval {sort_interval_name}")
+        logger.info(f"Using sort interval {sort_interval_name}")
         if not (
             SortInterval
             & nwbf_dict
@@ -153,7 +158,7 @@ def spikesorting_pipeline_populator(
         ):
             raise KeyError(f"Sort interval {sort_interval_name} not found")
     else:
-        print(f"Generating sort interval from {interval_list_name}")
+        logger.info(f"Generating sort interval from {interval_list_name}")
         interval_list = (IntervalList & interval_dict).fetch1("valid_times")[0]
 
         sort_interval_name = interval_list_name
@@ -178,7 +183,7 @@ def spikesorting_pipeline_populator(
     ).fetch("sort_group_id")
 
     # make spike sorting recording
-    print("Generating spike sorting recording")
+    logger.info("Generating spike sorting recording")
     for sort_group_id in sort_group_id_list:
         ssr_key = dict(
             **sort_dict,
@@ -192,7 +197,7 @@ def spikesorting_pipeline_populator(
     SpikeSortingRecording.populate(interval_dict)
 
     # Artifact detection
-    print("Running artifact detection")
+    logger.info("Running artifact detection")
     artifact_keys = [
         {**k, "artifact_params_name": artifact_parameters}
         for k in (SpikeSortingRecordingSelection() & interval_dict).fetch("KEY")
@@ -201,7 +206,7 @@ def spikesorting_pipeline_populator(
     ArtifactDetection.populate(interval_dict)
 
     # Spike sorting
-    print("Running spike sorting")
+    logger.info("Running spike sorting")
     for artifact_key in artifact_keys:
         ss_key = dict(
             **(ArtifactDetection & artifact_key).fetch1("KEY"),
@@ -214,7 +219,7 @@ def spikesorting_pipeline_populator(
     SpikeSorting.populate(sort_dict)
 
     # initial curation
-    print("Beginning curation")
+    logger.info("Beginning curation")
     for sorting_key in (SpikeSorting() & sort_dict).fetch("KEY"):
         if not (Curation() & sorting_key):
             Curation.insert_curation(sorting_key)
@@ -226,7 +231,7 @@ def spikesorting_pipeline_populator(
         and len(auto_curation_params_name) > 0
     ):
         # Extract waveforms
-        print("Extracting waveforms")
+        logger.info("Extracting waveforms")
         curation_keys = [
             {**k, "waveform_params_name": waveform_params_name}
             for k in (Curation() & sort_dict & {"curation_id": 0}).fetch("KEY")
@@ -235,7 +240,7 @@ def spikesorting_pipeline_populator(
         Waveforms.populate(sort_dict)
 
         # Quality Metrics
-        print("Calculating quality metrics")
+        logger.info("Calculating quality metrics")
         waveform_keys = [
             {**k, "metric_params_name": metric_params_name}
             for k in (Waveforms() & sort_dict).fetch("KEY")
@@ -244,7 +249,7 @@ def spikesorting_pipeline_populator(
         QualityMetrics().populate(sort_dict)
 
         # Automatic Curation
-        print("Creating automatic curation")
+        logger.info("Creating automatic curation")
         metric_keys = [
             {**k, "auto_curation_params_name": auto_curation_params_name}
             for k in (QualityMetrics() & sort_dict).fetch("KEY")
@@ -255,7 +260,7 @@ def spikesorting_pipeline_populator(
         # Curated Spike Sorting
         # get curation keys of the automatic curation to populate into curated
         # spike sorting selection
-        print("Creating curated spike sorting")
+        logger.info("Creating curated spike sorting")
         auto_key_list = (AutomaticCuration() & sort_dict).fetch(
             "auto_curation_key"
         )
@@ -269,7 +274,7 @@ def spikesorting_pipeline_populator(
         # Perform no automatic curation, just populate curated spike sorting
         # selection with the initial curation. Used in case of clusterless
         # decoding
-        print("Creating curated spike sorting")
+        logger.info("Creating curated spike sorting")
         curation_keys = (Curation() & sort_dict).fetch("KEY")
         for curation_key in curation_keys:
             CuratedSpikeSortingSelection.insert1(
@@ -281,7 +286,7 @@ def spikesorting_pipeline_populator(
 
     if fig_url_repo:
         # Curation Figurl
-        print("Creating curation figurl")
+        logger.info("Creating curation figurl")
         sort_interval_name = interval_list_name + "_entire"
         gh_url = (
             fig_url_repo

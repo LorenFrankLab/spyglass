@@ -10,6 +10,7 @@
 - Refactor restriction use in `delete_downstream_merge` #703
 - Add `cautious_delete` to Mixin class, initial implementation. #711
 - Add `deprecation_factory` to facilitate table migration. #717
+- Add Spyglass logger. #730
 
 ### Pipelines
 

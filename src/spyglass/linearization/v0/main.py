@@ -9,7 +9,7 @@ from track_linearization import (
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa F401
 from spyglass.common.common_position import IntervalPositionInfo  # noqa F401
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("common_position")
 
@@ -119,7 +119,7 @@ class IntervalLinearizedPosition(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        print(f"Computing linear position for: {key}")
+        logger.info(f"Computing linear position for: {key}")
 
         key["analysis_file_name"] = AnalysisNwbfile().create(
             key["nwb_file_name"]

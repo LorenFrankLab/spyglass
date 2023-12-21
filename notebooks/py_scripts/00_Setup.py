@@ -135,7 +135,6 @@
 # - Anything else: A custom name that will need to be loaded (e.g.,
 #   `dj.load('x')`) for each python session.
 #
-#
 # The config will be a `json` file like the following.
 #
 # ```json
@@ -147,6 +146,7 @@
 #     "database.use_tls": true,
 #     "enable_python_native_blobs": true,
 #     "filepath_checksum_size_limit": 1 * 1024**3,
+#     "loglevel": "INFO",
 #     "stores": {
 #         "raw": {
 #             "protocol": "file",
@@ -167,6 +167,10 @@
 # }
 # ```
 #
+# Spyglass will use the log level present in your DataJoint config to decide the
+# appropriate logging level for this session. To change the messages you see,
+# select from one of [these options](https://docs.python.org/3/library/logging.html#levels).
+#
 # If you see an error saying `Could not find SPYGLASS_BASE_DIR`, try loading your
 # config before importing Spyglass.
 #
@@ -175,6 +179,7 @@
 # dj.load('/path/to/config')
 # import spyglass
 # ```
+#
 
 # ### Running your own database
 #
@@ -192,8 +197,8 @@
 #   ```
 #
 # _Note_: For this demo, MySQL version won't matter. Some
-#   [database management](https://lorenfranklab.github.io/spyglass/latest/misc/database_management/#mysql-version)
-#   features of Spyglass, however, expect MySQL >= 8.
+# [database management](https://lorenfranklab.github.io/spyglass/latest/misc/database_management/#mysql-version)
+# features of Spyglass, however, expect MySQL >= 8.
 #
 # - When run, this is referred to as a 'Docker container'
 # - Next start the container with a couple additional pieces of info...
@@ -244,7 +249,6 @@
 
 # +
 import os
-
 import datajoint as dj
 
 if os.path.basename(os.getcwd()) == "notebooks":
@@ -270,6 +274,7 @@ Nwbfile()
 # -
 
 # # Up Next
+#
 
 # Next, we'll try [inserting data](./01_Insert_Data.ipynb)
 #
