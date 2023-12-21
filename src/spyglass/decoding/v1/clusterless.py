@@ -10,6 +10,7 @@ speeds. eLife 10, e64505 (2021).
 
 import datajoint as dj
 from non_local_detector import ContFragClusterlessClassifier
+from spyglass.utils import SpyglassMixin
 
 from spyglass.decoding.v1.dj_decoder_conversion import (
     convert_classes_to_dict,
