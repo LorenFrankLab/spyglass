@@ -10,18 +10,14 @@ import pynwb
 import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting import (
-    CuratedSpikeSortingV1,
-    CurationV1,
-    SpikeSortingOutput,
-)
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("waveform_features")
 
 
 @schema
-class WaveformFeaturesParameters(dj.Manual):
+class WaveformFeaturesParams(SpyglassMixin, dj.Manual):
     """Defines the types of spike waveform features computed for a given spike
     time."""
 
@@ -33,14 +29,12 @@ class WaveformFeaturesParameters(dj.Manual):
     waveform_extraction_params : BLOB # parameters for extracting waveforms
     """
 
-    def insert_default(self):
-        """Insert the default parameter set
+    @property
+    def default_pk(self) -> dict:
+        return {"waveform_features_param_name": "default"}
 
-        Examples
-        --------
-        waveform_features_params = {"amplitude": {'peak_sign': 'neg'}}
-        corresponds to negative going waveforms of at least 100 uV size
-        """
+    @property
+    def default_params(self) -> dict:
         waveform_extraction_params = {
             "ms_before": 0.5,
             "ms_after": 0.5,
@@ -51,15 +45,31 @@ class WaveformFeaturesParameters(dj.Manual):
         waveform_feature_params = {
             "amplitude": {"peak_sign": "neg", "estimate_peak_time": False}
         }
-        self.insert1(
-            {
-                "waveform_features_param_name": "default",
-                "waveform_features": ["amplitude"],
-                "waveform_features_params": waveform_feature_params,
-                "waveform_extraction_params": waveform_extraction_params,
-            },
+        return {
+            "waveform_features_param_name": "default",
+            "waveform_features": ["amplitude"],
+            "waveform_features_params": waveform_feature_params,
+            "waveform_extraction_params": waveform_extraction_params,
+        }
+
+    @classmethod
+    def insert_default(cls, **kwargs):
+        """
+        Insert default parameter set for position determination
+        """
+        cls.insert1(
+            {**cls().default_pk, **cls().default_params},
             skip_duplicates=True,
         )
+
+    @classmethod
+    def get_default(cls):
+        query = cls & cls().default_pk
+        if not len(query) > 0:
+            cls().insert_default(skip_duplicates=True)
+            return (cls & cls().default_pk).fetch1()
+
+        return query.fetch1()
 
     @staticmethod
     def check_supported_waveform_features(waveform_features: list[str]) -> bool:
@@ -89,7 +99,7 @@ class UnitWaveformFeaturesSelection(dj.Manual):
 
 
 @schema
-class UnitWaveformFeatures(dj.Computed):
+class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
     """For each spike time, compute a spike waveform feature associated with that
     spike. Used for clusterless decoding.
     """
@@ -102,11 +112,11 @@ class UnitWaveformFeatures(dj.Computed):
     """
 
     def make(self, key):
-        # get the list of mark parameters
-        waveform_feature_params = (WaveformFeaturesParameters & key).fetch1()
+        # get the list of feature parameters
+        waveform_feature_params = (WaveformFeaturesParams & key).fetch1()
 
-        # check that the mark type is supported
-        if not WaveformFeaturesParameters.check_supported_waveform_features(
+        # check that the feature type is supported
+        if not WaveformFeaturesParams.check_supported_waveform_features(
             waveform_feature_params["waveform_features"]
         ):
             raise NotImplementedError(
@@ -114,49 +124,54 @@ class UnitWaveformFeatures(dj.Computed):
             )
 
         # retrieve the units from the NWB file
-        nwb_units = (SpikeSortingOutput & key).fetch_nwb()[0]["units"]
+        nwb_units = SpikeSortingOutput.fetch_nwb({"merge_id": key["merge_id"]})[
+            0
+        ]["object_id"]
 
-        recording = CurationV1.get_recording(key)
+        curation_key = (
+            SpikeSortingOutput.CurationV1() & {"merge_id": key["merge_id"]}
+        ).fetch1()
+        recording = sgs.CurationV1.get_recording(curation_key)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
-        sorting = CurationV1.get_curated_sorting(key)
-        waveform_extractor_name = (
-            f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
-            f'{key["curation_id"]}_clusterless_waveforms'
-        )
-        waveform_extractor_path = str(
-            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"])
-            / Path(waveform_extractor_name)
-        )
-        if os.path.exists(waveform_extractor_path):
-            shutil.rmtree(waveform_extractor_path)
+        sorting = sgs.CurationV1.get_sorting(curation_key)
 
+        waveforms_dir = temp_dir + "/" + str(curation_key["sorting_id"])
+        os.makedirs(waveforms_dir, exist_ok=True)
+
+        print("Extracting waveforms...")
         waveform_extractor = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
-            folder=waveform_extractor_path,
+            folder=waveforms_dir,
+            overwrite=True,
             **waveform_feature_params["waveform_extraction_params"],
         )
-        sorter = (CuratedSpikeSortingV1() & key).fetch1("sorter")
+        sorter = (
+            sgs.SpikeSortingSelection()
+            & {"sorting_id": curation_key["sorting_id"]}
+        ).fetch1("sorter")
+
         waveform_features = []
 
         for unit_id in nwb_units.index:
             waveforms = waveform_extractor.get_waveforms(unit_id)
             unit_waveform_features = []
-            for feature, feature_params in zip(
-                waveform_feature_params["waveform_features"],
-                waveform_feature_params["waveform_features_params"],
-            ):
+            for feature in waveform_feature_params["waveform_features"]:
                 if (
                     sorter == "clusterless_thresholder"
                     and feature == "amplitude"
                 ):
-                    feature_params["estimate_peak_time"] = False
+                    waveform_feature_params["waveform_features_params"][
+                        feature
+                    ]["estimate_peak_time"] = False
 
                 unit_waveform_features.append(
                     WAVEFORM_FEATURE_FUNCTIONS[feature](
                         waveforms,
-                        **feature_params,
+                        **waveform_feature_params["waveform_features_params"][
+                            feature
+                        ],
                     )
                 )
             waveform_features.append(
@@ -181,11 +196,6 @@ class UnitWaveformFeatures(dj.Computed):
         )
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         """Convenience function for returning the marks in a readable format"""
