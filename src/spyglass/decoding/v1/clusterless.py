@@ -49,14 +49,12 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class DecodingElectrodeSelection(dj.Manual):
+class DecodingElectrodeSelection(SpyglassMixin, dj.Manual):
     definition = """
-
     -> ElectrodeWaveformFeaturesGroup
-
     """
 
-    class DecodingElectrode(dj.Part):
+    class DecodingElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> DecodingElectrodeSelection
         -> UnitWaveformFeatures
