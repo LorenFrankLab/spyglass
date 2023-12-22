@@ -45,7 +45,8 @@
 #   inserts, see
 #   [these additional tutorials](https://github.com/datajoint/datajoint-tutorials)
 #
-# Let's start by importing the `spyglass` package.
+# Let's start by importing the `spyglass` package and testing that your environent
+#  is properly congigured for kachery sharing
 #
 
 # +
@@ -65,6 +66,15 @@ from spyglass.settings import config
 import warnings
 
 warnings.filterwarnings("ignore")
+
+
+env_vars = os.environ
+# check that base dir is defined
+assert (
+    "SPYGLASS_BASE_DIR" in env_vars
+), "SPYGLASS_BASE_DIR not set. Please set in your .bashrc or .bash_profile"
+# check that analysis dir is correctly defined relative to base dir
+assert dj.config["stores"]["analysis"]["location"]
 # -
 
 # For example analysis files, run the code hidden below.
@@ -115,7 +125,7 @@ warnings.filterwarnings("ignore")
 # 1. Try to load from the local file system/store.
 # 2. If unavailable, check if it is in the relevant sharing table (i.e.,
 #    `NwbKachery` or `AnalysisNWBKachery`).
-# 3. If present, attempt to download from the associated Kachery Resource.
+# 3. If present, attempt to download from the associated Kachery Resource to the user's spyglass analysis directory.
 #
 # _Note:_ large file downloads may take a long time, so downloading raw data is
 # not supported. We suggest direct transfer with
@@ -133,7 +143,8 @@ warnings.filterwarnings("ignore")
 # 3. `franklab.public`: Public file sharing (not yet active)
 #
 # Setting your zone can either be done as as an environment variable or an item
-# in a DataJoint config.
+# in a DataJoint config. Spyglass will automatically handle setting the appropriate zone when downloading
+# database files through kachery
 #
 # - Environment variable:
 #
@@ -148,12 +159,16 @@ warnings.filterwarnings("ignore")
 #    "custom": {
 #       "kachery_zone": "franklab.default",
 #       "kachery_dirs": {
-#          "cloud": "/your/base/path/.kachery_cloud"
+#          "cloud": "/your/base/path/.kachery-cloud"
 #       }
 #    }
 #    ```
 
 # ## Host Setup
+#
+# - If you are a team member who will be sharing data through a pre-existing database and zone, please skip to `Sharing Data`
+#
+# - If you are on a client machine and need to access files shared with you, please skip to `Accessing Shared Data`
 
 # ### Zones
 #
@@ -177,11 +192,11 @@ warnings.filterwarnings("ignore")
 # suggest using the same name for the zone and resource.
 #
 # _Note:_ For each zone, you need to run the local daemon that listens for
-# requests from that zone. An example of the bash script we use is
+# requests from that zone and uploads data to the bucket for client download when requested. An example of the bash script we use is
 #
 # ```bash
 #     export KACHERY_ZONE=franklab.collaborators
-#     export KACHERY_CLOUD_DIR=/stelmo/nwb/.kachery_cloud
+#     export KACHERY_CLOUD_DIR=/stelmo/nwb/.kachery-cloud
 #     cd /stelmo/nwb/franklab_collaborators_resource
 #     npx kachery-resource@latest share
 # ```
@@ -189,16 +204,15 @@ warnings.filterwarnings("ignore")
 # ## Database Setup
 #
 
-# We'll add zones/resources to the Spyglass database. First, we'll check existing
-# Zones.
+# Once you have a hosted zone running, we need to add it's information to the Spyglass database.
+# This will allow spyglass to manage linking files from our analysis tables to kachery.
+# First, we'll check existing Zones.
 
 sgs.KacheryZone()
 
-# Check existing file list:
-
-sgs.AnalysisNwbfileKachery()
-
-# Prepare an entry for the `KacheryZone` table:
+# To add a new hosted Zone, we need to prepare an entry for the `KacheryZone` table.
+# Note that the `kacherycloud_dir` key should be the path for the server daemon _hosting_ the zone,
+#  and is not required to be present on the client machine:
 
 # +
 zone_name = config.get("KACHERY_ZONE")
@@ -218,10 +232,18 @@ zone_key = {
 
 sgs.KacheryZone().insert1(zone_key)
 
-# ## Data Setup
+# ## Sharing Data
 
-# Once the zone exists, we can add `AnalysisNWB` files we want to share by adding
-# entries to the `AnalysisNwbfileKacherySelection` table.
+# Once the zone exists, we can add `AnalysisNWB` files we want to share with members of the zone.
+#
+# The `AnalysisNwbFileKachery` table links analysis files made within other spyglass tables with a `uri`
+# used by kachery. We can view files already made available through kachery here:
+
+sgs.AnalysisNwbfileKachery()
+
+# We can share additional results by populating new entries in this table.
+#
+# To do so we first add these entries to the `AnalysisNwbfileKacherySelection` table.
 #
 # _Note:_ This step depends on having previously run an analysis on the example
 # file.
@@ -247,6 +269,28 @@ for file in analysis_file_list:  # Add all analysis to shared list
 
 sgs.AnalysisNwbfileKachery.populate()
 
+# Alternatively, we can share data based on it's source table in the database using the helper function `share_data_to_kachery()`
+#
+# This will take a list of tables and add all associated analysis files for entries corresponding with a passed restriction.
+# Here, we are sharing LFP and position data for the Session "minirec20230622_.nwb"
+
+# +
+from spyglass.sharing import share_data_to_kachery
+from spyglass.lfp.v1 import LFPV1
+from spyglass.position.v1 import TrodesPosV1
+
+tables = [LFPV1, TrodesPosV1]
+restriction = {"nwb_file_name": "minirec20230622_.nwb"}
+share_data_to_kachery(
+    table_list=tables,
+    restriction=restriction,
+    zone_name="franklab.collaborators",
+)
+
+# -
+
+# ## Managing access
+
 # + [markdown] jupyter={"outputs_hidden": true}
 # If all of that worked,
 #
@@ -271,6 +315,50 @@ sgs.AnalysisNwbfileKachery.populate()
 # sort = (CuratedSpikeSorting & test_sort).fetch_nwb()
 # ```
 # -
+
+# ## Accessing Shared Data
+
+# If you are a collaborator accessing datasets, you first need to be given access to the zone by a collaborator admin (see above).
+#
+# If you know the uri for the dataset you are accessing you can test this process below (example is for members of `franklab.collaborators`)
+
+# +
+import kachery_cloud as kcl
+
+path = "/path/to/save/file/to/test"
+zone_name = "franklab.collaborators"
+uri = "sha1://ceac0c1995580dfdda98d6aa45b7dda72d63afe4"
+
+os.environ["KACHERY_ZONE"] = zone_name
+kcl.load_file(uri=uri, dest=path, verbose=True)
+assert os.path.exists(path), f"File not downloaded to {path}"
+# -
+
+# In normal use, spyglass will manage setting the zone and uri when accessing files.
+# In general, the easiest way to access data valueswill be through the `fetch1_dataframe()`
+# function part of many of the spyglass tables.  In brief this will check for the appropriate
+# nwb analysis file in your local directory, and if not found, attempt to download it from the appropriate kachery zone.
+# It will then parse the relevant information from that nwb file into a pandas dataframe.
+#
+# We will look at an example with data from the `LFPV1` table:
+
+from spyglass.lfp.v1 import LFPV1
+
+# Here is the data we are going to access
+LFPV1 & {
+    "nwb_file_name": "Winnie20220713_.nwb",
+    "target_interval_list_name": "pos 0 valid times",
+}
+
+# We can access the data using `fetch1_dataframe()`
+
+(
+    LFPV1
+    & {
+        "nwb_file_name": "Winnie20220713_.nwb",
+        "target_interval_list_name": "pos 0 valid times",
+    }
+).fetch1_dataframe()
 
 # # Up Next
 
