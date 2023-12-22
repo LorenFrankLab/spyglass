@@ -1,9 +1,13 @@
-from datetime import datetime
-import kachery_cloud as kcl
 import os
 import pathlib
+from datetime import datetime
+
+import kachery_cloud as kcl
 import pynwb
 import pytest
+
+from spyglass.common import CameraDevice, DataAcquisitionDevice, Probe, Session
+from spyglass.data_import import insert_sessions
 
 
 @pytest.mark.skip(reason="test_path needs to be updated")
@@ -15,14 +19,6 @@ def test_insert_sessions():
     raw_dir = pathlib.Path(os.environ["SPYGLASS_BASE_DIR"]) / "raw"
     nwbfile_path = raw_dir / "test.nwb"
 
-    from spyglass.common import (
-        Session,
-        DataAcquisitionDevice,
-        CameraDevice,
-        Probe,
-    )
-    from spyglass.data_import import insert_sessions
-
     test_path = (
         "ipfs://bafybeie4svt3paz5vr7cw7mkgibutbtbzyab4s24hqn5pzim3sgg56m3n4"
     )
@@ -31,7 +27,8 @@ def test_insert_sessions():
     except Exception as e:
         if os.environ.get("KACHERY_CLOUD_EPHEMERAL", None) != "TRUE":
             print(
-                "Cannot load test file in non-ephemeral mode. Kachery cloud client may need to be registered."
+                "Cannot load test file in non-ephemeral mode. Kachery cloud"
+                + "client may need to be registered."
             )
         raise e
 
