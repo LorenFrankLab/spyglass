@@ -1,4 +1,5 @@
 import os
+from itertools import chain
 
 import datajoint as dj
 import numpy as np
@@ -139,12 +140,17 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 sorter,
             )
 
+        spike_times = SpikeSortingOutput.fetch_nwb(merge_key)[0]["object_id"][
+            "spike_times"
+        ]
+
         (
             key["analysis_file_name"],
             key["object_id"],
         ) = _write_waveform_features_to_nwb(
             nwb_file_name,
             waveform_extractor,
+            spike_times,
             waveform_features,
         )
 
@@ -172,22 +178,42 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             for unit_id in waveform_extractor.sorting.get_unit_ids()
         }
 
-    def fetch1_dataframe(self):
-        """Convenience function for returning the marks in a readable format"""
-        return self.fetch_dataframe()[0]
+    def fetch_data(self):
+        """Fetches the spike times and features for each unit.
 
-    def fetch_dataframe(self):
-        return [self._convert_to_dataframe(data) for data in self.fetch_nwb()]
+        Returns
+        -------
+        spike_times : list of np.ndarray
+            List of spike times for each unit
+        features : list of np.ndarray
+            List of features for each unit
+
+        """
+        return list(
+            zip(
+                *list(
+                    chain(
+                        *[self._convert_data(data) for data in self.fetch_nwb()]
+                    )
+                )
+            )
+        )
 
     @staticmethod
-    def _convert_to_dataframe(nwb_data):
-        n_marks = nwb_data["marks"].data.shape[1]
-        columns = [f"amplitude_{ind:04d}" for ind in range(n_marks)]
-        return pd.DataFrame(
-            nwb_data["marks"].data,
-            index=pd.Index(nwb_data["marks"].timestamps, name="time"),
-            columns=columns,
-        )
+    def _convert_data(nwb_data):
+        feature_df = nwb_data["object_id"]
+
+        feature_columns = [
+            column for column in feature_df.columns if column != "spike_times"
+        ]
+
+        return [
+            (
+                unit.spike_times,
+                np.concatenate(unit[feature_columns].to_numpy(), axis=1),
+            )
+            for _, unit in feature_df.iterrows()
+        ]
 
 
 def get_peak_amplitude(
@@ -251,7 +277,8 @@ WAVEFORM_FEATURE_FUNCTIONS = {
 def _write_waveform_features_to_nwb(
     nwb_file_name: str,
     waveforms: si.WaveformExtractor,
-    waveform_features=None,
+    spike_times: pd.DataFrame,
+    waveform_features: dict,
 ):
     """Save waveforms, metrics, labels, and merge groups to NWB in the units table.
 
@@ -261,7 +288,8 @@ def _write_waveform_features_to_nwb(
         name of the NWB file containing the spike sorting information
     waveforms : si.WaveformExtractor
         waveform extractor object containing the waveforms
-    waveform_features : dict, optional
+    spike_times : pd.DataFrame
+    waveform_features : dict
         dictionary of waveform_features to be saved in the NWB file
 
     Returns
@@ -286,7 +314,7 @@ def _write_waveform_features_to_nwb(
         # Write waveforms to the nwb file
         for unit_id in unit_ids:
             nwbf.add_unit(
-                spike_times=waveforms.sorting.get_unit_spike_train(unit_id),
+                spike_times=spike_times.loc[unit_id],
                 id=unit_id,
             )
 
