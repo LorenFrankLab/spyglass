@@ -45,8 +45,8 @@
 #   inserts, see
 #   [these additional tutorials](https://github.com/datajoint/datajoint-tutorials)
 #
-# Let's start by importing the `spyglass` package and testing that your environent
-#  is properly congigured for kachery sharing
+# Let's start by importing the `spyglass` package and testing that your environment
+#  is properly configured for kachery sharing
 #
 
 # +
@@ -286,7 +286,6 @@ share_data_to_kachery(
     restriction=restriction,
     zone_name="franklab.collaborators",
 )
-
 # -
 
 # ## Managing access
@@ -342,6 +341,7 @@ assert os.path.exists(path), f"File not downloaded to {path}"
 #
 # We will look at an example with data from the `LFPV1` table:
 
+# +
 from spyglass.lfp.v1 import LFPV1
 
 # Here is the data we are going to access
@@ -349,6 +349,7 @@ LFPV1 & {
     "nwb_file_name": "Winnie20220713_.nwb",
     "target_interval_list_name": "pos 0 valid times",
 }
+# -
 
 # We can access the data using `fetch1_dataframe()`
 
