@@ -46,7 +46,17 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
                 "waveform_features_params": _default_waveform_feature_params,
                 "waveform_extraction_params": _default_waveform_extraction_params,
             },
-        ]
+        ],
+        [
+            "amplitude, spike_location",
+            {
+                "waveform_features_params": {
+                    "amplitude": _default_waveform_feature_params["amplitude"],
+                    "spike_location": {},
+                },
+                "waveform_extraction_params": _default_waveform_extraction_params,
+            },
+        ],
     ]
 
     @classmethod
@@ -105,27 +115,16 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 f"Features {set(params['waveform_features_params'])} are not supported"
             )
 
-        # retrieve the units from the NWB file
         merge_key = {"merge_id": key["merge_id"]}
+        waveform_extractor = self._fetch_waveform(
+            merge_key, params["waveform_extraction_params"]
+        )
 
-        curation_key = (SpikeSortingOutput.CurationV1 & merge_key).fetch1()
-        recording = CurationV1.get_recording(curation_key)
-        if recording.get_num_segments() > 1:
-            recording = si.concatenate_recordings([recording])
-        sorting = CurationV1.get_sorting(curation_key)
-
-        waveforms_dir = temp_dir + "/" + str(curation_key["sorting_id"])
-        os.makedirs(waveforms_dir, exist_ok=True)
-
-        waveform_extractor = si.extract_waveforms(
-            recording=recording,
-            sorting=sorting,
-            folder=waveforms_dir,
-            overwrite=True,
-            **params["waveform_extraction_params"],
+        sorting_id = (SpikeSortingOutput.CurationV1 & merge_key).fetch1(
+            "sorting_id"
         )
         sorter, nwb_file_name = (
-            SpikeSortingSelection & {"sorting_id": curation_key["sorting_id"]}
+            SpikeSortingSelection & {"sorting_id": sorting_id}
         ).fetch1("sorter", "nwb_file_name")
 
         waveform_features = {}
@@ -160,25 +159,44 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         )
         self.insert1(key)
 
+    @staticmethod
+    def _fetch_waveform(
+        merge_key: dict, waveform_extraction_params: dict
+    ) -> si.WaveformExtractor:
+        curation_key = (SpikeSortingOutput.CurationV1 & merge_key).fetch1()
+        recording = CurationV1.get_recording(curation_key)
+        if recording.get_num_segments() > 1:
+            recording = si.concatenate_recordings([recording])
+        sorting = CurationV1.get_sorting(curation_key)
+
+        waveforms_dir = temp_dir + "/" + str(curation_key["sorting_id"])
+        os.makedirs(waveforms_dir, exist_ok=True)
+
+        return si.extract_waveforms(
+            recording=recording,
+            sorting=sorting,
+            folder=waveforms_dir,
+            overwrite=True,
+            **waveform_extraction_params,
+        )
+
+    @staticmethod
     def _compute_waveform_features(
-        self,
-        waveform_extractor,
-        feature,
-        feature_params,
-        sorter,
-    ):
+        waveform_extractor: si.WaveformExtractor,
+        feature: str,
+        feature_params: dict,
+        sorter: str,
+    ) -> dict:
         feature_func = WAVEFORM_FEATURE_FUNCTIONS[feature]
         if sorter == "clusterless_thresholder" and feature == "amplitude":
             feature_params["estimate_peak_time"] = False
 
         return {
-            unit_id: feature_func(
-                waveform_extractor.get_waveforms(unit_id), **feature_params
-            )
+            unit_id: feature_func(waveform_extractor, unit_id, **feature_params)
             for unit_id in waveform_extractor.sorting.get_unit_ids()
         }
 
-    def fetch_data(self):
+    def fetch_data(self) -> tuple[list[np.ndarray], list[np.ndarray]]:
         """Fetches the spike times and features for each unit.
 
         Returns
@@ -189,7 +207,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             List of features for each unit
 
         """
-        return list(
+        return tuple(
             zip(
                 *list(
                     chain(
@@ -200,7 +218,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def _convert_data(nwb_data):
+    def _convert_data(nwb_data) -> list[tuple[np.ndarray, np.ndarray]]:
         feature_df = nwb_data["object_id"]
 
         feature_columns = [
@@ -216,11 +234,12 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         ]
 
 
-def get_peak_amplitude(
-    waveforms: np.ndarray,
+def _get_peak_amplitude(
+    waveform_extractor: si.WaveformExtractor,
+    unit_id: int,
     peak_sign: str = "neg",
     estimate_peak_time: bool = False,
-):
+) -> np.ndarray:
     """Returns the amplitudes of all channels at the time of the peak
     amplitude across channels.
 
@@ -238,7 +257,7 @@ def get_peak_amplitude(
     peak_amplitudes : array-like, shape (n_spikes, n_channels)
 
     """
-
+    waveforms = waveform_extractor.get_waveforms(unit_id)
     if estimate_peak_time:
         if peak_sign == "neg":
             peak_inds = np.argmin(np.min(waveforms, axis=2), axis=1)
@@ -256,13 +275,51 @@ def get_peak_amplitude(
     return waveforms[:, spike_peak_ind]
 
 
-def get_full_waveform(waveforms, **kwargs):
+def _get_full_waveform(
+    waveform_extractor: si.WaveformExtractor, unit_id: int, **kwargs
+) -> np.ndarray:
+    """Returns the full waveform around each spike.
+
+    Parameters
+    ----------
+    waveform_extractor : si.WaveformExtractor
+    unit_id : int
+
+    Returns
+    -------
+    waveforms : np.ndarray, shape (n_spikes, n_time * n_channels)
+    """
+    waveforms = waveform_extractor.get_waveforms(unit_id)
     return waveforms.reshape((waveforms.shape[0], -1))
 
 
+def _get_spike_locations(
+    waveform_extractor: si.WaveformExtractor, unit_id: int, **kwargs
+) -> np.ndarray:
+    """Returns the spike locations in 2D or 3D space.
+
+    Parameters
+    ----------
+    waveform_extractor : si.WaveformExtractor
+        _description_
+    unit_id : int
+        Not used but needed for the function signature
+
+    Returns
+    -------
+    spike_locations: np.ndarray, shape (n_spikes, 2 or 3)
+        spike locations in 2D or 3D space
+    """
+    spike_locations = si.postprocessing.compute_spike_locations(
+        waveform_extractor
+    )
+    return np.array(spike_locations.tolist())
+
+
 WAVEFORM_FEATURE_FUNCTIONS = {
-    "amplitude": get_peak_amplitude,
-    "full_waveform": get_full_waveform,
+    "amplitude": _get_peak_amplitude,
+    "full_waveform": _get_full_waveform,
+    "spike_location": _get_spike_locations,
 }
 
 
@@ -279,7 +336,7 @@ def _write_waveform_features_to_nwb(
     waveforms: si.WaveformExtractor,
     spike_times: pd.DataFrame,
     waveform_features: dict,
-):
+) -> tuple[str, str]:
     """Save waveforms, metrics, labels, and merge groups to NWB in the units table.
 
     Parameters
