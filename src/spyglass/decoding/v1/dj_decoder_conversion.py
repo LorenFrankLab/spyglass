@@ -23,11 +23,6 @@ from non_local_detector.initial_conditions import UniformInitialConditions
 from non_local_detector.observation_models import ObservationModel
 from track_linearization import make_track_graph
 
-from spyglass.decoding.v1.dj_decoder_conversion import (
-    convert_classes_to_dict,
-    restore_classes,
-)
-
 schema = dj.schema("decoding_clusterless_v1")
 
 
