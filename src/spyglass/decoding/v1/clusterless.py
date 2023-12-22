@@ -9,13 +9,21 @@ speeds. eLife 10, e64505 (2021).
 """
 
 import datajoint as dj
-from non_local_detector import ContFragClusterlessClassifier
-from spyglass.utils import SpyglassMixin
+from non_local_detector.models import ContFragClusterlessClassifier
+from non_local_detector.models.base import ClusterlessDetector
 
+from spyglass.common.common_interval import IntervalList  # noqa: F401
+from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
+from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.decoding.v1.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
 )
+from spyglass.decoding.v1.waveform_features import (
+    UnitWaveformFeatures,
+)  # noqa: F401
+from spyglass.position.position_merge import PositionOutput  # noqa: F401
+from spyglass.utils import SpyglassMixin
 
 schema = dj.schema("decoding_clusterless_v1")
 
@@ -30,16 +38,26 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     classifier_params :   BLOB        # initialization parameters for model
     estimate_parameters_kwargs : BLOB # keyword arguments for estimate_parameters
     """
+    definition = """
+    features_param_name : varchar(80) # a name for this set of parameters
+    ---
+    params : longblob # the parameters for the waveform features
+    """
 
-    def insert_default(self):
-        self.insert1(
-            {
-                "classifier_param_name": "contfrag_clusterless",
-                "classifier_params": vars(ContFragClusterlessClassifier()),
-                "estimate_parameters_kwargs": dict(),
-            },
-            skip_duplicates=True,
-        )
+    # contents = [
+    #     [
+    #         "contfrag_clusterless",
+    #         vars(ContFragClusterlessClassifier()),
+    #         dict(),
+    #     ],
+    # ]
+
+    # @classmethod
+    # def insert_default(cls):
+    #     cls.insert(cls.contents, skip_duplicates=True)
+
+    # def insert(self, keys, **kwargs):
+    #     pass
 
     def insert1(self, key, **kwargs):
         super().insert1(convert_classes_to_dict(key), **kwargs)
@@ -49,28 +67,117 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class DecodingElectrodeSelection(SpyglassMixin, dj.Manual):
+class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
     definition = """
-    -> ElectrodeWaveformFeaturesGroup
+    waveform_features_group_name: varchar(80)
     """
 
-    class DecodingElectrode(SpyglassMixin, dj.Part):
+    class UnitFeatures(SpyglassMixin, dj.Part):
         definition = """
-        -> DecodingElectrodeSelection
+        -> UnitWaveformFeaturesGroup
         -> UnitWaveformFeatures
         """
+
+    def create_group(self, group_name: str, keys: list[dict]):
+        self.insert1(
+            {"waveform_features_group_name": group_name}, skip_duplicates=True
+        )
+        for key in keys:
+            self.UnitFeatures.insert1(
+                {
+                    **key,
+                    "waveform_features_group_name": group_name,
+                },
+                skip_duplicates=True,
+            )
+
+
+@schema
+class ClusterlessDecodingSelection(SpyglassMixin, dj.Manual):
+    definition = """
+    -> UnitWaveformFeaturesGroup
+    -> PositionOutput.proj(pos_merge_id='merge_id')
+    -> DecodingParameters
+    # -> IntervalList.proj(encoding_interval='interval_list_name')
+    # -> IntervalList.proj(decoding_interval='interval_list_name')
+    """
 
 
 @schema
 class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     definition = """
-    -> DecodingSelection
-    -> PositionOutput.proj(pos_merge_id='merge_id')
-    -> DecodingParameters
+    -> ClusterlessDecodingSelection
     ---
-    -> AnalysisNwbfile
-    object_id: varchar(40)
+    results_path: varchar(255) # path to the results file
     """
 
     def make(self, key):
-        pass
+        selection_params = (ClusterlessDecodingSelection & key).fetch1()
+
+        # Get model parameters
+        decoding_params = (
+            DecodingParameters
+            & {
+                "classifier_param_name": selection_params[
+                    "classifier_param_name"
+                ]
+            }
+        ).fetch1()
+
+        estimate_parameters_kwargs = decoding_params[
+            "estimate_parameters_kwargs"
+        ]
+        classifier_params = decoding_params["classifier_params"]
+
+        # Get position data
+        position_info = IntervalPositionInfo._data_to_df(
+            PositionOutput.fetch_nwb(
+                {"merge_id": selection_params["pos_merge_id"]}
+            )[0],
+            prefix="",
+            add_frame_ind=True,
+        )
+
+        # Get the waveform features for the selected units
+        waveform_keys = (
+            (
+                UnitWaveformFeaturesGroup.UnitFeatures
+                & {
+                    "waveform_features_group_name": selection_params[
+                        "waveform_features_group_name"
+                    ]
+                }
+            )
+        ).fetch("KEY")
+
+        spike_times, spike_waveform_features = (
+            UnitWaveformFeatures & waveform_keys
+        ).fetch_data()
+
+        # Get the encoding and decoding intervals
+
+        # Decode
+        classifier = ClusterlessDetector(**classifier_params)
+        results = classifier.estimate_parameters(
+            position_time=position_info.index.to_numpy(),
+            position=position_info[["position_x", "position_y"]].to_numpy(),
+            spike_times=spike_times,
+            spike_waveform_features=spike_waveform_features,
+            time=position_info.index.to_numpy(),
+            **estimate_parameters_kwargs,
+        )
+
+        # Insert results
+        # in future use https://github.com/rly/ndx-xarray
+        # from ndx_xarray import ExternalXarrayDataset
+        # xr_dset2 = ExternalXarrayDataset(name="test_xarray2", description="test description", path=xr_path)
+        # nwbfile.add_analysis(xr_dset2)
+
+        results_path = "results.nc"
+        classifier.save_results(
+            results,
+            results_path,
+        )
+        key["results_path"] = results_path
+
+        self.insert1(key)
