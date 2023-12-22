@@ -818,13 +818,19 @@ def populate_mark_indicators(
 
     # Compute mark indicators for each position epoch
     nwb_file_name = spikesorting_selection_keys[0]["nwb_file_name"]
-    position_interval_names = (
-        IntervalPositionInfo()
-        & {
-            "nwb_file_name": nwb_file_name,
-            "position_info_param_name": position_info_param_name,
-        }
-    ).fetch("interval_list_name")
+    # position_interval_names = (
+    #     IntervalPositionInfo()
+    #     & {
+    #         "nwb_file_name": nwb_file_name,
+    #         "position_info_param_name": position_info_param_name,
+    #     }
+    # ).fetch("interval_list_name")
+    position_restriction = {
+        "nwb_file_name": nwb_file_name,
+        "position_info_param_name": position_info_param_name,
+    }
+    position_interval_names = get_linearization_intervals(position_restriction)
+    print(position_interval_names)
 
     for interval_name in tqdm(position_interval_names):
         position_interval = IntervalList & {
@@ -842,3 +848,40 @@ def populate_mark_indicators(
             marks_selection, skip_duplicates=True
         )
         UnitMarksIndicator.populate(marks_selection)
+
+
+from spyglass.linearization import LinearizedPositionOutput
+from spyglass.position import PositionOutput
+
+
+def get_linearization_intervals(restriction: dict = {}):
+    restricted_parents = []
+    parent_table_list = LinearizedPositionOutput._merge_restrict_parents(
+        restriction
+    )
+    for parent_table in parent_table_list:
+        if "pos_merge_id" in parent_table.heading.names:
+            parent_table_list_2 = PositionOutput._merge_restrict_parts(
+                restriction
+            )
+            for parent_table_2 in parent_table_list_2:
+                # proj merge id from Position table to pos_merge_id so restricts when joined
+                column_names = parent_table_2.heading.names
+                column_names = [
+                    x
+                    for x in column_names
+                    if x not in ["merge_id", "analysis_file_name"]
+                ]
+                parent_table_2 = parent_table_2.proj(
+                    *column_names, pos_merge_id="merge_id"
+                )
+                restricted_parents.append(parent_table * parent_table_2)
+        else:
+            restricted_parents.append(parent_table)
+    return np.concatenate(
+        [
+            table.fetch("interval_list_name")
+            for table in restricted_parents
+            if "interval_list_name" in table.heading.names
+        ]
+    )
