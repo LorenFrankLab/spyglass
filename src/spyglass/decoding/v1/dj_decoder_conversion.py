@@ -155,7 +155,7 @@ def restore_classes(params: dict) -> dict:
 
     if params["classifier_params"]["observation_models"] is not None:
         params["classifier_params"]["observation_models"] = [
-            ObservationModel(obs)
+            ObservationModel(**obs)
             for obs in params["classifier_params"]["observation_models"]
         ]
 
