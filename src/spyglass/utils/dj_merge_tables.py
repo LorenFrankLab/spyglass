@@ -513,7 +513,7 @@ class Merge(dj.Manual):
             nwbs.extend(
                 fetch_nwb(
                     part_parent,
-                    (cls.analysis_nwbfile, "analysis_file_abs_path"),
+                    (cls().analysis_nwbfile, "analysis_file_abs_path"),
                     *attrs,
                     **kwargs,
                 )
