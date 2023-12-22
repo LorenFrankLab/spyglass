@@ -288,9 +288,6 @@ def _write_waveform_features_to_nwb(
             nwbf.add_unit(
                 spike_times=waveforms.sorting.get_unit_spike_train(unit_id),
                 id=unit_id,
-                electrodes=waveforms.recording.get_channel_ids(),
-                waveforms=waveforms.get_waveforms(unit_id),
-                waveform_mean=waveforms.get_template(unit_id),
             )
 
         if waveform_features is not None:
