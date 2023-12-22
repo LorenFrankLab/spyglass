@@ -6,7 +6,7 @@
 
 - Additional documentation. #690
 - Clean up following pre-commit checks. #688
-- Add Mixin class to centralize `fetch_nwb` functionality. #692
+- Add Mixin class to centralize `fetch_nwb` functionality. #692, #734
 - Refactor restriction use in `delete_downstream_merge` #703
 - Add `cautious_delete` to Mixin class, initial implementation. #711
 - Add `deprecation_factory` to facilitate table migration. #717
