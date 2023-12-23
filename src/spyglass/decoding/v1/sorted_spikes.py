@@ -8,6 +8,7 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
+import copy
 import uuid
 from itertools import chain
 from pathlib import Path
@@ -79,6 +80,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        orig_key = copy.deepcopy(key)
+
         # Get model parameters
         model_params = (
             DecodingParameters
@@ -254,6 +257,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         # save environment?
 
         self.insert1(key)
+
+        from spyglass.decoding.decoding_merge import DecodingOutput
+
+        DecodingOutput.insert1(orig_key, skip_duplicates=True)
 
     def load_results(self):
         return SortedSpikesDetector.load_results(self.fetch1("results_path"))
