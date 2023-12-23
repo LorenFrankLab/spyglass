@@ -9,6 +9,7 @@ speeds. eLife 10, e64505 (2021).
 """
 
 import uuid
+from itertools import chain
 from pathlib import Path
 
 import datajoint as dj
@@ -48,7 +49,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             {"sorted_spikes_group_name": group_name}, skip_duplicates=True
         )
         for key in keys:
-            self.UnitFeatures.insert1(
+            self.SortGroup.insert1(
                 {
                     **key,
                     "sorted_spikes_group_name": group_name,
@@ -118,9 +119,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         spike_times = [
             SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0][
                 "object_id"
-            ]["spike_times"]
+            ]["spike_times"].to_list()
             for merge_id in merge_ids
         ]
+        spike_times = list(chain(*spike_times))
 
         # Get the encoding and decoding intervals
         encoding_interval = (
