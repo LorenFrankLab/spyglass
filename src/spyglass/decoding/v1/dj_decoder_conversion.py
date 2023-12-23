@@ -3,7 +3,6 @@ so that datajoint can store them in tables."""
 
 
 import datajoint as dj
-from non_local_detector import ContFragClusterlessClassifier
 from non_local_detector.continuous_state_transitions import (
     Discrete,
     EmpiricalMovement,
