@@ -8,13 +8,17 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
+import uuid
+from pathlib import Path
+
 import datajoint as dj
+import numpy as np
 import pandas as pd
+import xarray as xr
 from non_local_detector.models import ContFragClusterlessClassifier
 from non_local_detector.models.base import ClusterlessDetector
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
-from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.decoding.v1.dj_decoder_conversion import (
     convert_classes_to_dict,
@@ -24,7 +28,8 @@ from spyglass.decoding.v1.waveform_features import (
     UnitWaveformFeatures,
 )  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
-from spyglass.utils import SpyglassMixin
+from spyglass.settings import config
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("decoding_clusterless_v1")
 
@@ -131,8 +136,9 @@ class ClusterlessDecodingSelection(SpyglassMixin, dj.Manual):
     -> UnitWaveformFeaturesGroup
     -> PositionGroup
     -> DecodingParameters
-    # -> IntervalList.proj(encoding_interval='interval_list_name')
-    # -> IntervalList.proj(decoding_interval='interval_list_name')
+    -> IntervalList.proj(encoding_interval='interval_list_name')
+    -> IntervalList.proj(decoding_interval='interval_list_name')
+    estimate_decoding_params = 1 : bool # whether to estimate the decoding parameters
     """
 
 
@@ -141,13 +147,14 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     definition = """
     -> ClusterlessDecodingSelection
     ---
-    results_path: varchar(255) # path to the results file
+    results_path: filepath@analysis # path to the results file
     """
 
     def make(self, key):
         # Get model parameters
         model_params = (
             DecodingParameters
+            & {"decoding_param_name": key["decoding_param_name"]}
         ).fetch1()
         decoding_params, decoding_kwargs = (
             model_params["decoding_params"],
@@ -190,29 +197,138 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         ).fetch_data()
 
         # Get the encoding and decoding intervals
+        encoding_interval = (
+            IntervalList
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["encoding_interval"],
+            }
+        ).fetch1("valid_times")
+        is_training = np.zeros(len(position_info), dtype=bool)
+        for interval_start, interval_end in encoding_interval:
+            is_training[
+                np.logical_and(
+                    position_info.index >= interval_start,
+                    position_info.index <= interval_end,
+                )
+            ] = True
+        if "is_training" not in decoding_kwargs:
+            decoding_kwargs["is_training"] = is_training
+
+        decoding_interval = (
+            IntervalList
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["decoding_interval"],
+            }
+        ).fetch1("valid_times")
 
         # Decode
-        results = classifier.estimate_parameters(
-            position_time=position_info.index.to_numpy(),
-            position=position_info[position_variable_names].to_numpy(),
-            spike_times=spike_times,
-            spike_waveform_features=spike_waveform_features,
-            time=position_info.index.to_numpy(),
-            **estimate_parameters_kwargs,
-        )
         classifier = ClusterlessDetector(**decoding_params)
 
-        # Insert results
-        # in future use https://github.com/rly/ndx-xarray
-        # from ndx_xarray import ExternalXarrayDataset
-        # xr_dset2 = ExternalXarrayDataset(name="test_xarray2", description="test description", path=xr_path)
-        # nwbfile.add_analysis(xr_dset2)
+        if key["estimate_decoding_params"]:
+            # if estimating parameters, then we need to treat times outside decoding interval as missing
+            # this means that times outside the decoding interval will not use the spiking data
+            # a better approach would be to treat the intervals as multiple sequences
+            # (see https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+            is_missing = np.ones(len(position_info), dtype=bool)
+            for interval_start, interval_end in decoding_interval:
+                is_missing[
+                    np.logical_and(
+                        position_info.index >= interval_start,
+                        position_info.index <= interval_end,
+                    )
+                ] = False
+            if "is_missing" not in decoding_kwargs:
+                decoding_kwargs["is_missing"] = is_missing
+            results = classifier.estimate_parameters(
+                position_time=position_info.index.to_numpy(),
+                position=position_info[position_variable_names].to_numpy(),
+                spike_times=spike_times,
+                spike_waveform_features=spike_waveform_features,
+                time=position_info.index.to_numpy(),
+                **decoding_kwargs,
+            )
+        else:
+            VALID_FIT_KWARGS = [
+                "is_training",
+                "encoding_group_labels",
+                "environment_labels",
+                "discrete_transition_covariate_data",
+            ]
 
-        results_path = "results.nc"
+            fit_kwargs = {
+                key: value
+                for key, value in decoding_kwargs.items()
+                if key in VALID_FIT_KWARGS
+            }
+            classifier.fit(
+                position_time=position_info.index.to_numpy(),
+                position=position_info[position_variable_names].to_numpy(),
+                spike_times=spike_times,
+                spike_waveform_features=spike_waveform_features,
+                **fit_kwargs,
+            )
+            VALID_PREDICT_KWARGS = [
+                "is_missing",
+                "discrete_transition_covariate_data",
+                "return_causal_posterior",
+            ]
+            predict_kwargs = {
+                key: value
+                for key, value in decoding_kwargs.items()
+                if key in VALID_PREDICT_KWARGS
+            }
+
+            # We treat each decoding interval as a separate sequence
+            results = []
+            for interval_start, interval_end in decoding_interval:
+                interval_time = position_info.loc[
+                    interval_start:interval_end
+                ].index.to_numpy()
+
+                if interval_time.size == 0:
+                    logger.warning(
+                        f"Interval {interval_start}:{interval_end} is empty"
+                    )
+                    continue
+                results.append(
+                    classifier.predict(
+                        position_time=interval_time,
+                        position=position_info.loc[interval_start:interval_end][
+                            position_variable_names
+                        ].to_numpy(),
+                        spike_times=spike_times,
+                        spike_waveform_features=spike_waveform_features,
+                        time=interval_time,
+                        **predict_kwargs,
+                    )
+                )
+            results = xr.concat(results, dim="intervals")
+
+        # Insert results
+        # in future use https://github.com/rly/ndx-xarray and analysis nwb file?
+
+        nwb_file_name = key["nwb_file_name"].strip("_.nwb")
+
+        # Generate a unique path for the results file
+        path_exists = True
+        while path_exists:
+            results_path = (
+                Path(config["SPYGLASS_ANALYSIS_DIR"])
+                / nwb_file_name
+                / f"{nwb_file_name}_{str(uuid.uuid4())}.nc"
+            )
+            path_exists = results_path.exists()
         classifier.save_results(
             results,
             results_path,
         )
         key["results_path"] = results_path
 
+        # save environment?
+
         self.insert1(key)
+
+    def load_results(self):
+        return ClusterlessDetector.load_results(self.fetch1("results_path"))

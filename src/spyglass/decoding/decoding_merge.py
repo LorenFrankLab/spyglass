@@ -1,7 +1,10 @@
 import datajoint as dj
-from spyglass.utils import _Merge, SpyglassMixin
-from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1
-from spyglass.decoding.v1.sorted_spikes import SortedSpikesDecodingV1
+
+from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1  # noqa: F401
+from spyglass.decoding.v1.sorted_spikes import (
+    SortedSpikesDecodingV1,
+)  # noqa: F401
+from spyglass.utils import SpyglassMixin, _Merge
 
 schema = dj.schema("decoding_merge")
 
