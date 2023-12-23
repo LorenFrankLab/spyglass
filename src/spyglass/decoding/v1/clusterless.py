@@ -9,6 +9,7 @@ speeds. eLife 10, e64505 (2021).
 """
 
 import datajoint as dj
+import pandas as pd
 from non_local_detector.models import ContFragClusterlessClassifier
 from non_local_detector.models.base import ClusterlessDetector
 
@@ -93,10 +94,47 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
 
 
 @schema
+class PositionGroup(SpyglassMixin, dj.Manual):
+    definition = """
+    position_group_name: varchar(80)
+    ----
+    position_variables = NULL: longblob # list of position variables to decode
+    """
+
+    class Position(SpyglassMixin, dj.Part):
+        definition = """
+        -> PositionGroup
+        -> PositionOutput.proj(pos_merge_id='merge_id')
+        """
+
+    def create_group(
+        self,
+        group_name: str,
+        keys: list[dict],
+        position_variables: list[str] = ["position_x", "position_y"],
+    ):
+        self.insert1(
+            {
+                "position_group_name": group_name,
+                "position_variables": position_variables,
+            },
+            skip_duplicates=True,
+        )
+        for key in keys:
+            self.Position.insert1(
+                {
+                    **key,
+                    "position_group_name": group_name,
+                },
+                skip_duplicates=True,
+            )
+
+
+@schema
 class ClusterlessDecodingSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> UnitWaveformFeaturesGroup
-    -> PositionOutput.proj(pos_merge_id='merge_id')
+    -> PositionGroup
     -> DecodingParameters
     # -> IntervalList.proj(encoding_interval='interval_list_name')
     # -> IntervalList.proj(decoding_interval='interval_list_name')
@@ -130,13 +168,25 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         classifier_params = decoding_params["classifier_params"]
 
         # Get position data
-        position_info = IntervalPositionInfo._data_to_df(
-            PositionOutput.fetch_nwb(
-                {"merge_id": selection_params["pos_merge_id"]}
-            )[0],
-            prefix="",
-            add_frame_ind=True,
+        position_group_key = {
+            "position_group_name": selection_params["position_group_name"]
+        }
+        position_variable_names = (PositionGroup & position_group_key).fetch1(
+            "position_variables"
         )
+
+        position_info = []
+        for pos_merge_id in (PositionGroup.Position & position_group_key).fetch(
+            "pos_merge_id"
+        ):
+            position_info.append(
+                IntervalPositionInfo._data_to_df(
+                    PositionOutput.fetch_nwb({"merge_id": pos_merge_id})[0],
+                    prefix="",
+                    add_frame_ind=True,
+                )
+            )
+        position_info = pd.concat(position_info, axis=0).dropna()
 
         # Get the waveform features for the selected units
         waveform_keys = (
@@ -160,7 +210,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         classifier = ClusterlessDetector(**classifier_params)
         results = classifier.estimate_parameters(
             position_time=position_info.index.to_numpy(),
-            position=position_info[["position_x", "position_y"]].to_numpy(),
+            position=position_info[position_variable_names].to_numpy(),
             spike_times=spike_times,
             spike_waveform_features=spike_waveform_features,
             time=position_info.index.to_numpy(),
