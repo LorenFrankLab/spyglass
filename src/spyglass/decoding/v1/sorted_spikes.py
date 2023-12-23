@@ -8,440 +8,250 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
-import pprint
+import uuid
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
 import pandas as pd
-from replay_trajectory_classification.classifier import (
-    _DEFAULT_CONTINUOUS_TRANSITIONS,
-    _DEFAULT_ENVIRONMENT,
-    _DEFAULT_SORTED_SPIKES_MODEL_KWARGS,
-)
-from replay_trajectory_classification.discrete_state_transitions import (
-    DiagonalDiscrete,
-)
-from replay_trajectory_classification.initial_conditions import (
-    UniformInitialConditions,
-)
+import xarray as xr
+from non_local_detector.models.base import SortedSpikesDetector
 
-from spyglass.common.common_behav import (
-    convert_epoch_interval_name_to_position_interval_name,
-)
-from spyglass.common.common_interval import IntervalList
-from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.decoding.core import (
-    convert_valid_times_to_slice,
-    get_valid_ephys_position_times_by_epoch,
-)
-from spyglass.decoding.dj_decoder_conversion import (
-    convert_classes_to_dict,
-    restore_classes,
-)
-from spyglass.spikesorting.spikesorting_curation import CuratedSpikeSorting
+from spyglass.decoding.v1.core import (
+    DecodingParameters,
+    PositionGroup,
+)  # noqa: F401
+from spyglass.position.position_merge import PositionOutput  # noqa: F401
+from spyglass.settings import config
+from spyglass.spikesorting.merge import SpikeSortingOutput  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
 
-schema = dj.schema("decoding_sortedspikes")
+schema = dj.schema("decoding_sorted_spikes_v1")
 
 
 @schema
-class SortedSpikesIndicatorSelection(SpyglassMixin, dj.Lookup):
-    """Bins spike times into regular intervals given by the sampling rate.
-    Start and stop time of the interval are defined by the interval list.
+class SortedSpikesGroup(SpyglassMixin, dj.Manual):
+    definition = """
+    sorted_spikes_group_name: varchar(80)
     """
 
+    class SortGroup(SpyglassMixin, dj.Part):
+        definition = """
+        -> SortedSpikesGroup
+        -> SpikeSortingOutput
+        """
+
+    def create_group(self, group_name: str, keys: list[dict]):
+        self.insert1(
+            {"sorted_spikes_group_name": group_name}, skip_duplicates=True
+        )
+        for key in keys:
+            self.UnitFeatures.insert1(
+                {
+                    **key,
+                    "sorted_spikes_group_name": group_name,
+                },
+                skip_duplicates=True,
+            )
+
+
+@schema
+class SortedSpikesDecodingSelection(SpyglassMixin, dj.Manual):
     definition = """
-    -> CuratedSpikeSorting
-    -> IntervalList
-    sampling_rate=500 : float
-    ---
+    -> SortedSpikesGroup
+    -> PositionGroup
+    -> DecodingParameters
+    -> IntervalList.proj(encoding_interval='interval_list_name')
+    -> IntervalList.proj(decoding_interval='interval_list_name')
+    estimate_decoding_params = 1 : bool # whether to estimate the decoding parameters
     """
 
 
 @schema
-class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
-    """Bins spike times into regular intervals given by the sampling rate.
-    Useful for GLMs and for decoding.
-
-    """
-
+class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     definition = """
-    -> SortedSpikesIndicatorSelection
+    -> SortedSpikesDecodingSelection
     ---
-    -> AnalysisNwbfile
-    spike_indicator_object_id: varchar(40)
+    results_path: filepath@analysis # path to the results file
     """
 
     def make(self, key):
-        pprint.pprint(key)
-        # TODO: intersection of sort interval and interval list
-        interval_times = (IntervalList & key).fetch1("valid_times")
-
-        sampling_rate = (SortedSpikesIndicatorSelection & key).fetch(
-            "sampling_rate"
+        # Get model parameters
+        model_params = (
+            DecodingParameters
+            & {"decoding_param_name": key["decoding_param_name"]}
+        ).fetch1()
+        decoding_params, decoding_kwargs = (
+            model_params["decoding_params"],
+            model_params["decoding_kwargs"],
         )
 
-        time = self.get_time_bins_from_interval(interval_times, sampling_rate)
+        # Get position data
+        position_group_key = {"position_group_name": key["position_group_name"]}
+        position_variable_names = (PositionGroup & position_group_key).fetch1(
+            "position_variables"
+        )
 
-        spikes_nwb = (CuratedSpikeSorting & key).fetch_nwb()
-        # restrict to cases with units
-        spikes_nwb = [entry for entry in spikes_nwb if "units" in entry]
-        spike_times_list = [
-            np.asarray(n_trode["units"]["spike_times"])
-            for n_trode in spikes_nwb
+        position_info = []
+        for pos_merge_id in (PositionGroup.Position & position_group_key).fetch(
+            "pos_merge_id"
+        ):
+            position_info.append(
+                IntervalPositionInfo._data_to_df(
+                    PositionOutput.fetch_nwb({"merge_id": pos_merge_id})[0],
+                    prefix="",
+                    add_frame_ind=True,
+                )
+            )
+        position_info = pd.concat(position_info, axis=0).dropna()
+
+        # Get the waveform features for the selected units
+        merge_ids = (
+            (
+                SortedSpikesGroup.SortGroup
+                & {"sorted_spikes_group_name": key["sorted_spikes_group_name"]}
+            )
+        ).fetch("merge_id")
+
+        spike_times = [
+            SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0][
+                "object_id"
+            ]["spike_times"]
+            for merge_id in merge_ids
         ]
-        if len(spike_times_list) > 0:  # if units
-            spikes = np.concatenate(spike_times_list)
 
-            # Bin spikes into time bins
-            spike_indicator = []
-            for spike_times in spikes:
-                spike_times = spike_times[
-                    (spike_times > time[0]) & (spike_times <= time[-1])
-                ]
-                spike_indicator.append(
-                    np.bincount(
-                        np.digitize(spike_times, time[1:-1]),
-                        minlength=time.shape[0],
+        # Get the encoding and decoding intervals
+        encoding_interval = (
+            IntervalList
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["encoding_interval"],
+            }
+        ).fetch1("valid_times")
+        is_training = np.zeros(len(position_info), dtype=bool)
+        for interval_start, interval_end in encoding_interval:
+            is_training[
+                np.logical_and(
+                    position_info.index >= interval_start,
+                    position_info.index <= interval_end,
+                )
+            ] = True
+        if "is_training" not in decoding_kwargs:
+            decoding_kwargs["is_training"] = is_training
+
+        decoding_interval = (
+            IntervalList
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["decoding_interval"],
+            }
+        ).fetch1("valid_times")
+
+        # Decode
+        classifier = SortedSpikesDetector(**decoding_params)
+
+        if key["estimate_decoding_params"]:
+            # if estimating parameters, then we need to treat times outside decoding interval as missing
+            # this means that times outside the decoding interval will not use the spiking data
+            # a better approach would be to treat the intervals as multiple sequences
+            # (see https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+            is_missing = np.ones(len(position_info), dtype=bool)
+            for interval_start, interval_end in decoding_interval:
+                is_missing[
+                    np.logical_and(
+                        position_info.index >= interval_start,
+                        position_info.index <= interval_end,
+                    )
+                ] = False
+            if "is_missing" not in decoding_kwargs:
+                decoding_kwargs["is_missing"] = is_missing
+            results = classifier.estimate_parameters(
+                position_time=position_info.index.to_numpy(),
+                position=position_info[position_variable_names].to_numpy(),
+                spike_times=spike_times,
+                time=position_info.index.to_numpy(),
+                **decoding_kwargs,
+            )
+        else:
+            VALID_FIT_KWARGS = [
+                "is_training",
+                "encoding_group_labels",
+                "environment_labels",
+                "discrete_transition_covariate_data",
+            ]
+
+            fit_kwargs = {
+                key: value
+                for key, value in decoding_kwargs.items()
+                if key in VALID_FIT_KWARGS
+            }
+            classifier.fit(
+                position_time=position_info.index.to_numpy(),
+                position=position_info[position_variable_names].to_numpy(),
+                spike_times=spike_times,
+                **fit_kwargs,
+            )
+            VALID_PREDICT_KWARGS = [
+                "is_missing",
+                "discrete_transition_covariate_data",
+                "return_causal_posterior",
+            ]
+            predict_kwargs = {
+                key: value
+                for key, value in decoding_kwargs.items()
+                if key in VALID_PREDICT_KWARGS
+            }
+
+            # We treat each decoding interval as a separate sequence
+            results = []
+            for interval_start, interval_end in decoding_interval:
+                interval_time = position_info.loc[
+                    interval_start:interval_end
+                ].index.to_numpy()
+
+                if interval_time.size == 0:
+                    logger.warning(
+                        f"Interval {interval_start}:{interval_end} is empty"
+                    )
+                    continue
+                results.append(
+                    classifier.predict(
+                        position_time=interval_time,
+                        position=position_info.loc[interval_start:interval_end][
+                            position_variable_names
+                        ].to_numpy(),
+                        spike_times=spike_times,
+                        time=interval_time,
+                        **predict_kwargs,
                     )
                 )
+            results = xr.concat(results, dim="intervals")
 
-            column_names = np.concatenate(
-                [
-                    [
-                        f'{n_trode["sort_group_id"]:04d}_{unit_number:04d}'
-                        for unit_number in n_trode["units"].index
-                    ]
-                    for n_trode in spikes_nwb
-                ]
+        # Insert results
+        # in future use https://github.com/rly/ndx-xarray and analysis nwb file?
+
+        nwb_file_name = key["nwb_file_name"].strip("_.nwb")
+
+        # Generate a unique path for the results file
+        path_exists = True
+        while path_exists:
+            results_path = (
+                Path(config["SPYGLASS_ANALYSIS_DIR"])
+                / nwb_file_name
+                / f"{nwb_file_name}_{str(uuid.uuid4())}.nc"
             )
-            spike_indicator = pd.DataFrame(
-                np.stack(spike_indicator, axis=1),
-                index=pd.Index(time, name="time"),
-                columns=column_names,
-            )
-
-            # Insert into analysis nwb file
-            nwb_analysis_file = AnalysisNwbfile()
-            key["analysis_file_name"] = nwb_analysis_file.create(
-                key["nwb_file_name"]
-            )
-
-            key["spike_indicator_object_id"] = nwb_analysis_file.add_nwb_object(
-                analysis_file_name=key["analysis_file_name"],
-                nwb_object=spike_indicator.reset_index(),
-            )
-
-            nwb_analysis_file.add(
-                nwb_file_name=key["nwb_file_name"],
-                analysis_file_name=key["analysis_file_name"],
-            )
-
-            self.insert1(key)
-
-    @staticmethod
-    def get_time_bins_from_interval(interval_times, sampling_rate):
-        """Gets the superset of the interval."""
-        start_time, end_time = interval_times[0][0], interval_times[-1][-1]
-        n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
-
-        return np.linspace(start_time, end_time, n_samples)
-
-    def fetch1_dataframe(self):
-        return self.fetch_dataframe()[0]
-
-    def fetch_dataframe(self):
-        return pd.concat(
-            [
-                data["spike_indicator"].set_index("time")
-                for data in self.fetch_nwb()
-            ],
-            axis=1,
+            path_exists = results_path.exists()
+        classifier.save_results(
+            results,
+            results_path,
         )
+        key["results_path"] = results_path
 
+        # save environment?
 
-def make_default_decoding_parameters_cpu():
-    classifier_parameters = dict(
-        environments=[_DEFAULT_ENVIRONMENT],
-        observation_models=None,
-        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
-        discrete_transition_type=DiagonalDiscrete(0.98),
-        initial_conditions_type=UniformInitialConditions(),
-        infer_track_interior=True,
-        knot_spacing=10,
-        spike_model_penalty=1e1,
-    )
+        self.insert1(key)
 
-    predict_parameters = {
-        "is_compute_acausal": True,
-        "use_gpu": False,
-        "state_names": ["Continuous", "Fragmented"],
-    }
-    fit_parameters = dict()
-
-    return classifier_parameters, fit_parameters, predict_parameters
-
-
-def make_default_decoding_parameters_gpu():
-    classifier_parameters = dict(
-        environments=[_DEFAULT_ENVIRONMENT],
-        observation_models=None,
-        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
-        discrete_transition_type=DiagonalDiscrete(0.98),
-        initial_conditions_type=UniformInitialConditions(),
-        infer_track_interior=True,
-        sorted_spikes_algorithm="spiking_likelihood_kde",
-        sorted_spikes_algorithm_params=_DEFAULT_SORTED_SPIKES_MODEL_KWARGS,
-    )
-
-    predict_parameters = {
-        "is_compute_acausal": True,
-        "use_gpu": True,
-        "state_names": ["Continuous", "Fragmented"],
-    }
-
-    fit_parameters = dict()
-
-    return classifier_parameters, fit_parameters, predict_parameters
-
-
-@schema
-class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
-    """Stores parameters for decoding with sorted spikes"""
-
-    definition = """
-    classifier_param_name : varchar(80) # a name for this set of parameters
-    ---
-    classifier_params :   BLOB    # initialization parameters
-    fit_params :          BLOB    # fit parameters
-    predict_params :      BLOB    # prediction parameters
-    """
-
-    def insert_default(self):
-        (
-            classifier_parameters,
-            fit_parameters,
-            predict_parameters,
-        ) = make_default_decoding_parameters_cpu()
-        self.insert1(
-            {
-                "classifier_param_name": "default_decoding_cpu",
-                "classifier_params": classifier_parameters,
-                "fit_params": fit_parameters,
-                "predict_params": predict_parameters,
-            },
-            skip_duplicates=True,
-        )
-
-        (
-            classifier_parameters,
-            fit_parameters,
-            predict_parameters,
-        ) = make_default_decoding_parameters_gpu()
-        self.insert1(
-            {
-                "classifier_param_name": "default_decoding_gpu",
-                "classifier_params": classifier_parameters,
-                "fit_params": fit_parameters,
-                "predict_params": predict_parameters,
-            },
-            skip_duplicates=True,
-        )
-
-    def insert1(self, key, **kwargs):
-        super().insert1(convert_classes_to_dict(key), **kwargs)
-
-    def fetch1(self, *args, **kwargs):
-        return restore_classes(super().fetch1(*args, **kwargs))
-
-
-def get_spike_indicator(
-    key: dict, time_range: tuple[float, float], sampling_rate: float = 500.0
-) -> pd.DataFrame:
-    """For a given key, returns a dataframe with the spike indicator for each unit
-
-    Parameters
-    ----------
-    key : dict
-    time_range : tuple[float, float]
-        Start and end time of the spike indicator
-    sampling_rate : float, optional
-
-    Returns
-    -------
-    spike_indicator : pd.DataFrame, shape (n_time, n_units)
-        A dataframe with the spike indicator for each unit
-    """
-    start_time, end_time = time_range
-    n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
-    time = np.linspace(start_time, end_time, n_samples)
-
-    spike_indicator = dict()
-    spikes_nwb_table = CuratedSpikeSorting() & key
-
-    for n_trode in spikes_nwb_table.fetch_nwb():
-        try:
-            for unit_id, unit_spike_times in n_trode["units"][
-                "spike_times"
-            ].items():
-                unit_spike_times = unit_spike_times[
-                    (unit_spike_times > time[0])
-                    & (unit_spike_times <= time[-1])
-                ]
-                unit_name = f'{n_trode["sort_group_id"]:04d}_{unit_id:04d}'
-                spike_indicator[unit_name] = np.bincount(
-                    np.digitize(unit_spike_times, time[1:-1]),
-                    minlength=time.shape[0],
-                )
-        except KeyError:
-            pass
-
-    return pd.DataFrame(
-        spike_indicator,
-        index=pd.Index(time, name="time"),
-    )
-
-
-def get_decoding_data_for_epoch(
-    nwb_file_name: str,
-    interval_list_name: str,
-    position_info_param_name: str = "default",
-    additional_spike_keys: dict = {},
-) -> tuple[pd.DataFrame, pd.DataFrame, list[slice]]:
-    """Collects the data needed for decoding
-
-    Parameters
-    ----------
-    nwb_file_name : str
-    interval_list_name : str
-    position_info_param_name : str, optional
-    additional_spike_keys : dict, optional
-
-    Returns
-    -------
-    position_info : pd.DataFrame, shape (n_time, n_position_features)
-    spikes : pd.DataFrame, shape (n_time, n_units)
-    valid_slices : list[slice]
-
-    """
-    # valid slices
-    valid_ephys_position_times_by_epoch = (
-        get_valid_ephys_position_times_by_epoch(nwb_file_name)
-    )
-    valid_ephys_position_times = valid_ephys_position_times_by_epoch[
-        interval_list_name
-    ]
-    valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
-
-    # position interval
-    position_interval_name = (
-        convert_epoch_interval_name_to_position_interval_name(
-            {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": interval_list_name,
-            }
-        )
-    )
-
-    # spikes
-    valid_times = np.asarray(
-        [(times.start, times.stop) for times in valid_slices]
-    )
-
-    curated_spikes_key = {
-        "nwb_file_name": nwb_file_name,
-        **additional_spike_keys,
-    }
-    spikes = get_spike_indicator(
-        curated_spikes_key,
-        (valid_times.min(), valid_times.max()),
-        sampling_rate=500,
-    )
-    spikes = pd.concat([spikes.loc[times] for times in valid_slices])
-
-    # position
-    position_info = (
-        IntervalPositionInfo()
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": position_interval_name,
-            "position_info_param_name": position_info_param_name,
-        }
-    ).fetch1_dataframe()
-    new_time = spikes.index.to_numpy()
-    new_index = pd.Index(
-        np.unique(np.concatenate((position_info.index, new_time))), name="time"
-    )
-    position_info = (
-        position_info.reindex(index=new_index)
-        .interpolate(method="linear")
-        .reindex(index=new_time)
-    )
-
-    return position_info, spikes, valid_slices
-
-
-def get_data_for_multiple_epochs(
-    nwb_file_name: str,
-    epoch_names: list,
-    position_info_param_name: str = "decoding",
-    additional_spike_keys: dict = {},
-) -> tuple[pd.DataFrame, pd.DataFrame, list[slice], np.ndarray, np.ndarray]:
-    """Collects the data needed for decoding for multiple epochs
-
-    Parameters
-    ----------
-    nwb_file_name : str
-    epoch_names : list
-    position_info_param_name : str, optional
-    additional_spike_keys : dict, optional
-
-    Returns
-    -------
-    position_info : pd.DataFrame, shape (n_time, n_position_features)
-    spikes : pd.DataFrame, shape (n_time, n_units)
-    valid_slices : list[slice]
-    environment_labels : np.ndarray, shape (n_time,)
-        The environment label for each time point
-    sort_group_ids : np.ndarray, shape (n_units,)
-        The sort group of each unit
-    """
-    data = []
-    environment_labels = []
-
-    for epoch in epoch_names:
-        logger.info(epoch)
-        data.append(
-            get_decoding_data_for_epoch(
-                nwb_file_name,
-                epoch,
-                position_info_param_name=position_info_param_name,
-                additional_spike_keys=additional_spike_keys,
-            )
-        )
-        n_time = data[-1][0].shape[0]
-        environment_labels.append([epoch] * n_time)
-
-    environment_labels = np.concatenate(environment_labels, axis=0)
-    position_info, spikes, valid_slices = list(zip(*data))
-    position_info = pd.concat(position_info, axis=0)
-    spikes = pd.concat(spikes, axis=0)
-    valid_slices = {
-        epoch: valid_slice
-        for epoch, valid_slice in zip(epoch_names, valid_slices)
-    }
-
-    assert position_info.shape[0] == spikes.shape[0]
-
-    sort_group_ids = np.asarray(
-        [int(col.split("_")[0]) for col in spikes.columns]
-    )
-
-    return (
-        position_info,
-        spikes,
-        valid_slices,
-        environment_labels,
-        sort_group_ids,
-    )
+    def load_results(self):
+        return SortedSpikesDetector.load_results(self.fetch1("results_path"))
