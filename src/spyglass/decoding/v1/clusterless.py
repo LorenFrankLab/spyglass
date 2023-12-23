@@ -34,15 +34,10 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     """Parameters for decoding the animal's mental position and some category of interest"""
 
     definition = """
-    classifier_param_name : varchar(80) # a name for this set of parameters
+    decoding_param_name : varchar(80)  # a name for this set of parameters
     ---
-    classifier_params :   BLOB        # initialization parameters for model
-    estimate_parameters_kwargs : BLOB # keyword arguments for estimate_parameters
-    """
-    definition = """
-    features_param_name : varchar(80) # a name for this set of parameters
-    ---
-    params : longblob # the parameters for the waveform features
+    decoding_params : BLOB             # initialization parameters for model
+    decoding_kwargs : BLOB             # additional keyword arguments
     """
 
     # contents = [
@@ -150,27 +145,17 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        selection_params = (ClusterlessDecodingSelection & key).fetch1()
-
         # Get model parameters
-        decoding_params = (
+        model_params = (
             DecodingParameters
-            & {
-                "classifier_param_name": selection_params[
-                    "classifier_param_name"
-                ]
-            }
         ).fetch1()
-
-        estimate_parameters_kwargs = decoding_params[
-            "estimate_parameters_kwargs"
-        ]
-        classifier_params = decoding_params["classifier_params"]
+        decoding_params, decoding_kwargs = (
+            model_params["decoding_params"],
+            model_params["decoding_kwargs"],
+        )
 
         # Get position data
-        position_group_key = {
-            "position_group_name": selection_params["position_group_name"]
-        }
+        position_group_key = {"position_group_name": key["position_group_name"]}
         position_variable_names = (PositionGroup & position_group_key).fetch1(
             "position_variables"
         )
@@ -193,7 +178,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             (
                 UnitWaveformFeaturesGroup.UnitFeatures
                 & {
-                    "waveform_features_group_name": selection_params[
+                    "waveform_features_group_name": key[
                         "waveform_features_group_name"
                     ]
                 }
@@ -207,7 +192,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # Get the encoding and decoding intervals
 
         # Decode
-        classifier = ClusterlessDetector(**classifier_params)
         results = classifier.estimate_parameters(
             position_time=position_info.index.to_numpy(),
             position=position_info[position_variable_names].to_numpy(),
@@ -216,6 +200,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             time=position_info.index.to_numpy(),
             **estimate_parameters_kwargs,
         )
+        classifier = ClusterlessDetector(**decoding_params)
 
         # Insert results
         # in future use https://github.com/rly/ndx-xarray

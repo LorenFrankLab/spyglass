@@ -129,34 +129,34 @@ def restore_classes(params: dict) -> dict:
         "UniformInitialConditions": UniformInitialConditions,
     }
 
-    params["classifier_params"]["continuous_transition_types"] = [
+    params["decoding_params"]["continuous_transition_types"] = [
         [
             _convert_dict_to_class(st, continuous_state_transition_types)
             for st in sts
         ]
-        for sts in params["classifier_params"]["continuous_transition_types"]
+        for sts in params["decoding_params"]["continuous_transition_types"]
     ]
-    params["classifier_params"]["environments"] = [
+    params["decoding_params"]["environments"] = [
         _convert_env_dict(env_params)
-        for env_params in params["classifier_params"]["environments"]
+        for env_params in params["decoding_params"]["environments"]
     ]
-    params["classifier_params"][
+    params["decoding_params"][
         "discrete_transition_type"
     ] = _convert_dict_to_class(
-        params["classifier_params"]["discrete_transition_type"],
+        params["decoding_params"]["discrete_transition_type"],
         discrete_state_transition_types,
     )
-    params["classifier_params"]["continuous_initial_conditions_types"] = [
+    params["decoding_params"]["continuous_initial_conditions_types"] = [
         _convert_dict_to_class(cont_ic, continuous_initial_conditions_types)
-        for cont_ic in params["classifier_params"][
+        for cont_ic in params["decoding_params"][
             "continuous_initial_conditions_types"
         ]
     ]
 
-    if params["classifier_params"]["observation_models"] is not None:
-        params["classifier_params"]["observation_models"] = [
+    if params["decoding_params"]["observation_models"] is not None:
+        params["decoding_params"]["observation_models"] = [
             ObservationModel(**obs)
-            for obs in params["classifier_params"]["observation_models"]
+            for obs in params["decoding_params"]["observation_models"]
         ]
 
     return params
@@ -202,71 +202,41 @@ def convert_classes_to_dict(key: dict) -> dict:
     key = copy.deepcopy(key)
     """Converts the classifier parameters into a dictionary so that datajoint can store it."""
     try:
-        key["classifier_params"]["environments"] = [
+        key["decoding_params"]["environments"] = [
             _convert_environment_to_dict(env)
-            for env in key["classifier_params"]["environments"]
+            for env in key["decoding_params"]["environments"]
         ]
     except TypeError:
-        key["classifier_params"]["environments"] = [
-            _convert_environment_to_dict(
-                key["classifier_params"]["environments"]
-            )
+        key["decoding_params"]["environments"] = [
+            _convert_environment_to_dict(key["decoding_params"]["environments"])
         ]
-    key["classifier_params"][
+    key["decoding_params"][
         "continuous_transition_types"
     ] = _convert_transitions_to_dict(
-        key["classifier_params"]["continuous_transition_types"]
+        key["decoding_params"]["continuous_transition_types"]
     )
-    key["classifier_params"]["discrete_transition_type"] = _to_dict(
-        key["classifier_params"]["discrete_transition_type"]
+    key["decoding_params"]["discrete_transition_type"] = _to_dict(
+        key["decoding_params"]["discrete_transition_type"]
     )
-    key["classifier_params"]["continuous_initial_conditions_types"] = [
+    key["decoding_params"]["continuous_initial_conditions_types"] = [
         _to_dict(cont_ic)
-        for cont_ic in key["classifier_params"][
+        for cont_ic in key["decoding_params"][
             "continuous_initial_conditions_types"
         ]
     ]
 
-    if key["classifier_params"]["observation_models"] is not None:
-        key["classifier_params"]["observation_models"] = [
-            vars(obs) for obs in key["classifier_params"]["observation_models"]
+    if key["decoding_params"]["observation_models"] is not None:
+        key["decoding_params"]["observation_models"] = [
+            vars(obs) for obs in key["decoding_params"]["observation_models"]
         ]
 
     try:
-        key["classifier_params"][
+        key["decoding_params"][
             "clusterless_algorithm_params"
         ] = _convert_algorithm_params(
-            key["classifier_params"]["clusterless_algorithm_params"]
+            key["decoding_params"]["clusterless_algorithm_params"]
         )
     except KeyError:
         pass
 
     return key
-
-
-@schema
-class DecodingParameters(dj.Lookup):
-    """Parameters for decoding the animal's mental position and some category of interest"""
-
-    definition = """
-    classifier_param_name : varchar(80) # a name for this set of parameters
-    ---
-    classifier_params :   BLOB        # initialization parameters for model
-    estimate_parameters_kwargs : BLOB # keyword arguments for estimate_parameters
-    """
-
-    def insert_default(self):
-        self.insert1(
-            {
-                "classifier_param_name": "contfrag_clusterless",
-                "classifier_params": vars(ContFragClusterlessClassifier()),
-                "estimate_parameters_kwargs": dict(),
-            },
-            skip_duplicates=True,
-        )
-
-    def insert1(self, key, **kwargs):
-        super().insert1(convert_classes_to_dict(key), **kwargs)
-
-    def fetch1(self, *args, **kwargs):
-        return restore_classes(super().fetch1(*args, **kwargs))
