@@ -1,10 +1,14 @@
+from itertools import chain
+from pathlib import Path
+
 import datajoint as dj
 
 from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1  # noqa: F401
 from spyglass.decoding.v1.sorted_spikes import (
     SortedSpikesDecodingV1,
 )  # noqa: F401
-from spyglass.utils import SpyglassMixin, _Merge
+from spyglass.settings import config
+from spyglass.utils import SpyglassMixin, _Merge, logger
 
 schema = dj.schema("decoding_merge")
 
@@ -30,3 +34,21 @@ class DecodingOutput(_Merge, SpyglassMixin):
         ---
         -> SortedSpikesDecodingV1
         """
+
+    def cleanup(self):
+        """Remove any decoding outputs that are not in the merge table"""
+        logger.info("Cleaning up decoding outputs")
+        table_results_paths = list(
+            chain(
+                *[
+                    part_parent_table.fetch("results_path").tolist()
+                    for part_parent_table in DecodingOutput.merge_get_parent(
+                        multi_source=True
+                    )
+                ]
+            )
+        )
+        for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.nc"):
+            if str(path) not in table_results_paths:
+                logger.info(f"Removing {path}")
+                path.unlink()
