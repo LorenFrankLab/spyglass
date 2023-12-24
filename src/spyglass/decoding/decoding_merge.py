@@ -42,7 +42,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
             chain(
                 *[
                     part_parent_table.fetch("results_path").tolist()
-                    for part_parent_table in DecodingOutput.merge_get_parent(
+                    for part_parent_table in self.merge_get_parent(
                         multi_source=True
                     )
                 ]
