@@ -238,6 +238,25 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 )
             results = xr.concat(results, dim="intervals")
 
+        # Save discrete transition and initial conditions
+        results["initial_conditions"] = xr.DataArray(
+            classifier.initial_conditions_,
+            dims=("states",),
+            name="initial_conditions",
+        )
+        results["discrete_state_transitions"] = xr.DataArray(
+            classifier.discrete_state_transitions_,
+            dims=("states", "states"),
+            name="discrete_state_transitions",
+        )
+        if (
+            vars(classifier).get("discrete_transition_coefficients_")
+            is not None
+        ):
+            results[
+                "discrete_transition_coefficients"
+            ] = classifier.discrete_transition_coefficients_
+
         # Insert results
         # in future use https://github.com/rly/ndx-xarray and analysis nwb file?
 
