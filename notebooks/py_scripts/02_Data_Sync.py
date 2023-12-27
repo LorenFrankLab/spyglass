@@ -48,6 +48,7 @@
 # Let's start by importing the `spyglass` package and testing that your environment
 #  is properly configured for kachery sharing
 #
+# If you haven't already done so, be sure to set up your Spyglass base directory and Kachery sharing directory with [Setup](./00_Setup.ipynb)
 
 # +
 import os
@@ -66,15 +67,6 @@ from spyglass.settings import config
 import warnings
 
 warnings.filterwarnings("ignore")
-
-
-env_vars = os.environ
-# check that base dir is defined
-assert (
-    "SPYGLASS_BASE_DIR" in env_vars
-), "SPYGLASS_BASE_DIR not set. Please set in your .bashrc or .bash_profile"
-# check that analysis dir is correctly defined relative to base dir
-assert dj.config["stores"]["analysis"]["location"]
 # -
 
 # For example analysis files, run the code hidden below.
@@ -150,7 +142,7 @@ assert dj.config["stores"]["analysis"]["location"]
 #
 #    ```bash
 #    export KACHERY_ZONE=franklab.default
-#    export KACHERY_CLOUD_DIR=/stelmo/nwb/.kachery_cloud
+#    export KACHERY_CLOUD_DIR=/stelmo/nwb/.kachery-cloud
 #    ```
 #
 # - DataJoint Config:
@@ -166,9 +158,9 @@ assert dj.config["stores"]["analysis"]["location"]
 
 # ## Host Setup
 #
-# - If you are a team member who will be sharing data through a pre-existing database and zone, please skip to `Sharing Data`
+# - If you are a member of a team with a pre-existing database and zone who will be sharing data, please skip to `Sharing Data`
 #
-# - If you are on a client machine and need to access files shared with you, please skip to `Accessing Shared Data`
+# - If you are a collaborator outside your team's network and need to access files shared with you, please skip to `Accessing Shared Data`
 
 # ### Zones
 #
@@ -200,11 +192,16 @@ assert dj.config["stores"]["analysis"]["location"]
 #     cd /stelmo/nwb/franklab_collaborators_resource
 #     npx kachery-resource@latest share
 # ```
+#
+# For convenience, we recommend saving this code as a bash script which can be executed by the local daemon. For franklab member, these scripts can be found in the directory `/home/loren/bin/`:
+#
+# - run_restart_kachery_collab.sh
+# - run_restart_kachery_default.sh
 
 # ## Database Setup
 #
 
-# Once you have a hosted zone running, we need to add it's information to the Spyglass database.
+# Once you have a hosted zone running, we need to add its information to the Spyglass database.
 # This will allow spyglass to manage linking files from our analysis tables to kachery.
 # First, we'll check existing Zones.
 
@@ -269,7 +266,7 @@ for file in analysis_file_list:  # Add all analysis to shared list
 
 sgs.AnalysisNwbfileKachery.populate()
 
-# Alternatively, we can share data based on it's source table in the database using the helper function `share_data_to_kachery()`
+# Alternatively, we can share data based on its source table in the database using the helper function `share_data_to_kachery()`
 #
 # This will take a list of tables and add all associated analysis files for entries corresponding with a passed restriction.
 # Here, we are sharing LFP and position data for the Session "minirec20230622_.nwb"
