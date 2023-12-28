@@ -302,11 +302,11 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
     - {"interval_list_name": "pos 2 valid times"}
 ).fetch("interval_list_name")
 
-# `IntervalList` has an additional secondary key `interval_type` which can describe the origin of the data.
+# `IntervalList` has an additional secondary key `pipeline` which can describe the origin of the data.
 # Because it is a _secondary_ key, it is not required to uniquely identify an entry.
 # Current values for this key from spyglass pipelines are:
 #
-# | interval_type | Source|
+# | pipeline | Source|
 # | ---   | --- |
 # | position | sg.common.PositionSource |
 # | lfp_v0 | sg.common.LFP |

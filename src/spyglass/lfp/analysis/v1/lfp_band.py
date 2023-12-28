@@ -353,7 +353,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                     "nwb_file_name": key["nwb_file_name"],
                     "interval_list_name": key["interval_list_name"],
                     "valid_times": lfp_band_valid_times,
-                    "interval_type": "lfp band",
+                    "pipeline": "lfp band",
                 }
             )
         else:

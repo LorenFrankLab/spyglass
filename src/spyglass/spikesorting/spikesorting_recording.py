@@ -400,7 +400,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": recording_name,
                 "valid_times": sort_interval_valid_times,
-                "interval_type": "spikesorting_recording_v0",
+                "pipeline": "spikesorting_recording_v0",
             },
             replace=True,
         )

@@ -166,7 +166,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
                 "valid_times": lfp_valid_times,
-                "interval_type": "lfp_v1",
+                "pipeline": "lfp_v1",
             },
             replace=True,
         )

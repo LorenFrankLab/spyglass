@@ -192,7 +192,7 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
             "nwb_file_name": key["nwb_file_name"],
             "interval_list_name": key["artifact_removed_interval_list_name"],
             "valid_times": key["artifact_removed_valid_times"],
-            "interval_type": "lfp_artifact",
+            "pipeline": "lfp_artifact",
         }
 
         LFPArtifactRemovedIntervalList.insert1(key, replace=True)
