@@ -23,6 +23,7 @@
 - Position:
     - Refactor input validation in DLC pipeline. #688
     - DLC path handling from config, and normalize naming convention. #722
+- IntervalList: Add secondary key `interval_type` #742
 
 ## [0.4.3] (November 7, 2023)
 
