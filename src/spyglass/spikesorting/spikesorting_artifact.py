@@ -130,6 +130,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 "artifact_removed_interval_list_name"
             ]
             tmp_key["valid_times"] = key["artifact_removed_valid_times"]
+            tmp_key["interval_type"] = "spikesorting_artifact_v0"
             IntervalList.insert1(tmp_key, replace=True)
 
             # insert into computed table

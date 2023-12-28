@@ -76,6 +76,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
                     **sess_key,
                     **ind_key,
                     valid_times=epoch_list[0]["valid_times"],
+                    interval_type="position",
                 )
             )
 
