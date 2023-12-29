@@ -8,7 +8,7 @@ import pynwb
 import pynwb.behavior
 from position_tools import (
     get_angle,
-    get_centriod,
+    get_centroid,
     get_distance,
     get_speed,
     get_velocity,
@@ -417,7 +417,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
             )
 
         # Calculate position, orientation, velocity, speed
-        position = get_centriod(back_LED, front_LED)  # cm
+        position = get_centroid(back_LED, front_LED)  # cm
 
         orientation = get_angle(back_LED, front_LED)  # radians
         is_nan = np.isnan(orientation)

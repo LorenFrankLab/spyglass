@@ -1,114 +1,42 @@
 import datetime
-import os
-import pathlib
 import shutil
+import warnings
+from pathlib import Path
 
-import datajoint as dj
 import pynwb
 import pytest
 from hdmf.backends.warnings import BrokenLinkWarning
 
-from spyglass.data_import.insert_sessions import copy_nwb_link_raw_ephys
 
-
-@pytest.fixture()
-def new_nwbfile_raw_file_name(tmp_path):
-    nwbfile = pynwb.NWBFile(
-        session_description="session_description",
-        identifier="identifier",
-        session_start_time=datetime.datetime.now(datetime.timezone.utc),
+@pytest.fixture(scope="session")
+def copy_nwb_link_raw_ephys(data_import):
+    from spyglass.data_import.insert_sessions import (  # noqa: E402
+        copy_nwb_link_raw_ephys,
     )
 
-    device = nwbfile.create_device("dev1")
-    group = nwbfile.create_electrode_group(
-        "tetrode1", "tetrode description", "tetrode location", device
-    )
-    nwbfile.add_electrode(
-        id=1,
-        x=1.0,
-        y=2.0,
-        z=3.0,
-        imp=-1.0,
-        location="CA1",
-        filtering="none",
-        group=group,
-        group_name="tetrode1",
-    )
-    region = nwbfile.create_electrode_table_region(
-        region=[0], description="electrode 1"
-    )
-
-    es = pynwb.ecephys.ElectricalSeries(
-        name="test_ts",
-        data=[1, 2, 3],
-        timestamps=[1.0, 2.0, 3.0],
-        electrodes=region,
-    )
-    nwbfile.add_acquisition(es)
-
-    spyglass_base_dir = tmp_path / "nwb-data"
-    os.environ["SPYGLASS_BASE_DIR"] = str(spyglass_base_dir)
-    os.mkdir(os.environ["SPYGLASS_BASE_DIR"])
-
-    raw_dir = spyglass_base_dir / "raw"
-    os.mkdir(raw_dir)
-
-    dj.config["stores"] = {
-        "raw": {
-            "protocol": "file",
-            "location": str(raw_dir),
-            "stage": str(raw_dir),
-        },
-    }
-
-    file_name = "raw.nwb"
-    file_path = raw_dir / file_name
-    with pynwb.NWBHDF5IO(str(file_path), mode="w") as io:
-        io.write(nwbfile)
-
-    return file_name
+    return copy_nwb_link_raw_ephys
 
 
-@pytest.fixture()
-def new_nwbfile_no_ephys_file_name():
-    return "raw_no_ephys.nwb"
+def test_open_path(minirec_path, minirec_open):
+    this_acq = minirec_open.acquisition
+    assert "e-series" in this_acq, "Ephys link no longer exists"
+    assert (
+        str(minirec_path) == this_acq["e-series"].data.file.filename
+    ), "Path of ephys link is incorrect"
 
 
-@pytest.fixture()
-def moved_nwbfile_no_ephys_file_path(tmp_path, new_nwbfile_no_ephys_file_name):
-    return tmp_path / new_nwbfile_no_ephys_file_name
-
-
-def test_copy_nwb(
-    new_nwbfile_raw_file_name,
-    new_nwbfile_no_ephys_file_name,
-    moved_nwbfile_no_ephys_file_path,
+def test_copy_link(
+    minirec_path, settings, minirec_closed, copy_nwb_link_raw_ephys
 ):
-    copy_nwb_link_raw_ephys(
-        new_nwbfile_raw_file_name, new_nwbfile_no_ephys_file_name
-    )
+    """Test readabilty after moving the linking raw file, breaking link"""
+    new_path = Path(settings.raw_dir) / "no_ephys.nwb"
+    new_moved = Path(settings.temp_dir) / "no_ephys_moved.nwb"
 
-    # new file should not have ephys data
-    base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
-    new_nwbfile_raw_file_name_abspath = (
-        base_dir / "raw" / new_nwbfile_raw_file_name
-    )
-    out_nwb_file_abspath = base_dir / "raw" / new_nwbfile_no_ephys_file_name
-    with pynwb.NWBHDF5IO(path=str(out_nwb_file_abspath), mode="r") as io:
-        nwbfile = io.read()
-        assert (
-            "test_ts" in nwbfile.acquisition
-        )  # this still exists but should be a link now
-        assert nwbfile.acquisition["test_ts"].data.file.filename == str(
-            new_nwbfile_raw_file_name_abspath
-        )
-
-    # test readability after moving the linking raw file (paths are stored as relative paths in NWB)
-    # so this should break the link (moving the linked-to file should also break the link)
-    shutil.move(out_nwb_file_abspath, moved_nwbfile_no_ephys_file_path)
-    with pynwb.NWBHDF5IO(
-        path=str(moved_nwbfile_no_ephys_file_path), mode="r"
-    ) as io:
-        with pytest.warns(BrokenLinkWarning):
-            nwbfile = io.read()  # should raise BrokenLinkWarning
-        assert "test_ts" not in nwbfile.acquisition
+    copy_nwb_link_raw_ephys(minirec_path.name, new_path.name)
+    shutil.move(new_path, new_moved)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        with pynwb.NWBHDF5IO(path=str(new_moved), mode="r") as io:
+            with pytest.warns(BrokenLinkWarning):
+                nwb_acq = io.read().acquisition
+    assert "e-series" not in nwb_acq, "Ephys link still exists after move"

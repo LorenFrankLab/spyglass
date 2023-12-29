@@ -31,6 +31,7 @@ class SpyglassConfig:
         self._config = dict()
         self.config_defaults = dict(prepopulate=True)
         self._debug_mode = False
+        self._test_mode = False
         self._dlc_base = None
 
         self.relative_dirs = {
@@ -106,6 +107,7 @@ class SpyglassConfig:
         dj_dlc = dj_custom.get("dlc_dirs", {})
 
         self._debug_mode = dj_custom.get("debug_mode", False)
+        self._test_mode = dj_custom.get("test_mode", False)
 
         resolved_base = (
             self.supplied_base_dir
@@ -166,6 +168,7 @@ class SpyglassConfig:
 
         self._config = dict(
             debug_mode=self._debug_mode,
+            test_mode=self._test_mode,
             **self.config_defaults,
             **config_dirs,
             **kachery_zone_dict,
@@ -381,6 +384,7 @@ class SpyglassConfig:
         return {
             "custom": {
                 "debug_mode": str(self.debug_mode).lower(),
+                "test_mode": str(self._test_mode).lower(),
                 "spyglass_dirs": {
                     "base": self.base_dir,
                     "raw": self.raw_dir,
@@ -453,7 +457,18 @@ class SpyglassConfig:
 
     @property
     def debug_mode(self) -> bool:
+        """Returns True if debug_mode is set.
+
+        Supports skipping inserts for Dockerized development.
+        """
         return self._debug_mode
+
+    @property
+    def test_mode(self) -> bool:
+        """Returns True if test_mode is set.
+
+        Required for pytests to run without prompts."""
+        return self._test_mode
 
     @property
     def dlc_project_dir(self) -> str:
@@ -479,6 +494,7 @@ sorting_dir = sg_config.sorting_dir
 waveform_dir = sg_config.waveform_dir
 video_dir = sg_config.video_dir
 debug_mode = sg_config.debug_mode
+test_mode = sg_config.test_mode
 prepopulate = config.get("prepopulate", False)
 dlc_project_dir = sg_config.dlc_project_dir
 dlc_video_dir = sg_config.dlc_video_dir

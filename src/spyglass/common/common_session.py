@@ -1,10 +1,6 @@
 import datajoint as dj
 
-from spyglass.common.common_device import (
-    CameraDevice,
-    DataAcquisitionDevice,
-    Probe,
-)
+from spyglass.common.common_device import CameraDevice, DataAcquisitionDevice, Probe
 from spyglass.common.common_lab import Institution, Lab, LabMember
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_subject import Subject
@@ -63,13 +59,15 @@ class Session(SpyglassMixin, dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath)
 
-        # certain data are not associated with a single NWB file / session because they may apply to
-        # multiple sessions. these data go into dj.Manual tables.
-        # e.g., a lab member may be associated with multiple experiments, so the lab member table should not
-        # be dependent on (contain a primary key for) a session.
+        # certain data are not associated with a single NWB file / session
+        # because they may apply to multiple sessions. these data go into
+        # dj.Manual tables. e.g., a lab member may be associated with multiple
+        # experiments, so the lab member table should not be dependent on
+        # (contain a primary key for) a session.
 
-        # here, we create new entries in these dj.Manual tables based on the values read from the NWB file
-        # then, they are linked to the session via fields of Session (e.g., Subject, Institution, Lab) or part
+        # here, we create new entries in these dj.Manual tables based on the
+        # values read from the NWB file then, they are linked to the session
+        # via fields of Session (e.g., Subject, Institution, Lab) or part
         # tables (e.g., Experimenter, DataAcquisitionDevice).
 
         logger.info("Institution...")
@@ -87,15 +85,12 @@ class Session(SpyglassMixin, dj.Imported):
         if not debug_mode:  # TODO: remove when demo files agree on device
             logger.info("Populate DataAcquisitionDevice...")
             DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
-            logger.info()
 
         logger.info("Populate CameraDevice...")
         CameraDevice.insert_from_nwbfile(nwbf)
-        logger.info()
 
         logger.info("Populate Probe...")
         Probe.insert_from_nwbfile(nwbf, config)
-        logger.info()
 
         if nwbf.subject is not None:
             subject_id = nwbf.subject.subject_id

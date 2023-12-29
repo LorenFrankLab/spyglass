@@ -68,9 +68,10 @@ spyglass_cli = "spyglass.cli:cli"
 "Homepage" = "https://github.com/LorenFrankLab/spyglass"
 "Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
 
-[project.optional-dependencies]
+[project.optional-dependencies] 
 position = ["ffmpeg", "numba>=0.54", "deeplabcut<2.3.0"]
 test = [
+    "docker",         # for tests in a container
     "pytest",         # unit testing
     "pytest-cov",     # code coverage
     "kachery",        # database access
@@ -110,5 +111,42 @@ line-length = 80
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
+ignore-words-list = 'nevers' 
 # Nevers - name in Citation
-ignore-words-list = 'nevers'
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+  "-sv", 
+  "-p no:warnings", 
+  "--no-teardown",
+  "--quiet-spy",
+  "--show-capture=no",
+  "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
+  "--cov=spyglass", 
+  "--cov-report=term-missing", 
+  "--no-cov-on-fail",
+]
+testpaths = ["tests"]
+log_level = "INFO"
+
+[tool.coverage.run]
+source = ["*/src/spyglass/*"]
+omit = [
+  "*/__init__.py",
+  "*/_version.py",
+  "*/cli/*",
+  # "*/common/*",
+  # "*/data_import/*",
+  "*/decoding/*",
+  "*/figurl_views/*",
+  "*/lfp/*",
+  "*/linearization/*",
+  "*/lock/*",
+  "*/position/*",
+  "*/ripple/*",
+  "*/sharing/*",
+  "*/spikesorting/*",
+  # "*/utils/*",
+]
+

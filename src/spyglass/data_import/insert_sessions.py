@@ -101,7 +101,7 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
     if os.path.exists(out_nwb_file_abs_path):
         if debug_mode:
             return out_nwb_file_abs_path
-        warnings.warn(
+        logger.warn(
             f"Output file {out_nwb_file_abs_path} exists and will be "
             + "overwritten."
         )

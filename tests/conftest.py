@@ -1,26 +1,20 @@
 import os
-import pathlib
-import shutil
 import sys
-import tempfile
+import warnings
 from contextlib import nullcontext
+from pathlib import Path
 
 import datajoint as dj
+import pynwb
 import pytest
 from datajoint.logging import logger
 
-from .datajoint._config import DATAJOINT_SERVER_PORT
-from .datajoint._datajoint_server import (
-    kill_datajoint_server,
-    run_datajoint_server,
-)
+from .container import DockerMySQLManager
 
 # ---------------------- CONSTANTS ---------------------
 
-thisdir = os.path.dirname(os.path.realpath(__file__))
-sys.path.append(thisdir)
-global __PROCESS
-__PROCESS = None
+# globals in pytest_configure: BASE_DIR, SERVER, TEARDOWN, VERBOSE
+warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
 
 
 def pytest_addoption(parser):
@@ -43,7 +37,7 @@ def pytest_addoption(parser):
         action="store_true",
         dest="quiet_spy",
         default=False,
-        help="Quiet print statements from Spyglass.",
+        help="Quiet logging from Spyglass.",
     )
     parser.addoption(
         "--no-server",
@@ -60,11 +54,29 @@ def pytest_addoption(parser):
         help="Tear down tables after tests.",
     )
     parser.addoption(
-        "--datadir",
+        "--base-dir",
         action="store",
-        default="./tests/test_data/",
-        dest="datadir",
+        default="./tests/_data/",
+        dest="base_dir",
         help="Directory for local input file.",
+    )
+
+
+def pytest_configure(config):
+    global BASE_DIR, SERVER, TEARDOWN, VERBOSE
+
+    TEARDOWN = not config.option.no_teardown
+    VERBOSE = not config.option.quiet_spy
+
+    BASE_DIR = Path(config.option.base_dir).absolute()
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
+
+    SERVER = DockerMySQLManager(
+        restart=False,
+        shutdown=TEARDOWN,
+        null_server=config.option.no_server,
+        verbose=VERBOSE,
     )
 
 
@@ -72,128 +84,168 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture(scope="session")
-def verbose_context(config):
-    """Verbosity context for suppressing Spyglass print statements."""
-    return QuietStdOut() if config.option.quiet_spy else nullcontext()
+def verbose():
+    """Config for pytest fixtures."""
+    yield VERBOSE
+
+
+@pytest.fixture(scope="session", autouse=True)
+def verbose_context(verbose):
+    """Verbosity context for suppressing Spyglass logging."""
+    yield nullcontext() if verbose else QuietStdOut()
 
 
 @pytest.fixture(scope="session")
-def teardown(config):
-    return not config.option.no_teardown
+def teardown(request):
+    yield TEARDOWN
 
 
 @pytest.fixture(scope="session")
-def spy_config(config):
+def server(request, teardown):
+    SERVER.wait()
+    yield SERVER
+    if teardown:
+        SERVER.stop()
+
+
+@pytest.fixture(scope="session")
+def dj_conn(request, server, verbose, teardown):
+    """Fixture for datajoint connection."""
+    config_file = "dj_local_conf.json_pytest"
+
+    dj.config.update(server.creds)
+    dj.config["loglevel"] = "INFO" if verbose else "ERROR"
+    dj.config.save(config_file)
+    dj.conn()
+    yield dj.conn()
+    if teardown:
+        if Path(config_file).exists():
+            os.remove(config_file)
+
+
+@pytest.fixture(scope="session")
+def base_dir():
+    yield BASE_DIR
+
+
+@pytest.fixture(scope="session")
+def raw_dir(base_dir):
+    # could do settings.raw_dir, but this is faster while server booting
+    yield base_dir / "raw"
+
+
+@pytest.fixture(scope="session")
+def minirec_path(raw_dir):
+    yield raw_dir / "test.nwb"
+
+
+@pytest.fixture(scope="session")
+def minirec_download():
+    # test_path = (
+    #     "ipfs://bafybeie4svt3paz5vr7cw7mkgibutbtbzyab4s24hqn5pzim3sgg56m3n4"
+    # )
+    # try:
+    #     local_test_path = kcl.load_file(test_path)
+    # except Exception as e:
+    #     if os.environ.get("KACHERY_CLOUD_EPHEMERAL", None) != "TRUE":
+    #         print(
+    #             "Cannot load test file in non-ephemeral mode. Kachery cloud"
+    #             + "client may need to be registered."
+    #         )
+    #     raise e
+    # os.rename(local_test_path, nwbfile_path)
     pass
 
 
-def pytest_configure(config):
-    """Run on build, after parsing command line options."""
-    _set_env(base_dir=config.option.datadir)
-
-    # note that in this configuration, every test will use the same datajoint
-    # server this may create conflicts and dependencies between tests it may be
-    # better but significantly slower to start a new server for every test but
-    # the server needs to be started before tests are collected because
-    # datajoint runs when the source files are loaded, not when the tests are
-    # run. one solution might be to restart the server after every test
-
-    if not config.option.no_server:
-        global __PROCESS
-        __PROCESS = run_datajoint_server()
+@pytest.fixture(scope="session")
+def minirec_content(minirec_path):
+    with pynwb.NWBHDF5IO(
+        path=str(minirec_path), mode="r", load_namespaces=True
+    ) as io:
+        nwbfile = io.read()
+        yield nwbfile
 
 
-def pytest_unconfigure(config):
-    """Called before test process is exited."""
-    if __PROCESS:
-        logger.info("Terminating datajoint compute resource process")
-        __PROCESS.terminate()
+@pytest.fixture(scope="session")
+def minirec_open(minirec_content):
+    yield minirec_content
 
-        # TODO handle ResourceWarning: subprocess X is still running __PROCESS.join()
 
-    if not config.option.no_server:
-        kill_datajoint_server()
-        shutil.rmtree(os.environ["SPYGLASS_BASE_DIR"])
+@pytest.fixture(scope="session")
+def minirec_closed(minirec_path):
+    with pynwb.NWBHDF5IO(
+        path=str(minirec_path), mode="r", load_namespaces=True
+    ) as io:
+        nwbfile = io.read()
+    yield nwbfile
+
+
+@pytest.fixture(scope="session")
+def minirec_devices(minirec_content):
+    yield minirec_content.devices
+
+
+@pytest.fixture(scope="session")
+def minirec_insert(minirec_path, teardown, server, dj_conn):
+    from spyglass.common import Nwbfile, Session  # noqa: E402
+    from spyglass.data_import import insert_sessions  # noqa: E402
+    from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
+
+    if len(Nwbfile()) > 0:
+        Nwbfile().delete(safemode=False)
+
+    if server.connected:
+        insert_sessions(minirec_path.name)
+    else:
+        logger.error("No server connection.")
+    if len(Session()) == 0:
+        logger.error("No sessions inserted.")
+
+    yield
+
+    close_nwb_files()
+    if teardown:
+        Nwbfile().delete(safemode=False)
+
+
+@pytest.fixture(scope="session")
+def minirec_restr(minirec_path):
+    yield f"nwb_file_name LIKE '{minirec_path.stem}%'"
+
+
+@pytest.fixture(scope="session")
+def common(dj_conn):
+    from spyglass import common
+
+    yield common
+
+
+@pytest.fixture(scope="session")
+def data_import(dj_conn):
+    from spyglass import data_import
+
+    yield data_import
+
+
+@pytest.fixture(scope="session")
+def settings(dj_conn):
+    from spyglass import settings
+
+    yield settings
 
 
 # ------------------ GENERAL FUNCTION ------------------
-
-
-def _set_env(base_dir):
-    """Set environment variables."""
-
-    # TODO: change from tempdir to user supplied dir
-    # spyglass_base_dir = pathlib.Path(base_dir)
-    spyglass_base_dir = pathlib.Path(tempfile.mkdtemp())
-
-    spike_sorting_storage_dir = spyglass_base_dir / "spikesorting"
-    tmp_dir = spyglass_base_dir / "tmp"
-
-    logger.info("Setting datajoint and kachery environment variables.")
-    logger.info("SPYGLASS_BASE_DIR set to", spyglass_base_dir)
-
-    # TODO: make this a fixture
-    # spy_config_dict = dict(
-    #     SPYGLASS_BASE_DIR=str(spyglass_base_dir),
-    #     SPYGLASS_RECORDING_DIR=str(spyglass_base_dir / "recording"),
-    #     SPYGLASS_SORTING_DIR=str(spyglass_base_dir / "sorting"),
-    #     SPYGLASS_WAVEFORMS_DIR=str(spyglass_base_dir / "waveforms"),
-    #     SPYGLASS_TEMP_DIR=str(tmp_dir),
-    #     SPIKE_SORTING_STORAGE_DIR=str(spike_sorting_storage_dir),
-    #     KACHERY_ZONE="franklab.collaborators",
-    #     KACHERY_CLOUD_DIR="/stelmo/nwb/.kachery_cloud",
-    #     KACHERY_STORAGE_DIR=str(spyglass_base_dir / "kachery_storage"),
-    #     KACHERY_TEMP_DIR=str(spyglass_base_dir / "tmp"),
-    #     FIGURL_CHANNEL="franklab2",
-    #     DJ_SUPPORT_FILEPATH_MANAGEMENT="TRUE",
-    #     KACHERY_CLOUD_EPHEMERAL="TRUE",
-    # )
-
-    os.environ["SPYGLASS_BASE_DIR"] = str(spyglass_base_dir)
-    os.environ["DJ_SUPPORT_FILEPATH_MANAGEMENT"] = "TRUE"
-    os.environ["SPIKE_SORTING_STORAGE_DIR"] = str(spike_sorting_storage_dir)
-    os.environ["SPYGLASS_TEMP_DIR"] = str(tmp_dir)
-    os.environ["KACHERY_CLOUD_EPHEMERAL"] = "TRUE"
-
-    os.mkdir(spike_sorting_storage_dir)
-    os.mkdir(tmp_dir)
-
-    raw_dir = spyglass_base_dir / "raw"
-    analysis_dir = spyglass_base_dir / "analysis"
-
-    os.mkdir(raw_dir)
-    os.mkdir(analysis_dir)
-
-    dj.config["database.host"] = "localhost"
-    dj.config["database.port"] = DATAJOINT_SERVER_PORT
-    dj.config["database.user"] = "root"
-    dj.config["database.password"] = "tutorial"
-
-    dj.config["stores"] = {
-        "raw": {
-            "protocol": "file",
-            "location": str(raw_dir),
-            "stage": str(raw_dir),
-        },
-        "analysis": {
-            "protocol": "file",
-            "location": str(analysis_dir),
-            "stage": str(analysis_dir),
-        },
-    }
 
 
 class QuietStdOut:
     """If quiet_spy, used to quiet prints, teardowns and table.delete prints"""
 
     def __enter__(self):
-        # os.environ["LOG_LEVEL"] = "WARNING"
         logger.setLevel("CRITICAL")
         self._original_stdout = sys.stdout
         sys.stdout = open(os.devnull, "w")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # os.environ["LOG_LEVEL"] = "INFO"
         logger.setLevel("INFO")
         sys.stdout.close()
         sys.stdout = self._original_stdout
