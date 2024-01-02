@@ -124,7 +124,7 @@ try:
             initial_conditions_types,
         )
 
-        if params["classifier_params"]["observation_models"] is not None:
+        if params["classifier_params"].get("observation_models"):
             params["classifier_params"]["observation_models"] = [
                 ObservationModel(obs)
                 for obs in params["classifier_params"]["observation_models"]
