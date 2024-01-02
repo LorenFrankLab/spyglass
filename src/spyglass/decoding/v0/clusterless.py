@@ -20,6 +20,7 @@ import pynwb
 import spikeinterface as si
 import xarray as xr
 
+from spyglass.settings import waveform_dir
 from spyglass.utils import logger
 
 try:
@@ -156,8 +157,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
             f'{key["curation_id"]}_clusterless_waveforms'
         )
         waveform_extractor_path = str(
-            Path(os.environ["SPYGLASS_WAVEFORMS_DIR"])
-            / Path(waveform_extractor_name)
+            Path(waveform_dir) / Path(waveform_extractor_name)
         )
         if os.path.exists(waveform_extractor_path):
             shutil.rmtree(waveform_extractor_path)
@@ -183,10 +183,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
             else:
                 estimate_peak_time = True
 
-            try:
-                peak_sign = mark_param["mark_param_dict"]["peak_sign"]
-            except KeyError:
-                peak_sign = "neg"
+            peak_sign = mark_param["mark_param_dict"].get("peak_sign")
 
             marks = np.concatenate(
                 [
