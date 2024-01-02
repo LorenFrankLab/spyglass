@@ -152,7 +152,7 @@ try:
                 f'{key["curation_id"]}_clusterless_waveforms'
             )
             waveform_extractor_path = str(
-                Path(os.environ["SPYGLASS_WAVEFORMS_DIR"])
+                Path(waveform_dir)
                 / Path(waveform_extractor_name)
             )
             if os.path.exists(waveform_extractor_path):
