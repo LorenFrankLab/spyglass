@@ -85,7 +85,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
 @schema
 class UnitWaveformFeaturesSelection(dj.Manual):
     definition = """
-    -> SpikeSortingOutput
+    -> SpikeSortingOutput.proj(spikesorting_merge_id="merge_id")
     -> WaveformFeaturesParams
     """
 
@@ -115,7 +115,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 f"Features {set(params['waveform_features_params'])} are not supported"
             )
 
-        merge_key = {"merge_id": key["merge_id"]}
+        merge_key = {"merge_id": key["spikesorting_merge_id"]}
         waveform_extractor = self._fetch_waveform(
             merge_key, params["waveform_extraction_params"]
         )

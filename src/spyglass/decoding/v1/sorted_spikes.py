@@ -42,7 +42,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     class SortGroup(SpyglassMixin, dj.Part):
         definition = """
         -> SortedSpikesGroup
-        -> SpikeSortingOutput
+        -> SpikeSortingOutput.proj(spikesorting_merge_id='merge_id')
         """
 
     def create_group(self, group_name: str, keys: list[dict]):
@@ -117,7 +117,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 SortedSpikesGroup.SortGroup
                 & {"sorted_spikes_group_name": key["sorted_spikes_group_name"]}
             )
-        ).fetch("merge_id")
+        ).fetch("spikesorting_merge_id")
 
         spike_times = [
             SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0][
