@@ -323,14 +323,6 @@ WAVEFORM_FEATURE_FUNCTIONS = {
 }
 
 
-# spikeinterface.postprocessing.compute_spike_locations
-# spikeinterface.postprocessing.compute_unit_locations
-# spikeinterface.postprocessing.compute_spike_amplitudes
-# before we had clusterless_thresholder just use the middle and if not estimate the peak time
-# spikeinterface.postprocessing.compute_principal_components
-# spikeinterface.postprocessing.compute_template_metrics
-
-
 def _write_waveform_features_to_nwb(
     nwb_file_name: str,
     waveforms: si.WaveformExtractor,
