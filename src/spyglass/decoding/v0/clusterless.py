@@ -60,6 +60,7 @@ try:
         SpikeSortingSelection,
     )
     from spyglass.utils.dj_mixin import SpyglassMixin
+    from spyglass.settings import waveform_dir
 
     schema = dj.schema("decoding_clusterless")
 
