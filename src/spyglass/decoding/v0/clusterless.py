@@ -180,10 +180,7 @@ try:
                 else:
                     estimate_peak_time = True
 
-                try:
-                    peak_sign = mark_param["mark_param_dict"]["peak_sign"]
-                except KeyError:
-                    peak_sign = "neg"
+                peak_sign = mark_param["mark_param_dict"].get("peak_sign")
 
                 marks = np.concatenate(
                     [
