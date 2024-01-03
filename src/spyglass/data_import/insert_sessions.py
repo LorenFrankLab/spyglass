@@ -6,9 +6,10 @@ from typing import List, Union
 
 import pynwb
 
-from ..common import Nwbfile, get_raw_eseries, populate_all_common
-from ..settings import debug_mode, raw_dir
-from ..utils.nwb_helper_fn import get_nwb_copy_filename
+from spyglass.common import Nwbfile, get_raw_eseries, populate_all_common
+from spyglass.settings import debug_mode, raw_dir
+from spyglass.utils import logger
+from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
 
 def insert_sessions(nwb_file_names: Union[str, List[str]]):
@@ -83,7 +84,7 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
     str
         The absolute path of the new NWB file.
     """
-    print(
+    logger.info(
         f"Creating a copy of NWB file {nwb_file_name} "
         + f"with link to raw ephys data: {out_nwb_file_name}"
     )

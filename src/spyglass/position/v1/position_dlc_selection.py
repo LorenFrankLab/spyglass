@@ -26,7 +26,7 @@ schema = dj.schema("position_v1_dlc_selection")
 
 
 @schema
-class DLCPosSelection(dj.Manual):
+class DLCPosSelection(SpyglassMixin, dj.Manual):
     """
     Specify collection of upstream DLCCentroid and DLCOrientation entries
     to combine into a set of position information
@@ -247,7 +247,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
 
 @schema
-class DLCPosVideoParams(dj.Manual):
+class DLCPosVideoParams(SpyglassMixin, dj.Manual):
     definition = """
     dlc_pos_video_params_name : varchar(50)
     ---
@@ -281,7 +281,7 @@ class DLCPosVideoParams(dj.Manual):
 
 
 @schema
-class DLCPosVideoSelection(dj.Manual):
+class DLCPosVideoSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> DLCPosV1
     -> DLCPosVideoParams
@@ -290,7 +290,7 @@ class DLCPosVideoSelection(dj.Manual):
 
 
 @schema
-class DLCPosVideo(dj.Computed):
+class DLCPosVideo(SpyglassMixin, dj.Computed):
     """Creates a video of the computed head position and orientation as well as
     the original LED positions overlaid on the video of the animal.
 

@@ -23,6 +23,7 @@ from spyglass.spikesorting.v1.metric_utils import (
     get_peak_offset,
 )
 from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_metric_curation")
 
@@ -47,7 +48,7 @@ _comparison_to_function = {
 
 
 @schema
-class WaveformParameters(dj.Lookup):
+class WaveformParameters(SpyglassMixin, dj.Lookup):
     definition = """
     # Parameters for extracting waveforms from the recording based on the sorting.
     waveform_param_name: varchar(80) # name of waveform extraction parameters
@@ -86,7 +87,7 @@ class WaveformParameters(dj.Lookup):
 
 
 @schema
-class MetricParameters(dj.Lookup):
+class MetricParameters(SpyglassMixin, dj.Lookup):
     definition = """
     # Parameters for computing quality metrics of sorted units.
     metric_param_name: varchar(200)
@@ -133,11 +134,11 @@ class MetricParameters(dj.Lookup):
     def show_available_metrics(self):
         for metric in _metric_name_to_func:
             metric_doc = _metric_name_to_func[metric].__doc__.split("\n")[0]
-            print(f"{metric} : {metric_doc}\n")
+            logger.info(f"{metric} : {metric_doc}\n")
 
 
 @schema
-class MetricCurationParameters(dj.Lookup):
+class MetricCurationParameters(SpyglassMixin, dj.Lookup):
     definition = """
     # Parameters for curating a spike sorting based on the metrics.
     metric_curation_param_name: varchar(200)
@@ -157,7 +158,7 @@ class MetricCurationParameters(dj.Lookup):
 
 
 @schema
-class MetricCurationSelection(dj.Manual):
+class MetricCurationSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Spike sorting and parameters for metric curation. Use `insert_selection` to insert a row into this table.
     metric_curation_id: uuid
@@ -184,9 +185,7 @@ class MetricCurationSelection(dj.Manual):
             key for the inserted row
         """
         if cls & key:
-            print(
-                "This row has already been inserted into MetricCurationSelection."
-            )
+            logger.warn("This row has already been inserted.")
             return (cls & key).fetch1()
         key["metric_curation_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)
@@ -194,7 +193,7 @@ class MetricCurationSelection(dj.Manual):
 
 
 @schema
-class MetricCuration(dj.Computed):
+class MetricCuration(SpyglassMixin, dj.Computed):
     definition = """
     # Results of applying curation based on quality metrics. To do additional curation, insert another row in `CurationV1`
     -> MetricCurationSelection
@@ -239,7 +238,7 @@ class MetricCuration(dj.Computed):
             os.mkdir(waveforms_dir)
         except FileExistsError:
             pass
-        print("Extracting waveforms...")
+        logger.info("Extracting waveforms...")
         waveforms = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
@@ -248,7 +247,7 @@ class MetricCuration(dj.Computed):
             **waveform_params,
         )
         # compute metrics
-        print("Computing metrics...")
+        logger.info("Computing metrics...")
         metrics = {}
         for metric_name, metric_param_dict in metric_params.items():
             metrics[metric_name] = self._compute_metric(
@@ -260,11 +259,11 @@ class MetricCuration(dj.Computed):
                 for unit_id, value in metrics["nn_isolation"].items()
             }
 
-        print("Applying curation...")
+        logger.info("Applying curation...")
         labels = self._compute_labels(metrics, label_params)
         merge_groups = self._compute_merge_groups(metrics, merge_params)
 
-        print("Saving to NWB...")
+        logger.info("Saving to NWB...")
         (
             key["analysis_file_name"],
             key["object_id"],

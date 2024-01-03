@@ -4,7 +4,10 @@ import datajoint as dj
 import kachery_cloud as kcl
 from datajoint.errors import DataJointError
 
-from ..common.common_lab import Lab  # noqa
+from spyglass.settings import config
+from spyglass.utils import SpyglassMixin, logger
+
+from ..common.common_lab import Lab  # noqa: F401
 from ..common.common_nwbfile import AnalysisNwbfile
 
 # define the environment variable name for the kachery zone and the cloud directory
@@ -33,7 +36,7 @@ def kachery_download_file(uri: str, dest: str, kachery_zone_name: str) -> str:
 
 
 @schema
-class KacheryZone(dj.Manual):
+class KacheryZone(SpyglassMixin, dj.Manual):
     definition = """
     kachery_zone_name: varchar(200) # the name of the kachery zone. Note that this is the same as the name of the kachery resource.
     ---
@@ -108,7 +111,7 @@ class KacheryZone(dj.Manual):
 
 
 @schema
-class AnalysisNwbfileKacherySelection(dj.Manual):
+class AnalysisNwbfileKacherySelection(SpyglassMixin, dj.Manual):
     definition = """
     -> KacheryZone
     -> AnalysisNwbfile
@@ -116,14 +119,14 @@ class AnalysisNwbfileKacherySelection(dj.Manual):
 
 
 @schema
-class AnalysisNwbfileKachery(dj.Computed):
+class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
     definition = """
     -> AnalysisNwbfileKacherySelection
     ---
     analysis_file_uri='': varchar(200)  # the uri of the file
     """
 
-    class LinkedFile(dj.Part):
+    class LinkedFile(SpyglassMixin, dj.Part):
         definition = """
         -> AnalysisNwbfileKachery
         linked_file_rel_path: varchar(200) # the path for the linked file relative to the SPYGLASS_BASE_DIR environment variable
@@ -138,7 +141,7 @@ class AnalysisNwbfileKachery(dj.Computed):
 
         # linked_key = copy.deepcopy(key)
 
-        print(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
+        logger.info(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
         # set the kachery zone
 
         KacheryZone.set_zone(key)
@@ -146,11 +149,11 @@ class AnalysisNwbfileKachery(dj.Computed):
         key["analysis_file_uri"] = kcl.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )
-        print(
+        logger.info(
             os.environ[kachery_zone_envar], os.environ[kachery_cloud_dir_envar]
         )
-        print(AnalysisNwbfile().get_abs_path(key["analysis_file_name"]))
-        print(kcl.load_file(key["analysis_file_uri"]))
+        logger.info(AnalysisNwbfile().get_abs_path(key["analysis_file_name"]))
+        logger.info(kcl.load_file(key["analysis_file_uri"]))
         self.insert1(key)
 
         # we also need to insert any linked files
@@ -182,7 +185,7 @@ class AnalysisNwbfileKachery(dj.Computed):
         for uri, kachery_zone_name in zip(fetched_list[0], fetched_list[1]):
             if len(uri) == 0:
                 return False
-            print("uri:", uri)
+            logger.info("uri:", uri)
             if kachery_download_file(
                 uri=uri,
                 dest=AnalysisNwbfile.get_abs_path(analysis_file_name),
@@ -196,7 +199,7 @@ class AnalysisNwbfileKachery(dj.Computed):
                 ).fetch(as_dict=True)
                 for file in linked_files:
                     uri = file["linked_file_uri"]
-                    print(f"attempting to download linked file uri {uri}")
+                    logger.info(f"attempting to download linked file uri {uri}")
                     linked_file_path = (
                         os.environ["SPYGLASS_BASE_DIR"]
                         + file["linked_file_rel_path"]
@@ -213,3 +216,43 @@ class AnalysisNwbfileKachery(dj.Computed):
             raise Exception(f"{analysis_file_name} cannot be downloaded")
 
         return True
+
+
+def share_data_to_kachery(
+    restriction={},
+    table_list=[],
+    zone_name=None,
+):
+    """Share data to kachery
+
+    Parameters
+    ----------
+    restriction : dict, optional
+        restriction to select what data should be shared from table, by default {}
+    table_list : list, optional
+        List of tables to share data from, by default []
+    zone_name : str, optional
+        What kachery zone to share the data to, by default zone in spyglass.settings.config,
+        which looks for `KACHERY_ZONE` environmental variable, but defaults to
+        'franklab.default'
+
+    Raises
+    ------
+    ValueError
+        Does not allow sharing of all data in table
+    """
+    if not zone_name:
+        zone_name = config["KACHERY_ZONE"]
+    kachery_selection_key = {"kachery_zone_name": zone_name}
+    if not restriction:
+        raise ValueError("Must provide a restriction to the table")
+    selection_inserts = []
+    for table in table_list:
+        analysis_file_list = (table & restriction).fetch("analysis_file_name")
+        for file in analysis_file_list:  # Add all analysis to shared list
+            kachery_selection_key["analysis_file_name"] = file
+            selection_inserts.append(kachery_selection_key)
+    AnalysisNwbfileKacherySelection.insert(
+        selection_inserts, skip_duplicates=True
+    )
+    AnalysisNwbfileKachery.populate()

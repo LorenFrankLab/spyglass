@@ -4,12 +4,12 @@ import numpy as np
 import pandas as pd
 import pynwb
 
-from ..utils.dj_mixin import SpyglassMixin
-from ..utils.nwb_helper_fn import get_data_interface, get_nwb_file
-from .common_ephys import Raw
-from .common_interval import IntervalList
-from .common_nwbfile import Nwbfile
-from .common_session import Session  # noqa: F401
+from spyglass.common.common_ephys import Raw
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.nwb_helper_fn import get_data_interface, get_nwb_file
 
 schema = dj.schema("common_dio")
 
@@ -35,7 +35,7 @@ class DIOEvents(SpyglassMixin, dj.Imported):
             nwbf, "behavioral_events", pynwb.behavior.BehavioralEvents
         )
         if behav_events is None:
-            print(
+            logger.warn(
                 "No conforming behavioral events data interface found in "
                 + f"{nwb_file_name}\n"
             )

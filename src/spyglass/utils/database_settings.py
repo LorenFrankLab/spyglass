@@ -7,6 +7,8 @@ from pathlib import Path
 
 import datajoint as dj
 
+from spyglass.utils.logging import logger
+
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SEL = "GRANT SELECT ON "
 CREATE_USR = "CREATE USER IF NOT EXISTS "
@@ -16,7 +18,12 @@ ESC = r"\_%"
 
 class DatabaseSettings:
     def __init__(
-        self, user_name=None, host_name=None, target_group=None, debug=False
+        self,
+        user_name=None,
+        host_name=None,
+        target_group=None,
+        debug=False,
+        target_database=None,
     ):
         """Class to manage common database settings
 
@@ -29,7 +36,9 @@ class DatabaseSettings:
         target_group : str, optional
             Group to which user belongs. Default is kachery-users
         debug : bool, optional
-            Default False. If True, print sql instead of running
+            Default False. If True, pprint sql instead of running
+        target_database : str, optional
+            Default is mysql. Can also be docker container id
         """
         self.shared_modules = [
             f"common{ESC}",
@@ -46,6 +55,7 @@ class DatabaseSettings:
         )
         self.target_group = target_group or "kachery-users"
         self.debug = debug
+        self.target_database = target_database or "mysql"
 
     @property
     def _add_collab_usr_sql(self):
@@ -61,7 +71,7 @@ class DatabaseSettings:
     def add_collab_user(self):
         """Add collaborator user with full permissions to shared modules"""
         file = self.write_temp_file(self._add_collab_usr_sql)
-        self.run_file(file)
+        self.exec(file)
 
     @property
     def _add_dj_guest_sql(self):
@@ -73,10 +83,10 @@ class DatabaseSettings:
             f"{GRANT_SEL}`%`.* TO '{self.user}'@'%';\n",
         ]
 
-    def add_dj_guest(self):
+    def add_dj_guest(self, method="file"):
         """Add guest user with select permissions to shared modules"""
         file = self.write_temp_file(self._add_dj_guest_sql)
-        self.run_file(file)
+        self.exec(file)
 
     def _find_group(self):
         # find the kachery-users group
@@ -92,7 +102,7 @@ class DatabaseSettings:
         # Check if the group was found
         if not group_found:
             if self.debug:
-                print(f"All groups: {[g.gr_name for g in groups]}")
+                logger.info(f"All groups: {[g.gr_name for g in groups]}")
             sys.exit(
                 f"Error: The target group {self.target_group} was not found."
             )
@@ -108,10 +118,10 @@ class DatabaseSettings:
 
     def add_module(self, module_name):
         """Add module to database. Grant permissions to all users in group"""
-        print(f"Granting everyone permissions to module {module_name}")
+        logger.info(f"Granting everyone permissions to module {module_name}")
         group = self._find_group()
         file = self.write_temp_file(self._add_module_sql(module_name, group))
-        self.run_file(file)
+        self.exec(file)
 
     @property
     def _add_dj_user_sql(self):
@@ -133,14 +143,14 @@ class DatabaseSettings:
         if check_exists:
             user_home = Path.home().parent / self.user
             if user_home.exists():
-                print("Creating database user ", self.user)
+                logger.info("Creating database user ", self.user)
             else:
                 sys.exit(
                     f"Error: could not find {self.user} in home dir: {user_home}"
                 )
 
         file = self.write_temp_file(self._add_dj_user_sql)
-        self.run_file(file)
+        self.exec(file)
 
     def write_temp_file(self, content: list) -> tempfile.NamedTemporaryFile:
         """Write content to a temporary file and return the file object"""
@@ -157,10 +167,17 @@ class DatabaseSettings:
 
         return file
 
-    def run_file(self, file):
+    def exec(self, file):
         """Run commands saved to file in sql"""
 
         if self.debug:
             return
 
-        os.system(f"mysql -p -h {self.host} < {file.name}")
+        if self.target_database == "mysql":
+            cmd = f"mysql -p -h {self.host} < {file.name}"
+        else:
+            cmd = (
+                f"docker exec -i {self.target_database} mysql -u {self.user} "
+                + f"--password=tutorial < {file.name}"
+            )
+        os.system(cmd)

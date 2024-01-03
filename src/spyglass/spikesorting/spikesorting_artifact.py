@@ -8,20 +8,21 @@ import scipy.stats as stats
 import spikeinterface as si
 from spikeinterface.core.job_tools import ChunkRecordingExecutor, ensure_n_jobs
 
-from ..common.common_interval import (
+from spyglass.common.common_interval import (
     IntervalList,
     _union_concat,
     interval_from_inds,
     interval_set_difference_inds,
 )
-from ..utils.nwb_helper_fn import get_valid_intervals
-from .spikesorting_recording import SpikeSortingRecording
+from spyglass.spikesorting.spikesorting_recording import SpikeSortingRecording
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.nwb_helper_fn import get_valid_intervals
 
 schema = dj.schema("spikesorting_artifact")
 
 
 @schema
-class ArtifactDetectionParameters(dj.Manual):
+class ArtifactDetectionParameters(SpyglassMixin, dj.Manual):
     definition = """
     # Parameters for detecting artifact times within a sort group.
     artifact_params_name: varchar(200)
@@ -46,7 +47,7 @@ class ArtifactDetectionParameters(dj.Manual):
 
 
 @schema
-class ArtifactDetectionSelection(dj.Manual):
+class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Specifies artifact detection parameters to apply to a sort group's recording.
     -> SpikeSortingRecording
@@ -57,7 +58,7 @@ class ArtifactDetectionSelection(dj.Manual):
 
 
 @schema
-class ArtifactDetection(dj.Computed):
+class ArtifactDetection(SpyglassMixin, dj.Computed):
     definition = """
     # Stores artifact times and valid no-artifact times as intervals.
     -> ArtifactDetectionSelection
@@ -136,7 +137,7 @@ class ArtifactDetection(dj.Computed):
 
 
 @schema
-class ArtifactRemovedIntervalList(dj.Manual):
+class ArtifactRemovedIntervalList(SpyglassMixin, dj.Manual):
     definition = """
     # Stores intervals without detected artifacts.
     # Note that entries can come from either ArtifactDetection() or alternative artifact removal analyses.
@@ -202,7 +203,7 @@ def _get_artifact_times(
             [[valid_timestamps[0], valid_timestamps[-1]]]
         )
         artifact_times_empty = np.asarray([])
-        print(
+        logger.info(
             "Amplitude and zscore thresholds are both None, skipping artifact detection"
         )
         return recording_interval, artifact_times_empty
@@ -218,7 +219,7 @@ def _get_artifact_times(
 
     # detect frames that are above threshold in parallel
     n_jobs = ensure_n_jobs(recording, n_jobs=job_kwargs.get("n_jobs", 1))
-    print(f"using {n_jobs} jobs...")
+    logger.info(f"using {n_jobs} jobs...")
 
     func = _compute_artifact_chunk
     init_func = _init_artifact_worker
@@ -258,7 +259,7 @@ def _get_artifact_times(
             [[valid_timestamps[0], valid_timestamps[-1]]]
         )
         artifact_times_empty = np.asarray([])
-        print("No artifacts detected.")
+        logger.warn("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
     # convert indices to intervals

@@ -1,19 +1,20 @@
 import datajoint as dj
 
 from spyglass.common.common_ephys import Electrode
-from spyglass.common.common_session import Session
+from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("lfp_electrode")
 
 
 @schema
-class LFPElectrodeGroup(dj.Manual):
+class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
     definition = """
      -> Session                             # the session to which this LFP belongs
      lfp_electrode_group_name: varchar(200) # the name of this group of electrodes
      """
 
-    class LFPElectrode(dj.Part):
+    class LFPElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> LFPElectrodeGroup # the group of electrodes to be filtered
         -> Electrode        # the electrode to be filtered

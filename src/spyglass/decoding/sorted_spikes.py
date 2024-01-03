@@ -24,13 +24,13 @@ from replay_trajectory_classification.discrete_state_transitions import (
 from replay_trajectory_classification.initial_conditions import (
     UniformInitialConditions,
 )
-from spyglass.common.common_interval import IntervalList
-from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.utils.dj_helper_fn import fetch_nwb
+
 from spyglass.common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
 )
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.decoding.core import (
     convert_valid_times_to_slice,
     get_valid_ephys_position_times_by_epoch,
@@ -40,13 +40,13 @@ from spyglass.decoding.dj_decoder_conversion import (
     restore_classes,
 )
 from spyglass.spikesorting.spikesorting_curation import CuratedSpikeSorting
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("decoding_sortedspikes")
 
 
 @schema
-class SortedSpikesIndicatorSelection(dj.Lookup):
+class SortedSpikesIndicatorSelection(SpyglassMixin, dj.Lookup):
     """Bins spike times into regular intervals given by the sampling rate.
     Start and stop time of the interval are defined by the interval list.
     """
@@ -207,7 +207,7 @@ def make_default_decoding_parameters_gpu():
 
 
 @schema
-class SortedSpikesClassifierParameters(dj.Manual):
+class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
     """Stores parameters for decoding with sorted spikes"""
 
     definition = """
@@ -411,7 +411,7 @@ def get_data_for_multiple_epochs(
     environment_labels = []
 
     for epoch in epoch_names:
-        print(epoch)
+        logger.info(epoch)
         data.append(
             get_decoding_data_for_epoch(
                 nwb_file_name,

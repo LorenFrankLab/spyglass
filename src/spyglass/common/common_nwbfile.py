@@ -2,6 +2,7 @@ import os
 import random
 import stat
 import string
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -9,11 +10,11 @@ import pandas as pd
 import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
-from pathlib import Path
 
-from ..settings import raw_dir
-from ..utils.dj_helper_fn import get_child_tables
-from ..utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
+from spyglass.settings import analysis_dir, raw_dir
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
 schema = dj.schema("common_nwbfile")
 
@@ -38,7 +39,7 @@ NWB_KEEP_FIELDS = (
 
 
 @schema
-class Nwbfile(dj.Manual):
+class Nwbfile(SpyglassMixin, dj.Manual):
     definition = """
     # Table for holding the NWB files.
     nwb_file_name: varchar(64)   # name of the NWB file
@@ -147,7 +148,7 @@ class Nwbfile(dj.Manual):
 # TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
 # We therefore need another way to keep track of the
 @schema
-class AnalysisNwbfile(dj.Manual):
+class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting.
     analysis_file_name: varchar(64)               # name of the file
@@ -195,7 +196,7 @@ class AnalysisNwbfile(dj.Manual):
 
             analysis_file_name = self.__get_new_file_name(nwb_file_name)
             # write the new file
-            print(f"Writing new NWB file {analysis_file_name}")
+            logger.info(f"Writing new NWB file {analysis_file_name}")
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
                 analysis_file_name
             )
@@ -261,7 +262,7 @@ class AnalysisNwbfile(dj.Manual):
             original_nwb_file_name = query.fetch("nwb_file_name")[0]
             analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
             # write the new file
-            print(f"Writing new NWB file {analysis_file_name}...")
+            logger.info(f"Writing new NWB file {analysis_file_name}...")
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
                 analysis_file_name
             )
@@ -296,7 +297,7 @@ class AnalysisNwbfile(dj.Manual):
     def get_abs_path(analysis_nwb_file_name):
         """Return the absolute path for a stored analysis NWB file given just the file name.
 
-        The SPYGLASS_BASE_DIR environment variable must be set.
+        The spyglass config from settings.py must be set.
 
         Parameters
         ----------
@@ -308,25 +309,16 @@ class AnalysisNwbfile(dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = Path(os.getenv("SPYGLASS_BASE_DIR", None))
-        assert (
-            base_dir is not None
-        ), "You must set SPYGLASS_BASE_DIR environment variable."
-
         # see if the file exists and is stored in the base analysis dir
-        test_path = str(base_dir / "analysis" / analysis_nwb_file_name)
+        test_path = f"{analysis_dir}/{analysis_nwb_file_name}"
 
         if os.path.exists(test_path):
             return test_path
         else:
             # use the new path
-            analysis_file_base_path = (
-                base_dir
-                / "analysis"
-                / AnalysisNwbfile.__get_analysis_file_dir(
-                    analysis_nwb_file_name
-                )
-            )
+            analysis_file_base_path = Path(
+                analysis_dir
+            ) / AnalysisNwbfile.__get_analysis_file_dir(analysis_nwb_file_name)
             if not analysis_file_base_path.exists():
                 os.mkdir(str(analysis_file_base_path))
             return str(analysis_file_base_path / analysis_nwb_file_name)
@@ -437,7 +429,9 @@ class AnalysisNwbfile(dj.Manual):
                             )
                             # sort by unit_ids and apply that sorting to values to ensure that things go in the right order
                             metric_values = metric_values[np.argsort(unit_ids)]
-                            print(f"Adding metric {metric} : {metric_values}")
+                            logger.info(
+                                f"Adding metric {metric} : {metric_values}"
+                            )
                             nwbf.add_unit_column(
                                 name=metric,
                                 description=f"{metric} metric",
@@ -550,7 +544,7 @@ class AnalysisNwbfile(dj.Manual):
             # If metrics were specified, add one column per metric
             if metrics is not None:
                 for metric_name, metric_dict in metrics.items():
-                    print(f"Adding metric {metric_name} : {metric_dict}")
+                    logger.info(f"Adding metric {metric_name} : {metric_dict}")
                     metric_data = metric_dict.values().to_list()
                     nwbf.add_unit_column(
                         name=metric_name,
@@ -594,7 +588,7 @@ class AnalysisNwbfile(dj.Manual):
                 nwbf.add_unit(id=id)
 
             for metric_name, metric_dict in metrics.items():
-                print(f"Adding metric {metric_name} : {metric_dict}")
+                logger.info(f"Adding metric {metric_name} : {metric_dict}")
                 metric_data = list(metric_dict.values())
                 nwbf.add_unit_column(
                     name=metric_name, description=metric_name, data=metric_data
@@ -649,7 +643,7 @@ class AnalysisNwbfile(dj.Manual):
 
 
 @schema
-class NwbfileKachery(dj.Computed):
+class NwbfileKachery(SpyglassMixin, dj.Computed):
     definition = """
     -> Nwbfile
     ---
@@ -659,7 +653,7 @@ class NwbfileKachery(dj.Computed):
     def make(self, key):
         import kachery_client as kc
 
-        print(f'Linking {key["nwb_file_name"]} and storing in kachery...')
+        logger.info(f'Linking {key["nwb_file_name"]} and storing in kachery...')
         key["nwb_file_uri"] = kc.link_file(
             Nwbfile().get_abs_path(key["nwb_file_name"])
         )
@@ -667,7 +661,7 @@ class NwbfileKachery(dj.Computed):
 
 
 @schema
-class AnalysisNwbfileKachery(dj.Computed):
+class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
     definition = """
     -> AnalysisNwbfile
     ---
@@ -677,7 +671,9 @@ class AnalysisNwbfileKachery(dj.Computed):
     def make(self, key):
         import kachery_client as kc
 
-        print(f'Linking {key["analysis_file_name"]} and storing in kachery...')
+        logger.info(
+            f'Linking {key["analysis_file_name"]} and storing in kachery...'
+        )
         key["analysis_file_uri"] = kc.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )

@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from spyglass.utils import SpyglassMixin, logger
+
 from .common_session import Session  # noqa: F401
 
 schema = dj.schema("common_interval")
@@ -14,7 +16,7 @@ schema = dj.schema("common_interval")
 
 
 @schema
-class IntervalList(dj.Manual):
+class IntervalList(SpyglassMixin, dj.Manual):
     definition = """
     # Time intervals used for analysis
     -> Session
@@ -45,7 +47,7 @@ class IntervalList(dj.Manual):
             table.
         """
         if nwbf.epochs is None:
-            print("No epochs found in NWB file.")
+            logger.info("No epochs found in NWB file.")
             return
 
         epochs = nwbf.epochs.to_dataframe()

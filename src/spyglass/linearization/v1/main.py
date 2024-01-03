@@ -12,14 +12,13 @@ from track_linearization import (
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
-from spyglass.utils.dj_helper_fn import fetch_nwb
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_linearization_v1")
 
 
 @schema
-class LinearizationParameters(dj.Lookup):
+class LinearizationParameters(SpyglassMixin, dj.Lookup):
     """Choose whether to use an HMM to linearize position. This can help when
     the eucledian distances between separate arms are too close and the previous
     position has some information about which arm the animal is on."""
@@ -37,7 +36,7 @@ class LinearizationParameters(dj.Lookup):
 
 
 @schema
-class TrackGraph(dj.Manual):
+class TrackGraph(SpyglassMixin, dj.Manual):
     """Graph representation of track representing the spatial environment.
     Used for linearizing position."""
 
@@ -94,7 +93,7 @@ class TrackGraph(dj.Manual):
 
 
 @schema
-class LinearizationSelection(dj.Lookup):
+class LinearizationSelection(SpyglassMixin, dj.Lookup):
     definition = """
     -> PositionOutput.proj(pos_merge_id='merge_id')
     -> TrackGraph
@@ -116,7 +115,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         orig_key = copy.deepcopy(key)
-        print(f"Computing linear position for: {key}")
+        logger.info(f"Computing linear position for: {key}")
 
         position_nwb = PositionOutput.fetch_nwb(
             {"merge_id": key["pos_merge_id"]}
@@ -174,7 +173,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
 
         self.insert1(key)
 
-        from ..position_linearization_merge import LinearizedPositionOutput
+        from ..merge import LinearizedPositionOutput
 
         part_name = to_camel_case(self.table_name.split("__")[-1])
 

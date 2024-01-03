@@ -10,6 +10,8 @@ import numpy as np
 import pynwb
 import yaml
 
+from spyglass.utils.logging import logger
+
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
 
@@ -48,7 +50,7 @@ def get_nwb_file(nwb_file_path):
     if nwbfile is None:
         # check to see if the file exists
         if not os.path.exists(nwb_file_path):
-            print(
+            logger.info(
                 "NWB file not found locally; checking kachery for "
                 + f"{nwb_file_path}"
             )
@@ -92,7 +94,7 @@ def get_config(nwb_file_path):
     # NOTE use p.stem[:-1] to remove the underscore that was added to the file
     config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
     if not os.path.exists(config_path):
-        print(f"No config found at file path {config_path}")
+        logger.info(f"No config found at file path {config_path}")
         return dict()
     with open(config_path, "r") as stream:
         d = yaml.safe_load(stream)
@@ -197,9 +199,9 @@ def estimate_sampling_rate(
     multiplier : float or int, optional
         Deft
     verbose : bool, optional
-        Print sampling rate to stdout. Default, False
+        Log sampling rate to stdout. Default, False
     filename : str, optional
-        Filename to reference when printing or err. Default, "file"
+        Filename to reference when logging or err. Default, "file"
 
     Returns
     -------
@@ -241,7 +243,9 @@ def estimate_sampling_rate(
     if sampling_rate < 0:
         raise ValueError(f"Error calculating sampling rate. For {filename}")
     if verbose:
-        print(f"Estimated sampling rate for {filename}: {sampling_rate} Hz")
+        logger.info(
+            f"Estimated sampling rate for {filename}: {sampling_rate} Hz"
+        )
 
     return sampling_rate
 
@@ -265,7 +269,7 @@ def get_valid_intervals(
         a gap. Must be > 1. Default to 2.5
     min_valid_len : float, optional
         Length of smallest valid interval. Default to 0. If greater
-        than interval duration, print warning and use half the total time.
+        than interval duration, log warning and use half the total time.
 
     Returns
     -------
@@ -279,7 +283,7 @@ def get_valid_intervals(
 
     if total_time < min_valid_len:
         half_total_time = total_time / 2
-        print(f"WARNING: Setting minimum valid interval to {half_total_time}")
+        logger.warn(f"Setting minimum valid interval to {half_total_time}")
         min_valid_len = half_total_time
 
     # get rid of NaN elements
@@ -393,9 +397,9 @@ def _get_pos_dict(
     epoch_groups : dict
         Epoch start times as keys, spatial series indices as values
     session_id : str, optional
-        Optional session ID for verbose print during sampling rate estimation
+        Optional session ID for verbose log during sampling rate estimation
     verbose : bool, optional
-        Default to False. Print estimated sampling rate
+        Default to False. Log estimated sampling rate
     incl_times : bool, optional
         Default to True. Include valid intervals. Requires additional
         computation not needed for RawPosition
@@ -442,7 +446,7 @@ def get_all_spatial_series(nwbf, verbose=False, incl_times=True) -> dict:
     nwbf : pynwb.NWBFile
         The source NWB file object.
     verbose : bool
-        Flag representing whether to print the sampling rate.
+        Flag representing whether to log the sampling rate.
     incl_times : bool
         Include valid times in the output. Default, True. Set to False for only
         spatial series object IDs.
@@ -477,7 +481,7 @@ def get_nwb_copy_filename(nwb_file_name):
     filename, file_extension = os.path.splitext(nwb_file_name)
 
     if filename.endswith("_"):
-        print(f"WARNING: File may already be a copy: {nwb_file_name}")
+        logger.warn(f"File may already be a copy: {nwb_file_name}")
 
     return f"{filename}_{file_extension}"
 
@@ -495,7 +499,7 @@ def change_group_permissions(
     ]
     # Loop through nwb file directories and change group permissions
     for target_content in target_contents:
-        print(
+        logger.info(
             f"For {target_content}, changing group to {set_group_name} "
             + "and giving read/write/execute permissions"
         )

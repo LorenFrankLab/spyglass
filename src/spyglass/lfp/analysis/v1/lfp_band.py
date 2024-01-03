@@ -15,18 +15,18 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.lfp.lfp_merge import LFPOutput
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("lfp_band_v1")
 
 
 @schema
-class LFPBandSelection(dj.Manual):
+class LFPBandSelection(SpyglassMixin, dj.Manual):
     """The user's selection of LFP data to be filtered in a given frequency band."""
 
     definition = """
-    -> LFPOutput.proj(lfp_merge_id='merge_id')                                # the LFP data to be filtered
+    -> LFPOutput.proj(lfp_merge_id='merge_id')                            # the LFP data to be filtered
     -> FirFilterParameters                                                # the filter to use for the data
     -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
     lfp_band_sampling_rate: int                                           # the sampling rate for this band
@@ -34,7 +34,7 @@ class LFPBandSelection(dj.Manual):
     min_interval_len = 1.0: float  # the minimum length of a valid interval to filter
     """
 
-    class LFPBandElectrode(dj.Part):
+    class LFPBandElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> LFPBandSelection # the LFP band selection
         -> LFPElectrodeGroup.LFPElectrode  # the LFP electrode to be filtered
@@ -275,8 +275,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
 
         filter_coeff = filter[0]["filter_coeff"]
         if len(filter_coeff) == 0:
-            print(
-                f"Error in LFPBand: no filter found with data sampling rate of {lfp_band_sampling_rate}"
+            logger.error(
+                "LFPBand: no filter found with data "
+                + f"sampling rate of {lfp_band_sampling_rate}"
             )
             return None
 
@@ -355,6 +356,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 }
             )
         else:
+            lfp_band_valid_times = interval_list_censor(
+                lfp_band_valid_times, new_timestamps
+            )
             # check that the valid times are the same
             assert np.isclose(
                 tmp_valid_times[0], lfp_band_valid_times

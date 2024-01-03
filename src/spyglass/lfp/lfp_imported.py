@@ -4,12 +4,13 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_session import Session
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("lfp_imported")
 
 
 @schema
-class ImportedLFP(dj.Imported):
+class ImportedLFP(SpyglassMixin, dj.Imported):
     definition = """
     -> Session                      # the session to which this LFP belongs
     -> LFPElectrodeGroup            # the group of electrodes to be filtered

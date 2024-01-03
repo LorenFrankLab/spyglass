@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
-from ...settings import raw_dir
+from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
 
 
 def validate_option(
@@ -156,7 +156,7 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
             os.chmod(os.path.join(dirpath, filename), mode)
 
 
-class OutputLogger:
+class OutputLogger:  # TODO: migrate to spyglass.utils.logger
     """
     A class to wrap a logging.Logger object in order to provide context manager capabilities.
 
@@ -381,7 +381,7 @@ def infer_output_dir(key, makedir=True):
     # TODO: add check to make sure interval_list_name refers to a single epoch
     # Or make key include epoch in and of itself instead of interval_list_name
     nwb_file_name = key["nwb_file_name"].split("_.")[0]
-    output_dir = pathlib.Path(os.getenv("DLC_OUTPUT_PATH")) / pathlib.Path(
+    output_dir = pathlib.Path(dlc_output_dir) / pathlib.Path(
         f"{nwb_file_name}/{nwb_file_name}_{key['epoch']:02}"
         f"_model_" + key["dlc_model_name"].replace(" ", "-")
     )
@@ -447,7 +447,7 @@ def get_video_path(key):
 
 def check_videofile(
     video_path: Union[str, pathlib.PosixPath],
-    output_path: Union[str, pathlib.PosixPath] = os.getenv("DLC_VIDEO_PATH"),
+    output_path: Union[str, pathlib.PosixPath] = dlc_video_dir,
     video_filename: str = None,
     video_filetype: str = "h264",
 ):

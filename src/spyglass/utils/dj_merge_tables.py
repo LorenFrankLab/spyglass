@@ -1,3 +1,4 @@
+import re
 from contextlib import nullcontext
 from itertools import chain as iter_chain
 from pprint import pprint
@@ -9,8 +10,8 @@ from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, get_master, to_camel_case
 from IPython.core.display import HTML
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.logging import logger
 
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
@@ -35,21 +36,36 @@ class Merge(dj.Manual):
             f"\n    {self._reserved_pk}: uuid\n    ---\n"
             + f"    {self._reserved_sk}: varchar({RESERVED_SK_LENGTH})\n    "
         )
-        # TODO: Change warnings to logger. Throw error? - CBroz1
         if not self.is_declared:
-            if self.definition != merge_def:
-                print(
-                    "WARNING: merge table with non-default definition\n\t"
+            # remove comments after # from each line of definition
+            if self._remove_comments(self.definition) != merge_def:
+                logger.warn(
+                    "Merge table with non-default definition\n\t"
                     + f"Expected: {merge_def.strip()}\n\t"
                     + f"Actual  : {self.definition.strip()}"
                 )
             for part in self.parts(as_objects=True):
                 if part.primary_key != self.primary_key:
-                    print(
-                        f"WARNING: unexpected primary key in {part.table_name}"
+                    logger.warn(
+                        f"Unexpected primary key in {part.table_name}"
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
                     )
+        self._analysis_nwbfile = None
+
+    @property  # CB: This is a property to avoid circular import
+    def analysis_nwbfile(self):
+        if self._analysis_nwbfile is None:
+            from spyglass.common import AnalysisNwbfile  # noqa F401
+
+            self._analysis_nwbfile = AnalysisNwbfile
+        return self._analysis_nwbfile
+
+    def _remove_comments(self, definition):
+        """Use regular expressions to remove comments and blank lines"""
+        return re.sub(  # First remove comments, then blank lines
+            r"\n\s*\n", "\n", re.sub(r"#.*\n", "\n", definition)
+        )
 
     @classmethod
     def _merge_restrict_parts(
@@ -204,7 +220,7 @@ class Merge(dj.Manual):
             for p in cls._merge_restrict_parts(
                 restriction=restriction,
                 add_invalid_restrict=False,
-                return_empties=False,
+                return_empties=True,
             )
         ]
 
@@ -457,11 +473,16 @@ class Merge(dj.Manual):
             return  # User can still abort del below, but yes/no is unlikly
 
         for part_parent in part_parents:
-            super().delete(part_parent, **kwargs)  # add safemode=False?
+            super().delete(part_parent, **kwargs)
 
     @classmethod
     def fetch_nwb(
-        cls, restriction: str = True, multi_source=False, *attrs, **kwargs
+        cls,
+        restriction: str = True,
+        multi_source=False,
+        disable_warning=False,
+        *attrs,
+        **kwargs,
     ):
         """Return the AnalysisNwbfile file linked in the source.
 
@@ -472,6 +493,9 @@ class Merge(dj.Manual):
         multi_source: bool
             Return from multiple parents. Default False.
         """
+        if not disable_warning:
+            _warn_on_restriction(table=cls, restriction=restriction)
+
         part_parents = cls._merge_restrict_parents(
             restriction=restriction,
             return_empties=False,
@@ -489,7 +513,7 @@ class Merge(dj.Manual):
             nwbs.extend(
                 fetch_nwb(
                     part_parent,
-                    (AnalysisNwbfile, "analysis_file_abs_path"),
+                    (cls().analysis_nwbfile, "analysis_file_abs_path"),
                     *attrs,
                     **kwargs,
                 )
@@ -642,8 +666,8 @@ class Merge(dj.Manual):
             try:
                 results.extend(part.fetch(*attrs, **kwargs))
             except DataJointError as e:
-                print(
-                    f"WARNING: {e.args[0]} Skipping "
+                logger.warn(
+                    f"{e.args[0]} Skipping "
                     + to_camel_case(part.table_name.split("__")[-1])
                 )
 
@@ -652,7 +676,7 @@ class Merge(dj.Manual):
         # attrs or "KEY" called. Intercept format, merge, and then transform?
 
         if not results:
-            print(
+            logger.info(
                 "No merge_fetch results.\n\t"
                 + "If not restricting, try: `M.merge_fetch(True,'attr')\n\t"
                 + "If restricting by source, use dict: "
@@ -676,9 +700,10 @@ _Merge = Merge
 
 def delete_downstream_merge(
     table: dj.Table,
-    restriction: str = True,
+    restriction: str = None,
     dry_run=True,
     recurse_level=2,
+    disable_warning=False,
     **kwargs,
 ) -> list:
     """Given a table/restriction, id or delete relevant downstream merge entries
@@ -695,6 +720,8 @@ def delete_downstream_merge(
         downstream of table input. Otherwise, delete merge/part table entries.
     recurse_level: int
         Default 2. Depth to recurse into table descendants.
+    disable_warning: bool
+        Default False. If True, don't warn about restrictions on table object.
     kwargs: dict
         Additional keyword arguments for DataJoint delete.
 
@@ -703,20 +730,23 @@ def delete_downstream_merge(
     List[Tuple[dj.Table, dj.Table]]
         Entries in merge/part tables downstream of table input.
     """
-    if table.restriction:
-        print(
-            f"Warning: ignoring table restriction: {table.restriction}.\n\t"
-            + "Please pass restrictions as an arg"
-        )
+    if not disable_warning:
+        _warn_on_restriction(table, restriction)
+
+    if not restriction:
+        restriction = True
 
     descendants = _unique_descendants(table, recurse_level)
-    merge_table_pairs = _master_table_pairs(descendants, restriction)
+    merge_table_pairs = _master_table_pairs(
+        table_list=descendants,
+        restricted_parent=(table & restriction),
+    )
 
     # restrict the merge table based on uuids in part
+    # don't need part for del, but show on dry_run
     merge_pairs = [
-        (merge & uuids, part)  # don't need part for del, but show on dry_run
+        (merge & part.fetch(RESERVED_PRIMARY_KEY, as_dict=True), part)
         for merge, part in merge_table_pairs
-        for uuids in part.fetch(RESERVED_PRIMARY_KEY, as_dict=True)
     ]
 
     if dry_run:
@@ -724,6 +754,15 @@ def delete_downstream_merge(
 
     for merge_table, _ in merge_pairs:
         merge_table.delete(**kwargs)
+
+
+def _warn_on_restriction(table: dj.Table, restriction: str = None):
+    """Warn if restriction on table object differs from input restriction"""
+    if restriction is None and table().restriction:
+        logger.warn(
+            f"Warning: ignoring table restriction: {table().restriction}.\n\t"
+            + "Please pass restrictions as an arg"
+        )
 
 
 def _unique_descendants(
@@ -779,7 +818,7 @@ def _unique_descendants(
 
 def _master_table_pairs(
     table_list: list,
-    restriction: str = True,
+    restricted_parent: dj.expression.QueryExpression = True,
     connection: dj.connection.Connection = None,
 ) -> list:
     """
@@ -792,8 +831,9 @@ def _master_table_pairs(
     ----------
     table_list : List[dj.Table]
         A list of datajoint tables.
-    restriction : str
-        A restriction string. Default True, no restriction.
+    restricted_parent : dj.expression.QueryExpression
+        Parent table restricted, to be joined with master and part. Default
+        True, no restriction.
     connection : datajoint.connection.Connection
         A database connection. Default None, use connection from first table.
 
@@ -805,22 +845,33 @@ def _master_table_pairs(
     conn = connection or table_list[0].connection
 
     master_table_pairs = []
+    unique_parts = []
+
     # Adapted from Spyglass PR 535
     for table in table_list:
-        master_name = get_master(table.full_table_name)
+        table_name = table.full_table_name
+        if table_name in unique_parts:  # then repeat in list
+            continue
+
+        master_name = get_master(table_name)
         if not master_name:  # then it's not a part table
             continue
 
         master = dj.FreeTable(conn, master_name)
-
         if RESERVED_PRIMARY_KEY not in master.heading.attributes.keys():
+            continue  # then it's not a merge table
+
+        restricted_join = restricted_parent * table
+        if not restricted_join:  # No entries relevant to restriction in part
             continue
 
-        restricted_table = table.restrict(restriction)
-
-        if not restricted_table:
-            continue
-
-        master_table_pairs.append((master, restricted_table))
+        unique_parts.append(table_name)
+        master_table_pairs.append(
+            (
+                master,
+                table
+                & restricted_join.fetch(RESERVED_PRIMARY_KEY, as_dict=True),
+            )
+        )
 
     return master_table_pairs
