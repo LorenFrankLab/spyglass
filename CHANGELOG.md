@@ -25,6 +25,9 @@
     - DLC path handling from config, and normalize naming convention. #722
 - Decoding:
     - Add `decoding` pipeline. #731
+    - Add a table to store the decoding results
+    - Use the new `non_local_detector` package for decoding
+    - Allow multiple spike waveform features for clusterelss decoding
 
 ## [0.4.3] (November 7, 2023)
 
