@@ -21,6 +21,7 @@ from non_local_detector.models.base import SortedSpikesDetector
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_position import IntervalPositionInfo
+from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.core import (
     DecodingParameters,
     PositionGroup,
@@ -36,6 +37,7 @@ schema = dj.schema("decoding_sorted_spikes_v1")
 @schema
 class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     definition = """
+    -> Session
     sorted_spikes_group_name: varchar(80)
     """
 
@@ -45,16 +47,20 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         -> SpikeSortingOutput.proj(spikesorting_merge_id='merge_id')
         """
 
-    def create_group(self, group_name: str, keys: list[dict]):
+    def create_group(
+        self, group_name: str, nwb_file_name: str, keys: list[dict]
+    ):
+        group_key = {
+            "sorted_spikes_group_name": group_name,
+            "nwb_file_name": nwb_file_name,
+        }
         self.insert1(
-            {"sorted_spikes_group_name": group_name}, skip_duplicates=True
+            group_key,
+            skip_duplicates=True,
         )
         for key in keys:
             self.SortGroup.insert1(
-                {
-                    **key,
-                    "sorted_spikes_group_name": group_name,
-                },
+                {**key, **group_key},
                 skip_duplicates=True,
             )
 

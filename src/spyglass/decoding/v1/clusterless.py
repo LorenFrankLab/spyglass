@@ -20,6 +20,7 @@ from non_local_detector.models.base import ClusterlessDetector
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_position import IntervalPositionInfo
+from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.core import (
     DecodingParameters,
     PositionGroup,
@@ -37,6 +38,7 @@ schema = dj.schema("decoding_clusterless_v1")
 @schema
 class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
     definition = """
+    -> Session
     waveform_features_group_name: varchar(80)
     """
 
@@ -46,16 +48,20 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
         -> UnitWaveformFeatures
         """
 
-    def create_group(self, group_name: str, keys: list[dict]):
+    def create_group(
+        self, nwb_file_name: str, group_name: str, keys: list[dict]
+    ):
+        group_key = {
+            "nwb_file_name": nwb_file_name,
+            "waveform_features_group_name": group_name,
+        }
         self.insert1(
-            {"waveform_features_group_name": group_name}, skip_duplicates=True
+            group_key,
+            skip_duplicates=True,
         )
         for key in keys:
             self.UnitFeatures.insert1(
-                {
-                    **key,
-                    "waveform_features_group_name": group_name,
-                },
+                {**key, **group_key},
                 skip_duplicates=True,
             )
 
