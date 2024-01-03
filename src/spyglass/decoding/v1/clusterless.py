@@ -360,10 +360,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             UnitWaveformFeatures & waveform_keys
         ).fetch_data()
 
-        min_time, max_time = ClusterlessDecodingV1._get_interval_range(key)
-
         if not filter_by_interval:
             return spike_times, spike_waveform_features
+
+        min_time, max_time = ClusterlessDecodingV1._get_interval_range(key)
 
         new_spike_times = []
         new_waveform_features = []
