@@ -292,3 +292,109 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     def load_results(self):
         return ClusterlessDetector.load_results(self.fetch1("results_path"))
+
+    @staticmethod
+    def load_environments(key):
+        model_params = (
+            DecodingParameters
+            & {"decoding_param_name": key["decoding_param_name"]}
+        ).fetch1()
+        decoding_params, decoding_kwargs = (
+            model_params["decoding_params"],
+            model_params["decoding_kwargs"],
+        )
+
+        (
+            position_info,
+            position_variable_names,
+        ) = ClusterlessDecodingV1.load_position_info(key)
+        classifier = ClusterlessDetector(**decoding_params)
+
+        classifier.initialize_environments(
+            position=position_info[position_variable_names].to_numpy(),
+            environment_labels=decoding_kwargs.get("environment_labels", None),
+        )
+
+        return classifier.environments
+
+    @staticmethod
+    def load_position_info(key):
+        position_group_key = {"position_group_name": key["position_group_name"]}
+        position_variable_names = (PositionGroup & position_group_key).fetch1(
+            "position_variables"
+        )
+
+        position_info = []
+        for pos_merge_id in (PositionGroup.Position & position_group_key).fetch(
+            "pos_merge_id"
+        ):
+            position_info.append(
+                IntervalPositionInfo._data_to_df(
+                    PositionOutput.fetch_nwb({"merge_id": pos_merge_id})[0],
+                    prefix="",
+                    add_frame_ind=True,
+                )
+            )
+        position_info = pd.concat(position_info, axis=0).dropna()
+
+        return position_info, position_variable_names
+
+    @staticmethod
+    def _get_interval_range(key):
+        encoding_interval = (
+            IntervalList
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["encoding_interval"],
+            }
+        ).fetch1("valid_times")
+
+        decoding_interval = (
+            IntervalList
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["decoding_interval"],
+            }
+        ).fetch1("valid_times")
+
+        return (
+            min(
+                np.asarray(encoding_interval).min(),
+                np.asarray(decoding_interval).min(),
+            ),
+            max(
+                np.asarray(encoding_interval).max(),
+                np.asarray(decoding_interval).max(),
+            ),
+        )
+
+    @staticmethod
+    def load_spike_data(key):
+        waveform_keys = (
+            (
+                UnitWaveformFeaturesGroup.UnitFeatures
+                & {
+                    "waveform_features_group_name": key[
+                        "waveform_features_group_name"
+                    ]
+                }
+            )
+        ).fetch("KEY")
+        spike_times, spike_waveform_features = (
+            UnitWaveformFeatures & waveform_keys
+        ).fetch_data()
+
+        min_time, max_time = ClusterlessDecodingV1._get_interval_range(key)
+
+        new_spike_times = []
+        new_waveform_features = []
+        for elec_spike_times, elec_waveform_features in zip(
+            spike_times, spike_waveform_features
+        ):
+            is_in_interval = np.logical_and(
+                elec_spike_times >= min_time, elec_spike_times <= max_time
+            )
+            new_spike_times.append(elec_spike_times[is_in_interval])
+            new_waveform_features.append(elec_waveform_features[is_in_interval])
+
+        return new_spike_times, new_waveform_features
