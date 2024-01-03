@@ -191,45 +191,38 @@ def _convert_environment_to_dict(env: Environment) -> dict:
     return vars(env)
 
 
-def convert_classes_to_dict(key: dict) -> dict:
-    key = copy.deepcopy(key)
+def convert_classes_to_dict(params: dict) -> dict:
     """Converts the classifier parameters into a dictionary so that datajoint can store it."""
+    params = copy.deepcopy(params)
     try:
-        key["decoding_params"]["environments"] = [
-            _convert_environment_to_dict(env)
-            for env in key["decoding_params"]["environments"]
+        params["environments"] = [
+            _convert_environment_to_dict(env) for env in params["environments"]
         ]
     except TypeError:
-        key["decoding_params"]["environments"] = [
-            _convert_environment_to_dict(key["decoding_params"]["environments"])
+        params["environments"] = [
+            _convert_environment_to_dict(params["environments"])
         ]
-    key["decoding_params"][
-        "continuous_transition_types"
-    ] = _convert_transitions_to_dict(
-        key["decoding_params"]["continuous_transition_types"]
+    params["continuous_transition_types"] = _convert_transitions_to_dict(
+        params["continuous_transition_types"]
     )
-    key["decoding_params"]["discrete_transition_type"] = _to_dict(
-        key["decoding_params"]["discrete_transition_type"]
+    params["discrete_transition_type"] = _to_dict(
+        params["discrete_transition_type"]
     )
-    key["decoding_params"]["continuous_initial_conditions_types"] = [
+    params["continuous_initial_conditions_types"] = [
         _to_dict(cont_ic)
-        for cont_ic in key["decoding_params"][
-            "continuous_initial_conditions_types"
-        ]
+        for cont_ic in params["continuous_initial_conditions_types"]
     ]
 
-    if key["decoding_params"]["observation_models"] is not None:
-        key["decoding_params"]["observation_models"] = [
-            vars(obs) for obs in key["decoding_params"]["observation_models"]
+    if params["observation_models"] is not None:
+        params["observation_models"] = [
+            vars(obs) for obs in params["observation_models"]
         ]
 
     try:
-        key["decoding_params"][
-            "clusterless_algorithm_params"
-        ] = _convert_algorithm_params(
-            key["decoding_params"]["clusterless_algorithm_params"]
+        params["clusterless_algorithm_params"] = _convert_algorithm_params(
+            params["clusterless_algorithm_params"]
         )
     except KeyError:
         pass
 
-    return key
+    return params

@@ -63,8 +63,12 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         ignore_extra_fields=False,
         allow_direct_insert=None,
     ):
+        for row in rows:
+            row["decoding_params"] = convert_classes_to_dict(
+                row["decoding_params"]
+            )
         super().insert(
-            [convert_classes_to_dict(key) for key in rows],
+            rows,
             replace,
             skip_duplicates,
             ignore_extra_fields,
@@ -73,7 +77,7 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
 
     def fetch(self, *args, **kwargs):
         rows = super().fetch(*args, **kwargs)
-        if len(rows) > 0 and len(rows[0]) == 3:
+        if len(rows) > 0 and len(rows[0]) > 1:
             content = []
             for row in rows:
                 (
