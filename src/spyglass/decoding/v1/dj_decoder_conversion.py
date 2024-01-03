@@ -128,34 +128,28 @@ def restore_classes(params: dict) -> dict:
         "UniformInitialConditions": UniformInitialConditions,
     }
 
-    params["decoding_params"]["continuous_transition_types"] = [
+    params["continuous_transition_types"] = [
         [
             _convert_dict_to_class(st, continuous_state_transition_types)
             for st in sts
         ]
-        for sts in params["decoding_params"]["continuous_transition_types"]
+        for sts in params["continuous_transition_types"]
     ]
-    params["decoding_params"]["environments"] = [
-        _convert_env_dict(env_params)
-        for env_params in params["decoding_params"]["environments"]
+    params["environments"] = [
+        _convert_env_dict(env_params) for env_params in params["environments"]
     ]
-    params["decoding_params"][
-        "discrete_transition_type"
-    ] = _convert_dict_to_class(
-        params["decoding_params"]["discrete_transition_type"],
+    params["discrete_transition_type"] = _convert_dict_to_class(
+        params["discrete_transition_type"],
         discrete_state_transition_types,
     )
-    params["decoding_params"]["continuous_initial_conditions_types"] = [
+    params["continuous_initial_conditions_types"] = [
         _convert_dict_to_class(cont_ic, continuous_initial_conditions_types)
-        for cont_ic in params["decoding_params"][
-            "continuous_initial_conditions_types"
-        ]
+        for cont_ic in params["continuous_initial_conditions_types"]
     ]
 
-    if params["decoding_params"]["observation_models"] is not None:
-        params["decoding_params"]["observation_models"] = [
-            ObservationModel(**obs)
-            for obs in params["decoding_params"]["observation_models"]
+    if params["observation_models"] is not None:
+        params["observation_models"] = [
+            ObservationModel(**obs) for obs in params["observation_models"]
         ]
 
     return params
