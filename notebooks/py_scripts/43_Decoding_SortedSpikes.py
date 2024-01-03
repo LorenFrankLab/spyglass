@@ -96,7 +96,7 @@ from non_local_detector.models import ContFragSortedSpikesClassifier
 DecodingParameters.insert1(
     {
         "decoding_param_name": "contfrag_sorted",
-        "decoding_params": vars(ContFragSortedSpikesClassifier()),
+        "decoding_params": ContFragSortedSpikesClassifier(),
         "decoding_kwargs": dict(),
     },
     skip_duplicates=True,

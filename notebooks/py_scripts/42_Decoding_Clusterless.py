@@ -190,9 +190,7 @@ ContFragClusterlessClassifier(
 )
 # -
 
-# To insert these parameters into the database, we need to use the following syntax, we need to convert the initialized model into a dictionary, and then insert the dictionary into the database.
-
-vars(ContFragClusterlessClassifier())
+# This is how to insert the model parameters into the database:
 
 # +
 from spyglass.decoding.v1.core import DecodingParameters
@@ -201,7 +199,7 @@ from spyglass.decoding.v1.core import DecodingParameters
 DecodingParameters.insert1(
     {
         "decoding_param_name": "contfrag_clusterless",
-        "decoding_params": vars(ContFragClusterlessClassifier()),
+        "decoding_params": ContFragClusterlessClassifier(),
         "decoding_kwargs": dict(),
     },
     skip_duplicates=True,

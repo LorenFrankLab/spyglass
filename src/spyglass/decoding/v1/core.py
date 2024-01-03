@@ -31,22 +31,22 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     contents = [
         {
             "decoding_param_name": "contfrag_clusterless",
-            "decoding_params": vars(ContFragClusterlessClassifier()),
+            "decoding_params": ContFragClusterlessClassifier(),
             "decoding_kwargs": dict(),
         },
         {
             "decoding_param_name": "nonlocal_clusterless",
-            "decoding_params": vars(NonLocalClusterlessDetector()),
+            "decoding_params": NonLocalClusterlessDetector(),
             "decoding_kwargs": dict(),
         },
         {
             "decoding_param_name": "contfrag_sorted",
-            "decoding_params": vars(ContFragSortedSpikesClassifier()),
+            "decoding_params": ContFragSortedSpikesClassifier(),
             "decoding_kwargs": dict(),
         },
         {
             "decoding_param_name": "nonlocal_sorted",
-            "decoding_params": vars(NonLocalSortedSpikesDetector()),
+            "decoding_params": NonLocalSortedSpikesDetector(),
             "decoding_kwargs": dict(),
         },
     ]
@@ -65,7 +65,7 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     ):
         for row in rows:
             row["decoding_params"] = convert_classes_to_dict(
-                row["decoding_params"]
+                vars(row["decoding_params"])
             )
         super().insert(
             rows,
