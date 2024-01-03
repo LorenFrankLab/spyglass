@@ -100,39 +100,17 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         )
 
         # Get position data
-        position_group_key = {"position_group_name": key["position_group_name"]}
-        position_variable_names = (PositionGroup & position_group_key).fetch1(
-            "position_variables"
-        )
-
-        position_info = []
-        for pos_merge_id in (PositionGroup.Position & position_group_key).fetch(
-            "pos_merge_id"
-        ):
-            position_info.append(
-                IntervalPositionInfo._data_to_df(
-                    PositionOutput.fetch_nwb({"merge_id": pos_merge_id})[0],
-                    prefix="",
-                    add_frame_ind=True,
-                )
-            )
-        position_info = pd.concat(position_info, axis=0).dropna()
+        (
+            position_info,
+            position_variable_names,
+        ) = ClusterlessDecodingV1.load_position_info(key)
 
         # Get the waveform features for the selected units
-        waveform_keys = (
-            (
-                UnitWaveformFeaturesGroup.UnitFeatures
-                & {
-                    "waveform_features_group_name": key[
-                        "waveform_features_group_name"
-                    ]
-                }
-            )
-        ).fetch("KEY")
-
-        spike_times, spike_waveform_features = (
-            UnitWaveformFeatures & waveform_keys
-        ).fetch_data()
+        # Don't need to filter by interval since the non_local_detector code will do that
+        (
+            spike_times,
+            spike_waveform_features,
+        ) = ClusterlessDecodingV1.load_spike_data(key, filter_by_interval=False)
 
         # Get the encoding and decoding intervals
         encoding_interval = (
@@ -282,8 +260,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         )
         key["results_path"] = results_path
 
-        # save environment?
-
         self.insert1(key)
 
         from spyglass.decoding.decoding_merge import DecodingOutput
@@ -369,7 +345,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def load_spike_data(key):
+    def load_spike_data(key, filter_by_interval=True):
         waveform_keys = (
             (
                 UnitWaveformFeaturesGroup.UnitFeatures
@@ -385,6 +361,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         ).fetch_data()
 
         min_time, max_time = ClusterlessDecodingV1._get_interval_range(key)
+
+        if not filter_by_interval:
+            return spike_times, spike_waveform_features
 
         new_spike_times = []
         new_waveform_features = []

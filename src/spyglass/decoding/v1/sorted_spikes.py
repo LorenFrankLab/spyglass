@@ -99,39 +99,16 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
 
         # Get position data
-        position_group_key = {"position_group_name": key["position_group_name"]}
-        position_variable_names = (PositionGroup & position_group_key).fetch1(
-            "position_variables"
+        (
+            position_info,
+            position_variable_names,
+        ) = SortedSpikesDecodingV1.load_position_info(key)
+
+        # Get the spike times for the selected units
+        # Don't need to filter by interval since the non_local_detector code will do that
+        spike_times = SortedSpikesDecodingV1.load_spike_data(
+            key, filter_by_interval=False
         )
-
-        position_info = []
-        for pos_merge_id in (PositionGroup.Position & position_group_key).fetch(
-            "pos_merge_id"
-        ):
-            position_info.append(
-                IntervalPositionInfo._data_to_df(
-                    PositionOutput.fetch_nwb({"merge_id": pos_merge_id})[0],
-                    prefix="",
-                    add_frame_ind=True,
-                )
-            )
-        position_info = pd.concat(position_info, axis=0).dropna()
-
-        # Get the waveform features for the selected units
-        merge_ids = (
-            (
-                SortedSpikesGroup.SortGroup
-                & {"sorted_spikes_group_name": key["sorted_spikes_group_name"]}
-            )
-        ).fetch("spikesorting_merge_id")
-
-        spike_times = [
-            SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0][
-                "object_id"
-            ]["spike_times"].to_list()
-            for merge_id in merge_ids
-        ]
-        spike_times = list(chain(*spike_times))
 
         # Get the encoding and decoding intervals
         encoding_interval = (
@@ -278,8 +255,6 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
         key["results_path"] = results_path
 
-        # save environment?
-
         self.insert1(key)
 
         from spyglass.decoding.decoding_merge import DecodingOutput
@@ -288,3 +263,109 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     def load_results(self):
         return SortedSpikesDetector.load_results(self.fetch1("results_path"))
+
+    @staticmethod
+    def load_environments(key):
+        model_params = (
+            DecodingParameters
+            & {"decoding_param_name": key["decoding_param_name"]}
+        ).fetch1()
+        decoding_params, decoding_kwargs = (
+            model_params["decoding_params"],
+            model_params["decoding_kwargs"],
+        )
+
+        (
+            position_info,
+            position_variable_names,
+        ) = SortedSpikesDecodingV1.load_position_info(key)
+        classifier = SortedSpikesDetector(**decoding_params)
+
+        classifier.initialize_environments(
+            position=position_info[position_variable_names].to_numpy(),
+            environment_labels=decoding_kwargs.get("environment_labels", None),
+        )
+
+        return classifier.environments
+
+    @staticmethod
+    def load_position_info(key):
+        position_group_key = {"position_group_name": key["position_group_name"]}
+        position_variable_names = (PositionGroup & position_group_key).fetch1(
+            "position_variables"
+        )
+
+        position_info = []
+        for pos_merge_id in (PositionGroup.Position & position_group_key).fetch(
+            "pos_merge_id"
+        ):
+            position_info.append(
+                IntervalPositionInfo._data_to_df(
+                    PositionOutput.fetch_nwb({"merge_id": pos_merge_id})[0],
+                    prefix="",
+                    add_frame_ind=True,
+                )
+            )
+        position_info = pd.concat(position_info, axis=0).dropna()
+
+        return position_info, position_variable_names
+
+    @staticmethod
+    def _get_interval_range(key):
+        encoding_interval = (
+            IntervalList
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["encoding_interval"],
+            }
+        ).fetch1("valid_times")
+
+        decoding_interval = (
+            IntervalList
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["decoding_interval"],
+            }
+        ).fetch1("valid_times")
+
+        return (
+            min(
+                np.asarray(encoding_interval).min(),
+                np.asarray(decoding_interval).min(),
+            ),
+            max(
+                np.asarray(encoding_interval).max(),
+                np.asarray(decoding_interval).max(),
+            ),
+        )
+
+    @staticmethod
+    def load_spike_data(key, filter_by_interval=True):
+        merge_ids = (
+            (
+                SortedSpikesGroup.SortGroup
+                & {"sorted_spikes_group_name": key["sorted_spikes_group_name"]}
+            )
+        ).fetch("spikesorting_merge_id")
+
+        spike_times = [
+            SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0][
+                "object_id"
+            ]["spike_times"].to_list()
+            for merge_id in merge_ids
+        ]
+        spike_times = list(chain(*spike_times))
+
+        if not filter_by_interval:
+            return spike_times
+
+        min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
+
+        new_spike_times = []
+        for elec_spike_times in zip(spike_times):
+            is_in_interval = np.logical_and(
+                elec_spike_times >= min_time, elec_spike_times <= max_time
+            )
+            new_spike_times.append(elec_spike_times[is_in_interval])
+
+        return new_spike_times
