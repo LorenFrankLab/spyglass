@@ -87,15 +87,12 @@ class Session(SpyglassMixin, dj.Imported):
         if not debug_mode:  # TODO: remove when demo files agree on device
             logger.info("Populate DataAcquisitionDevice...")
             DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
-            logger.info()
 
         logger.info("Populate CameraDevice...")
         CameraDevice.insert_from_nwbfile(nwbf)
-        logger.info()
 
         logger.info("Populate Probe...")
         Probe.insert_from_nwbfile(nwbf, config)
-        logger.info()
 
         if nwbf.subject is not None:
             subject_id = nwbf.subject.subject_id
