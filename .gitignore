@@ -174,3 +174,4 @@ _version.py
 *.xz
 *.zip
 *.pb
+*.pem
