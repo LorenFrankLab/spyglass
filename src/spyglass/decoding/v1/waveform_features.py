@@ -120,12 +120,21 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             merge_key, params["waveform_extraction_params"]
         )
 
-        sorting_id = (SpikeSortingOutput.CurationV1 & merge_key).fetch1(
-            "sorting_id"
-        )
-        sorter, nwb_file_name = (
-            SpikeSortingSelection & {"sorting_id": sorting_id}
-        ).fetch1("sorter", "nwb_file_name")
+        source_key = SpikeSortingOutput().merge_get_parent(merge_key).fetch1()
+        # v0 pipeline
+        if "sorter" in source_key and "nwb_file_name" in source_key:
+            sorter = source_key["sorter"]
+            nwb_file_name = source_key["nwb_file_name"]
+            analysis_nwb_key = "units"
+        # v1 pipeline
+        else:
+            sorting_id = (SpikeSortingOutput.CurationV1 & merge_key).fetch1(
+                "sorting_id"
+            )
+            sorter, nwb_file_name = (
+                SpikeSortingSelection & {"sorting_id": sorting_id}
+            ).fetch1("sorter", "nwb_file_name")
+            analysis_nwb_key = "object_id"
 
         waveform_features = {}
 
@@ -139,9 +148,9 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 sorter,
             )
 
-        spike_times = SpikeSortingOutput.fetch_nwb(merge_key)[0]["object_id"][
-            "spike_times"
-        ]
+        spike_times = SpikeSortingOutput.fetch_nwb(merge_key)[0][
+            analysis_nwb_key
+        ]["spike_times"]
 
         (
             key["analysis_file_name"],
@@ -163,13 +172,14 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
     def _fetch_waveform(
         merge_key: dict, waveform_extraction_params: dict
     ) -> si.WaveformExtractor:
-        curation_key = (SpikeSortingOutput.CurationV1 & merge_key).fetch1()
-        recording = CurationV1.get_recording(curation_key)
+        # get the recording from the parent table
+        recording = SpikeSortingOutput().get_recording(merge_key)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
-        sorting = CurationV1.get_sorting(curation_key)
+        # get the sorting from the parent table
+        sorting = SpikeSortingOutput().get_sorting(merge_key)
 
-        waveforms_dir = temp_dir + "/" + str(curation_key["sorting_id"])
+        waveforms_dir = temp_dir + "/" + str(merge_key["merge_id"])
         os.makedirs(waveforms_dir, exist_ok=True)
 
         return si.extract_waveforms(
