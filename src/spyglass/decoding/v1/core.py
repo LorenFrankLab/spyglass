@@ -66,12 +66,11 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         rows = super().fetch(*args, **kwargs)
         if len(rows) > 0 and len(rows[0]) > 1:
             content = []
-            for row in rows:
-                (
-                    decoding_param_name,
-                    decoding_params,
-                    decoding_kwargs,
-                ) = row
+            for (
+                decoding_param_name,
+                decoding_params,
+                decoding_kwargs,
+            ) in rows:
                 content.append(
                     (
                         decoding_param_name,
