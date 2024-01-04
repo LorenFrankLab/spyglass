@@ -25,29 +25,25 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     decoding_param_name : varchar(80)  # a name for this set of parameters
     ---
     decoding_params : BLOB             # initialization parameters for model
-    decoding_kwargs : BLOB             # additional keyword arguments
+    decoding_kwargs = NULL : BLOB      # additional keyword arguments
     """
 
     contents = [
         {
             "decoding_param_name": "contfrag_clusterless",
             "decoding_params": ContFragClusterlessClassifier(),
-            "decoding_kwargs": dict(),
         },
         {
             "decoding_param_name": "nonlocal_clusterless",
             "decoding_params": NonLocalClusterlessDetector(),
-            "decoding_kwargs": dict(),
         },
         {
             "decoding_param_name": "contfrag_sorted",
             "decoding_params": ContFragSortedSpikesClassifier(),
-            "decoding_kwargs": dict(),
         },
         {
             "decoding_param_name": "nonlocal_sorted",
             "decoding_params": NonLocalSortedSpikesDetector(),
-            "decoding_kwargs": dict(),
         },
     ]
 
@@ -55,36 +51,22 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     def insert_default(cls):
         cls.insert(cls.contents, skip_duplicates=True)
 
-    def insert(
-        self,
-        rows,
-        replace=False,
-        skip_duplicates=False,
-        ignore_extra_fields=False,
-        allow_direct_insert=None,
-    ):
+    def insert(self, rows, *args, **kwargs):
         for row in rows:
             row["decoding_params"] = convert_classes_to_dict(
                 vars(row["decoding_params"])
             )
-        super().insert(
-            rows,
-            replace,
-            skip_duplicates,
-            ignore_extra_fields,
-            allow_direct_insert,
-        )
+        super().insert(rows, *args, **kwargs)
 
     def fetch(self, *args, **kwargs):
         rows = super().fetch(*args, **kwargs)
         if len(rows) > 0 and len(rows[0]) > 1:
             content = []
-            for row in rows:
-                (
-                    decoding_param_name,
-                    decoding_params,
-                    decoding_kwargs,
-                ) = row
+            for (
+                decoding_param_name,
+                decoding_params,
+                decoding_kwargs,
+            ) in rows:
                 content.append(
                     (
                         decoding_param_name,

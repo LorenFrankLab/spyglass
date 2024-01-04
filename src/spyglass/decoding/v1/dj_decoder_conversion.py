@@ -2,50 +2,17 @@
 so that datajoint can store them in tables."""
 
 
+import copy
+
 import datajoint as dj
-from non_local_detector.continuous_state_transitions import (
-    Discrete,
-    EmpiricalMovement,
-    RandomWalk,
-    RandomWalkDirection1,
-    RandomWalkDirection2,
-    Uniform,
-)
-from non_local_detector.discrete_state_transitions import (
-    DiscreteNonStationaryCustom,
-    DiscreteNonStationaryDiagonal,
-    DiscreteStationaryCustom,
-    DiscreteStationaryDiagonal,
-)
+from non_local_detector import continuous_state_transitions as cst
+from non_local_detector import discrete_state_transitions as dst
+from non_local_detector import initial_conditions as ic
 from non_local_detector.environment import Environment
-from non_local_detector.initial_conditions import UniformInitialConditions
 from non_local_detector.observation_models import ObservationModel
 from track_linearization import make_track_graph
 
 schema = dj.schema("decoding_clusterless_v1")
-
-
-import copy
-
-from non_local_detector import ContFragClusterlessClassifier
-from non_local_detector.continuous_state_transitions import (
-    Discrete,
-    EmpiricalMovement,
-    RandomWalk,
-    RandomWalkDirection1,
-    RandomWalkDirection2,
-    Uniform,
-)
-from non_local_detector.discrete_state_transitions import (
-    DiscreteNonStationaryCustom,
-    DiscreteNonStationaryDiagonal,
-    DiscreteStationaryCustom,
-    DiscreteStationaryDiagonal,
-)
-from non_local_detector.environment import Environment
-from non_local_detector.initial_conditions import UniformInitialConditions
-from non_local_detector.observation_models import ObservationModel
-from track_linearization import make_track_graph
 
 
 def _convert_dict_to_class(d: dict, class_conversion: dict) -> object:
@@ -104,29 +71,53 @@ def _convert_transitions_to_dict(
     ]
 
 
+def _map_class_name_to_class(module: object) -> dict:
+    """Helper function to map name of class to class
+
+    Parameters
+    ----------
+    module : object
+        The module to get the classes from
+
+    Returns
+    -------
+    dict
+        A dictionary of the classes in the module mapping the class name to the class
+    """
+    module_attributes = dir(module)
+    return {
+        attr_name: attr
+        for attr_name, attr in [
+            (name, getattr(module, name)) for name in module_attributes
+        ]
+        if hasattr(attr, "__class__") and attr.__class__.__name__ == "type"
+    }
+
+
 def restore_classes(params: dict) -> dict:
-    """Converts a dictionary of parameters into a dictionary of classes since datajoint cannot handle classes"""
+    """Converts a dictionary of parameters into a dictionary of classes
+    since datajoint cannot handle classes
+
+    Parameters
+    ----------
+    params : dict
+        The parameters to convert
+
+    Returns
+    -------
+    converted_params : dict
+        The converted parameters
+    """
 
     params = copy.deepcopy(params)
-    continuous_state_transition_types = {
-        "Discrete": Discrete,
-        "EmpiricalMovement": EmpiricalMovement,
-        "RandomWalk": RandomWalk,
-        "RandomWalkDirection1": RandomWalkDirection1,
-        "RandomWalkDirection2": RandomWalkDirection2,
-        "Uniform": Uniform,
-    }
 
-    discrete_state_transition_types = {
-        "DiscreteNonStationaryCustom": DiscreteNonStationaryCustom,
-        "DiscreteNonStationaryDiagonal": DiscreteNonStationaryDiagonal,
-        "DiscreteStationaryCustom": DiscreteStationaryCustom,
-        "DiscreteStationaryDiagonal": DiscreteStationaryDiagonal,
-    }
+    continuous_state_transition_types = _map_class_name_to_class(cst)
+    discrete_state_transition_types = _map_class_name_to_class(dst)
+    continuous_initial_conditions_types = _map_class_name_to_class(ic)
 
-    continuous_initial_conditions_types = {
-        "UniformInitialConditions": UniformInitialConditions,
-    }
+    params["environments"] = [
+        _convert_env_dict(env_params) for env_params in params["environments"]
+    ]
 
     params["continuous_transition_types"] = [
         [
@@ -134,9 +125,6 @@ def restore_classes(params: dict) -> dict:
             for st in sts
         ]
         for sts in params["continuous_transition_types"]
-    ]
-    params["environments"] = [
-        _convert_env_dict(env_params) for env_params in params["environments"]
     ]
     params["discrete_transition_type"] = _convert_dict_to_class(
         params["discrete_transition_type"],
@@ -155,7 +143,7 @@ def restore_classes(params: dict) -> dict:
     return params
 
 
-def _convert_algorithm_params(algo_params):
+def _convert_algorithm_params(algo_params: dict) -> dict:
     """Helper function that adds in the algorithm name to the algorithm parameters dictionary"""
     try:
         algo_params = algo_params.copy()
