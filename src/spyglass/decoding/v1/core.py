@@ -55,25 +55,12 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     def insert_default(cls):
         cls.insert(cls.contents, skip_duplicates=True)
 
-    def insert(
-        self,
-        rows,
-        replace=False,
-        skip_duplicates=False,
-        ignore_extra_fields=False,
-        allow_direct_insert=None,
-    ):
+    def insert(self, rows, *args, **kwargs):
         for row in rows:
             row["decoding_params"] = convert_classes_to_dict(
                 vars(row["decoding_params"])
             )
-        super().insert(
-            rows,
-            replace,
-            skip_duplicates,
-            ignore_extra_fields,
-            allow_direct_insert,
-        )
+        super().insert(rows, *args, **kwargs)
 
     def fetch(self, *args, **kwargs):
         rows = super().fetch(*args, **kwargs)
