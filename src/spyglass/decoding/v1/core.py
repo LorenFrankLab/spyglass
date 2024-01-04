@@ -25,29 +25,25 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     decoding_param_name : varchar(80)  # a name for this set of parameters
     ---
     decoding_params : BLOB             # initialization parameters for model
-    decoding_kwargs : BLOB             # additional keyword arguments
+    decoding_kwargs = NULL : BLOB      # additional keyword arguments
     """
 
     contents = [
         {
             "decoding_param_name": "contfrag_clusterless",
             "decoding_params": ContFragClusterlessClassifier(),
-            "decoding_kwargs": dict(),
         },
         {
             "decoding_param_name": "nonlocal_clusterless",
             "decoding_params": NonLocalClusterlessDetector(),
-            "decoding_kwargs": dict(),
         },
         {
             "decoding_param_name": "contfrag_sorted",
             "decoding_params": ContFragSortedSpikesClassifier(),
-            "decoding_kwargs": dict(),
         },
         {
             "decoding_param_name": "nonlocal_sorted",
             "decoding_params": NonLocalSortedSpikesDetector(),
-            "decoding_kwargs": dict(),
         },
     ]
 
