@@ -302,11 +302,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             "pos_merge_id"
         ):
             position_info.append(
-                IntervalPositionInfo._data_to_df(
-                    PositionOutput.fetch_nwb({"merge_id": pos_merge_id})[0],
-                    prefix="",
-                    add_frame_ind=True,
-                )
+                (PositionOutput & {"merge_id": pos_merge_id}).fetch1_dataframe()
             )
         position_info = pd.concat(position_info, axis=0).dropna()
 
