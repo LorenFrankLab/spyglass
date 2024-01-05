@@ -105,14 +105,14 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         (
             position_info,
             position_variable_names,
-        ) = ClusterlessDecodingV1.load_position_info(key)
+        ) = self.load_position_info(key)
 
         # Get the waveform features for the selected units
         # Don't need to filter by interval since the non_local_detector code will do that
         (
             spike_times,
             spike_waveform_features,
-        ) = ClusterlessDecodingV1.load_spike_data(key, filter_by_interval=False)
+        ) = self.load_spike_data(key, filter_by_interval=False)
 
         # Get the encoding and decoding intervals
         encoding_interval = (
