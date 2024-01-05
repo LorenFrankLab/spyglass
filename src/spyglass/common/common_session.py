@@ -1,6 +1,10 @@
 import datajoint as dj
 
-from spyglass.common.common_device import CameraDevice, DataAcquisitionDevice, Probe
+from spyglass.common.common_device import (
+    CameraDevice,
+    DataAcquisitionDevice,
+    Probe,
+)
 from spyglass.common.common_lab import Institution, Lab, LabMember
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_subject import Subject

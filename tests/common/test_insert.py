@@ -1,15 +1,13 @@
+from datajoint.hash import key_hash
+from pandas import DataFrame, Index
 from pytest import approx
 
 
-def test_load_file(minirec_content):
-    assert minirec_content is not None
+def test_insert_session(mini_insert, mini_content, mini_restr, common):
+    subj_raw = mini_content.subject
+    meta_raw = mini_content
 
-
-def test_insert_session(minirec_insert, minirec_content, minirec_restr, common):
-    subj_raw = minirec_content.subject
-    meta_raw = minirec_content
-
-    sess_data = (common.Session & minirec_restr).fetch1()
+    sess_data = (common.Session & mini_restr).fetch1()
     assert (
         sess_data["subject_id"] == subj_raw.subject_id
     ), "Subjuect ID not match"
@@ -40,12 +38,12 @@ def test_insert_session(minirec_insert, minirec_content, minirec_restr, common):
         ), f"Session table {sess_attr} not match raw data {meta_attr}"
 
 
-def test_insert_electrode_group(minirec_insert, minirec_content, common):
+def test_insert_electrode_group(mini_insert, mini_content, common):
     group_name = "0"
     egroup_data = (
         common.ElectrodeGroup & {"electrode_group_name": group_name}
     ).fetch1()
-    egroup_raw = minirec_content.electrode_groups.get(group_name)
+    egroup_raw = mini_content.electrode_groups.get(group_name)
 
     assert (
         egroup_data["description"] == egroup_raw.description
@@ -58,12 +56,10 @@ def test_insert_electrode_group(minirec_insert, minirec_content, common):
     ), "Region ID does not match across raw data and BrainRegion table"
 
 
-def test_insert_electrode(
-    minirec_insert, minirec_content, minirec_restr, common
-):
+def test_insert_electrode(mini_insert, mini_content, mini_restr, common):
     electrode_id = "0"
     e_data = (common.Electrode & {"electrode_id": electrode_id}).fetch1()
-    e_raw = minirec_content.electrodes.get(int(electrode_id)).to_dict().copy()
+    e_raw = mini_content.electrodes.get(int(electrode_id)).to_dict().copy()
 
     attrs = [
         ("x", "x"),
@@ -75,14 +71,14 @@ def test_insert_electrode(
     ]
 
     for e_attr, meta_attr in attrs:
-        assert (  # KeyError: 0 here  ↓
-            e_data[e_attr] == e_raw[int(electrode_id)][meta_attr]
+        assert (
+            e_data[e_attr] == e_raw[meta_attr][int(electrode_id)]
         ), f"Electrode table {e_attr} not match raw data {meta_attr}"
 
 
-def test_insert_raw(minirec_insert, minirec_content, minirec_restr, common):
-    raw_data = (common.Raw & minirec_restr).fetch1()
-    raw_raw = minirec_content.get_acquisition()
+def test_insert_raw(mini_insert, mini_content, mini_restr, common):
+    raw_data = (common.Raw & mini_restr).fetch1()
+    raw_raw = mini_content.get_acquisition()
 
     attrs = [
         ("comments", "comments"),
@@ -94,24 +90,73 @@ def test_insert_raw(minirec_insert, minirec_content, minirec_restr, common):
         ), f"Raw table {raw_attr} not match raw data {meta_attr}"
 
 
-def test_insert_sample_count(minirec_insert, minirec_content, common):
-    # commont.SampleCount
-    assert False, "TODO"
+def test_insert_sample_count(mini_insert, mini_content, mini_restr, common):
+    sample_data = (common.SampleCount & mini_restr).fetch1()
+    sample_full = mini_content.processing.get("sample_count")
+    if not sample_full:
+        assert False, "No sample count data in raw data"
+    sample_raw = sample_full.data_interfaces.get("sample_count")
+    assert (
+        sample_data["sample_count_object_id"] == sample_raw.object_id
+    ), "SampleCount insertion error"
 
 
-def test_insert_dio(minirec_insert, minirec_content, common):
-    # commont.DIOEvents
-    assert False, "TODO"
+def test_insert_dio(mini_insert, mini_behavior, mini_restr, common):
+    events_data = (common.DIOEvents & mini_restr).fetch(as_dict=True)
+    events_raw = mini_behavior.get_data_interface(
+        "behavioral_events"
+    ).time_series
+
+    assert len(events_data) == len(events_raw), "Number of events not match"
+
+    event = "Poke1"
+    event_raw = events_raw.get(event)
+    event_data = (common.DIOEvents & {"dio_event_name": event}).fetch1()
+
+    assert (
+        event_data["dio_object_id"] == event_raw.object_id
+    ), "DIO Event insertion error"
 
 
-def test_insert_pos(minirec_insert, minirec_content, common):
-    # commont.PositionSource * common.RawPosition
-    assert False, "TODO"
+def test_insert_pos(
+    mini_insert,
+    common,
+    mini_behavior,
+    mini_restr,
+    mini_pos_series,
+    mini_pos_tbl,
+):
+    pos_data = (common.PositionSource.SpatialSeries & mini_restr).fetch()
+    pos_raw = mini_behavior.get_data_interface("position").spatial_series
+
+    assert len(pos_data) == len(pos_raw), "Number of spatial series not match"
+
+    raw_obj_id = pos_raw[mini_pos_series].object_id
+    data_obj_id = mini_pos_tbl.fetch1("raw_position_object_id")
+
+    assert data_obj_id == raw_obj_id, "PosObject insertion error"
 
 
-def test_insert_device(minirec_insert, minirec_devices, common):
+def test_fetch_pos(
+    mini_insert, common, mini_pos, mini_pos_series, mini_pos_tbl
+):
+    pos_key = (
+        common.PositionSource.SpatialSeries & mini_pos_tbl.fetch("KEY")
+    ).fetch(as_dict=True)[0]
+    pos_df = (common.RawPosition.PosObject & pos_key).fetch1_dataframe()
+
+    series = mini_pos[mini_pos_series]
+    raw_df = DataFrame(
+        data=series.data,
+        index=Index(series.timestamps, name="time"),
+        columns=[col + "1" for col in series.description.split(", ")],
+    )
+    assert key_hash(pos_df) == key_hash(raw_df), "Spatial series fetch error"
+
+
+def test_insert_device(mini_insert, mini_devices, common):
     this_device = "dataacq_device0"
-    device_raw = minirec_devices.get(this_device)
+    device_raw = mini_devices.get(this_device)
     device_data = (
         common.DataAcquisitionDevice
         & {"data_acquisition_device_name": this_device}
@@ -130,8 +175,8 @@ def test_insert_device(minirec_insert, minirec_devices, common):
         ), f"Device table {device_attr} not match raw data {meta_attr}"
 
 
-def test_insert_camera(minirec_insert, minirec_devices, common):
-    camera_raw = minirec_devices.get("camera_device 0")
+def test_insert_camera(mini_insert, mini_devices, common):
+    camera_raw = mini_devices.get("camera_device 0")
     camera_data = (
         common.CameraDevice & {"camera_name": camera_raw.camera_name}
     ).fetch1()
@@ -149,9 +194,9 @@ def test_insert_camera(minirec_insert, minirec_devices, common):
         ), f"Camera table {camera_attr} not match raw data {meta_attr}"
 
 
-def test_insert_probe(minirec_insert, minirec_devices, common):
+def test_insert_probe(mini_insert, mini_devices, common):
     this_probe = "probe 0"
-    probe_raw = minirec_devices.get(this_probe)
+    probe_raw = mini_devices.get(this_probe)
     probe_id = probe_raw.probe_type
 
     probe_data = (

@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-from numpy import all, array
 
 
 @pytest.fixture(scope="session")

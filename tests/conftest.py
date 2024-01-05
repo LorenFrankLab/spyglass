@@ -135,12 +135,12 @@ def raw_dir(base_dir):
 
 
 @pytest.fixture(scope="session")
-def minirec_path(raw_dir):
+def mini_path(raw_dir):
     yield raw_dir / "test.nwb"
 
 
 @pytest.fixture(scope="session")
-def minirec_download():
+def mini_download():
     # test_path = (
     #     "ipfs://bafybeie4svt3paz5vr7cw7mkgibutbtbzyab4s24hqn5pzim3sgg56m3n4"
     # )
@@ -158,35 +158,31 @@ def minirec_download():
 
 
 @pytest.fixture(scope="session")
-def minirec_content(minirec_path):
+def mini_content(mini_path):
     with pynwb.NWBHDF5IO(
-        path=str(minirec_path), mode="r", load_namespaces=True
+        path=str(mini_path), mode="r", load_namespaces=True
     ) as io:
         nwbfile = io.read()
+        assert nwbfile is not None, "NWBFile empty."
         yield nwbfile
 
 
 @pytest.fixture(scope="session")
-def minirec_open(minirec_content):
-    yield minirec_content
+def mini_open(mini_content):
+    yield mini_content
 
 
 @pytest.fixture(scope="session")
-def minirec_closed(minirec_path):
+def mini_closed(mini_path):
     with pynwb.NWBHDF5IO(
-        path=str(minirec_path), mode="r", load_namespaces=True
+        path=str(mini_path), mode="r", load_namespaces=True
     ) as io:
         nwbfile = io.read()
     yield nwbfile
 
 
 @pytest.fixture(scope="session")
-def minirec_devices(minirec_content):
-    yield minirec_content.devices
-
-
-@pytest.fixture(scope="session")
-def minirec_insert(minirec_path, teardown, server, dj_conn):
+def mini_insert(mini_path, teardown, server, dj_conn):
     from spyglass.common import Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
@@ -195,7 +191,7 @@ def minirec_insert(minirec_path, teardown, server, dj_conn):
         Nwbfile().delete(safemode=False)
 
     if server.connected:
-        insert_sessions(minirec_path.name)
+        insert_sessions(mini_path.name)
     else:
         logger.error("No server connection.")
     if len(Session()) == 0:
@@ -209,8 +205,8 @@ def minirec_insert(minirec_path, teardown, server, dj_conn):
 
 
 @pytest.fixture(scope="session")
-def minirec_restr(minirec_path):
-    yield f"nwb_file_name LIKE '{minirec_path.stem}%'"
+def mini_restr(mini_path):
+    yield f"nwb_file_name LIKE '{mini_path.stem}%'"
 
 
 @pytest.fixture(scope="session")

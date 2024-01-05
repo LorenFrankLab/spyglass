@@ -8,7 +8,6 @@ import pynwb
 import pynwb.behavior
 from position_tools import (
     get_angle,
-    get_centroid,
     get_distance,
     get_speed,
     get_velocity,
@@ -29,6 +28,12 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import raw_dir, video_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import deprecated_factory
+
+try:
+    from position_tools import get_centroid
+except ImportError:
+    logger.warnint("Please update position_tools to >= 0.1.0")
+    from position_tools import get_centroid
 
 schema = dj.schema("common_position")
 
