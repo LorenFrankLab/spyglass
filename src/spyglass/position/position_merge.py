@@ -79,7 +79,7 @@ class PositionOutput(_Merge, SpyglassMixin):
     def fetch1_dataframe(self):
         # proj replaces operator restriction to enable
         # (TableName & restriction).fetch1_dataframe()
-        key = self.merge_restrict(self.proj())
+        key = self.merge_restrict(self.proj()).proj()
         query = (
             source_class_dict[
                 to_camel_case(self.merge_get_parent(self.proj()).table_name)

@@ -32,7 +32,7 @@
       "base": "/your/path/like/stelmo/nwb/"
     },
     "kachery_dirs": {
-      "cloud": "/your/path/.kachery_cloud"
+      "cloud": "/your/path/.kachery-cloud"
     },
     "dlc_dirs": {
       "base": "/your/path/like/nimbus/deeplabcut/"
