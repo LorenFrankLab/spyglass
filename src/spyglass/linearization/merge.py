@@ -1,10 +1,10 @@
 import datajoint as dj
 
-from spyglass.position_linearization.v1.linearization import (  # noqa F401
-    LinearizedPositionV1,
-)
-from spyglass.utils.dj_merge_tables import _Merge
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.linearization.v0.main import (
+    IntervalLinearizedPosition,
+)  # noqa F401
+from spyglass.linearization.v1.main import LinearizedPositionV1  # noqa F401
+from spyglass.utils import SpyglassMixin, _Merge
 
 schema = dj.schema("position_linearization_merge")
 
@@ -16,6 +16,13 @@ class LinearizedPositionOutput(_Merge, SpyglassMixin):
     ---
     source: varchar(32)
     """
+
+    class LinearizedPositionV0(SpyglassMixin, dj.Part):  # noqa: F811
+        definition = """
+        -> LinearizedPositionOutput
+        ---
+        -> IntervalLinearizedPosition
+        """
 
     class LinearizedPositionV1(SpyglassMixin, dj.Part):  # noqa: F811
         definition = """

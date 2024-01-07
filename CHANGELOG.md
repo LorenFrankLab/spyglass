@@ -2,18 +2,27 @@
 
 ## [0.4.4] (Unreleased)
 
+### Infrastructure
+
 - Additional documentation. #690
-- Refactor input validation in DLC pipeline. #688
 - Clean up following pre-commit checks. #688
-- Add Mixin class to centralize `fetch_nwb` functionality. #692
-- Minor fixes to LinearizedPositionV1 pipeline #695
-- Add SpikeSorting V1 pipeline #651
+- Add Mixin class to centralize `fetch_nwb` functionality. #692, #734
 - Refactor restriction use in `delete_downstream_merge` #703
-- Minor fixes to LFPBandV1 populator #706
 - Add `cautious_delete` to Mixin class, initial implementation. #711
-- DLC path handling: #722
-    - Allow setting from config file.
-    - Env variable convention: `DLC_X_PATH` -> `DLC_X_DIR`.
+- Add `deprecation_factory` to facilitate table migration. #717
+- Add Spyglass logger. #730
+
+### Pipelines
+
+- Spike sorting: Add SpikeSorting V1 pipeline. #651
+- LFP: Minor fixes to LFPBandV1 populator. #706
+- Linearization:
+    - Minor fixes to LinearizedPositionV1 pipeline #695
+    - Rename `position_linearization` -> `linearization`. #717
+    - Migrate tables: `common_position` -> `linearization.v0`. #717
+- Position:
+    - Refactor input validation in DLC pipeline. #688
+    - DLC path handling from config, and normalize naming convention. #722
 
 ## [0.4.3] (November 7, 2023)
 

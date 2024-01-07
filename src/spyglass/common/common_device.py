@@ -1,10 +1,10 @@
 import datajoint as dj
 import ndx_franklab_novela
 
+from spyglass.common.errors import PopulateException
 from spyglass.utils.dj_mixin import SpyglassMixin
-
-from ..utils.nwb_helper_fn import get_nwb_file
-from .errors import PopulateException
+from spyglass.utils.logging import logger
+from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_device")
 
@@ -14,7 +14,6 @@ class DataAcquisitionDeviceSystem(SpyglassMixin, dj.Manual):
     definition = """
     # Known data acquisition device system names.
     data_acquisition_device_system: varchar(80)
-    ---
     """
 
 
@@ -23,7 +22,6 @@ class DataAcquisitionDeviceAmplifier(SpyglassMixin, dj.Manual):
     definition = """
     # Known data acquisition device amplifier names.
     data_acquisition_device_amplifier: varchar(80)
-    ---
     """
 
 
@@ -84,12 +82,12 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
             cls._add_device(new_device_dict)
 
         if ndx_devices:
-            print(
+            logger.info(
                 "Inserted or referenced data acquisition device(s): "
                 + f"{ndx_devices.keys()}"
             )
         else:
-            print("No conforming data acquisition device metadata found.")
+            logger.warn("No conforming data acquisition device metadata found.")
 
     @classmethod
     def get_all_device_names(cls, nwbf, config) -> tuple:
@@ -158,7 +156,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
         ).tolist()
         if name not in all_values:
             # no entry with the same name exists, prompt user to add a new entry
-            print(
+            logger.info(
                 f"\nData acquisition device '{name}' was not found in the "
                 f"database. The current values are: {all_values}. "
                 "Please ensure that the device you want to add does not already"
@@ -216,7 +214,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
             "data_acquisition_device_system"
         ).tolist()
         if system not in all_values:
-            print(
+            logger.info(
                 f"\nData acquisition device system '{system}' was not found in"
                 f" the database. The current values are: {all_values}. "
                 "Please ensure that the system you want to add does not already"
@@ -267,7 +265,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
             "data_acquisition_device_amplifier"
         ).tolist()
         if amplifier not in all_values:
-            print(
+            logger.info(
                 f"\nData acquisition device amplifier '{amplifier}' was not "
                 f"found in the database. The current values are: {all_values}. "
                 "Please ensure that the amplifier you want to add does not "
@@ -337,9 +335,9 @@ class CameraDevice(SpyglassMixin, dj.Manual):
                 cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict["camera_name"])
         if device_name_list:
-            print(f"Inserted camera devices {device_name_list}")
+            logger.info(f"Inserted camera devices {device_name_list}")
         else:
-            print("No conforming camera device metadata found.")
+            logger.warn("No conforming camera device metadata found.")
         return device_name_list
 
 
@@ -442,7 +440,7 @@ class Probe(SpyglassMixin, dj.Manual):
             # the ones in the database
             query = Probe & {"probe_id": new_probe_dict["probe_id"]}
             if len(query) > 0:
-                print(
+                logger.info(
                     f"Probe ID '{new_probe_dict['probe_id']}' already exists in"
                     " the database. Spyglass will use that and not create a new"
                     " Probe, Shanks, or Electrodes."
@@ -457,9 +455,9 @@ class Probe(SpyglassMixin, dj.Manual):
                 cls.Electrode.insert1(electrode, skip_duplicates=True)
 
         if all_probes_types:
-            print(f"Inserted probes {all_probes_types}")
+            logger.info(f"Inserted probes {all_probes_types}")
         else:
-            print("No conforming probe metadata found.")
+            logger.warn("No conforming probe metadata found.")
 
         return all_probes_types
 
@@ -579,7 +577,7 @@ class Probe(SpyglassMixin, dj.Manual):
         probe_type = new_probe_type_dict["probe_type"]
         all_values = ProbeType.fetch("probe_type").tolist()
         if probe_type not in all_values:
-            print(
+            logger.info(
                 f"\nProbe type '{probe_type}' was not found in the database. "
                 f"The current values are: {all_values}. "
                 "Please ensure that the probe type you want to add does not "
@@ -663,7 +661,7 @@ class Probe(SpyglassMixin, dj.Manual):
 
         query = ProbeType & {"probe_type": probe_type}
         if len(query) == 0:
-            print(
+            logger.warn(
                 f"No ProbeType found with probe_type '{probe_type}'. Aborting."
             )
             return
@@ -727,7 +725,7 @@ class Probe(SpyglassMixin, dj.Manual):
                     ]
 
         if not device_found:
-            print(
+            logger.warn(
                 "No electrodes in the NWB file were associated with a device "
                 + f"named '{nwb_device_name}'."
             )

@@ -19,8 +19,10 @@ def create_static_track_animation(
     compute_real_time_rate: bool = False,
     head_dir=None,
 ):
-    # float32 gives about 7 digits of decimal precision; we want 3 digits right of the decimal.
-    # So need to compress-store the timestamp if the start is greater than say 5000.
+    # float32 gives about 7 digits of decimal precision; we want 3 digits right
+    # of the decimal. So need to compress-store the timestamp if the start is
+    # greater than say 5000.
+
     first_timestamp = 0
     if timestamps[0] > 5000:
         first_timestamp = timestamps[0]
@@ -41,7 +43,6 @@ def create_static_track_animation(
         # TODO: Better approach for accommodating further data streams
     }
     if head_dir is not None:
-        # print(f'Loading head direction: {head_dir}')
         data["headDirection"] = head_dir.astype(np.float32)
     if compute_real_time_rate:
         median_delta_t = np.median(np.diff(timestamps))

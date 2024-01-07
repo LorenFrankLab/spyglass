@@ -8,7 +8,10 @@ import sortingview.views as vv
 import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
-from .merged_sorting_extractor import MergedSortingExtractor
+from spyglass.spikesorting.merged_sorting_extractor import (
+    MergedSortingExtractor,
+)
+from spyglass.utils import logger
 
 
 def _create_spikesortingview_workspace(
@@ -69,7 +72,7 @@ def _generate_url(
     unit_metrics: Union[List[Any], None] = None,
 ) -> Tuple[str, str]:
     # moved figURL creation to function called trythis_URL in sosrtingview.py
-    print("Preparing spikesortingview data")
+    logger.info("Preparing spikesortingview data")
     X = SpikeSortingView.create(
         recording=recording,
         sorting=sorting,
@@ -79,25 +82,9 @@ def _generate_url(
         channel_neighborhood_size=7,
     )
 
-    # create a fake unit similarity matrix
-    # similarity_scores = []
-    # for u1 in X.unit_ids:
-    #     for u2 in X.unit_ids:
-    #         similarity_scores.append(
-    #             vv.UnitSimilarityScore(
-    #                 unit_id1=u1,
-    #                 unit_id2=u2,
-    #                 similarity=similarity_matrix[(X.unit_ids==u1),(X.unit_ids==u2)]
-    #             )
-    #         )
-    # Create the similarity matrix view
-    # unit_similarity_matrix_view = vv.UnitSimilarityMatrix(
-    #    unit_ids=X.unit_ids,
-    #    similarity_scores=similarity_scores
-    #    )
-
     # Assemble the views in a layout
     # You can replace this with other layouts
+
     view = vv.MountainLayout(
         items=[
             vv.MountainLayoutItem(
@@ -149,7 +136,7 @@ def _generate_url(
     )
 
     if initial_curation is not None:
-        print("found initial curation")
+        logger.warn("found initial curation")
         sorting_curation_uri = kcl.store_json(initial_curation)
     else:
         sorting_curation_uri = None
@@ -160,6 +147,6 @@ def _generate_url(
     )
     url = view.url(label=label, state=url_state)
 
-    print(url)
+    logger.info(url)
 
     return url

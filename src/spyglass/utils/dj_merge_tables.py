@@ -10,8 +10,8 @@ from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, get_master, to_camel_case
 from IPython.core.display import HTML
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.logging import logger
 
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
@@ -39,18 +39,27 @@ class Merge(dj.Manual):
         if not self.is_declared:
             # remove comments after # from each line of definition
             if self._remove_comments(self.definition) != merge_def:
-                print(
-                    "WARNING: merge table with non-default definition\n\t"
+                logger.warn(
+                    "Merge table with non-default definition\n\t"
                     + f"Expected: {merge_def.strip()}\n\t"
                     + f"Actual  : {self.definition.strip()}"
                 )
             for part in self.parts(as_objects=True):
                 if part.primary_key != self.primary_key:
-                    print(
-                        f"WARNING: unexpected primary key in {part.table_name}"
+                    logger.warn(
+                        f"Unexpected primary key in {part.table_name}"
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
                     )
+        self._analysis_nwbfile = None
+
+    @property  # CB: This is a property to avoid circular import
+    def analysis_nwbfile(self):
+        if self._analysis_nwbfile is None:
+            from spyglass.common import AnalysisNwbfile  # noqa F401
+
+            self._analysis_nwbfile = AnalysisNwbfile
+        return self._analysis_nwbfile
 
     def _remove_comments(self, definition):
         """Use regular expressions to remove comments and blank lines"""
@@ -211,7 +220,7 @@ class Merge(dj.Manual):
             for p in cls._merge_restrict_parts(
                 restriction=restriction,
                 add_invalid_restrict=False,
-                return_empties=False,
+                return_empties=True,
             )
         ]
 
@@ -464,11 +473,16 @@ class Merge(dj.Manual):
             return  # User can still abort del below, but yes/no is unlikly
 
         for part_parent in part_parents:
-            super().delete(part_parent, **kwargs)  # add safemode=False?
+            super().delete(part_parent, **kwargs)
 
     @classmethod
     def fetch_nwb(
-        cls, restriction: str = True, multi_source=False, *attrs, **kwargs
+        cls,
+        restriction: str = True,
+        multi_source=False,
+        disable_warning=False,
+        *attrs,
+        **kwargs,
     ):
         """Return the AnalysisNwbfile file linked in the source.
 
@@ -479,6 +493,9 @@ class Merge(dj.Manual):
         multi_source: bool
             Return from multiple parents. Default False.
         """
+        if not disable_warning:
+            _warn_on_restriction(table=cls, restriction=restriction)
+
         part_parents = cls._merge_restrict_parents(
             restriction=restriction,
             return_empties=False,
@@ -496,7 +513,7 @@ class Merge(dj.Manual):
             nwbs.extend(
                 fetch_nwb(
                     part_parent,
-                    (AnalysisNwbfile, "analysis_file_abs_path"),
+                    (cls().analysis_nwbfile, "analysis_file_abs_path"),
                     *attrs,
                     **kwargs,
                 )
@@ -649,8 +666,8 @@ class Merge(dj.Manual):
             try:
                 results.extend(part.fetch(*attrs, **kwargs))
             except DataJointError as e:
-                print(
-                    f"WARNING: {e.args[0]} Skipping "
+                logger.warn(
+                    f"{e.args[0]} Skipping "
                     + to_camel_case(part.table_name.split("__")[-1])
                 )
 
@@ -659,7 +676,7 @@ class Merge(dj.Manual):
         # attrs or "KEY" called. Intercept format, merge, and then transform?
 
         if not results:
-            print(
+            logger.info(
                 "No merge_fetch results.\n\t"
                 + "If not restricting, try: `M.merge_fetch(True,'attr')\n\t"
                 + "If restricting by source, use dict: "
@@ -713,11 +730,9 @@ def delete_downstream_merge(
     List[Tuple[dj.Table, dj.Table]]
         Entries in merge/part tables downstream of table input.
     """
-    if not disable_warning and restriction is None and table().restriction:
-        print(
-            f"Warning: ignoring table restriction: {table().restriction}.\n\t"
-            + "Please pass restrictions as an arg"
-        )
+    if not disable_warning:
+        _warn_on_restriction(table, restriction)
+
     if not restriction:
         restriction = True
 
@@ -739,6 +754,15 @@ def delete_downstream_merge(
 
     for merge_table, _ in merge_pairs:
         merge_table.delete(**kwargs)
+
+
+def _warn_on_restriction(table: dj.Table, restriction: str = None):
+    """Warn if restriction on table object differs from input restriction"""
+    if restriction is None and table().restriction:
+        logger.warn(
+            f"Warning: ignoring table restriction: {table().restriction}.\n\t"
+            + "Please pass restrictions as an arg"
+        )
 
 
 def _unique_descendants(

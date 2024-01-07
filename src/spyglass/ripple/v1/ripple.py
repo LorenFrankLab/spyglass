@@ -12,7 +12,7 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.position import PositionOutput
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("ripple_v1")
@@ -96,7 +96,7 @@ class RippleLFPSelection(SpyglassMixin, dj.Manual):
                 .loc[:, LFPBandSelection.LFPBandElectrode.primary_key]
             )
         except KeyError as err:
-            print(err)
+            logger.debug(err)
             raise KeyError(
                 "Attempting to use electrode_ids that aren't in the associated"
                 " LFPBand filtered dataset."
@@ -160,7 +160,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
             "nwb_file_name", "target_interval_list_name"
         )
 
-        print(f"Computing ripple times for: {key}")
+        logger.info(f"Computing ripple times for: {key}")
         ripple_params = (
             RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
         ).fetch1("ripple_param_dict")

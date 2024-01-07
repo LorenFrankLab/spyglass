@@ -6,6 +6,8 @@ import h5py
 import numpy as np
 import spikeinterface as si
 
+from spyglass.utils import logger
+
 
 def prepare_spikesortingview_data(
     *,
@@ -70,7 +72,7 @@ def prepare_spikesortingview_data(
                     something_missing = True
             if not something_missing:
                 break
-            print(f"Initial pass: segment {iseg}")
+            logger.info(f"Initial pass: segment {iseg}")
             start_frame = iseg * num_frames_per_segment
             end_frame = min(start_frame + num_frames_per_segment, num_frames)
             start_frame_with_padding = max(start_frame - snippet_len[0], 0)
@@ -131,7 +133,7 @@ def prepare_spikesortingview_data(
             )
 
         for iseg in range(num_segments):
-            print(f"Segment {iseg} of {num_segments}")
+            logger.info(f"Segment {iseg} of {num_segments}")
             start_frame = iseg * num_frames_per_segment
             end_frame = min(start_frame + num_frames_per_segment, num_frames)
             start_frame_with_padding = max(start_frame - snippet_len[0], 0)
@@ -196,13 +198,13 @@ def prepare_spikesortingview_data(
             subsampled_spike_trains_concat = np.concatenate(
                 all_subsampled_spike_trains, dtype=np.int32
             )
-            # print('Extracting spike snippets')
+            # logger.info('Extracting spike snippets')
             spike_snippets_concat = extract_spike_snippets(
                 traces=traces_with_padding,
                 times=subsampled_spike_trains_concat - start_frame_with_padding,
                 snippet_len=snippet_len,
             )
-            # print('Collecting spike snippets')
+            # logger.info('Collecting spike snippets')
             index = 0
             for ii, unit_id in enumerate(unit_ids):
                 channel_neighborhood = unit_channel_neighborhoods[str(unit_id)]

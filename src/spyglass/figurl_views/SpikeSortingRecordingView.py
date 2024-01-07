@@ -8,9 +8,8 @@ import spikeinterface as si
 from sortingview.SpikeSortingView import create_raw_traces_plot
 from sortingview.SpikeSortingView.Figure import Figure
 
-from spyglass.utils.dj_mixin import SpyglassMixin
-
-from ..spikesorting.spikesorting_recording import SpikeSortingRecording
+from spyglass.spikesorting.spikesorting_recording import SpikeSortingRecording
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("figurl_view_spike_sorting_recording")
 
@@ -33,12 +32,12 @@ class SpikeSortingRecordingView(SpyglassMixin, dj.Computed):
         recording_path = rec["recording_path"]
 
         # Load the SI recording extractor
-        print("Loading recording")
+        logger.info("Loading recording")
         recording: si.BaseRecording = si.load_extractor(recording_path)
 
         # Raw traces (sample)
         # Extract the first 1 second of traces
-        print("Extracting traces")
+        logger.info("Extracting traces")
         traces: np.array = recording.get_traces(
             start_frame=0, end_frame=int(recording.get_sampling_frequency() * 1)
         ).astype(np.float32)
@@ -50,11 +49,11 @@ class SpikeSortingRecordingView(SpyglassMixin, dj.Computed):
         )
 
         # Electrode geometry
-        print("Electrode geometry")
+        logger.info("Electrode geometry")
         f2 = create_electrode_geometry(recording)
 
         label = f"{nwb_file_name}:{sort_group_id}:{sort_interval_name}"
-        print(label)
+        logger.info(label)
 
         # Mountain layout
         F = create_mountain_layout(figures=[f1, f2], label=label)

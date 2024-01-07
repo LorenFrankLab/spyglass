@@ -16,7 +16,7 @@ from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 
 # from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("lfp_v1")
 
@@ -91,10 +91,10 @@ class LFPV1(SpyglassMixin, dj.Computed):
             raw_valid_times,
             min_length=MIN_LFP_INTERVAL_DURATION,
         )
-        print(
-            f"LFP: found {len(valid_times)} intervals > {MIN_LFP_INTERVAL_DURATION} sec long."
+        logger.info(
+            f"LFP: found {len(valid_times)} intervals > "
+            + f"{MIN_LFP_INTERVAL_DURATION} sec long."
         )
-
         # target user-specified sampling rate
         decimation = sampling_rate // key["target_sampling_rate"]
 
@@ -107,14 +107,17 @@ class LFPV1(SpyglassMixin, dj.Computed):
             }  # not key['filter_sampling_rate']?
         ).fetch(as_dict=True)[0]
 
-        # there should only be one filter that matches, so we take the first of the dictionaries
+        # there should only be one filter that matches, so we take the first of
+        # the dictionaries
+
         key["filter_name"] = filter["filter_name"]
         key["filter_sampling_rate"] = filter["filter_sampling_rate"]
 
         filter_coeff = filter["filter_coeff"]
         if len(filter_coeff) == 0:
-            print(
-                f"Error in LFP: no filter found with data sampling rate of {sampling_rate}"
+            logger.error(
+                "LFP: no filter found with data sampling rate of "
+                + f"{sampling_rate}"
             )
             return None
         # get the list of selected LFP Channels from LFPElectrode
@@ -137,14 +140,16 @@ class LFPV1(SpyglassMixin, dj.Computed):
             decimation,
         )
 
-        # now that the LFP is filtered and in the file, add the file to the AnalysisNwbfile table
+        # now that the LFP is filtered and in the file, add the file to the
+        # AnalysisNwbfile table
+
         AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
 
         key["analysis_file_name"] = lfp_file_name
         key["lfp_object_id"] = lfp_object_id
         key["lfp_sampling_rate"] = sampling_rate // decimation
 
-        # finally, we need to censor the valid times to account for the downsampling
+        # need to censor the valid times to account for the downsampling
         lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
 
         # add an interval list for the LFP valid times, skipping duplicates

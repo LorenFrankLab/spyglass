@@ -8,7 +8,7 @@ from ripple_detection.core import gaussian_smooth, get_envelope
 from spyglass.common import IntervalList  # noqa
 from spyglass.common import IntervalPositionInfo, LFPBand, LFPBandSelection
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("common_ripple")
 
@@ -138,7 +138,7 @@ class RippleTimes(SpyglassMixin, dj.Computed):
      """
 
     def make(self, key):
-        print(f"Computing ripple times for: {key}")
+        logger.info(f"Computing ripple times for: {key}")
         ripple_params = (
             RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
         ).fetch1("ripple_param_dict")

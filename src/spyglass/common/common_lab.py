@@ -1,7 +1,7 @@
 """Schema for institution, lab team/name/members. Session-independent."""
 import datajoint as dj
 
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 from ..utils.nwb_helper_fn import get_nwb_file
 from .common_nwbfile import Nwbfile
@@ -54,7 +54,7 @@ class LabMember(SpyglassMixin, dj.Manual):
             nwbf = get_nwb_file(nwb_file_abspath)
 
         if nwbf.experimenter is None:
-            print("No experimenter metadata found.\n")
+            logger.info("No experimenter metadata found.\n")
             return
 
         for experimenter in nwbf.experimenter:
@@ -196,7 +196,7 @@ class LabTeam(SpyglassMixin, dj.Manual):
                 LabMember.LabMemberInfo() & {"lab_member_name": team_member}
             ).fetch("google_user_name")
             if not query:
-                print(
+                logger.info(
                     f"Please add the Google user ID for {team_member} in "
                     + "LabMember.LabMemberInfo to help manage permissions."
                 )
@@ -228,7 +228,7 @@ class Institution(SpyglassMixin, dj.Manual):
             The NWB file with institution information.
         """
         if nwbf.institution is None:
-            print("No institution metadata found.\n")
+            logger.info("No institution metadata found.\n")
             return
 
         cls.insert1(
@@ -252,7 +252,7 @@ class Lab(SpyglassMixin, dj.Manual):
             The NWB file with lab name information.
         """
         if nwbf.lab is None:
-            print("No lab metadata found.\n")
+            logger.info("No lab metadata found.\n")
             return
         cls.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)
 

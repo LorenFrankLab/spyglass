@@ -7,6 +7,8 @@ from pathlib import Path
 
 import datajoint as dj
 
+from spyglass.utils.logging import logger
+
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SEL = "GRANT SELECT ON "
 CREATE_USR = "CREATE USER IF NOT EXISTS "
@@ -34,7 +36,7 @@ class DatabaseSettings:
         target_group : str, optional
             Group to which user belongs. Default is kachery-users
         debug : bool, optional
-            Default False. If True, print sql instead of running
+            Default False. If True, pprint sql instead of running
         target_database : str, optional
             Default is mysql. Can also be docker container id
         """
@@ -100,7 +102,7 @@ class DatabaseSettings:
         # Check if the group was found
         if not group_found:
             if self.debug:
-                print(f"All groups: {[g.gr_name for g in groups]}")
+                logger.info(f"All groups: {[g.gr_name for g in groups]}")
             sys.exit(
                 f"Error: The target group {self.target_group} was not found."
             )
@@ -116,7 +118,7 @@ class DatabaseSettings:
 
     def add_module(self, module_name):
         """Add module to database. Grant permissions to all users in group"""
-        print(f"Granting everyone permissions to module {module_name}")
+        logger.info(f"Granting everyone permissions to module {module_name}")
         group = self._find_group()
         file = self.write_temp_file(self._add_module_sql(module_name, group))
         self.exec(file)
@@ -141,7 +143,7 @@ class DatabaseSettings:
         if check_exists:
             user_home = Path.home().parent / self.user
             if user_home.exists():
-                print("Creating database user ", self.user)
+                logger.info("Creating database user ", self.user)
             else:
                 sys.exit(
                     f"Error: could not find {self.user} in home dir: {user_home}"

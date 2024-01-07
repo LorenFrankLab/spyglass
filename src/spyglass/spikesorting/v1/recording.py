@@ -18,7 +18,7 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_recording")
 
@@ -147,7 +147,7 @@ class SortGroup(SpyglassMixin, dj.Manual):
                 if omit_ref_electrode_group and (
                     str(e_group) == str(reference_electrode_group)
                 ):
-                    print(
+                    logger.warn(
                         f"Omitting electrode group {e_group} from sort groups "
                         + "because contains reference."
                     )
@@ -161,8 +161,9 @@ class SortGroup(SpyglassMixin, dj.Manual):
                 if (
                     omit_unitrode and len(shank_elect) == 1
                 ):  # omit unitrodes if indicated
-                    print(
-                        f"Omitting electrode group {e_group}, shank {shank} from sort groups because unitrode."
+                    logger.warn(
+                        f"Omitting electrode group {e_group}, shank {shank} "
+                        + "from sort groups because unitrode."
                     )
                     continue
                 cls.insert1(sg_key, skip_duplicates=True)
@@ -231,7 +232,7 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
         """
         query = cls & key
         if query:
-            print("Similar row(s) already inserted.")
+            logger.warn("Similar row(s) already inserted.")
             return query.fetch(as_dict=True)
         key["recording_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)

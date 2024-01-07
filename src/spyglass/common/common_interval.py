@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 from .common_session import Session  # noqa: F401
 
@@ -47,7 +47,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
             table.
         """
         if nwbf.epochs is None:
-            print("No epochs found in NWB file.")
+            logger.info("No epochs found in NWB file.")
             return
 
         epochs = nwbf.epochs.to_dataframe()
