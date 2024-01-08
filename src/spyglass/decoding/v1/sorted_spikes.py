@@ -255,7 +255,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
         key["results_path"] = results_path
 
-        classifier_path = results_path.strip(".nc") + ".pkl"
+        classifier_path = results_path.with_suffix(".pkl")
         classifier.save_model(classifier_path)
         key["classifier_path"] = classifier_path
 
