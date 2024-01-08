@@ -52,3 +52,18 @@ class DecodingOutput(_Merge, SpyglassMixin):
             if str(path) not in table_results_paths:
                 logger.info(f"Removing {path}")
                 path.unlink()
+
+        table_model_paths = list(
+            chain(
+                *[
+                    part_parent_table.fetch("classifier_path").tolist()
+                    for part_parent_table in self.merge_get_parent(
+                        multi_source=True
+                    )
+                ]
+            )
+        )
+        for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.pkl"):
+            if str(path) not in table_model_paths:
+                logger.info(f"Removing {path}")
+                path.unlink()
