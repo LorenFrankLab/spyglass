@@ -16,6 +16,7 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import xarray as xr
+from track_linearization import get_linearized_position
 from non_local_detector.models.base import SortedSpikesDetector
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
@@ -311,6 +312,26 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         position_info = pd.concat(position_info, axis=0).dropna()
 
         return position_info, position_variable_names
+
+    @staticmethod
+    def load_linear_position_info(key):
+        environment = SortedSpikesDecodingV1().load_environments(key)[0]
+
+        position_df = SortedSpikesDecodingV1().load_position_info(key)[0]
+        position = np.asarray(position_df[["position_x", "position_y"]])
+
+        linear_position_df = get_linearized_position(
+            position,
+            environment.track_graph,
+            environment.edge_order,
+            environment.edge_spacing,
+        )
+
+        linear_position_df.insert(4, "speed", np.asarray(position_df.speed))
+
+        linear_position_df.insert(5, "time", np.asarray(position_df.index))
+        linear_position_df.set_index("time", inplace=True)
+        return linear_position_df
 
     @staticmethod
     def _get_interval_range(key):
