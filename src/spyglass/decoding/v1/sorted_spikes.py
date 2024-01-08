@@ -81,6 +81,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     -> SortedSpikesDecodingSelection
     ---
     results_path: filepath@analysis # path to the results file
+    classifier_path: filepath@analysis # path to the classifier file
     """
 
     def make(self, key):
@@ -253,6 +254,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
         key["results_path"] = results_path
 
+        classifier_path = results_path.strip(".nc") + ".pkl"
+        classifier.save_model(classifier_path)
+        key["classifier_path"] = classifier_path
+
         self.insert1(key)
 
         from spyglass.decoding.decoding_merge import DecodingOutput
@@ -261,6 +266,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     def load_results(self):
         return SortedSpikesDetector.load_results(self.fetch1("results_path"))
+
+    def load_model(self):
+        return SortedSpikesDetector.load_model(self.fetch1("classifier_path"))
 
     @staticmethod
     def load_environments(key):
