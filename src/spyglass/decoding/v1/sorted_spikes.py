@@ -344,11 +344,17 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             )
         ).fetch("spikesorting_merge_id")
 
-        spike_times = [
-            SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0][
-                "object_id"
-            ]["spike_times"].to_list()
+       nwb_files = [
+            SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0]
             for merge_id in merge_ids
+        ]
+        spike_times = [
+            nwb_file["object_id"]["spike_times"].to_list()  # v1 spikesorting
+            if "object_id" in nwb_file
+            else nwb_file["units"]["spike_times"].to_list()  # v0 spikesorting
+            if "units" in nwb_file
+            else []  # no units in spikesorting
+            for nwb_file in nwb_files
         ]
         spike_times = list(chain(*spike_times))
 
