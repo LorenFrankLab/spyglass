@@ -10,7 +10,6 @@ speeds. eLife 10, e64505 (2021).
 
 import copy
 import uuid
-from itertools import chain
 from pathlib import Path
 
 import datajoint as dj
@@ -20,7 +19,6 @@ import xarray as xr
 from non_local_detector.models.base import SortedSpikesDetector
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
-from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.core import (
     DecodingParameters,
@@ -344,19 +342,18 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             )
         ).fetch("spikesorting_merge_id")
 
-       nwb_files = [
-            SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0]
-            for merge_id in merge_ids
-        ]
-        spike_times = [
-            nwb_file["object_id"]["spike_times"].to_list()  # v1 spikesorting
-            if "object_id" in nwb_file
-            else nwb_file["units"]["spike_times"].to_list()  # v0 spikesorting
-            if "units" in nwb_file
-            else []  # no units in spikesorting
-            for nwb_file in nwb_files
-        ]
-        spike_times = list(chain(*spike_times))
+        spike_times = []
+        for merge_id in merge_ids:
+            nwb_file = SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0]
+
+            if "object_id" in nwb_file:
+                # v1 spikesorting
+                spike_times.extend(
+                    nwb_file["object_id"]["spike_times"].to_list()
+                )
+            elif "units" in nwb_file:
+                # v0 spikesorting
+                spike_times.extend(nwb_file["units"]["spike_times"].to_list())
 
         if not filter_by_interval:
             return spike_times
