@@ -226,7 +226,6 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                 )
                 final_df = smooth_func(
                     interp_df,
-                    smoothing_duration=smoothing_duration,
                     sampling_rate=sampling_rate,
                     **params["smoothing_params"],
                 )
