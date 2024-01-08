@@ -7,7 +7,7 @@ from pathlib import Path
 import datajoint as dj
 import pynwb
 import pytest
-from datajoint.logging import logger
+from datajoint.logging import logger as dj_logger
 
 from .container import DockerMySQLManager
 
@@ -140,6 +140,13 @@ def mini_path(raw_dir):
 
 
 @pytest.fixture(scope="session")
+def mini_copy_name(mini_path):
+    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename  # noqa: E402
+
+    yield get_nwb_copy_filename(mini_path)
+
+
+@pytest.fixture(scope="session")
 def mini_download():
     # test_path = (
     #     "ipfs://bafybeie4svt3paz5vr7cw7mkgibutbtbzyab4s24hqn5pzim3sgg56m3n4"
@@ -181,11 +188,13 @@ def mini_closed(mini_path):
     yield nwbfile
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(autouse=True, scope="session")
 def mini_insert(mini_path, teardown, server, dj_conn):
     from spyglass.common import Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
+
+    dj_logger.info("Inserting test data.")
 
     if len(Nwbfile()) > 0:
         Nwbfile().delete(safemode=False)
@@ -193,9 +202,9 @@ def mini_insert(mini_path, teardown, server, dj_conn):
     if server.connected:
         insert_sessions(mini_path.name)
     else:
-        logger.error("No server connection.")
+        dj_logger.error("No server connection.")
     if len(Session()) == 0:
-        logger.error("No sessions inserted.")
+        dj_logger.error("No sessions inserted.")
 
     yield
 
@@ -230,18 +239,32 @@ def settings(dj_conn):
     yield settings
 
 
+@pytest.fixture(scope="session")
+def populate_exception():
+    from spyglass.common.errors import PopulateException
+
+    yield PopulateException
+
+
 # ------------------ GENERAL FUNCTION ------------------
 
 
 class QuietStdOut:
     """If quiet_spy, used to quiet prints, teardowns and table.delete prints"""
 
+    def __init__(self):
+        from spyglass.utils import logger as spyglass_logger
+
+        self.spy_logger = spyglass_logger
+        self.previous_level = None
+
     def __enter__(self):
-        logger.setLevel("CRITICAL")
+        self.previous_level = self.spy_logger.getEffectiveLevel()
+        self.spy_logger.setLevel("CRITICAL")
         self._original_stdout = sys.stdout
         sys.stdout = open(os.devnull, "w")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        logger.setLevel("INFO")
+        self.spy_logger.setLevel(self.previous_level)
         sys.stdout.close()
         sys.stdout = self._original_stdout

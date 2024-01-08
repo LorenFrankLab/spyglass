@@ -22,7 +22,22 @@ def mini_pos_series(mini_pos):
 
 
 @pytest.fixture(scope="session")
+def mini_pos_interval_dict(common):
+    yield {"interval_list_name": common.PositionSource.get_pos_interval_name(0)}
+
+
+@pytest.fixture(scope="session")
 def mini_pos_tbl(common, mini_pos_series):
     yield common.PositionSource.SpatialSeries * common.RawPosition.PosObject & {
         "name": mini_pos_series
     }
+
+
+@pytest.fixture(scope="session")
+def pos_src(common):
+    yield common.PositionSource()
+
+
+@pytest.fixture(scope="session")
+def pos_interval_01(pos_src):
+    yield [pos_src.get_pos_interval_name(x) for x in range(1)]

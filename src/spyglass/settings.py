@@ -30,8 +30,8 @@ class SpyglassConfig:
         self.supplied_base_dir = base_dir
         self._config = dict()
         self.config_defaults = dict(prepopulate=True)
-        self._debug_mode = False
-        self._test_mode = False
+        self._debug_mode = kwargs.get("debug_mode", False)
+        self._test_mode = kwargs.get("test_mode", False)
         self._dlc_base = None
 
         self.relative_dirs = {

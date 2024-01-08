@@ -25,7 +25,7 @@ def test_open_path(mini_path, mini_open):
 
 
 def test_copy_link(mini_path, settings, mini_closed, copy_nwb_link_raw_ephys):
-    """Test readabilty after moving the linking raw file, breaking link"""
+    """Test readability after moving the linking raw file, breaking link"""
     new_path = Path(settings.raw_dir) / "no_ephys.nwb"
     new_moved = Path(settings.temp_dir) / "no_ephys_moved.nwb"
 

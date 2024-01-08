@@ -137,13 +137,13 @@ def test_insert_pos(
     assert data_obj_id == raw_obj_id, "PosObject insertion error"
 
 
-def test_fetch_pos(
+def test_fetch_posobj(
     mini_insert, common, mini_pos, mini_pos_series, mini_pos_tbl
 ):
     pos_key = (
         common.PositionSource.SpatialSeries & mini_pos_tbl.fetch("KEY")
     ).fetch(as_dict=True)[0]
-    pos_df = (common.RawPosition.PosObject & pos_key).fetch1_dataframe()
+    pos_df = (common.RawPosition & pos_key).fetch1_dataframe().iloc[:, 0:2]
 
     series = mini_pos[mini_pos_series]
     raw_df = DataFrame(
