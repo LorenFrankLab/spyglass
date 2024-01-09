@@ -65,8 +65,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
 
     @staticmethod
     def check_supported_waveform_features(waveform_features: list[str]) -> bool:
-        """Checks whether the requested waveform features types are supported.
-        Currently only 'amplitude" is supported.
+        """Checks whether the requested waveform features types are supported
 
         Parameters
         ----------
