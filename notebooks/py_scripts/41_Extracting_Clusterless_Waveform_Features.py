@@ -62,6 +62,8 @@ sgs.SortGroup.set_group_by_shank(nwb_file_name=nwb_copy_file_name)
 sort_group_ids = (sgs.SortGroup & {"nwb_file_name": nwb_copy_file_name}).fetch(
     "sort_group_id"
 )
+
+group_keys = []
 for sort_group_id in sort_group_ids:
     key = {
         "nwb_file_name": nwb_copy_file_name,
@@ -70,9 +72,10 @@ for sort_group_id in sort_group_ids:
         "preproc_param_name": "default",
         "team_name": "Alison Comrie",
     }
+    group_keys.append(key)
     sgs.SpikeSortingRecordingSelection.insert_selection(key)
 
-sgs.SpikeSortingRecording.populate()
+sgs.SpikeSortingRecording.populate(group_keys)
 # -
 
 # Next we do artifact detection. Here we skip it by setting the `artifact_param_name` to `None`, but in practice you should detect artifacts as it will affect the decoding.
@@ -82,19 +85,22 @@ recording_ids = (
     sgs.SpikeSortingRecordingSelection & {"nwb_file_name": nwb_copy_file_name}
 ).fetch("recording_id")
 
+group_keys = []
 for recording_id in recording_ids:
     key = {
         "recording_id": recording_id,
         "artifact_param_name": "none",
     }
+    group_keys.append(key)
     sgs.ArtifactDetectionSelection.insert_selection(key)
 
-sgs.ArtifactDetection.populate()
+sgs.ArtifactDetection.populate(group_keys)
 # -
 
 # Now we run the "spike sorting", which in our case is simply thresholding the signal to find spikes. We use the `SpikeSorting` table to store the results. Note that `sorter_param_name` defines the parameters for thresholding the signal.
 
 # +
+group_keys = []
 for recording_id in recording_ids:
     key = {
         "recording_id": recording_id,
@@ -107,9 +113,10 @@ for recording_id in recording_ids:
             ).fetch1("artifact_id")
         ),
     }
+    group_keys.append(key)
     sgs.SpikeSortingSelection.insert_selection(key)
 
-sgs.SpikeSorting.populate()
+sgs.SpikeSorting.populate(group_keys)
 # -
 
 # For clusterless decoding we do not need any manual curation, but for the sake of the pipeline, we need to store the output of the thresholding in the `CurationV1` table and insert this into the `SpikeSortingOutput` table.
