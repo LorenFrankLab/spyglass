@@ -167,9 +167,9 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
     def _filter_restrict(self, filter_name, fs):
         return (
             self & {"filter_name": filter_name} & {"filter_sampling_rate": fs}
-        ).fetch1(as_dict=True)
+        ).fetch1()
 
-    def plot_magnitude(self, filter_name, fs):
+    def plot_magnitude(self, filter_name, fs, return_fig=False):
         filter_dict = self._filter_restrict(filter_name, fs)
         plt.figure()
         w, h = signal.freqz(filter_dict["filter_coeff"], worN=65536)
@@ -178,11 +178,13 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         plt.xlabel("Frequency (Hz)")
         plt.ylabel("Magnitude")
         plt.title("Frequency Response")
-        plt.xlim(0, np.max(filter_dict["filter_coeffand_edges"] * 2))
+        plt.xlim(0, np.max(filter_dict["filter_band_edges"] * 2))
         plt.ylim(np.min(magnitude), -1 * np.min(magnitude) * 0.1)
         plt.grid(True)
+        if return_fig:
+            return plt.gcf()
 
-    def plot_fir_filter(self, filter_name, fs):
+    def plot_fir_filter(self, filter_name, fs, return_fig=False):
         filter_dict = self._filter_restrict(filter_name, fs)
         plt.figure()
         plt.clf()
@@ -191,6 +193,8 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         plt.ylabel("Magnitude")
         plt.title("Filter Taps")
         plt.grid(True)
+        if return_fig:
+            return plt.gcf()
 
     def filter_delay(self, filter_name, fs):
         return self.calc_filter_delay(

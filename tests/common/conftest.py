@@ -41,3 +41,8 @@ def pos_src(common):
 @pytest.fixture(scope="session")
 def pos_interval_01(pos_src):
     yield [pos_src.get_pos_interval_name(x) for x in range(1)]
+
+
+@pytest.fixture(scope="session")
+def common_ephys(common):
+    yield common.common_ephys

@@ -65,7 +65,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
             cls.insert1(epoch_dict, skip_duplicates=True)
 
-    def plot_intervals(self, figsize=(20, 5)):
+    def plot_intervals(self, figsize=(20, 5), return_fig=False):
         interval_list = pd.DataFrame(self)
         fig, ax = plt.subplots(figsize=figsize)
         interval_count = 0
@@ -83,8 +83,10 @@ class IntervalList(SpyglassMixin, dj.Manual):
         ax.set_yticklabels(interval_list.interval_list_name)
         ax.set_xlabel("Time [s]")
         ax.grid(True)
+        if return_fig:
+            return fig
 
-    def plot_epoch_pos_raw_intervals(self, figsize=(20, 5)):
+    def plot_epoch_pos_raw_intervals(self, figsize=(20, 5), return_fig=False):
         interval_list = pd.DataFrame(self)
         fig, ax = plt.subplots(figsize=(30, 3))
 
@@ -144,6 +146,8 @@ class IntervalList(SpyglassMixin, dj.Manual):
         ax.set_yticklabels(["pos valid times", "raw data valid times", "epoch"])
         ax.set_xlabel("Time [s]")
         ax.grid(True)
+        if return_fig:
+            return fig
 
 
 def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):

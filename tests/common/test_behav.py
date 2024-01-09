@@ -51,12 +51,12 @@ def test_posinterval_no_transaction(verbose_context, common, mini_restr):
     with verbose_context:
         common.PositionIntervalMap()._no_transaction_make(mini_restr)
     after = common.PositionIntervalMap().fetch()
-    assert array_equal(
-        before, after
+    assert (
+        len(after) == len(before) + 2
     ), "PositionIntervalMap no_transaction had unexpected effect"
 
 
-def test_get_pos_interval_name(pos_src, mini_copy_name, pos_interval_01):
+def test_get_pos_interval_name(pos_src, pos_interval_01):
     """Test get pos interval name"""
     names = [f"pos {x} valid times" for x in range(1)]
     assert pos_interval_01 == names, "get_pos_interval_name failed"

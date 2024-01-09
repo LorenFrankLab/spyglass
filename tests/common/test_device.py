@@ -27,7 +27,7 @@ def test_create_probe(common, mini_devices, mini_path, mini_copy_name):
     probe_type = common.ProbeType.fetch("KEY", as_dict=True)[0]
     before = common.Probe.fetch()
     common.Probe.create_from_nwbfile(
-        nwb_file_name=mini_copy_name.split("/")[-1],
+        nwb_file_name=mini_copy_name,
         nwb_device_name="probe 0",
         contact_side_numbering=False,
         **probe_id,

@@ -143,7 +143,7 @@ def mini_path(raw_dir):
 def mini_copy_name(mini_path):
     from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename  # noqa: E402
 
-    yield get_nwb_copy_filename(mini_path)
+    yield get_nwb_copy_filename(mini_path).split("/")[-1]
 
 
 @pytest.fixture(scope="session")
@@ -216,6 +216,11 @@ def mini_insert(mini_path, teardown, server, dj_conn):
 @pytest.fixture(scope="session")
 def mini_restr(mini_path):
     yield f"nwb_file_name LIKE '{mini_path.stem}%'"
+
+
+@pytest.fixture(scope="session")
+def mini_dict(mini_copy_name):
+    yield {"nwb_file_name": mini_copy_name}
 
 
 @pytest.fixture(scope="session")
