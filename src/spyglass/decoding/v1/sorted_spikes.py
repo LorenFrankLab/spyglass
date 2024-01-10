@@ -16,8 +16,8 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import xarray as xr
-from track_linearization import get_linearized_position
 from non_local_detector.models.base import SortedSpikesDetector
+from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
@@ -97,8 +97,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             model_params["decoding_params"],
             model_params["decoding_kwargs"],
         )
-        if decoding_kwargs is None:
-            decoding_kwargs = {}
+        decoding_kwargs = {} or None
 
         # Get position data
         (
@@ -321,10 +320,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         position = np.asarray(position_df[["position_x", "position_y"]])
 
         linear_position_df = get_linearized_position(
-            position = position,
-            track_graph = environment.track_graph,
-            edge_order = environment.edge_order,
-            edge_spacing = environment.edge_spacing,
+            position=position,
+            track_graph=environment.track_graph,
+            edge_order=environment.edge_order,
+            edge_spacing=environment.edge_spacing,
         )
 
         linear_position_df.insert(4, "speed", np.asarray(position_df.speed))

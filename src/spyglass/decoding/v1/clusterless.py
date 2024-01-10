@@ -16,8 +16,8 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import xarray as xr
-from track_linearization import get_linearized_position
 from non_local_detector.models.base import ClusterlessDetector
+from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_position import IntervalPositionInfo
@@ -329,10 +329,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         position = np.asarray(position_df[["position_x", "position_y"]])
 
         linear_position_df = get_linearized_position(
-            position = position,
-            track_graph = environment.track_graph,
-            edge_order = environment.edge_order,
-            edge_spacing = environment.edge_spacing,
+            position=position,
+            track_graph=environment.track_graph,
+            edge_order=environment.edge_order,
+            edge_spacing=environment.edge_spacing,
         )
 
         linear_position_df.insert(4, "speed", np.asarray(position_df.speed))
