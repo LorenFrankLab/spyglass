@@ -11,6 +11,7 @@
 - Add `cautious_delete` to Mixin class, initial implementation. #711
 - Add `deprecation_factory` to facilitate table migration. #717
 - Add Spyglass logger. #730
+- IntervalList: Add secondary key `pipeline` #742
 
 ### Pipelines
 
@@ -29,6 +30,7 @@
     - Use the new `non_local_detector` package for decoding #731
     - Allow multiple spike waveform features for clusterelss decoding #731
     - Reorder notebooks #731
+
 
 ## [0.4.3] (November 7, 2023)
 

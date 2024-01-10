@@ -275,6 +275,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 ),
                 "interval_list_name": key["recording_id"],
                 "valid_times": sort_interval_valid_times,
+                "pipeline": "spikesorting_recording_v1",
             }
         )
         AnalysisNwbfile().add(
