@@ -39,6 +39,16 @@ jobs:
     - name: Install spyglass
       run: |
         pip install -e .[test]
+    - name: Download data
+      env:
+        UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }}
+        UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
+        WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/minirec20230622.nwb
+      run: |
+        mkdir -p ./tests/test_data; mkdir -p ./tests/test_data/raw
+        wget --recursive --no-verbose --no-host-directories --no-directories \
+        --user $UCSF_BOX_USER --password $UCSF_BOX_TOKEN \
+        -P ./tests/test_data/raw $WEBSITE
     - name: Run tests
       run: |
         pytest -rP  # env vars are set within certain tests

@@ -3,6 +3,7 @@ import sys
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
+from time import sleep as tsleep
 
 import datajoint as dj
 import pynwb
@@ -14,6 +15,7 @@ from .container import DockerMySQLManager
 # ---------------------- CONSTANTS ---------------------
 
 # globals in pytest_configure: BASE_DIR, SERVER, TEARDOWN, VERBOSE
+# download managed by gh-action test-conda, so no need to download here
 warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
 
 
@@ -136,7 +138,14 @@ def raw_dir(base_dir):
 
 @pytest.fixture(scope="session")
 def mini_path(raw_dir):
-    yield raw_dir / "test.nwb"
+    path = raw_dir / "minirec20230622.nwb"
+
+    timeout, wait = 60, 5  # download managed by gh-action test-conda
+    for _ in range(timeout // wait):  # wait for download to finish
+        if path.exists():
+            break
+        tsleep(wait)
+    yield path
 
 
 @pytest.fixture(scope="session")
@@ -144,24 +153,6 @@ def mini_copy_name(mini_path):
     from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename  # noqa: E402
 
     yield get_nwb_copy_filename(mini_path).split("/")[-1]
-
-
-@pytest.fixture(scope="session")
-def mini_download():
-    # test_path = (
-    #     "ipfs://bafybeie4svt3paz5vr7cw7mkgibutbtbzyab4s24hqn5pzim3sgg56m3n4"
-    # )
-    # try:
-    #     local_test_path = kcl.load_file(test_path)
-    # except Exception as e:
-    #     if os.environ.get("KACHERY_CLOUD_EPHEMERAL", None) != "TRUE":
-    #         print(
-    #             "Cannot load test file in non-ephemeral mode. Kachery cloud"
-    #             + "client may need to be registered."
-    #         )
-    #     raise e
-    # os.rename(local_test_path, nwbfile_path)
-    pass
 
 
 @pytest.fixture(scope="session")

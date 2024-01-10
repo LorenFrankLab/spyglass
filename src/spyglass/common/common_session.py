@@ -223,17 +223,19 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         )
 
     @staticmethod
-    def remove_session_from_group(nwb_file_name: str, session_group_name: str):
+    def remove_session_from_group(
+        nwb_file_name: str, session_group_name: str, *args, **kwargs
+    ):
         query = {
             "session_group_name": session_group_name,
             "nwb_file_name": nwb_file_name,
         }
-        (SessionGroupSession & query).delete()
+        (SessionGroupSession & query).delete(*args, **kwargs)
 
     @staticmethod
-    def delete_group(session_group_name: str):
+    def delete_group(session_group_name: str, *args, **kwargs):
         query = {"session_group_name": session_group_name}
-        (SessionGroup & query).delete()
+        (SessionGroup & query).delete(*args, **kwargs)
 
     @staticmethod
     def get_group_sessions(session_group_name: str):
