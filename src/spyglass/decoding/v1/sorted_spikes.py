@@ -321,10 +321,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         position = np.asarray(position_df[["position_x", "position_y"]])
 
         linear_position_df = get_linearized_position(
-            position,
-            environment.track_graph,
-            environment.edge_order,
-            environment.edge_spacing,
+            position = position,
+            track_graph = environment.track_graph,
+            edge_order = environment.edge_order,
+            edge_spacing = environment.edge_spacing,
         )
 
         linear_position_df.insert(4, "speed", np.asarray(position_df.speed))
