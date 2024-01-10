@@ -178,13 +178,13 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         # get the sorting from the parent table
         sorting = SpikeSortingOutput().get_sorting(merge_key)
 
-        waveforms_dir = temp_dir + "/" + str(merge_key["merge_id"])
-        os.makedirs(waveforms_dir, exist_ok=True)
+        waveforms_temp_dir = temp_dir + "/" + str(merge_key["merge_id"])
+        os.makedirs(waveforms_temp_dir, exist_ok=True)
 
         return si.extract_waveforms(
             recording=recording,
             sorting=sorting,
-            folder=waveforms_dir,
+            folder=waveforms_temp_dir,
             overwrite=True,
             **waveform_extraction_params,
         )
