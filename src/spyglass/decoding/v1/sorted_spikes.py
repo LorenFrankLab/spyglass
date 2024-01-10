@@ -296,7 +296,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def load_position_info(key):
-        position_group_key = {"position_group_name": key["position_group_name"]}
+        position_group_key = {
+            "position_group_name": key["position_group_name"],
+            "nwb_file_name": key["nwb_file_name"],
+        }
         position_variable_names = (PositionGroup & position_group_key).fetch1(
             "position_variables"
         )
