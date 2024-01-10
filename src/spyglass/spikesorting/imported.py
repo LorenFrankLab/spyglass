@@ -31,8 +31,12 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
 
     @classmethod
     def get_recording(cls, key):
-        raise NotImplementedError, "Imported spike sorting does not have a `get_recording` method"
+        raise NotImplementedError(
+            "Imported spike sorting does not have a `get_recording` method"
+        )
 
     @classmethod
     def get_sorting(cls, key):
-        raise NotImplementedError, "Imported spike sorting does not have a `get_sorting` method"
+        raise NotImplementedError(
+            "Imported spike sorting does not have a `get_sorting` method"
+        )
