@@ -379,9 +379,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             (
                 UnitWaveformFeaturesGroup.UnitFeatures
                 & {
+                    "nwb_file_name": key["nwb_file_name"],
                     "waveform_features_group_name": key[
                         "waveform_features_group_name"
-                    ]
+                    ],
                 }
             )
         ).fetch("KEY")

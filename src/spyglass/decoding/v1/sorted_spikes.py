@@ -369,7 +369,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         merge_ids = (
             (
                 SortedSpikesGroup.SortGroup
-                & {"sorted_spikes_group_name": key["sorted_spikes_group_name"]}
+                & {
+                    "nwb_file_name": key["nwb_file_name"],
+                    "sorted_spikes_group_name": key["sorted_spikes_group_name"],
+                }
             )
         ).fetch("spikesorting_merge_id")
 
