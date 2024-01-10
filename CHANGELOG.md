@@ -23,6 +23,12 @@
 - Position:
     - Refactor input validation in DLC pipeline. #688
     - DLC path handling from config, and normalize naming convention. #722
+- Decoding:
+    - Add `decoding` pipeline V1. #731
+    - Add a table to store the decoding results #731
+    - Use the new `non_local_detector` package for decoding #731
+    - Allow multiple spike waveform features for clusterelss decoding #731
+    - Reorder notebooks #731
 
 ## [0.4.3] (November 7, 2023)
 
