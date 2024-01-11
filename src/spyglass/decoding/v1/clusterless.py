@@ -338,11 +338,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             edge_spacing=environment.edge_spacing,
         )
 
-        linear_position_df.insert(4, "speed", np.asarray(position_df.speed))
-
-        linear_position_df.insert(5, "time", np.asarray(position_df.index))
-        linear_position_df.set_index("time", inplace=True)
-        return linear_position_df
+        return pd.concat(
+            [linear_position_df.set_index(position_df.index), position_df],
+            axis=1,
+        )
 
     @staticmethod
     def _get_interval_range(key):
