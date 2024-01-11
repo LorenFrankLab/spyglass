@@ -1010,6 +1010,20 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         unit_fields.remove("label")
         return unit_fields
 
+    @classmethod
+    def get_recording(cls, key):
+        """Returns the recording related to this curation. Useful for operations downstream of merge table"""
+        # expand the key
+        recording_key = (cls & key).fetch1("KEY")
+        return SpikeSortingRecording()._get_filtered_recording(recording_key)
+
+    @classmethod
+    def get_sorting(cls, key):
+        """Returns the sorting related to this curation. Useful for operations downstream of merge table"""
+        # expand the key
+        sorting_key = (cls & key).fetch1("KEY")
+        return Curation.get_curated_sorting(sorting_key)
+
 
 @schema
 class UnitInclusionParameters(SpyglassMixin, dj.Manual):

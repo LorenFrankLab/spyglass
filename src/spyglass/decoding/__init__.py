@@ -1,21 +1,5 @@
-# flake8: noqa
-from spyglass.decoding.clusterless import (
-    ClusterlessClassifierParameters,
-    MarkParameters,
-    MultiunitFiringRate,
-    MultiunitHighSynchronyEventsParameters,
-    UnitMarkParameters,
-    UnitMarks,
-    UnitMarksIndicator,
-    UnitMarksIndicatorSelection,
-    populate_mark_indicators,
-)
-from spyglass.decoding.sorted_spikes import (
-    SortedSpikesClassifierParameters,
-    SortedSpikesIndicator,
-    SortedSpikesIndicatorSelection,
-)
-from spyglass.decoding.visualization import (
+from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: E402
+from spyglass.decoding.visualization.core import (  # noqa: E402
     create_interactive_1D_decoding_figurl,
     create_interactive_2D_decoding_figurl,
     make_multi_environment_movie,

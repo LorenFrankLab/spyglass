@@ -13,9 +13,8 @@ dependencies:
   - position_tools
   - numpy<1.24
   - track_linearization>=2.3
-  - replay_trajectory_classification
   - ripple_detection
-  - trajectory_analysis_tools
+  - non_local_detector
   - matplotlib
   - seaborn
   - bottleneck

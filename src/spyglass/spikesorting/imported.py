@@ -28,3 +28,15 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
                 self.insert1(key, skip_duplicates=True)
             else:
                 logger.warn("No units found in NWB file")
+
+    @classmethod
+    def get_recording(cls, key):
+        raise NotImplementedError(
+            "Imported spike sorting does not have a `get_recording` method"
+        )
+
+    @classmethod
+    def get_sorting(cls, key):
+        raise NotImplementedError(
+            "Imported spike sorting does not have a `get_sorting` method"
+        )

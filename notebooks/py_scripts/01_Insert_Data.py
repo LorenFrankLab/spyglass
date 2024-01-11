@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.16.0
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -301,6 +301,24 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
     )
     - {"interval_list_name": "pos 2 valid times"}
 ).fetch("interval_list_name")
+
+# `IntervalList` has an additional secondary key `pipeline` which can describe the origin of the data.
+# Because it is a _secondary_ key, it is not required to uniquely identify an entry.
+# Current values for this key from spyglass pipelines are:
+#
+# | pipeline | Source|
+# | ---   | --- |
+# | position | sg.common.PositionSource |
+# | lfp_v0 | sg.common.LFP |
+# | lfp_v1 | sg.lfp.v1.LFPV1 |
+# | lfp_band | sg.common.LFPBand,<br>  sg.lfp.analysis.v1.LFPBandV1 |
+# | lfp_artifact | sg.lfp.v1.LFPArtifactDetection |
+# | spikesorting_artifact_v0 | sg.spikesorting.ArtifactDetection |
+# | spikesorting_artifact_v1 | sg.spikesorting.v1.ArtifactDetection |
+# | spikesorting_recording_v0 | sg.spikesorting.SpikeSortingRecording |
+# | spikesorting_recording_v1 | sg.spikesorting.v1.SpikeSortingRecording |
+#
+#
 
 # ## Deleting data
 #

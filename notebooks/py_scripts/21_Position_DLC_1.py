@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.16.0
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -30,6 +30,7 @@
 #   [the Insert Data notebook](./01_Insert_Data.ipynb)
 #
 # This tutorial will extract position via DeepLabCut (DLC). It will walk through...
+#
 # - creating a DLC project
 # - extracting and labeling frames
 # - training your model
@@ -38,10 +39,12 @@
 # [next tutorial](./22_Position_DLC_2.ipynb) to load it into the database, or skip
 # to the [following tutorial](./23_Position_DLC_3.ipynb) to start pose estimation
 # with a model that is already inserted.
+#
 
 # Here is a schematic showing the tables used in this pipeline.
 #
 # ![dlc_scratch.png|2000x900](./../notebook-images/dlc_scratch.png)
+#
 
 # ### Table of Contents<a id='TableOfContents'></a>
 #
@@ -51,7 +54,8 @@
 # - [`DLCModelTraining`](#DLCModelTraining1)
 # - [`DLCModel`](#DLCModel1)
 #
-# __You can click on any header to return to the Table of Contents__
+# **You can click on any header to return to the Table of Contents**
+#
 
 # ### Imports
 #
@@ -91,8 +95,10 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 #     </li>
 #     </ul>
 # </div>
+#
 
 # ### Body Parts
+#
 
 # We'll begin by looking at the `BodyPart` table, which stores standard names of body parts used in DLC models throughout the lab with a concise description.
 #
@@ -211,6 +217,7 @@ project_key = sgp.DLCProject.insert_new_project(
 )
 
 # After initializing our project, we would typically extract and label frames. Use the following commands to pull up the DLC GUI:
+#
 
 sgp.DLCProject().run_extract_frames(project_key)
 sgp.DLCProject().run_label_frames(project_key)
@@ -223,6 +230,7 @@ sgp.DLCProject().run_label_frames(project_key)
 # - The absolute path to the project directory from which we'll import labeled
 #   frames.
 # - The filenames, without extension, of the videos from which we want frames.
+#
 
 sgp.DLCProject.import_labeled_frames(
     project_key.copy(),
@@ -234,6 +242,7 @@ sgp.DLCProject.import_labeled_frames(
 # <div class="alert alert-block alert-warning">
 #     This step and beyond should be run on a GPU-enabled machine.
 # </div>
+#
 
 # #### [DLCModelTraining](#ToC)<a id='DLCModelTraining1'></a>
 #
@@ -246,10 +255,12 @@ sgp.DLCProject.import_labeled_frames(
 #
 # The cell below determines which core has space and set the `gputouse` variable
 # accordingly.
+#
 
 sgp.dlc_utils.get_gpu_memory()
 
 # Set GPU core:
+#
 
 gputouse = 1  ## 1-9
 
@@ -260,6 +271,7 @@ gputouse = 1  ## 1-9
 # ```python
 # sgp.DLCModelTrainingParams.get_accepted_params()
 # ```
+#
 
 training_params_name = "tutorial"
 sgp.DLCModelTrainingParams.insert_new_params(
@@ -276,6 +288,7 @@ sgp.DLCModelTrainingParams.insert_new_params(
 
 # Next we'll modify the `project_key` to include the entries for
 # `DLCModelTraining`
+#
 
 # project_key['project_path'] = os.path.dirname(project_key['config_path'])
 if "config_path" in project_key:
@@ -284,6 +297,7 @@ if "config_path" in project_key:
 # We can insert an entry into `DLCModelTrainingSelection` and populate `DLCModelTraining`.
 #
 # _Note:_ You can stop training at any point using `I + I` or interrupt the Kernel
+#
 
 sgp.DLCModelTrainingSelection.heading
 
@@ -307,16 +321,19 @@ sgp.DLCModelTraining.populate(model_training_key)
 # -
 
 # Here we'll make sure that the entry made it into the table properly!
+#
 
 sgp.DLCModelTraining() & model_training_key
 
 # Populating `DLCModelTraining` automatically inserts the entry into
 # `DLCModelSource`, which is used to select between models trained using Spyglass
 # vs. other tools.
+#
 
 sgp.DLCModelSource() & model_training_key
 
 # The `source` field will only accept _"FromImport"_ or _"FromUpstream"_ as entries. Let's checkout the `FromUpstream` part table attached to `DLCModelSource` below.
+#
 
 sgp.DLCModelSource.FromUpstream() & model_training_key
 
@@ -327,6 +344,7 @@ sgp.DLCModelSource.FromUpstream() & model_training_key
 #
 # First, we'll need to determine a set of parameters for our model to select the
 # correct model file. Here is the default:
+#
 
 pprint(sgp.DLCModelParams.get_default())
 
@@ -345,9 +363,11 @@ pprint(sgp.DLCModelParams.get_default())
 #     skip_duplicates=True,
 # )
 # ```
+#
 
 # We can insert sets of parameters into `DLCModelSelection` and populate
 # `DLCModel`.
+#
 
 temp_model_key = (sgp.DLCModelSource & model_training_key).fetch1("KEY")
 sgp.DLCModelSelection().insert1(
@@ -357,6 +377,7 @@ model_key = (sgp.DLCModelSelection & temp_model_key).fetch1("KEY")
 sgp.DLCModel.populate(model_key)
 
 # Again, let's make sure that everything looks correct in `DLCModel`.
+#
 
 sgp.DLCModel() & model_key
 
@@ -366,5 +387,7 @@ sgp.DLCModel() & model_key
 # (notebook coming soon!).
 #
 # <!-- [pose estimation](./23_Position_DLC_3.ipynb). -->
+#
 
 # ### [Return To Table of Contents](#TableOfContents)<br>
+#
