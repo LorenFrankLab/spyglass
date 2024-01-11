@@ -317,9 +317,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def load_linear_position_info(key):
-        environment = SortedSpikesDecodingV1().load_environments(key)[0]
+        environment = SortedSpikesDecodingV1.load_environments(key)[0]
 
-        position_df = SortedSpikesDecodingV1().load_position_info(key)[0]
+        position_df = SortedSpikesDecodingV1.load_position_info(key)[0]
         position = np.asarray(position_df[["position_x", "position_y"]])
 
         linear_position_df = get_linearized_position(
@@ -328,12 +328,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             edge_order=environment.edge_order,
             edge_spacing=environment.edge_spacing,
         )
-
-        linear_position_df.insert(4, "speed", np.asarray(position_df.speed))
-
-        linear_position_df.insert(5, "time", np.asarray(position_df.index))
-        linear_position_df.set_index("time", inplace=True)
-        return linear_position_df
+        return pd.concat(
+            [linear_position_df.set_index(position_df.index), position_df],
+            axis=1,
+        )
 
     @staticmethod
     def _get_interval_range(key):
@@ -369,7 +367,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         merge_ids = (
             (
                 SortedSpikesGroup.SortGroup
-                & {"sorted_spikes_group_name": key["sorted_spikes_group_name"]}
+                & {
+                    "nwb_file_name": key["nwb_file_name"],
+                    "sorted_spikes_group_name": key["sorted_spikes_group_name"],
+                }
             )
         ).fetch("spikesorting_merge_id")
 
