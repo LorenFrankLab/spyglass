@@ -326,9 +326,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def load_linear_position_info(key):
-        environment = ClusterlessDecodingV1().load_environments(key)[0]
+        environment = ClusterlessDecodingV1.load_environments(key)[0]
 
-        position_df = ClusterlessDecodingV1().load_position_info(key)[0]
+        position_df = ClusterlessDecodingV1.load_position_info(key)[0]
         position = np.asarray(position_df[["position_x", "position_y"]])
 
         linear_position_df = get_linearized_position(
