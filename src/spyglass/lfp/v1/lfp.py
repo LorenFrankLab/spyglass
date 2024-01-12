@@ -70,6 +70,9 @@ class LFPV1(SpyglassMixin, dj.Computed):
             "sampling_rate", "interval_list_name"
         )
         sampling_rate = int(np.round(sampling_rate))
+        target_sampling_rate = (LFPSelection & key).fetch1(
+            "target_sampling_rate"
+        )
 
         # to get the list of valid times, we need to combine those from the user with those from the
         # raw data
@@ -96,7 +99,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
             + f"{MIN_LFP_INTERVAL_DURATION} sec long."
         )
         # target user-specified sampling rate
-        decimation = sampling_rate // key["target_sampling_rate"]
+        decimation = int(sampling_rate // target_sampling_rate)
 
         # get the LFP filter that matches the raw data
         filter = (
@@ -166,6 +169,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
                 "valid_times": lfp_valid_times,
+                "pipeline": "lfp_v1",
             },
             replace=True,
         )

@@ -34,6 +34,8 @@ class SpyglassMixin:
     _nwb_table_dict = {}
     _delete_dependencies = []
     _merge_delete_func = None
+    _session_pk = None
+    _member_pk = None
 
     # ------------------------------- fetch_nwb -------------------------------
 
@@ -59,7 +61,7 @@ class SpyglassMixin:
     def fetch_nwb(self, *attrs, **kwargs):
         """Fetch NWBFile object from relevant table.
 
-        Impleminting class must have a foreign key to Nwbfile or
+        Implementing class must have a foreign key to Nwbfile or
         AnalysisNwbfile or a _nwb_table attribute.
 
         A class that does not have with either '-> Nwbfile' or
@@ -103,6 +105,8 @@ class SpyglassMixin:
             from spyglass.common import LabMember, LabTeam, Session  # noqa F401
 
             self._delete_dependencies = [LabMember, LabTeam, Session]
+            self._session_pk = Session.primary_key[0]
+            self._member_pk = LabMember.primary_key[0]
         return self._delete_dependencies
 
     @property
@@ -119,10 +123,9 @@ class SpyglassMixin:
             self._merge_delete_func = delete_downstream_merge
         return self._merge_delete_func
 
-    def _find_session(
+    def _find_session_link(
         self,
         table: dj.user_tables.UserTable,
-        Session: dj.user_tables.UserTable,
         search_limit: int = 2,
     ) -> dj.expression.QueryExpression:
         """Find Session table associated with table.
@@ -141,25 +144,46 @@ class SpyglassMixin:
         datajoint.expression.QueryExpression or None
             Join of table link with Session table if found, else None.
         """
+        Session = self._delete_deps[-1]
         # TODO: check search_limit default is enough for any table in spyglass
-        if self.full_table_name == Session.full_table_name:
-            # if self is Session, return self
-            return self
+        if self._session_pk in table.primary_key:
+            # joinable with Session
+            return table * Session
 
-        elif (
-            # if Session is not in ancestors of table, search children
-            Session.full_table_name not in table.ancestors()
-            and search_limit > 0  # prevent infinite recursion
-        ):
-            for child in table.children():
-                table = self._find_session(child, Session, search_limit - 1)
+        elif search_limit > 0:
+            for child in table.children(as_objects=True):
+                table = self._find_session_link(child, search_limit - 1)
                 if table:  # table is link, will valid join to Session
-                    break
+                    return table
 
-        elif search_limit < 1:  # if no session ancestor found and limit reached
+        elif not table or search_limit < 1:  # if none found and limit reached
             return  # Err kept in parent func to centralize permission logic
 
         return table * Session
+
+    def _get_exp_summary(self, sess_link: dj.expression.QueryExpression):
+        """Get summary of experimenters for session(s), including NULL.
+
+        Parameters
+        ----------
+        sess_link : datajoint.expression.QueryExpression
+            Join of table link with Session table.
+
+        Returns
+        -------
+        str
+            Summary of experimenters for session(s).
+        """
+        Session = self._delete_deps[-1]
+
+        format = dj.U(self._session_pk, self._member_pk)
+        exp_missing = format & (sess_link - Session.Experimenter).proj(
+            **{self._member_pk: "NULL"}
+        )
+        exp_present = (
+            format & (sess_link * Session.Experimenter - exp_missing).proj()
+        )
+        return exp_missing + exp_present
 
     def _check_delete_permission(self) -> None:
         """Check user name against lab team assoc. w/ self * Session.
@@ -181,8 +205,8 @@ class SpyglassMixin:
         if dj_user in LabMember().admin:  # bypass permission check for admin
             return
 
-        sess = self._find_session(self, Session)
-        if not sess:  # Permit delete if not linked to a session
+        sess_link = self._find_session_link(table=self)
+        if not sess_link:  # Permit delete if not linked to a session
             logger.warn(
                 "Could not find lab team associated with "
                 + f"{self.__class__.__name__}."
@@ -190,23 +214,26 @@ class SpyglassMixin:
             )
             return
 
-        experimenters = (sess * Session.Experimenter).fetch("lab_member_name")
-        if len(experimenters) < len(sess):
-            # TODO: adjust to check each session individually? Expensive but
-            #       prevents against edge case of one sess with mult and another
-            #       with none
+        sess_summary = self._get_exp_summary(
+            sess_link.restrict(self.restriction)
+        )
+        experimenters = sess_summary.fetch(self._member_pk)
+        if None in experimenters:
             raise PermissionError(
-                f"Please ensure all Sessions have an experimenter:\n{sess}"
+                "Please ensure all Sessions have an experimenter in "
+                + f"SessionExperimenter:\n{sess_summary}"
             )
 
         user_name = LabMember().get_djuser_name(dj_user)
         for experimenter in set(experimenters):
             if user_name not in LabTeam().get_team_members(experimenter):
+                sess_w_exp = sess_summary & {self._member_pk: experimenter}
                 raise PermissionError(
                     f"User '{user_name}' is not on a team with '{experimenter}'"
                     + ", an experimenter for session(s):\n"
-                    + f"{sess * Session.Experimenter}"
+                    + f"{sess_w_exp}"
                 )
+        logger.info(f"Queueing delete for session(s):\n{sess_summary}")
 
     # Rename to `delete` when we're ready to use it
     # TODO: Intercept datajoint delete confirmation prompt for merge deletes
