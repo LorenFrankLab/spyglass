@@ -123,7 +123,7 @@ class LabMember(SpyglassMixin, dj.Manual):
         if len(query) != 1:
             raise ValueError(
                 f"Could not find name for datajoint user {dj_user}"
-                + f"in common.LabMember.LabMemberInfo: {query}"
+                + f" in common.LabMember.LabMemberInfo: {query}"
             )
 
         return query[0]
