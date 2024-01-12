@@ -1,3 +1,4 @@
+from ..imported import ImportedSpikeSorting
 from .artifact import (
     ArtifactDetection,
     ArtifactDetectionParameters,

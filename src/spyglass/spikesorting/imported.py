@@ -13,7 +13,7 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
     definition = """
     -> Session
     ---
-    object_id: varchar(32)
+    object_id: varchar(40)
     """
 
     def make(self, key):
