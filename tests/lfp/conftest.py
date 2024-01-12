@@ -1,5 +1,3 @@
-import copy
-
 import numpy as np
 import pytest
 
@@ -13,20 +11,33 @@ def lfp(common):
 
 @pytest.fixture(scope="session")
 def lfp_band(lfp):
-    return lfp.analysis.v1
+    from spyglass.lfp.analysis.v1 import lfp_band
+
+    return lfp_band
+
+
+@pytest.fixture(scope="session")
+def firfilters_table(common):
+    return common.FirFilterParameters()
+
+
+@pytest.fixture(scope="session")
+def electrodegroup_table(lfp):
+    return lfp.v1.LFPElectrodeGroup()
 
 
 @pytest.fixture(scope="session")
 def lfp_constants(common, mini_copy_name):
     n_delay = 9
     lfp_electrode_group_name = "test"
-    orig_interval_list_name, orig_valid_times = (
-        common.IntervalList & "interval_list_name LIKE '01_%'"
-    ).fetch("interval_list_name", "valid_times")[0]
-    new_interval_list_name = orig_interval_list_name + f"_first{n_delay}"
-    new_interval_list_key = {
+    orig_list_name = "01_s1"
+    orig_valid_times = (
+        common.IntervalList & f"interval_list_name = '{orig_list_name}'"
+    ).fetch1("valid_times")
+    new_list_name = orig_list_name + f"_first{n_delay}"
+    new_list_key = {
         "nwb_file_name": mini_copy_name,
-        "interval_list_name": new_interval_list_name,
+        "interval_list_name": new_list_name,
         "valid_times": np.asarray(
             [[orig_valid_times[0, 0], orig_valid_times[0, 0] + n_delay]]
         ),
@@ -40,10 +51,10 @@ def lfp_constants(common, mini_copy_name):
             "lfp_electrode_group_name": lfp_electrode_group_name,
         },
         n_delay=n_delay,
-        orig_interval_list_name="01_s1",
+        orig_interval_list_name=orig_list_name,
         orig_valid_times=orig_valid_times,
-        interval_list_name=new_interval_list_name,
-        interval_key=new_interval_list_key,
+        interval_list_name=new_list_name,
+        interval_key=new_list_key,
         filter1_name="LFP 0-400 Hz",
         filter_sampling_rate=30_000,
         filter2_name="Theta 5-11 Hz",
@@ -53,13 +64,21 @@ def lfp_constants(common, mini_copy_name):
 
 
 @pytest.fixture(scope="session")
-def add_electrode_group(common, mini_copy_name, lfp_constants):
-    common.FirFilterParameters().create_standard_filters()
-    lfp.lfp_electrode.LFPElectrodeGroup.create_lfp_electrode_group(
+def add_electrode_group(
+    firfilters_table,
+    electrodegroup_table,
+    mini_copy_name,
+    lfp_constants,
+    teardown,
+):
+    firfilters_table.create_standard_filters()
+    electrodegroup_table.create_lfp_electrode_group(
         nwb_file_name=mini_copy_name,
         group_name=lfp_constants.get("lfp_electrode_group_name"),
         electrode_list=lfp_constants.get("lfp_electrode_ids"),
     )
+    if teardown:
+        electrodegroup_table.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -71,7 +90,9 @@ def add_interval(common, lfp_constants):
 
 
 @pytest.fixture(scope="session")
-def add_selection(lfp, common, add_interval, lfp_constants):
+def add_selection(
+    lfp, common, add_electrode_group, add_interval, lfp_constants, teardown
+):
     lfp_s_key = {
         **lfp_constants.get("lfp_eg_key"),
         "target_interval_list_name": add_interval,
@@ -80,11 +101,19 @@ def add_selection(lfp, common, add_interval, lfp_constants):
     }
     lfp.v1.LFPSelection.insert1(lfp_s_key, skip_duplicates=True)
     yield lfp_s_key
+    if teardown:
+        lfp.v1.LFPSelection().delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
-def lfp_s_key(add_selection):
-    yield add_selection
+def lfp_s_key(lfp_constants, mini_copy_name):
+    yield {
+        "nwb_file_name": mini_copy_name,
+        "lfp_electrode_group_name": lfp_constants.get(
+            "lfp_electrode_group_name"
+        ),
+        "target_interval_list_name": lfp_constants.get("interval_list_name"),
+    }
 
 
 @pytest.fixture(scope="session")
@@ -106,15 +135,20 @@ def lfp_band_sampling_rate(lfp, lfp_merge_key):
 
 
 @pytest.fixture(scope="session")
-def add_band_filter(common, lfp_constants, lfp_band_sampling_rate):
+def add_band_filter(common, lfp_constants, lfp_band_sampling_rate, teardown):
+    filter_name = lfp_constants.get("filter2_name")
     common.FirFilterParameters().add_filter(
-        lfp_constants.get("filter2_name"),
+        filter_name,
         lfp_band_sampling_rate,
         "bandpass",
         [4, 5, 11, 12],
         "theta filter for 1 Khz data",
     )
     yield lfp_constants.get("filter2_name")
+    if teardown:
+        (common.FirFilterParameters() & {"filter_name": filter_name}).delete(
+            safemode=False
+        )
 
 
 @pytest.fixture(scope="session")
@@ -125,6 +159,7 @@ def add_band_selection(
     add_interval,
     lfp_constants,
     add_band_filter,
+    teardown,
 ):
     lfp_band.LFPBandSelection().set_lfp_band_electrodes(
         nwb_file_name=mini_copy_name,
@@ -138,6 +173,8 @@ def add_band_selection(
     yield (lfp_band.LFPBandSelection().fetch1("KEY") & lfp_merge_key).fetch1(
         "KEY"
     )
+    if teardown:
+        (lfp_band.LFPBandSelection() & lfp_merge_key).delete(safemode=False)
 
 
 @pytest.fixture(scope="session")

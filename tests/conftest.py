@@ -188,7 +188,7 @@ def mini_insert(mini_path, teardown, server, dj_conn):
     dj_logger.info("Inserting test data.")
 
     if len(Nwbfile()) > 0:
-        Nwbfile().delete(safemode=False)
+        Nwbfile().cautious_delete(force_permission=True, safemode=False)
 
     if server.connected:
         insert_sessions(mini_path.name)
