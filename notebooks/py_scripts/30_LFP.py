@@ -33,9 +33,6 @@
 # ## Imports
 #
 
-# %load_ext autoreload
-# %autoreload 2
-
 # +
 import os
 import copy
