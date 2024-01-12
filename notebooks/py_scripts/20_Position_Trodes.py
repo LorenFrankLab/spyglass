@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -221,7 +221,19 @@ sgp.v1.TrodesPosV1.populate(trodes_key)
 
 sgp.v1.TrodesPosV1 & trodes_key
 
-# To retrieve the results as a pandas DataFrame with time as the index, we use `TrodesPosV1.fetch1_dataframe`.
+# When we populatethe `TrodesPosV1` table, we automatically create an entry in the `PositionOutput` merge table.
+# Since this table supports position information from multiple methods, it's best practive to access data through here.
+#
+# We can view the entry in this table:
+
+# +
+from spyglass.position import PositionOutput
+
+PositionOutput.TrodesPosV1 & trodes_key
+# -
+
+# To retrieve the results as a pandas DataFrame with time as the index, we use `PositionOutput.fetch1_dataframe`.
+# When doing so, we need to restric the merge table by the
 #
 # This dataframe has the following columns:
 #
@@ -232,12 +244,10 @@ sgp.v1.TrodesPosV1 & trodes_key
 # - `speed`: the magnitude of the change in head position over time in cm/s
 #
 
-position_info = (
-    sgp.v1.TrodesPosV1()
-    & {
-        "nwb_file_name": nwb_copy_file_name,
-    }
-).fetch1_dataframe()
+# get the merge id corresponding to our inserted trodes_key
+merge_key = (PositionOutput.merge_get_part(trodes_key)).fetch1("KEY")
+# use this to restrict PositionOutput and fetch the data
+position_info = (PositionOutput & merge_key).fetch1_dataframe()
 position_info
 
 # `.index` on the pandas dataframe gives us timestamps.
@@ -340,15 +350,8 @@ sgp.v1.TrodesPosSelection.insert1(
 )
 sgp.v1.TrodesPosV1.populate(trodes_s_up_key)
 
-# +
-upsampled_position_info = (
-    sgp.v1.TrodesPosV1()
-    & {
-        "nwb_file_name": nwb_copy_file_name,
-        "position_info_param_name": trodes_params_up_name,
-    }
-).fetch1_dataframe()
-
+merge_key = (PositionOutput.merge_get_part(trodes_s_up_key)).fetch1("KEY")
+upsampled_position_info = (PositionOutput & merge_key).fetch1_dataframe()
 upsampled_position_info
 
 # +
