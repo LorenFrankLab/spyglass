@@ -61,7 +61,7 @@ class SpyglassMixin:
     def fetch_nwb(self, *attrs, **kwargs):
         """Fetch NWBFile object from relevant table.
 
-        Impleminting class must have a foreign key to Nwbfile or
+        Implementing class must have a foreign key to Nwbfile or
         AnalysisNwbfile or a _nwb_table attribute.
 
         A class that does not have with either '-> Nwbfile' or
