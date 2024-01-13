@@ -20,7 +20,6 @@ from non_local_detector.models.base import ClusterlessDetector
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
-from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.core import (
     DecodingParameters,
