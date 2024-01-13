@@ -50,22 +50,16 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 
     def get_recording(cls, key):
         """get the recording associated with a spike sorting output"""
-        recording_key = cls.merge_restrict(key).proj()
-        query = (
-            source_class_dict[
-                to_camel_case(cls.merge_get_parent(key).table_name)
-            ]
-            & recording_key
-        )
-        return query.get_recording(recording_key)
+        source_table = source_class_dict[
+            to_camel_case(cls.merge_get_parent(key).table_name)
+        ]
+        query = source_table & cls.merge_get_part(key)
+        return query.get_recording(query.fetch("KEY"))
 
     def get_sorting(cls, key):
         """get the sorting associated with a spike sorting output"""
-        sorting_key = cls.merge_restrict(key).proj()
-        query = (
-            source_class_dict[
-                to_camel_case(cls.merge_get_parent(key).table_name)
-            ]
-            & sorting_key
-        )
-        return query.get_sorting(sorting_key)
+        source_table = source_class_dict[
+            to_camel_case(cls.merge_get_parent(key).table_name)
+        ]
+        query = source_table & cls.merge_get_part(key)
+        return query.get_sorting(query.fetch("KEY"))

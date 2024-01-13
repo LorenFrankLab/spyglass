@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: Python 3.10.5 64-bit
 #     language: python
@@ -175,7 +175,8 @@ lfp_s_key.update(
     {
         "target_interval_list_name": interval_list_name,
         "filter_name": "LFP 0-400 Hz",
-        "filter_sampling_rate": 30_000,
+        "filter_sampling_rate": 30_000,  # sampling rate of the data (Hz)
+        "target_sampling_rate": 1_000,  # smpling rate of the lfp output (Hz)
     }
 )
 
@@ -271,7 +272,7 @@ lfp_band.LFPBandSelection()
 lfp_band_key = (
     lfp_band.LFPBandSelection
     & {
-        "merge_id": lfp_key["merge_id"],
+        "lfp_merge_id": lfp_key["merge_id"],
         "filter_name": filter_name,
         "lfp_band_sampling_rate": lfp_band_sampling_rate,
     }
@@ -284,7 +285,7 @@ lfp_band_key
 lfp_band.LFPBandSelection() & lfp_band_key
 
 lfp_band.LFPBandV1().populate(lfp_band.LFPBandSelection() & lfp_band_key)
-lfp_band.LFPBandV1()
+lfp_band.LFPBandV1() & lfp_band_key
 
 # ## Plotting
 #
