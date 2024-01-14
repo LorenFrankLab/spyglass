@@ -35,9 +35,12 @@ class DecodingOutput(_Merge, SpyglassMixin):
         -> SortedSpikesDecodingV1
         """
 
-    def cleanup(self):
+    def cleanup(self, dry_run=False):
         """Remove any decoding outputs that are not in the merge table"""
-        logger.info("Cleaning up decoding outputs")
+        if dry_run:
+            logger.info("Dry run, not removing any files")
+        else:
+            logger.info("Cleaning up decoding outputs")
         table_results_paths = list(
             chain(
                 *[
@@ -51,7 +54,8 @@ class DecodingOutput(_Merge, SpyglassMixin):
         for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.nc"):
             if str(path) not in table_results_paths:
                 logger.info(f"Removing {path}")
-                path.unlink()
+                if not dry_run:
+                    path.unlink()
 
         table_model_paths = list(
             chain(
@@ -66,4 +70,5 @@ class DecodingOutput(_Merge, SpyglassMixin):
         for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.pkl"):
             if str(path) not in table_model_paths:
                 logger.info(f"Removing {path}")
-                path.unlink()
+                if not dry_run:
+                    path.unlink()
