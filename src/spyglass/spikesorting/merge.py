@@ -11,18 +11,6 @@ from spyglass.spikesorting.v1.curation import CurationV1  # noqa: F401
 from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
 
-try:
-    from non_local_detector.likelihoods.common import (
-        get_spikecount_per_time_bin,
-    )
-except ImportError:
-
-    def get_spikecount_per_time_bin(*args, **kwargs):
-        raise NotImplementedError(
-            "Please install non_local_detector to use this function"
-        )
-
-
 schema = dj.schema("spikesorting_merge")
 
 source_class_dict = {
@@ -96,15 +84,18 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def get_spike_indicator(cls, key, time):
+        time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
         spike_times = cls.get_spike_times(key)
         spike_indicator = np.zeros((len(time), len(spike_times)))
 
         for ind, times in enumerate(spike_times):
-            is_in_time = np.logical_and(times >= min_time, times <= max_time)
-            spike_indicator[:, ind] = get_spikecount_per_time_bin(
-                times[is_in_time],
-                np.asarray(time),
+            times = times[
+                np.logical_and(spike_times >= min_time, spike_times <= max_time)
+            ]
+            spike_indicator[:, ind] = np.bincount(
+                np.digitize(times, time[1:-1]),
+                minlength=time.shape[0],
             )
 
         return spike_indicator
