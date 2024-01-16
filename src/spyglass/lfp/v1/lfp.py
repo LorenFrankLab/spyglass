@@ -161,6 +161,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
                 "lfp",
                 key["lfp_electrode_group_name"],
                 key["target_interval_list_name"],
+                str(key["lfp_sampling_rate"]) + "Hz",
                 "valid times",
             )
         )
