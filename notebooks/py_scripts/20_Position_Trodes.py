@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.16.0
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -292,21 +292,21 @@ ax.set_xlim((position_info.index.min(), position_info.index.max()))
 #
 # To keep `minirec` small, the download link does not include videos by default.
 #
-# (Download links coming soon)
-#
-# Full datasets can be further visualized by plotting the results on the video,
-# which will appear in the current working directory.
+# If it is available, you can uncomment the code, populate the  `TrodesPosVideo` table, and plot the results on the video using the `make_video` function, which will appear in the current working directory.
 #
 
-sgp.v1.TrodesPosVideo().populate(
-    {
-        "nwb_file_name": nwb_copy_file_name,
-        "interval_list_name": interval_list_name,
-        "position_info_param_name": trodes_params_name,
-    }
-)
+# +
+# sgp.v1.TrodesPosVideo().populate(
+#     {
+#         "nwb_file_name": nwb_copy_file_name,
+#         "interval_list_name": interval_list_name,
+#         "position_info_param_name": trodes_params_name,
+#     }
+# )
 
-sgp.v1.TrodesPosVideo()
+# +
+# sgp.v1.TrodesPosVideo()
+# -
 
 # ## Upsampling position
 #
