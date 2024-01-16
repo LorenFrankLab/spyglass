@@ -183,7 +183,9 @@ def mini_closed(mini_path):
 def mini_insert(mini_path, teardown, server, dj_conn):
     from spyglass.common import Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
-    from spyglass.utils.dj_merge_tables import delete_downstream_merge  # noqa: E402
+    from spyglass.utils.dj_merge_tables import (
+        delete_downstream_merge,
+    )  # noqa: E402
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
     dj_logger.info("Inserting test data.")

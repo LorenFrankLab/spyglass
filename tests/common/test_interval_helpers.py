@@ -83,7 +83,7 @@ def test_set_difference(set_difference, one, two, expected_result):
     ],
 )
 def test_intervals_by_length(common, expected_result, min_len, max_len):
-    # intput is the same across all tests. Could be parametrized as above
+    # input is the same across all tests. Could be parametrized as above
     inds = common.common_interval.intervals_by_length(
         interval_list=np.array([[0, 0], [0, 1], [0, 1e11]]),
         min_length=min_len,
