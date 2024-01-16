@@ -37,7 +37,7 @@ keywords = [
 dependencies = [
     "pydotplus",
     "dask",
-    "position_tools",
+    "position_tools>=0.1",
     "track_linearization>=2.3",
     "non_local_detector",
     "ripple_detection",

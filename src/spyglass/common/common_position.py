@@ -32,8 +32,8 @@ from spyglass.utils.dj_helper_fn import deprecated_factory
 try:
     from position_tools import get_centroid
 except ImportError:
-    logger.warnint("Please update position_tools to >= 0.1.0")
-    from position_tools import get_centroid
+    logger.warning("Please update position_tools to >= 0.1.0")
+    from position_tools import get_centriod as get_centroid
 
 schema = dj.schema("common_position")
 
