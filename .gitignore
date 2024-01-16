@@ -151,6 +151,12 @@ temp_nwb/*s
 *.json
 *.gz
 *.pdf
+*.lock
+*.npz
+*.xz
+*.zip
+*.pb
+*.pem
 dj_local_conf*
 !dj_local_conf_example.json
 
