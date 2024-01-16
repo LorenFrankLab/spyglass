@@ -295,45 +295,6 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         return classifier.environments
 
     @staticmethod
-    def load_position_info(key):
-        position_group_key = {
-            "position_group_name": key["position_group_name"],
-            "nwb_file_name": key["nwb_file_name"],
-        }
-        position_variable_names = (PositionGroup & position_group_key).fetch1(
-            "position_variables"
-        )
-
-        position_info = []
-        for pos_merge_id in (PositionGroup.Position & position_group_key).fetch(
-            "pos_merge_id"
-        ):
-            position_info.append(
-                (PositionOutput & {"merge_id": pos_merge_id}).fetch1_dataframe()
-            )
-        position_info = pd.concat(position_info, axis=0).dropna()
-
-        return position_info, position_variable_names
-
-    @staticmethod
-    def load_linear_position_info(key):
-        environment = SortedSpikesDecodingV1.load_environments(key)[0]
-
-        position_df = SortedSpikesDecodingV1.load_position_info(key)[0]
-        position = np.asarray(position_df[["position_x", "position_y"]])
-
-        linear_position_df = get_linearized_position(
-            position=position,
-            track_graph=environment.track_graph,
-            edge_order=environment.edge_order,
-            edge_spacing=environment.edge_spacing,
-        )
-        return pd.concat(
-            [linear_position_df.set_index(position_df.index), position_df],
-            axis=1,
-        )
-
-    @staticmethod
     def _get_interval_range(key):
         encoding_interval = (
             IntervalList
@@ -360,6 +321,53 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 np.asarray(encoding_interval).max(),
                 np.asarray(decoding_interval).max(),
             ),
+        )
+
+    @staticmethod
+    def load_position_info(key):
+        position_group_key = {
+            "position_group_name": key["position_group_name"],
+            "nwb_file_name": key["nwb_file_name"],
+        }
+        position_variable_names = (PositionGroup & position_group_key).fetch1(
+            "position_variables"
+        )
+
+        position_info = []
+        for pos_merge_id in (PositionGroup.Position & position_group_key).fetch(
+            "pos_merge_id"
+        ):
+            position_info.append(
+                (PositionOutput & {"merge_id": pos_merge_id}).fetch1_dataframe()
+            )
+        min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
+        position_info = (
+            pd.concat(position_info, axis=0).loc[min_time:max_time].dropna()
+        )
+
+        return position_info, position_variable_names
+
+    @staticmethod
+    def load_linear_position_info(key):
+        environment = SortedSpikesDecodingV1.load_environments(key)[0]
+
+        position_df = SortedSpikesDecodingV1.load_position_info(key)[0]
+        position = np.asarray(position_df[["position_x", "position_y"]])
+
+        linear_position_df = get_linearized_position(
+            position=position,
+            track_graph=environment.track_graph,
+            edge_order=environment.edge_order,
+            edge_spacing=environment.edge_spacing,
+        )
+        min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
+        return (
+            pd.concat(
+                [linear_position_df.set_index(position_df.index), position_df],
+                axis=1,
+            )
+            .loc[min_time:max_time]
+            .dropna()
         )
 
     @staticmethod
