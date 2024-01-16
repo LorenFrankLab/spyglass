@@ -131,15 +131,15 @@ log_level = "INFO"
 
 [tool.coverage.run]
 source = ["*/src/spyglass/*"]
-omit = [
+omit = [ # which submodules have no tests
   "*/__init__.py",
   "*/_version.py",
   "*/cli/*",
   # "*/common/*",
-  # "*/data_import/*",
+  "*/data_import/*",
   "*/decoding/*",
   "*/figurl_views/*",
-  "*/lfp/*",
+  # "*/lfp/*",
   "*/linearization/*",
   "*/lock/*",
   "*/position/*",

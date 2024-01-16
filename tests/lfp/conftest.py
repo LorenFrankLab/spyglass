@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from pynwb import NWBHDF5IO
 
 
 @pytest.fixture(scope="session")
@@ -27,12 +28,14 @@ def electrodegroup_table(lfp):
 
 
 @pytest.fixture(scope="session")
-def lfp_constants(common, mini_copy_name):
+def lfp_constants(common, mini_copy_name, mini_dict):
     n_delay = 9
     lfp_electrode_group_name = "test"
     orig_list_name = "01_s1"
     orig_valid_times = (
-        common.IntervalList & f"interval_list_name = '{orig_list_name}'"
+        common.IntervalList
+        & mini_dict
+        & f"interval_list_name = '{orig_list_name}'"
     ).fetch1("valid_times")
     new_list_name = orig_list_name + f"_first{n_delay}"
     new_list_key = {
@@ -117,7 +120,7 @@ def lfp_s_key(lfp_constants, mini_copy_name):
 
 
 @pytest.fixture(scope="session")
-def populate_lfp(lfp, add_selection):
+def populate_lfp(lfp, add_selection, lfp_s_key):
     lfp.v1.LFPV1().populate(add_selection)
     yield {"merge_id": (lfp.LFPOutput.LFPV1() & lfp_s_key).fetch1("merge_id")}
 
@@ -125,6 +128,18 @@ def populate_lfp(lfp, add_selection):
 @pytest.fixture(scope="session")
 def lfp_merge_key(populate_lfp):
     yield populate_lfp
+
+
+@pytest.fixture(scope="module")
+def lfp_analysis_raw(common, lfp, populate_lfp, mini_dict):
+    abs_path = (common.AnalysisNwbfile * lfp.v1.LFPV1 & mini_dict).fetch(
+        "analysis_file_abs_path"
+    )[0]
+    assert abs_path is not None, "No NWBFile found."
+    with NWBHDF5IO(path=str(abs_path), mode="r", load_namespaces=True) as io:
+        nwbfile = io.read()
+        assert nwbfile is not None, "NWBFile empty."
+        yield nwbfile
 
 
 @pytest.fixture(scope="session")
@@ -155,6 +170,7 @@ def add_band_filter(common, lfp_constants, lfp_band_sampling_rate, teardown):
 def add_band_selection(
     lfp_band,
     mini_copy_name,
+    mini_dict,
     lfp_merge_key,
     add_interval,
     lfp_constants,
@@ -170,9 +186,7 @@ def add_band_selection(
         reference_electrode_list=[-1],
         lfp_band_sampling_rate=lfp_constants.get("lfp_band_sampling_rate"),
     )
-    yield (lfp_band.LFPBandSelection().fetch1("KEY") & lfp_merge_key).fetch1(
-        "KEY"
-    )
+    yield (lfp_band.LFPBandSelection & mini_dict).fetch1("KEY")
     if teardown:
         (lfp_band.LFPBandSelection() & lfp_merge_key).delete(safemode=False)
 
@@ -188,8 +202,20 @@ def populate_lfp_band(lfp_band, add_band_selection):
     yield
 
 
-@pytest.fixture(scope="session")
-def mini_eseries(common, mini_copy_name):
-    yield (common.Raw() & {"nwb_file_name": mini_copy_name}).fetch_nwb()[0][
-        "raw"
-    ]
+# @pytest.fixture(scope="session")
+# def mini_eseries(common, mini_copy_name):
+#     yield (common.Raw() & {"nwb_file_name": mini_copy_name}).fetch_nwb()[0][
+#         "raw"
+#     ]
+
+
+@pytest.fixture(scope="module")
+def lfp_band_analysis_raw(common, lfp_band, populate_lfp_band, mini_dict):
+    abs_path = (common.AnalysisNwbfile * lfp_band.LFPBandV1 & mini_dict).fetch(
+        "analysis_file_abs_path"
+    )[0]
+    assert abs_path is not None, "No NWBFile found."
+    with NWBHDF5IO(path=str(abs_path), mode="r", load_namespaces=True) as io:
+        nwbfile = io.read()
+        assert nwbfile is not None, "NWBFile empty."
+        yield nwbfile

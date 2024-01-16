@@ -62,8 +62,10 @@ def test_get_pos_interval_name(pos_src, pos_interval_01):
     assert pos_interval_01 == names, "get_pos_interval_name failed"
 
 
-def test_convert_epoch(common, pos_interval_01):
-    this_key = (common.IntervalList & {"interval_list_name": "01_s1"}).fetch1()
+def test_convert_epoch(common, mini_dict, pos_interval_01):
+    this_key = (
+        common.IntervalList & mini_dict & {"interval_list_name": "01_s1"}
+    ).fetch1()
     ret = common.common_behav.convert_epoch_interval_name_to_position_interval_name(
         this_key
     )
