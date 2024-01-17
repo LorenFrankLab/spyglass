@@ -44,11 +44,12 @@ jobs:
         UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }}
         UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
         WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/minirec20230622.nwb
+        RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/ 
       run: |
-        mkdir -p ./tests/_data; mkdir -p ./tests/_data/raw
+        mkdir -p $RAW_DIR
         wget --recursive --no-verbose --no-host-directories --no-directories \
         --user $UCSF_BOX_USER --password $UCSF_BOX_TOKEN \
-        -P ./tests/test_data/raw $WEBSITE
+        -P $RAW_DIR $WEBSITE
     - name: Run tests
       run: |
         pytest -rP  # env vars are set within certain tests
