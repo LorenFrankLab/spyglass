@@ -72,16 +72,18 @@ def add_electrode_group(
     electrodegroup_table,
     mini_copy_name,
     lfp_constants,
-    teardown,
 ):
     firfilters_table.create_standard_filters()
+    group_name = lfp_constants.get("lfp_electrode_group_name")
     electrodegroup_table.create_lfp_electrode_group(
         nwb_file_name=mini_copy_name,
-        group_name=lfp_constants.get("lfp_electrode_group_name"),
+        group_name=group_name,
         electrode_list=lfp_constants.get("lfp_electrode_ids"),
     )
-    if teardown:
-        electrodegroup_table.delete(safemode=False)
+    assert len(
+        electrodegroup_table & {"lfp_electrode_group_name": group_name}
+    ), "Failed to add LFPElectrodeGroup."
+    yield
 
 
 @pytest.fixture(scope="session")
@@ -94,7 +96,7 @@ def add_interval(common, lfp_constants):
 
 @pytest.fixture(scope="session")
 def add_selection(
-    lfp, common, add_electrode_group, add_interval, lfp_constants, teardown
+    lfp, common, add_electrode_group, add_interval, lfp_constants
 ):
     lfp_s_key = {
         **lfp_constants.get("lfp_eg_key"),
@@ -104,8 +106,6 @@ def add_selection(
     }
     lfp.v1.LFPSelection.insert1(lfp_s_key, skip_duplicates=True)
     yield lfp_s_key
-    if teardown:
-        lfp.v1.LFPSelection().delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -150,7 +150,7 @@ def lfp_band_sampling_rate(lfp, lfp_merge_key):
 
 
 @pytest.fixture(scope="session")
-def add_band_filter(common, lfp_constants, lfp_band_sampling_rate, teardown):
+def add_band_filter(common, lfp_constants, lfp_band_sampling_rate):
     filter_name = lfp_constants.get("filter2_name")
     common.FirFilterParameters().add_filter(
         filter_name,
@@ -160,10 +160,6 @@ def add_band_filter(common, lfp_constants, lfp_band_sampling_rate, teardown):
         "theta filter for 1 Khz data",
     )
     yield lfp_constants.get("filter2_name")
-    if teardown:
-        (common.FirFilterParameters() & {"filter_name": filter_name}).delete(
-            safemode=False
-        )
 
 
 @pytest.fixture(scope="session")
@@ -175,7 +171,7 @@ def add_band_selection(
     add_interval,
     lfp_constants,
     add_band_filter,
-    teardown,
+    add_electrode_group,
 ):
     lfp_band.LFPBandSelection().set_lfp_band_electrodes(
         nwb_file_name=mini_copy_name,
@@ -187,8 +183,6 @@ def add_band_selection(
         lfp_band_sampling_rate=lfp_constants.get("lfp_band_sampling_rate"),
     )
     yield (lfp_band.LFPBandSelection & mini_dict).fetch1("KEY")
-    if teardown:
-        (lfp_band.LFPBandSelection() & lfp_merge_key).delete(safemode=False)
 
 
 @pytest.fixture(scope="session")

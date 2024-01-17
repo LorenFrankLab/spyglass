@@ -8,7 +8,7 @@ def common_lab(common):
 
 
 @pytest.fixture
-def add_admin(common_lab, teardown):
+def add_admin(common_lab):
     common_lab.LabMember.insert1(
         dict(
             lab_member_name="This Admin",
@@ -27,12 +27,10 @@ def add_admin(common_lab, teardown):
         skip_duplicates=True,
     )
     yield
-    if teardown:
-        common_lab.LabMember.delete(safe_mode=False)
 
 
 @pytest.fixture
-def add_member_team(common_lab, add_admin, teardown):
+def add_member_team(common_lab, add_admin):
     common_lab.LabMember.insert(
         [
             dict(
@@ -71,9 +69,6 @@ def add_member_team(common_lab, add_admin, teardown):
         team_description="This Team Description",
     )
     yield
-    if teardown:
-        common_lab.LabMember.delete(safe_mode=False)
-        common_lab.LabTeam.delete(safe_mode=False)
 
 
 def test_labmember_insert_file_str(mini_insert, common_lab, mini_copy_name):

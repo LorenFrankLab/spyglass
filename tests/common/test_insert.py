@@ -109,8 +109,9 @@ def test_insert_dio(mini_insert, mini_behavior, mini_restr, common):
 
     assert len(events_data) == len(events_raw), "Number of events not match"
 
-    event = "Poke1"
+    event = [p for p in events_raw.keys() if "Poke" in p][0]
     event_raw = events_raw.get(event)
+    # event_data = (common.DIOEvents & {"dio_event_name": event}).fetch(as_dict=True)[0]
     event_data = (common.DIOEvents & {"dio_event_name": event}).fetch1()
 
     assert (

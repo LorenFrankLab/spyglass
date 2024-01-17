@@ -3,6 +3,7 @@ import sys
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
+from subprocess import Popen
 from time import sleep as tsleep
 
 import datajoint as dj
@@ -14,8 +15,8 @@ from .container import DockerMySQLManager
 
 # ---------------------- CONSTANTS ---------------------
 
-# globals in pytest_configure: BASE_DIR, SERVER, TEARDOWN, VERBOSE
-# download managed by gh-action test-conda, so no need to download here
+# globals in pytest_configure:
+#       BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD
 warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
 
 
@@ -65,13 +66,15 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    global BASE_DIR, SERVER, TEARDOWN, VERBOSE
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD
 
+    TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
     VERBOSE = not config.option.quiet_spy
 
     BASE_DIR = Path(config.option.base_dir).absolute()
     BASE_DIR.mkdir(parents=True, exist_ok=True)
+    RAW_DIR = BASE_DIR / "raw"
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
 
     SERVER = DockerMySQLManager(
@@ -80,6 +83,52 @@ def pytest_configure(config):
         null_server=config.option.no_server,
         verbose=VERBOSE,
     )
+    DOWNLOAD = download_data(verbose=VERBOSE)
+
+
+def data_is_downloaded():
+    """Check if data is downloaded."""
+    return os.path.exists(RAW_DIR / TEST_FILE)
+
+
+def download_data(verbose=False):
+    """Download data from BOX using environment variable credentials.
+
+    Note: In gh-actions, this is handled by the test-conda workflow.
+    """
+    if data_is_downloaded():
+        return None
+    UCSF_BOX_USER = os.environ.get("UCSF_BOX_USER")
+    UCSF_BOX_TOKEN = os.environ.get("UCSF_BOX_TOKEN")
+    if not all([UCSF_BOX_USER, UCSF_BOX_TOKEN]):
+        raise ValueError(
+            "Missing data, no credentials: UCSF_BOX_USER or UCSF_BOX_TOKEN."
+        )
+    data_url = f"ftps://ftp.box.com/trodes_to_nwb_test_data/{TEST_FILE}"
+
+    cmd = [
+        "wget",
+        "--recursive",
+        "--no-host-directories",
+        "--no-directories",
+        "--user",
+        UCSF_BOX_USER,
+        "--password",
+        UCSF_BOX_TOKEN,
+        "-P",
+        RAW_DIR,
+        data_url,
+    ]
+    if not verbose:
+        cmd.insert(cmd.index("--recursive") + 1, "--no-verbose")
+    cmd_kwargs = dict(stdout=sys.stdout, stderr=sys.stderr) if verbose else {}
+
+    return Popen(cmd, **cmd_kwargs)
+
+
+def pytest_unconfigure(config):
+    if TEARDOWN:
+        SERVER.stop()
 
 
 # ------------------- FIXTURES -------------------
@@ -138,13 +187,23 @@ def raw_dir(base_dir):
 
 @pytest.fixture(scope="session")
 def mini_path(raw_dir):
-    path = raw_dir / "minirec20230622.nwb"
+    path = raw_dir / TEST_FILE
 
-    timeout, wait = 60, 5  # download managed by gh-action test-conda
-    for _ in range(timeout // wait):  # wait for download to finish
+    # wait for wget download to finish
+    if DOWNLOAD is not None:
+        DOWNLOAD.wait()
+
+    # wait for gh-actions download to finish
+    timeout, wait, found = 60, 5, False
+    for _ in range(timeout // wait):
         if path.exists():
+            found = True
             break
         tsleep(wait)
+
+    if not found:
+        raise ConnectionError("Download failed.")
+
     yield path
 
 
@@ -183,31 +242,26 @@ def mini_closed(mini_path):
 def mini_insert(mini_path, teardown, server, dj_conn):
     from spyglass.common import Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
-    from spyglass.utils.dj_merge_tables import (
-        delete_downstream_merge,
-    )  # noqa: E402
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
     dj_logger.info("Inserting test data.")
 
     if not server.connected:
-        dj_logger.error("No server connection.")
-    elif len(Nwbfile()) == 0 and server.connected:
-        insert_sessions(mini_path.name)
+        raise ConnectionError("No server connection.")
+
+    if len(Nwbfile()) != 0:
+        dj_logger.warning("Skipping insert, use existing data.")
     else:
-        dj_logger.warning(
-            "Nwbfile table not empty. Skipping insert, use existing data."
-        )
+        insert_sessions(mini_path.name)
 
     if len(Session()) == 0:
-        dj_logger.error("No sessions inserted.")
+        raise ValueError("No sessions inserted.")
 
     yield
 
     close_nwb_files()
-    if teardown:
-        delete_downstream_merge(table=Nwbfile())
-        Nwbfile().delete(safemode=False)
+    # Note: no need to run deletes in teardown, since we are using teardown
+    # will remove the container
 
 
 @pytest.fixture(scope="session")

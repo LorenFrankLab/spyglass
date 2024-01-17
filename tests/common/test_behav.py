@@ -1,5 +1,4 @@
 import pytest
-from numpy import array_equal
 from pandas import DataFrame
 
 

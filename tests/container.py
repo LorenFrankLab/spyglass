@@ -131,10 +131,10 @@ class DockerMySQLManager:
         if not self.container_status or self.container_status == "exited":
             self.start()
 
-        for _ in range(timeout // wait):
+        for i in range(timeout // wait):
             if self.container.health == "healthy":
                 break
-            self.logger.info(f"Container {self.container_name} starting...")
+            self.logger.info(f"Container {self.container_name} starting... {i}")
             time.sleep(wait)
         self.logger.info(
             f"Container {self.container_name}, {self.container.health}."
@@ -206,12 +206,11 @@ class DockerMySQLManager:
         if self.null_server:
             return None
         if not self.container_status or self.container_status == "exited":
-            self.logger.info(
-                f"Container {self.container_name} already stopped."
-            )
             return
+
         self.container.stop()
         self.logger.info(f"Container {self.container_name} stopped.")
+
         if remove:
             self.container.remove()
             self.logger.info(f"Container {self.container_name} removed.")

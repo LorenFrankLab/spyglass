@@ -17,7 +17,6 @@ def lockfile(base_dir, teardown):
     yield lockfile
     if teardown:
         os.remove(lockfile)
-        lockfile.unlink()
 
 
 def test_get_file_name_error(common_nwbfile):
