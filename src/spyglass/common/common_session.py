@@ -86,7 +86,14 @@ class Session(SpyglassMixin, dj.Imported):
 
         if not debug_mode:  # TODO: remove when demo files agree on device
             logger.info("Populate DataAcquisitionDevice...")
-            DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
+            try:
+                DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to populate DataAcquisitionDevice: {e}. "
+                    "This is likely due to a missing device in the NWB file. "
+                    "Skipping DataAcquisitionDevice."
+                )
 
         logger.info("Populate CameraDevice...")
         CameraDevice.insert_from_nwbfile(nwbf)
