@@ -70,15 +70,14 @@ schema = dj.schema("decoding_clusterless")
 
 @schema
 class MarkParameters(SpyglassMixin, dj.Manual):
-    """Defines the type of spike waveform feature computed for a given spike
-    time."""
+    """Defines the type of waveform feature computed for a given spike time."""
 
     definition = """
     mark_param_name : varchar(32) # a name for this set of parameters
     ---
     # the type of mark. Currently only 'amplitude' is supported
     mark_type = 'amplitude':  varchar(40)
-    mark_param_dict:    BLOB    # dictionary of parameters for the mark extraction function
+    mark_param_dict: BLOB # dict of parameters for the mark extraction function
     """
 
     # NOTE: See #630, #664. Excessive key length.
@@ -99,7 +98,8 @@ class MarkParameters(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def supported_mark_type(mark_type):
-        """checks whether the requested mark type is supported.
+        """Checks whether the requested mark type is supported.
+
         Currently only 'amplitude" is supported.
 
         Parameters
@@ -108,9 +108,7 @@ class MarkParameters(SpyglassMixin, dj.Manual):
 
         """
         supported_types = ["amplitude"]
-        if mark_type in supported_types:
-            return True
-        return False
+        return mark_type in supported_types
 
 
 @schema
@@ -123,7 +121,9 @@ class UnitMarkParameters(SpyglassMixin, dj.Manual):
 
 @schema
 class UnitMarks(SpyglassMixin, dj.Computed):
-    """For each spike time, compute a spike waveform feature associated with that
+    """Compute spike waveform features for each spike time.
+
+    For each spike time, compute a spike waveform feature associated with that
     spike. Used for clusterless decoding.
     """
 
@@ -224,15 +224,16 @@ class UnitMarks(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
         self.insert1(key)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
         """Convenience function for returning the marks in a readable format"""
         return self.fetch_dataframe()[0]
 
-    def fetch_dataframe(self):
+    def fetch_dataframe(self) -> list[pd.DataFrame]:
         return [self._convert_to_dataframe(data) for data in self.fetch_nwb()]
 
     @staticmethod
-    def _convert_to_dataframe(nwb_data):
+    def _convert_to_dataframe(nwb_data) -> pd.DataFrame:
+        """Converts the marks from an NWB object to a pandas dataframe"""
         n_marks = nwb_data["marks"].data.shape[1]
         columns = [f"amplitude_{ind:04d}" for ind in range(n_marks)]
         return pd.DataFrame(
@@ -243,23 +244,28 @@ class UnitMarks(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_peak_amplitude(
-        waveform, peak_sign="neg", estimate_peak_time=False
-    ):
-        """Returns the amplitudes of all channels at the time of the peak
-        amplitude across channels.
+        waveform: np.array,
+        peak_sign: str = "neg",
+        estimate_peak_time: bool = False,
+    ) -> np.array:
+        """Returns the amplitudes of all channels at the time of the peak.
+
+        Amplitude across channels.
 
         Parameters
         ----------
-        waveform : array-like, shape (n_spikes, n_time, n_channels)
-        peak_sign : ('pos', 'neg', 'both'), optional
-            Direction of the peak in the waveform
+        waveform : np.array
+            array-like, shape (n_spikes, n_time, n_channels)
+        peak_sign : str, optional
+            One of 'pos', 'neg', 'both'. Direction of the peak in the waveform
         estimate_peak_time : bool, optional
             Find the peak times for each spike because some spikesorters do not
             align the spike time (at index n_time // 2) to the peak
 
         Returns
         -------
-        peak_amplitudes : array-like, shape (n_spikes, n_channels)
+        peak_amplitudes : np.array
+            array-like, shape (n_spikes, n_channels)
 
         """
         if estimate_peak_time:
@@ -279,19 +285,25 @@ class UnitMarks(SpyglassMixin, dj.Computed):
         return waveform[:, spike_peak_ind]
 
     @staticmethod
-    def _threshold(timestamps, marks, mark_param_dict):
+    def _threshold(
+        timestamps: np.array, marks: np.array, mark_param_dict: dict
+    ):
         """Filter the marks by an amplitude threshold
 
         Parameters
         ----------
-        timestamps : array-like, shape (n_time,)
-        marks : array-like, shape (n_time, n_channels)
+        timestamps : np.array
+            array-like, shape (n_time,)
+        marks : np.array
+            array-like, shape (n_time, n_channels)
         mark_param_dict : dict
 
         Returns
         -------
-        filtered_timestamps : array-like, shape (n_filtered_time,)
-        filtered_marks : array-like, shape (n_filtered_time, n_channels)
+        filtered_timestamps : np.array
+            array-like, shape (n_filtered_time,)
+        filtered_marks : np.array
+            array-like, shape (n_filtered_time, n_channels)
 
         """
         if mark_param_dict["peak_sign"] == "neg":
@@ -307,20 +319,24 @@ class UnitMarks(SpyglassMixin, dj.Computed):
 
 @schema
 class UnitMarksIndicatorSelection(SpyglassMixin, dj.Lookup):
-    """Bins the spike times and associated spike waveform features for a given
-    time interval into regular time bins determined by the sampling rate."""
+    """Pairing of a UnitMarksIndicator with a time interval and sampling rate
+
+    Bins the spike times and associated spike waveform features for a given
+    time interval into regular time bins determined by the sampling rate.
+    """
 
     definition = """
     -> UnitMarks
     -> IntervalList
     sampling_rate=500 : float
-    ---
     """
 
 
 @schema
 class UnitMarksIndicator(SpyglassMixin, dj.Computed):
-    """Bins the spike times and associated spike waveform features into regular
+    """Bins spike times and waveforms into regular time bins.
+
+    Bins the spike times and associated spike waveform features into regular
     time bins according to the sampling rate. Features that fall into the same
     time bin are averaged.
     """
@@ -373,7 +389,9 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
         self.insert1(key)
 
     @staticmethod
-    def get_time_bins_from_interval(interval_times, sampling_rate):
+    def get_time_bins_from_interval(
+        interval_times: np.array, sampling_rate: int
+    ) -> np.array:
         """Picks the superset of the interval"""
         start_time, end_time = interval_times[0][0], interval_times[-1][-1]
         n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
@@ -382,9 +400,14 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def plot_all_marks(
-        marks_indicators: xr.DataArray, plot_size=5, s=10, plot_limit=None
+        marks_indicators: xr.DataArray,
+        plot_size: int = 5,
+        marker_size: int = 10,
+        plot_limit: int = None,
     ):
-        """Plots 2D slices of each of the spike features against each other
+        """Plot all marks for all electrodes.
+
+        Plots 2D slices of each of the spike features against each other
         for all electrodes.
 
         Parameters
@@ -393,7 +416,7 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
             Spike times and associated spike waveform features binned into
         plot_size : int, optional
             Default 5. Matplotlib figure size for each mark.
-        s : int, optional
+        marker_size : int, optional
             Default 10. Marker size
         plot_limit : int, optional
             Default None. Limits to first N electrodes.
@@ -422,25 +445,28 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
                         axes[ax_ind1, ax_ind2].scatter(
                             marks.sel(marks=feature1),
                             marks.sel(marks=feature2),
-                            s=s,
+                            s=marker_size,
                         )
                     except TypeError:
                         axes.scatter(
                             marks.sel(marks=feature1),
                             marks.sel(marks=feature2),
-                            s=s,
+                            s=marker_size,
                         )
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Convenience function for returning the first dataframe"""
         return self.fetch_dataframe()[0]
 
-    def fetch_dataframe(self):
+    def fetch_dataframe(self) -> list[pd.DataFrame]:
+        """Fetches the marks indicators as a list of pandas dataframes"""
         return [
             data["marks_indicator"].set_index("time")
             for data in self.fetch_nwb()
         ]
 
     def fetch_xarray(self):
+        """Fetches the marks indicators as an xarray DataArray"""
         # sort_group_electrodes = (
         #     SortGroup.SortGroupElectrode() &
         #     pd.DataFrame(self).to_dict('records'))
@@ -474,7 +500,16 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
         )
 
 
-def make_default_decoding_parameters_cpu():
+def make_default_decoding_parameters_cpu() -> tuple[dict, dict, dict]:
+    """Default parameters for decoding on CPU
+
+    Returns
+    -------
+    classifier_parameters : dict
+    fit_parameters : dict
+    predict_parameters : dict
+    """
+
     classifier_parameters = dict(
         environments=[_DEFAULT_ENVIRONMENT],
         observation_models=None,
@@ -496,7 +531,16 @@ def make_default_decoding_parameters_cpu():
     return classifier_parameters, fit_parameters, predict_parameters
 
 
-def make_default_decoding_parameters_gpu():
+def make_default_decoding_parameters_gpu() -> tuple[dict, dict, dict]:
+    """Default parameters for decoding on GPU
+
+    Returns
+    -------
+    classifier_parameters : dict
+    fit_parameters : dict
+    predict_parameters : dict
+    """
+
     classifier_parameters = dict(
         environments=[_DEFAULT_ENVIRONMENT],
         observation_models=None,
@@ -524,7 +568,9 @@ def make_default_decoding_parameters_gpu():
 
 @schema
 class ClusterlessClassifierParameters(SpyglassMixin, dj.Manual):
-    """Decodes the animal's mental position and some category of interest
+    """Decodes animal's mental position.
+
+    Decodes the animal's mental position and some category of interest
     from unclustered spikes and spike waveform features
     """
 
@@ -536,7 +582,8 @@ class ClusterlessClassifierParameters(SpyglassMixin, dj.Manual):
     predict_params :      BLOB    # prediction parameters
     """
 
-    def insert_default(self):
+    def insert_default(self) -> None:
+        """Insert the default parameter set"""
         (
             classifier_parameters,
             fit_parameters,
@@ -567,10 +614,12 @@ class ClusterlessClassifierParameters(SpyglassMixin, dj.Manual):
             skip_duplicates=True,
         )
 
-    def insert1(self, key, **kwargs):
+    def insert1(self, key, **kwargs) -> None:
+        """Custom insert1 to convert classes to dicts"""
         super().insert1(convert_classes_to_dict(key), **kwargs)
 
-    def fetch1(self, *args, **kwargs):
+    def fetch1(self, *args, **kwargs) -> dict:
+        """Custom fetch1 to convert dicts to classes"""
         return restore_classes(super().fetch1(*args, **kwargs))
 
 
@@ -619,10 +668,12 @@ class MultiunitFiringRate(SpyglassMixin, dj.Computed):
 
         self.insert1(key)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Convenience function for returning the first dataframe"""
         return self.fetch_dataframe()[0]
 
-    def fetch_dataframe(self):
+    def fetch_dataframe(self) -> list[pd.DataFrame]:
+        """Fetches the multiunit firing rate as a list of pandas dataframes"""
         return [
             data["multiunit_firing_rate"].set_index("time")
             for data in self.fetch_nwb()
@@ -631,7 +682,7 @@ class MultiunitFiringRate(SpyglassMixin, dj.Computed):
 
 @schema
 class MultiunitHighSynchronyEventsParameters(SpyglassMixin, dj.Manual):
-    """Parameters for extracting times of high mulitunit activity during immobility."""
+    """Params to extract times of high mulitunit activity during immobility."""
 
     definition = """
     param_name : varchar(80) # a name for this set of parameters
@@ -642,6 +693,7 @@ class MultiunitHighSynchronyEventsParameters(SpyglassMixin, dj.Manual):
     """
 
     def insert_default(self):
+        """Insert the default parameter set"""
         self.insert1(
             {
                 "param_name": "default",
@@ -673,7 +725,6 @@ def get_decoding_data_for_epoch(
     position_info : pd.DataFrame, shape (n_time, n_columns)
     marks : xr.DataArray, shape (n_time, n_marks, n_electrodes)
     valid_slices : list[slice]
-
     """
 
     valid_ephys_position_times_by_epoch = (
@@ -744,7 +795,6 @@ def get_data_for_multiple_epochs(
     marks : xr.DataArray, shape (n_time, n_marks, n_electrodes)
     valid_slices : dict[str, list[slice]]
     environment_labels : np.ndarray, shape (n_time,)
-
     """
     data = []
     environment_labels = []
@@ -780,7 +830,9 @@ def populate_mark_indicators(
     mark_param_name: str = "default",
     position_info_param_name: str = "default_decoding",
 ):
-    """Populate mark indicators for all units in the given spike sorting selection.
+    """Populate mark indicators
+
+    Populates for all units in a given spike sorting selection.
 
     This function is a way to do several pipeline steps at once. It will:
     1. Populate the SpikeSortingSelection table
