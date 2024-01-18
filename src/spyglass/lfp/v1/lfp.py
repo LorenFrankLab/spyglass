@@ -155,7 +155,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
         # need to censor the valid times to account for the downsampling
         lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
 
-        # add an interval list for the LFP valid times, skipping duplicates
+        # add an interval list for the LFP valid times, or check that it matches the existing one
         key["interval_list_name"] = "_".join(
             (
                 "lfp",
@@ -164,15 +164,30 @@ class LFPV1(SpyglassMixin, dj.Computed):
                 "valid times",
             )
         )
-        IntervalList.insert1(
-            {
+
+        tmp_valid_times = (
+            IntervalList
+            & {
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
-                "valid_times": lfp_valid_times,
-                "pipeline": "lfp_v1",
-            },
-            replace=True,
-        )
+            }
+        ).fetch("valid_times")
+        if len(tmp_valid_times) == 0:
+            IntervalList.insert1(
+                {
+                    "nwb_file_name": key["nwb_file_name"],
+                    "interval_list_name": key["interval_list_name"],
+                    "valid_times": lfp_valid_times,
+                    "pipeline": "lfp_v1",
+                },
+                replace=True,
+            )
+        else:
+            assert np.isclose(
+                tmp_valid_times[0], lfp_valid_times
+            ).all(), (
+                "previously saved lfp band times do not match current times"
+            )
         self.insert1(key)
 
         # finally, we insert this into the LFP output table.
