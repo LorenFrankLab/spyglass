@@ -26,6 +26,8 @@ class DecodingOutput(_Merge, SpyglassMixin):
     source: varchar(32)
     """
 
+    _source_class_dict = None
+
     class ClusterlessDecodingV1(SpyglassMixin, dj.Part):
         definition = """
         -> master
@@ -86,15 +88,16 @@ class DecodingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def _get_source_class(cls, key):
-        source_classes = {}
-        module = inspect.getmodule(cls)
-        for part_name in cls.parts():
-            part_name = to_camel_case(part_name.split("__")[-1].strip("`"))
-            part = getattr(module, part_name)
-            source_classes[part_name] = part
+        if cls._source_class_dict is None:
+            cls._source_class_dict = {}
+            module = inspect.getmodule(cls)
+            for part_name in cls.parts():
+                part_name = to_camel_case(part_name.split("__")[-1].strip("`"))
+                part = getattr(module, part_name)
+                cls._source_class_dict[part_name] = part
 
         source = (cls & key).fetch1("source")
-        return source_classes[source]
+        return cls._source_class_dict[source]
 
     @classmethod
     def load_results(cls, key):
