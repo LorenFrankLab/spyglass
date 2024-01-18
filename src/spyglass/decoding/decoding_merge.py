@@ -61,8 +61,8 @@ class DecodingOutput(_Merge, SpyglassMixin):
                 logger.info(f"Removing {path}")
                 if not dry_run:
                     try:
-                        path.unlink()
-                    except (PermissionError, FileNotFoundError):
+                        path.unlink(missing_ok=True)  # Ignore FileNotFoundError
+                    except PermissionError:
                         logger.warning(f"Unable to remove {path}, skipping")
 
         table_model_paths = list(
