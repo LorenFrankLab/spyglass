@@ -100,13 +100,13 @@ class DecodingOutput(_Merge, SpyglassMixin):
     def load_results(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
         source_class = cls._get_source_class(key)
-        return source_class.load_results(decoding_selection_key)
+        return (source_class & decoding_selection_key).load_results()
 
     @classmethod
     def load_model(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
         source_class = cls._get_source_class(key)
-        return source_class.load_model(decoding_selection_key)
+        return (source_class & decoding_selection_key).load_model()
 
     @classmethod
     def load_environments(cls, key):
