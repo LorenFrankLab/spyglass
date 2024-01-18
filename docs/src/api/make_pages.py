@@ -28,11 +28,6 @@ for path in sorted(Path("src/spyglass/").glob("**/*.py")):
         else:
             break
 
-if add_limit is not None:
-    from IPython import embed
-
-    embed()
-
 
 with mkdocs_gen_files.open("api/navigation.md", "w") as nav_file:
     nav_file.write("* [Overview](../api/index.md)\n")
