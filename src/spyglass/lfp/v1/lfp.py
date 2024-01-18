@@ -182,11 +182,9 @@ class LFPV1(SpyglassMixin, dj.Computed):
                 },
                 replace=True,
             )
-        else:
-            assert np.isclose(
-                tmp_valid_times[0], lfp_valid_times
-            ).all(), (
-                "previously saved lfp band times do not match current times"
+        elif not np.isclose(tmp_valid_times[0], lfp_valid_times).all():
+            raise ValueError(
+                "previously saved lfp times do not match current times"
             )
         self.insert1(key)
 
