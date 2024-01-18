@@ -72,14 +72,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_spike_times(cls, key):
         spike_times = []
         for nwb_file in cls.fetch_nwb(key):
-            if "object_id" in nwb_file:
-                # v1 spikesorting
-                spike_times.extend(
-                    nwb_file["object_id"]["spike_times"].to_list()
-                )
-            elif "units" in nwb_file:
-                # v0 spikesorting
-                spike_times.extend(nwb_file["units"]["spike_times"].to_list())
+            # V1 uses 'object_id', V0 uses 'units'
+            file_loc = "object_id" if "object_id" in nwb_file else "units"
+            spike_times.extend(nwb_file[file_loc]["spike_times"].to_list())
         return spike_times
 
     @classmethod
