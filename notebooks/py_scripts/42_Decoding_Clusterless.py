@@ -129,7 +129,7 @@ from spyglass.position import PositionOutput
 PositionOutput.TrodesPosV1 & {"nwb_file_name": nwb_copy_file_name}
 
 # +
-from spyglass.decoding.v1.clusterless import PositionGroup
+from spyglass.decoding.v1.core import PositionGroup
 
 position_merge_ids = (
     PositionOutput.TrodesPosV1
