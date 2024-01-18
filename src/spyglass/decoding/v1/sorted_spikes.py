@@ -97,7 +97,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             model_params["decoding_params"],
             model_params["decoding_kwargs"],
         )
-        decoding_kwargs = {} or None
+        decoding_kwargs = decoding_kwargs or {}
 
         # Get position data
         (
