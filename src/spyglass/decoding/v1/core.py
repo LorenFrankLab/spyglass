@@ -31,23 +31,19 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
 
     contents = [
         {
-            "decoding_param_name": "contfrag_clusterless_"
-            + non_local_detector_version,
+            "decoding_param_name": f"contfrag_clusterless_{non_local_detector_version}",
             "decoding_params": ContFragClusterlessClassifier(),
         },
         {
-            "decoding_param_name": "nonlocal_clusterless_"
-            + non_local_detector_version,
+            "decoding_param_name": f"nonlocal_clusterless_{non_local_detector_version}",
             "decoding_params": NonLocalClusterlessDetector(),
         },
         {
-            "decoding_param_name": "contfrag_sorted_"
-            + non_local_detector_version,
+            "decoding_param_name": f"contfrag_sorted_{non_local_detector_version}",
             "decoding_params": ContFragSortedSpikesClassifier(),
         },
         {
-            "decoding_param_name": "nonlocal_sorted_"
-            + non_local_detector_version,
+            "decoding_param_name": f"nonlocal_sorted_{non_local_detector_version}",
             "decoding_params": NonLocalSortedSpikesDetector(),
         },
     ]
