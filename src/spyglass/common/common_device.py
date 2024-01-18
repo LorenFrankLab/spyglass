@@ -166,16 +166,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
                 " Entering 'N' will raise an exception."
             )
             to_db = " to the database"
-
-            while True:
-                val = input(
-                    f"Add data acquisition device '{name}'{to_db}? (y/N)"
-                )
-                if val.lower() in ["y", "n", "yes", "no"]:
-                    break  # Exit the loop if a valid response is given
-                else:
-                    print("Invalid input. Please enter 'y' or 'N'.")
-
+            val = input(f"Add data acquisition device '{name}'{to_db}? (y/N)")
             if val.lower() in ["y", "yes"]:
                 cls.insert1(new_device_dict, skip_duplicates=True)
                 return
@@ -232,16 +223,10 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
                 "please change the corresponding Device object in the NWB file."
                 " Entering 'N' will raise an exception."
             )
-            while True:
-                val = input(
-                    f"Do you want to add data acquisition device system '{system}'"
-                    + " to the database? (y/N)"
-                )
-                if val.lower() in ["y", "n", "yes", "no"]:
-                    break  # Exit the loop if a valid response is given
-                else:
-                    print("Invalid input. Please enter 'y' or 'N'.")
-
+            val = input(
+                f"Do you want to add data acquisition device system '{system}'"
+                + " to the database? (y/N)"
+            )
             if val.lower() in ["y", "yes"]:
                 key = {"data_acquisition_device_system": system}
                 DataAcquisitionDeviceSystem.insert1(key, skip_duplicates=True)
@@ -289,16 +274,10 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
                 " please change the corresponding Device object in the NWB "
                 "file. Entering 'N' will raise an exception."
             )
-            while True:
-                val = input(
-                    "Do you want to add data acquisition device amplifier "
-                    + f"'{amplifier}' to the database? (y/N)"
-                )
-                if val.lower() in ["y", "n", "yes", "no"]:
-                    break  # Exit the loop if a valid response is given
-                else:
-                    print("Invalid input. Please enter 'y' or 'N'.")
-
+            val = input(
+                "Do you want to add data acquisition device amplifier "
+                + f"'{amplifier}' to the database? (y/N)"
+            )
             if val.lower() in ["y", "yes"]:
                 key = {"data_acquisition_device_amplifier": amplifier}
                 DataAcquisitionDeviceAmplifier.insert1(
@@ -607,16 +586,10 @@ class Probe(SpyglassMixin, dj.Manual):
                 "database, please change the corresponding Probe object in the "
                 "NWB file. Entering 'N' will raise an exception."
             )
-            while True:
-                val = input(
-                    f"Do you want to add probe type '{probe_type}' to the database?"
-                    + " (y/N)"
-                )
-                if val.lower() in ["y", "n", "yes", "no"]:
-                    break  # Exit the loop if a valid response is given
-                else:
-                    print("Invalid input. Please enter 'y' or 'N'.")
-
+            val = input(
+                f"Do you want to add probe type '{probe_type}' to the database?"
+                + " (y/N)"
+            )
             if val.lower() in ["y", "yes"]:
                 ProbeType.insert1(new_probe_type_dict, skip_duplicates=True)
                 return
