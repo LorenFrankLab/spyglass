@@ -5,14 +5,6 @@ import os
 # ignore datajoint+jupyter async warnings
 import warnings
 
-import numpy as np
-
-from spyglass.decoding.clusterless import (
-    MarkParameters,
-    UnitMarkParameters,
-    UnitMarks,
-)
-
 warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
 # NOTE: "SPIKE_SORTING_STORAGE_DIR" -> "SPYGLASS_SORTING_DIR"
