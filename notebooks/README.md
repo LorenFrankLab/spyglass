@@ -27,13 +27,13 @@ sorting.
 
 ## 2. Position Pipeline
 
-This series of notebooks covers tracking the position(s) of the animal. The
-user can employ two different methods:
+This series of notebooks covers tracking the position(s) of the animal. The user
+can employ two different methods:
 
-1. the simple [Trodes](20_Position_Trodes.ipynb) methods of tracking LEDs on
-   the animal's headstage
+1. the simple [Trodes](20_Position_Trodes.ipynb) methods of tracking LEDs on the
+    animal's headstage
 2. [DLC (DeepLabCut)](./21_Position_DLC_1.ipynb) which uses a neural network to
-   track the animal's body parts
+    track the animal's body parts
 
 Either case can be followed by the
 [Linearization notebook](./24_Linearization.ipynb) if the user wants to
@@ -61,11 +61,10 @@ The first notebook
 in this series shows how to retrieve the spike waveform features used for
 clusterless decoding.
 
-The second notebook
-([Clusterless Decoding](./42_Decoding_Clusterless.ipynb)) shows a detailed
-example of how to decode the position of the animal from the spike waveform
-features. The third notebook ([Decoding](./43_Decoding.ipynb)) shows how to
-decode the position of the animal from the sorted spikes.
+The second notebook ([Clusterless Decoding](./42_Decoding_Clusterless.ipynb))
+shows a detailed example of how to decode the position of the animal from the
+spike waveform features. The third notebook ([Decoding](./43_Decoding.ipynb))
+shows how to decode the position of the animal from the sorted spikes.
 
 ## Developer note
 
