@@ -72,13 +72,10 @@
 # +
 import os
 import datajoint as dj
-from pprint import pprint
 
 import spyglass.common as sgc
 import spyglass.position.v1 as sgp
 
-from pathlib import Path, PosixPath, PurePath
-import glob
 import numpy as np
 import pandas as pd
 import pynwb
@@ -227,7 +224,7 @@ project_key = sgp.DLCProject.insert_new_project(
     skip_duplicates=True,
 )
 
-# Now that we've intialized our project we'll need to extract frames which we will then label.
+# Now that we've initialized our project we'll need to extract frames which we will then label.
 #
 
 # comment this line out after you finish frame extraction for each project
