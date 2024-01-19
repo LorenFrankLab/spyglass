@@ -26,16 +26,14 @@ class DecodingOutput(_Merge, SpyglassMixin):
     source: varchar(32)
     """
 
-    _source_class_dict = None
-
-    class ClusterlessDecodingV1(SpyglassMixin, dj.Part):
+    class ClusterlessDecodingV1(SpyglassMixin, dj.Part):  # noqa: F811
         definition = """
         -> master
         ---
         -> ClusterlessDecodingV1
         """
 
-    class SortedSpikesDecodingV1(SpyglassMixin, dj.Part):
+    class SortedSpikesDecodingV1(SpyglassMixin, dj.Part):  # noqa: F811
         definition = """
         -> master
         ---

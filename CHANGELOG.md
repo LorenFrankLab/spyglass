@@ -12,6 +12,7 @@
 - Add `deprecation_factory` to facilitate table migration. #717
 - Add Spyglass logger. #730
 - IntervalList: Add secondary key `pipeline` #742
+- Increase pytest coverage for `common`, `lfp`, and `utils`. #743
 
 ### Pipelines
 
