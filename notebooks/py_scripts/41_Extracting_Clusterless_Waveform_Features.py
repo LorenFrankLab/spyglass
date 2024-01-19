@@ -31,8 +31,6 @@
 # The goal of this notebook is to populate the `UnitWaveformFeatures` table, which depends `SpikeSortingOutput`. This table contains the features of the waveforms of each unit.
 #
 # While clusterless decoding avoids actual spike sorting, we need to pass through these tables to maintain (relative) pipeline simplicity. Pass-through tables keep spike sorting and clusterless waveform extraction as similar as possible, by using shared steps. Here, "spike sorting" involves simple thresholding (sorter: clusterless_thresholder).
-#
-# Let's start with the following nwb file and time interval:
 
 # +
 from pathlib import Path
@@ -41,13 +39,39 @@ import datajoint as dj
 dj.config.load(
     Path("../dj_local_conf.json").absolute()
 )  # load config for database connection info
-
-nwb_copy_file_name = "mediumnwb20230802_.nwb"
-interval_list_name = "pos 0 valid times"
 # -
 
-# If you haven't already, run the [Insert Data notebook](./01_Insert_Data.ipynb) to populate the tables.
+# First, if you haven't inserted the the `mediumnwb20230802.nwb` file into the database (see [01_Data_Insert](01_Data_Insert.ipynb)), you should do so now. This is the file that we will use for the decoding tutorials.
 #
+# It is a truncated version of the full NWB file, so it will run faster, but bigger than the minirec file we used in the previous tutorials so that decoding makes sense.
+
+# +
+from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+import spyglass.data_import as sgi
+import spyglass.position as sgp
+
+# Insert the nwb file
+nwb_file_name = "mediumnwb20230802.nwb"
+nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
+sgi.insert_sessions(nwb_file_name)
+
+# Position
+sgp.v1.TrodesPosParams.insert_default()
+
+interval_list_name = "pos 0 valid times"
+
+trodes_s_key = {
+    "nwb_file_name": nwb_copy_file_name,
+    "interval_list_name": interval_list_name,
+    "trodes_pos_params_name": "default",
+}
+sgp.v1.TrodesPosSelection.insert1(
+    trodes_s_key,
+    skip_duplicates=True,
+)
+sgp.v1.TrodesPosV1.populate(trodes_s_key)
+# -
+
 # These next steps are the same as in the [Spike Sorting notebook](./10_Spike_SortingV1.ipynb), but we'll repeat them here for clarity. These are pre-processing steps that are shared between spike sorting and clusterless decoding.
 #
 # We first set the `SortGroup` to define which contacts are sorted together.

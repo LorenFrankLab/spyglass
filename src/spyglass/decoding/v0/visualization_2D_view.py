@@ -3,6 +3,10 @@ from typing import Callable, Dict, Tuple
 import numpy as np
 import sortingview.views.franklab as vvf
 import xarray as xr
+from replay_trajectory_classification.environments import (
+    get_grid,
+    get_track_interior,
+)
 
 
 def create_static_track_animation(

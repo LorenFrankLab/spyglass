@@ -10,8 +10,8 @@ from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from ripple_detection import get_multiunit_population_firing_rate
 from tqdm.auto import tqdm
 
-from spyglass.decoding.visualization.view1D import create_1D_decode_view
-from spyglass.decoding.visualization.view2D import create_2D_decode_view
+from spyglass.decoding.v0.visualization_1D_view import create_1D_decode_view
+from spyglass.decoding.v0.visualization_2D_view import create_2D_decode_view
 from spyglass.utils import logger
 
 

@@ -129,7 +129,7 @@ from spyglass.position import PositionOutput
 PositionOutput.TrodesPosV1 & {"nwb_file_name": nwb_copy_file_name}
 
 # +
-from spyglass.decoding.v1.clusterless import PositionGroup
+from spyglass.decoding.v1.core import PositionGroup
 
 position_merge_ids = (
     PositionOutput.TrodesPosV1
@@ -342,33 +342,33 @@ DecodingOutput().cleanup()
 #
 
 # +
-from non_local_detector.visualization import (
-    create_interactive_2D_decoding_figurl,
-)
+# from non_local_detector.visualization import (
+#     create_interactive_2D_decoding_figurl,
+# )
 
-(
-    position_info,
-    position_variable_names,
-) = ClusterlessDecodingV1.load_position_info(selection_key)
-results_time = decoding_results.acausal_posterior.isel(intervals=0).time.values
-position_info = position_info.loc[results_time[0] : results_time[-1]]
+# (
+#     position_info,
+#     position_variable_names,
+# ) = ClusterlessDecodingV1.load_position_info(selection_key)
+# results_time = decoding_results.acausal_posterior.isel(intervals=0).time.values
+# position_info = position_info.loc[results_time[0] : results_time[-1]]
 
-env = ClusterlessDecodingV1.load_environments(selection_key)[0]
-spike_times, _ = ClusterlessDecodingV1.load_spike_data(selection_key)
+# env = ClusterlessDecodingV1.load_environments(selection_key)[0]
+# spike_times, _ = ClusterlessDecodingV1.load_spike_data(selection_key)
 
 
-create_interactive_2D_decoding_figurl(
-    position_time=position_info.index.to_numpy(),
-    position=position_info[position_variable_names],
-    env=env,
-    results=decoding_results,
-    posterior=decoding_results.acausal_posterior.isel(intervals=0)
-    .unstack("state_bins")
-    .sum("state"),
-    spike_times=spike_times,
-    head_dir=position_info["orientation"],
-    speed=position_info["speed"],
-)
+# create_interactive_2D_decoding_figurl(
+#     position_time=position_info.index.to_numpy(),
+#     position=position_info[position_variable_names],
+#     env=env,
+#     results=decoding_results,
+#     posterior=decoding_results.acausal_posterior.isel(intervals=0)
+#     .unstack("state_bins")
+#     .sum("state"),
+#     spike_times=spike_times,
+#     head_dir=position_info["orientation"],
+#     speed=position_info["speed"],
+# )
 # -
 
 # ## GPUs
@@ -411,25 +411,3 @@ jax.devices()
 #   to monitor GPU usage in the notebook
 # - A [terminal program](https://github.com/peci1/nvidia-htop) like nvidia-smi
 #   with more information about  which GPUs are being utilized and by whom.
-#
-# ### Parallelizing Decoding
-#
-# You can also use the [dask_cuda](https://docs.rapids.ai/api/dask-cuda/nightly/) to parallelize decoding. You will need to install the `dask_cuda` package (see [here](https://docs.rapids.ai/api/dask-cuda/nightly/install/)). You then can run the following code to parallelize decoding:
-
-# +
-# import dask
-# from dask.distributed import Client
-# from dask_cuda import LocalCUDACluster
-
-# cluster = LocalCUDACluster()
-
-# selection_keys = [] # list of selection keys
-
-# with Client(cluster) as client:
-#     results = [
-#         dask.delayed(ClusterlessDecodingV1.populate)(
-#             selection_key, reserve_jobs=True
-#         )
-#         for selection_key in selection_keys
-#     ]
-#     dask.compute(*results)
