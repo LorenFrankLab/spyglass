@@ -852,7 +852,7 @@ def delete_downstream_merge(
 
 def _warn_on_restriction(table: dj.Table, restriction: str = None):
     """Warn if restriction on table object differs from input restriction"""
-    if restriction is None and table().restriction:
+    if restriction is None and table.restriction:
         logger.warn(
             f"Warning: ignoring table restriction: {table().restriction}.\n\t"
             + "Please pass restrictions as an arg"

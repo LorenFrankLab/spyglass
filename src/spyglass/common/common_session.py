@@ -63,13 +63,15 @@ class Session(SpyglassMixin, dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath)
 
-        # certain data are not associated with a single NWB file / session because they may apply to
-        # multiple sessions. these data go into dj.Manual tables.
-        # e.g., a lab member may be associated with multiple experiments, so the lab member table should not
-        # be dependent on (contain a primary key for) a session.
+        # certain data are not associated with a single NWB file / session
+        # because they may apply to multiple sessions. these data go into
+        # dj.Manual tables. e.g., a lab member may be associated with multiple
+        # experiments, so the lab member table should not be dependent on
+        # (contain a primary key for) a session.
 
-        # here, we create new entries in these dj.Manual tables based on the values read from the NWB file
-        # then, they are linked to the session via fields of Session (e.g., Subject, Institution, Lab) or part
+        # here, we create new entries in these dj.Manual tables based on the
+        # values read from the NWB file then, they are linked to the session
+        # via fields of Session (e.g., Subject, Institution, Lab) or part
         # tables (e.g., Experimenter, DataAcquisitionDevice).
 
         logger.info("Institution...")
@@ -221,17 +223,19 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         )
 
     @staticmethod
-    def remove_session_from_group(nwb_file_name: str, session_group_name: str):
+    def remove_session_from_group(
+        nwb_file_name: str, session_group_name: str, *args, **kwargs
+    ):
         query = {
             "session_group_name": session_group_name,
             "nwb_file_name": nwb_file_name,
         }
-        (SessionGroupSession & query).delete()
+        (SessionGroupSession & query).delete(*args, **kwargs)
 
     @staticmethod
-    def delete_group(session_group_name: str):
+    def delete_group(session_group_name: str, *args, **kwargs):
         query = {"session_group_name": session_group_name}
-        (SessionGroup & query).delete()
+        (SessionGroup & query).delete(*args, **kwargs)
 
     @staticmethod
     def get_group_sessions(session_group_name: str):
