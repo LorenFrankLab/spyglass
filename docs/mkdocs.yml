@@ -64,9 +64,8 @@ nav:
           - Curation: notebooks/11_Curation.ipynb
       - Position:
           - Position Trodes: notebooks/20_Position_Trodes.ipynb
-          - DLC From Scratch: notebooks/21_Position_DLC_1.ipynb
-          - DLC From Model: notebooks/22_Position_DLC_2.ipynb
-          - DLC Prediction: notebooks/23_Position_DLC_3.ipynb
+          - DLC Models: notebooks/21_DLC.ipynb
+          - Looping DLC: notebooks/22_DLC_Loop.ipynb
           - Linearization: notebooks/24_Linearization.ipynb
       - LFP:
           - LFP: notebooks/30_LFP.ipynb

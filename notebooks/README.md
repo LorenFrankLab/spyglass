@@ -63,8 +63,9 @@ clusterless decoding.
 
 The second notebook ([Clusterless Decoding](./42_Decoding_Clusterless.ipynb))
 shows a detailed example of how to decode the position of the animal from the
-spike waveform features. The third notebook ([Decoding](./43_Decoding.ipynb))
-shows how to decode the position of the animal from the sorted spikes.
+spike waveform features. The third notebook
+([Decoding](./43_Decoding_SortedSpikes.ipynb)) shows how to decode the position
+of the animal from the sorted spikes.
 
 ## Developer note
 
