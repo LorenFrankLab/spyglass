@@ -4,8 +4,6 @@ There are several paths one can take to these notebooks. The notebooks have
 two-digits in their names, the first of which indicates it's 'batch', as
 described in the categories below.
 
-<!-- TODO: Add links when names are finalized. -->
-
 ## 0. Intro
 
 Everyone should complete the [Setup](./00_Setup.ipynb) and
@@ -27,13 +25,13 @@ sorting.
 
 ## 2. Position Pipeline
 
-This series of notebooks covers tracking the position(s) of the animal. The user
-can employ two different methods:
+This series of notebooks covers tracking the position(s) of the animal. The
+user can employ two different methods:
 
-1. the simple [Trodes](20_Position_Trodes.ipynb) methods of tracking LEDs on the
-    animal's headstage
-2. [DLC (DeepLabCut)](./21_Position_DLC_1.ipynb) which uses a neural network to
-    track the animal's body parts
+1. the simple [Trodes](20_Position_Trodes.ipynb) methods of tracking LEDs on
+   the animal's headstage
+2. [DLC (DeepLabCut)](./21_DLC.ipynb) which uses a neural network to
+   track the animal's body parts.
 
 Either case can be followed by the
 [Linearization notebook](./24_Linearization.ipynb) if the user wants to
