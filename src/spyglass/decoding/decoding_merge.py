@@ -9,7 +9,9 @@ from non_local_detector.visualization.figurl_1D import create_1D_decode_view
 from non_local_detector.visualization.figurl_2D import create_2D_decode_view
 
 from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1  # noqa: F401
-from spyglass.decoding.v1.sorted_spikes import SortedSpikesDecodingV1  # noqa: F401
+from spyglass.decoding.v1.sorted_spikes import (
+    SortedSpikesDecodingV1,
+)  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, _Merge, logger
 
