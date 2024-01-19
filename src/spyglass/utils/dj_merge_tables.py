@@ -1,5 +1,6 @@
 import re
 from contextlib import nullcontext
+from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
 
@@ -52,20 +53,44 @@ class Merge(dj.Manual):
                         + f"\n\tActual  : {part.primary_key}"
                     )
         self._analysis_nwbfile = None
-
-    @property  # CB: This is a property to avoid circular import
-    def analysis_nwbfile(self):
-        if self._analysis_nwbfile is None:
-            from spyglass.common import AnalysisNwbfile  # noqa F401
-
-            self._analysis_nwbfile = AnalysisNwbfile
-        return self._analysis_nwbfile
+        self._source_class_dict = {}
 
     def _remove_comments(self, definition):
         """Use regular expressions to remove comments and blank lines"""
         return re.sub(  # First remove comments, then blank lines
             r"\n\s*\n", "\n", re.sub(r"#.*\n", "\n", definition)
         )
+
+    def _part_name(self, part=None):
+        """Return the CamelCase name of a part table"""
+        if not isinstance(part, str):
+            part = part.full_table_name
+        return to_camel_case(part.split("__")[-1].strip("`"))
+
+    def get_source_from_key(self, key: dict) -> str:
+        """Return the source of a given key"""
+        return self._part_name(self & key)
+
+    def parts(self, camel_case=False, *args, **kwargs) -> list:
+        """Return a list of part tables, add option for CamelCase names.
+
+        See DataJoint `parts` for additional arguments. If camel_case is True,
+        forces return of strings rather than objects.
+        """
+        self._ensure_dependencies_loaded()
+
+        if camel_case and kwargs.get("as_objects"):
+            logger.warning(
+                "Overriding as_objects=True to return CamelCase part names."
+            )
+            kwargs["as_objects"] = False
+
+        parts = super().parts(*args, **kwargs)
+
+        if camel_case:
+            parts = [self._part_name(part) for part in parts]
+
+        return parts
 
     @classmethod
     def _merge_restrict_parts(
@@ -294,7 +319,7 @@ class Merge(dj.Manual):
             keys = []  # empty to-be-inserted key
             for part in parts:  # check each part
                 part_parent = part.parents(as_objects=True)[-1]
-                part_name = to_camel_case(part.table_name.split("__")[-1])
+                part_name = cls._part_name(part)
                 if part_parent & row:  # if row is in part parent
                     if keys and mutual_exclusvity:  # if key from other part
                         raise ValueError(
@@ -475,6 +500,15 @@ class Merge(dj.Manual):
         for part_parent in part_parents:
             super().delete(part_parent, **kwargs)
 
+    @property
+    def analysis_nwbfile(self):
+        """Return the AnalysisNwbfile table. Avoid circular import."""
+        if self._analysis_nwbfile is None:
+            from spyglass.common import AnalysisNwbfile  # noqa F401
+
+            self._analysis_nwbfile = AnalysisNwbfile
+        return self._analysis_nwbfile
+
     @classmethod
     def fetch_nwb(
         cls,
@@ -527,6 +561,7 @@ class Merge(dj.Manual):
         join_master: bool = False,
         restrict_part=True,
         multi_source=False,
+        return_empties=False,
     ) -> dj.Table:
         """Retrieve part table from a restricted Merge table.
 
@@ -545,6 +580,8 @@ class Merge(dj.Manual):
             native part table.
         multi_source: bool
             Return multiple parts. Default False.
+        return_empties: bool
+            Default False. Return empty part tables.
 
         Returns
         ------
@@ -563,11 +600,11 @@ class Merge(dj.Manual):
             restricting
         """
         sources = [
-            to_camel_case(n.split("__")[-1].strip("`"))  # friendly part name
-            for n in cls._merge_restrict_parts(
+            cls._part_name(part)  # friendly part name
+            for part in cls._merge_restrict_parts(
                 restriction=restriction,
                 as_objects=False,
-                return_empties=False,
+                return_empties=return_empties,
                 add_invalid_restrict=False,
             )
         ]
@@ -595,7 +632,8 @@ class Merge(dj.Manual):
         cls,
         restriction: str = True,
         join_master: bool = False,
-        multi_source=False,
+        multi_source: bool = False,
+        return_empties: bool = False,
     ) -> dj.FreeTable:
         """Returns a list of part parents with restrictions applied.
 
@@ -610,6 +648,10 @@ class Merge(dj.Manual):
             Default True.
         join_master: bool
             Default False. Join part with Merge master to show uuid and source
+        multi_source: bool
+            Return multiple parents. Default False.
+        return_empties: bool
+            Default False. Return empty parent tables.
 
         Returns
         ------
@@ -620,7 +662,7 @@ class Merge(dj.Manual):
         part_parents = cls._merge_restrict_parents(
             restriction=restriction,
             as_objects=True,
-            return_empties=False,
+            return_empties=return_empties,
             add_invalid_restrict=False,
         )
 
@@ -636,6 +678,58 @@ class Merge(dj.Manual):
             part_parents = [cls * part for part in part_parents]
 
         return part_parents if multi_source else part_parents[0]
+
+    @property
+    def source_class_dict(self) -> dict:
+        if not self._source_class_dict:
+            module = getmodule(self)
+            self._source_class_dict = {
+                part_name: getattr(module, part_name)
+                for part_name in self.parts(camel_case=True)
+            }
+        return self._source_class_dict
+
+    def merge_get_parent_class(self, source: str) -> dj.Table:
+        """Return the class of the parent table for a given CamelCase source.
+
+        Parameters
+        ----------
+        source: Union[str, dict, dj.Table]
+            Accepts a CamelCase name of the source, or key as a dict, or a part
+            table.
+
+        Returns
+        -------
+        dj.Table
+            Class instance of the parent table, including class methods.
+        """
+
+        if isinstance(source, dj.Table):
+            source = self._part_name(source)
+        if isinstance(source, dict):
+            source = self.get_source_from_key(source)
+
+        ret = self.source_class_dict.get(source)
+
+        if not ret:
+            logger.error(
+                f"No source class found for {source}: \n\t"
+                + f"{self.parts(camel_case=True)}"
+            )
+        return ret
+
+    def merge_restrict_class(self, key: dict) -> dj.Table:
+        """Returns native parent class, restricted with key."""
+        parent_key = self.merge_get_parent(key).fetch("KEY", as_dict=True)
+
+        if len(parent_key) > 1:
+            raise ValueError(
+                f"Ambiguous entry. Data has mult rows in parent:\n\tData:{key}"
+                + f"\n\t{parent_key}"
+            )
+
+        parent_class = self.merge_get_parent_class(key)
+        return parent_class & parent_key
 
     @classmethod
     def merge_fetch(self, restriction: str = True, *attrs, **kwargs) -> list:

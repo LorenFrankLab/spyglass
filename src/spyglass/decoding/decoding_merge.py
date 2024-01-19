@@ -9,9 +9,7 @@ from non_local_detector.visualization.figurl_1D import create_1D_decode_view
 from non_local_detector.visualization.figurl_2D import create_2D_decode_view
 
 from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1  # noqa: F401
-from spyglass.decoding.v1.sorted_spikes import (
-    SortedSpikesDecodingV1,
-)  # noqa: F401
+from spyglass.decoding.v1.sorted_spikes import SortedSpikesDecodingV1  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, _Merge, logger
 
@@ -26,7 +24,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
     source: varchar(32)
     """
 
-    _source_class_dict = None
+    _source_class_dict = {}
 
     class ClusterlessDecodingV1(SpyglassMixin, dj.Part):
         definition = """
@@ -86,24 +84,47 @@ class DecodingOutput(_Merge, SpyglassMixin):
                     except (PermissionError, FileNotFoundError):
                         logger.warning(f"Unable to remove {path}, skipping")
 
-    @classmethod
-    def _get_source_class(cls, key):
-        if cls._source_class_dict is None:
-            cls._source_class_dict = {}
-            module = inspect.getmodule(cls)
-            for part_name in cls.parts():
+    @property
+    def source_class_dict(self) -> dict:
+        """Dictionary of source class names to source classes
+
+        {
+            'ClusterlessDecodingV1': spy...ClusterlessDecodingV1,
+             'SortedSpikesDecodingV1': spy...SortedSpikesDecodingV1
+        }
+
+        Returns
+        -------
+        dict
+            Dictionary of source class names to source classes
+        """
+        if not self._source_class_dict:
+            self._ensure_dependencies_loaded()
+            module = inspect.getmodule(self)
+            for part_name in self.parts():
                 part_name = to_camel_case(part_name.split("__")[-1].strip("`"))
                 part = getattr(module, part_name)
-                cls._source_class_dict[part_name] = part
+                self._source_class_dict[part_name] = part
+        return self._source_class_dict
 
-        source = (cls & key).fetch1("source")
-        return cls._source_class_dict[source]
+    @classmethod
+    def _get_source_class(cls, key):
+        # CB: By making this a property, we can generate the source_class_dict
+        #     without a key. Previously failed on empty table
+        #     This demonstrates pipeline-specific implementation. See also
+        #     merge_restrict_class edits that centralize this logic.
+        return cls.source_class_dict[(cls & key).fetch1("source")]
 
     @classmethod
     def load_results(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
         source_class = cls._get_source_class(key)
         return (source_class & decoding_selection_key).load_results()
+
+    def load_results_new(cls, key):
+        # CB: Please test with populated database. If this works, all Merge
+        #     tables can inherit this get_parent_class method for similar
+        return cls.merge_restrict_class(key).load_results()
 
     @classmethod
     def load_model(cls, key):
