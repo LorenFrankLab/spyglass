@@ -1,5 +1,8 @@
+import copy
+
 import datajoint as dj
 import pynwb
+from datajoint.utils import to_camel_case
 
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
@@ -19,6 +22,7 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
+        orig_key = copy.deepcopy(key)
         nwb_file_abs_path = Nwbfile.get_abs_path(key["nwb_file_name"])
 
         with pynwb.NWBHDF5IO(
@@ -30,6 +34,14 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
                 self.insert1(key, skip_duplicates=True)
             else:
                 logger.warn("No units found in NWB file")
+
+        from spyglass.spikesorting.merge import SpikeSortingOutput
+
+        part_name = to_camel_case(self.table_name.split("__")[-1])
+        # TODO: The next line belongs in a merge table function
+        SpikeSortingOutput._merge_insert(
+            [orig_key], part_name=part_name, skip_duplicates=True
+        )
 
     @classmethod
     def get_recording(cls, key):
