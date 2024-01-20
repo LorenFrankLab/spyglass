@@ -61,7 +61,8 @@ class Merge(dj.Manual):
             r"\n\s*\n", "\n", re.sub(r"#.*\n", "\n", definition)
         )
 
-    def _part_name(self, part=None):
+    @staticmethod
+    def _part_name(part=None):
         """Return the CamelCase name of a part table"""
         if not isinstance(part, str):
             part = part.full_table_name
