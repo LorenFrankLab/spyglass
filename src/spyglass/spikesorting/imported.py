@@ -16,6 +16,8 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
     object_id: varchar(40)
     """
 
+    _nwb_table = Nwbfile
+
     def make(self, key):
         nwb_file_abs_path = Nwbfile.get_abs_path(key["nwb_file_name"])
 
