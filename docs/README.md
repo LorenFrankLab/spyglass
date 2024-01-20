@@ -55,3 +55,6 @@ The following items can be commented out in `mkdocs.yml` to reduce build time:
 - `mkdocs-jupyter`: Generates tutorial pages from notebooks.
 
 To end the process in your console, use `ctrl+c`.
+
+If your new submodule is causing a build error (e.g., "Could not collect ..."),
+you may need to add `__init__.py` files to the submodule directories.
