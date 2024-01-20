@@ -182,7 +182,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
                 },
                 replace=True,
             )
-        elif not np.isclose(tmp_valid_times[0], lfp_valid_times).all():
+        elif not np.allclose(tmp_valid_times[0], lfp_valid_times):
             raise ValueError(
                 "previously saved lfp times do not match current times"
             )
