@@ -174,10 +174,13 @@ def get_position_obj(nwbfile):
     -------
     pynwb.behavior.Position object
     """
+    ret = []
     for obj in nwbfile.processing["behavior"].data_interfaces.values():
         if isinstance(obj, pynwb.behavior.Position):
-            return obj
-    return None
+            ret.append(obj)
+    if len(ret) > 1: 
+        raise ValueError(f"Found more than one position object in {nwbfile}")
+    return ret[0] if ret and len(ret) else None
 
 
 def get_raw_eseries(nwbfile):
