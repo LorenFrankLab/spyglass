@@ -13,6 +13,7 @@
 - Add Spyglass logger. #730
 - IntervalList: Add secondary key `pipeline` #742
 - Increase pytest coverage for `common`, `lfp`, and `utils`. #743
+- Update docs to reflect new notebooks. #776
 
 ### Pipelines
 

@@ -225,7 +225,7 @@ ContFragClusterlessClassifier(**model_params["decoding_params"])
 # +
 from non_local_detector.environment import Environment
 
-# Environment?
+# ?Environment
 # -
 
 # ## Decoding

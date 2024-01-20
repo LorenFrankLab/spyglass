@@ -16,9 +16,6 @@ theme:
   favicon: images/Spyglass.svg
   features:
     - toc.follow
-    # - navigation.expand # CBroz1: removed bc long tutorial list hides rest
-    # - toc.integrate
-    # - navigation.sections
     - navigation.top
     - navigation.instant # saves loading time - 1 browser page
     - navigation.tracking # even with above, changes URL by section
@@ -55,27 +52,29 @@ nav:
       - Database Management: misc/database_management.md
   - Tutorials:
       - Overview: notebooks/index.md
-      - General:
+      - Intro:
           - Setup: notebooks/00_Setup.ipynb
           - Insert Data: notebooks/01_Insert_Data.ipynb
           - Data Sync: notebooks/02_Data_Sync.ipynb
           - Merge Tables: notebooks/03_Merge_Tables.ipynb
-      - Ephys:
-          - Spike Sorting: notebooks/10_Spike_Sorting.ipynb
+          - Config Populate: notebooks/04_PopulateConfigFile.ipynb
+      - Spikes:
+          - Spike Sorting V0: notebooks/10_Spike_SortingV0.ipynb
+          - Spike Sorting V1: notebooks/10_Spike_SortingV1.ipynb
           - Curation: notebooks/11_Curation.ipynb
-          - LFP: notebooks/12_LFP.ipynb
-          - Theta: notebooks/14_Theta.ipynb
       - Position:
           - Position Trodes: notebooks/20_Position_Trodes.ipynb
-          - DLC From Scratch: notebooks/21_Position_DLC_1.ipynb
-          - DLC From Model: notebooks/22_Position_DLC_2.ipynb
-          - DLC Prediction: notebooks/23_Position_DLC_3.ipynb
+          - DLC Models: notebooks/21_DLC.ipynb
+          - Looping DLC: notebooks/22_DLC_Loop.ipynb
           - Linearization: notebooks/24_Linearization.ipynb
-      - Combined:
-          - Ripple Detection: notebooks/30_Ripple_Detection.ipynb
-          - Extract Mark Indicators: notebooks/31_Extract_Mark_Indicators.ipynb
-          - Decoding with GPUs: notebooks/32_Decoding_with_GPUs.ipynb
-          - Decoding Clusterless: notebooks/33_Decoding_Clusterless.ipynb
+      - LFP:
+          - LFP: notebooks/30_LFP.ipynb
+          - Theta: notebooks/31_Theta.ipynb
+          - Ripple Detection: notebooks/32_Ripple_Detection.ipynb
+      - Decoding:
+          - Extract Clusterless: notebooks/41_Extracting_Clusterless_Waveform_Features.ipynb
+          - Decoding Clusterless: notebooks/42_Decoding_Clusterless.ipynb
+          - Decoding Sorted Spikes: notebooks/43_Decoding_SortedSpikes.ipynb
   - API Reference: api/ # defer to gen-files + literate-nav
   - How to Contribute: contribute.md
   - Change Log: CHANGELOG.md

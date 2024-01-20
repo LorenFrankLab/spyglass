@@ -41,7 +41,7 @@ dj.config.load(
 )  # load config for database connection info
 # -
 
-# First, if you haven't inserted the the `mediumnwb20230802.nwb` file into the database (see [01_Data_Insert](01_Data_Insert.ipynb)), you should do so now. This is the file that we will use for the decoding tutorials.
+# First, if you haven't inserted the the `mediumnwb20230802.wnb` file into the database, you should do so now. This is the file that we will use for the decoding tutorials.
 #
 # It is a truncated version of the full NWB file, so it will run faster, but bigger than the minirec file we used in the previous tutorials so that decoding makes sense.
 
@@ -155,7 +155,7 @@ sorting_ids = (
 for sorting_id in sorting_ids:
     try:
         sgs.CurationV1.insert_curation(sorting_id=sorting_id)
-    except KeyError as e:
+    except KeyError:
         pass
 
 SpikeSortingOutput.insert(

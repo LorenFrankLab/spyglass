@@ -108,7 +108,7 @@ class LabMember(SpyglassMixin, dj.Manual):
 
         Parameters
         ----------
-        user: str
+        dj_user: str
             The datajoint user name.
 
         Returns
