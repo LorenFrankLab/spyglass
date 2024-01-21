@@ -52,7 +52,6 @@ class Merge(dj.Manual):
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
                     )
-        self._analysis_nwbfile = None
         self._source_class_dict = {}
 
     def _remove_comments(self, definition):
@@ -519,7 +518,10 @@ class Merge(dj.Manual):
         *attrs,
         **kwargs,
     ):
-        """Return the AnalysisNwbfile file linked in the source.
+        """Return the (Analysis)Nwbfile file linked in the source.
+
+        Relies on SpyglassMixin._nwb_table_tuple to determine the table to
+        fetch from and the appropriate path attribute to return.
 
         Parameters
         ----------
@@ -548,7 +550,7 @@ class Merge(dj.Manual):
             nwbs.extend(
                 fetch_nwb(
                     part_parent,
-                    (cls().analysis_nwbfile, "analysis_file_abs_path"),
+                    cls()._nwb_table_tuple,
                     *attrs,
                     **kwargs,
                 )
