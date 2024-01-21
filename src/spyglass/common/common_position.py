@@ -352,13 +352,17 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         dt = np.median(np.diff(time))
         sampling_rate = 1 / dt
 
-        # Define LEDs
-        if led1_is_front:
-            front_LED = position[:, [0, 1]].astype(float)
-            back_LED = position[:, [2, 3]].astype(float)
+        if position.shape[1] < 4:
+            front_LED = position.astype(float)
+            back_LED = position.astype(float)
         else:
-            back_LED = position[:, [0, 1]].astype(float)
-            front_LED = position[:, [2, 3]].astype(float)
+            # If there are 4 columns, then there are 2 LEDs
+            if led1_is_front:
+                front_LED = position[:, [0, 1]].astype(float)
+                back_LED = position[:, [2, 3]].astype(float)
+            else:
+                back_LED = position[:, [0, 1]].astype(float)
+                front_LED = position[:, [2, 3]].astype(float)
 
         # Convert to cm
         back_LED *= meters_to_pixels * CM_TO_METERS
@@ -783,16 +787,21 @@ def _fix_col_names(spatial_df):
     DEFAULT_COLS = ["xloc", "yloc", "xloc2", "yloc2"]
     ONE_IDX_COLS = ["xloc1", "yloc1", "xloc2", "yloc2"]
     ZERO_IDX_COLS = ["xloc0", "yloc0", "xloc1", "yloc1"]
+    OTHER_DEFAULT_COLS = ["x", "y", "z"]
 
     input_cols = list(spatial_df.columns)
 
     has_default = all([c in input_cols for c in DEFAULT_COLS])
     has_0_idx = all([c in input_cols for c in ZERO_IDX_COLS])
     has_1_idx = all([c in input_cols for c in ONE_IDX_COLS])
+    has_other_default = all([c in input_cols for c in OTHER_DEFAULT_COLS])
 
     if has_default:
         # move the 4 position columns to front, continue
         spatial_df = spatial_df[DEFAULT_COLS]
+    elif has_other_default:
+        # move the 4 position columns to front, continue
+        spatial_df = spatial_df[OTHER_DEFAULT_COLS]
     elif has_0_idx:
         # move the 4 position columns to front, rename to default, continue
         spatial_df = spatial_df[ZERO_IDX_COLS]
