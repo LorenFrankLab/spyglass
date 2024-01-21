@@ -31,11 +31,14 @@ class SpyglassMixin:
         Alias for cautious_delete.
     """
 
-    _nwb_table_dict = {}
-    _delete_dependencies = []
-    _merge_delete_func = None
-    _session_pk = None
-    _member_pk = None
+    _nwb_table_dict = {}  # Dict mapping NWBFile table to path attribute name.
+    # _nwb_table = None # NWBFile table class, defined at the table level
+    _nwb_table_resolved = None  # NWBFiletable class, resolved here from above
+    _delete_dependencies = []  # Session, LabMember, LabTeam, delay import
+    _merge_delete_func = None  # delete_downstream_merge, delay import
+    # pks for delete permission check, assumed to be on field
+    _session_pk = None  # Session primary key. Mixin is ambivalent to Session pk
+    _member_pk = None  # LabMember primary key. Mixin ambivalent table structure
 
     # ------------------------------- fetch_nwb -------------------------------
 
@@ -58,6 +61,47 @@ class SpyglassMixin:
             }
         return self._nwb_table_dict
 
+    @property
+    def _nwb_table_tuple(self):
+        """NWBFile table class.
+
+        Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
+        Multiple copies for different purposes.
+
+        - _nwb_table may be user-set. Don't overwrite.
+        - _nwb_table_resolved is set here from either _nwb_table or definition.
+        - _nwb_table_tuple is used to cache result of _nwb_table_resolved and
+            return the appropriate path_attr from _table_dict above.
+        """
+        if not self._nwb_table_resolved:
+            from spyglass.common.common_nwbfile import (  # noqa F401
+                AnalysisNwbfile,
+                Nwbfile,
+            )
+
+            if hasattr(self, "_nwb_table"):
+                self._nwb_table_resolved = self._nwb_table
+
+            if not hasattr(self, "_nwb_table"):
+                self._nwb_table_resolved = (
+                    AnalysisNwbfile
+                    if "-> AnalysisNwbfile" in self.definition
+                    else Nwbfile
+                    if "-> Nwbfile" in self.definition
+                    else None
+                )
+
+            if getattr(self, "_nwb_table_resolved", None) is None:
+                raise NotImplementedError(
+                    f"{self.__class__.__name__} does not have a "
+                    "(Analysis)Nwbfile foreign key or _nwb_table attribute."
+                )
+
+        return (
+            self._nwb_table_resolved,
+            self._table_dict[self._nwb_table_resolved],
+        )
+
     def fetch_nwb(self, *attrs, **kwargs):
         """Fetch NWBFile object from relevant table.
 
@@ -68,30 +112,9 @@ class SpyglassMixin:
         '-> AnalysisNwbfile' in its definition can use a _nwb_table attribute to
         specify which table to use.
         """
-        _nwb_table_dict = self._table_dict
-        analysis_table, nwb_table = _nwb_table_dict.keys()
+        nwb_table, path_attr = self._nwb_table_tuple
 
-        if not hasattr(self, "_nwb_table"):
-            self._nwb_table = (
-                analysis_table
-                if "-> AnalysisNwbfile" in self.definition
-                else nwb_table
-                if "-> Nwbfile" in self.definition
-                else None
-            )
-
-        if getattr(self, "_nwb_table", None) is None:
-            raise NotImplementedError(
-                f"{self.__class__.__name__} does not have a (Analysis)Nwbfile "
-                "foreign key or _nwb_table attribute."
-            )
-
-        return fetch_nwb(
-            self,
-            (self._nwb_table, _nwb_table_dict[self._nwb_table]),
-            *attrs,
-            **kwargs,
-        )
+        return fetch_nwb(self, (nwb_table, path_attr), *attrs, **kwargs)
 
     # -------------------------------- delete ---------------------------------
 
