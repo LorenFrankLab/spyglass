@@ -64,12 +64,12 @@ class Merge(dj.Manual):
     def _part_name(part=None):
         """Return the CamelCase name of a part table"""
         if not isinstance(part, str):
-            part = part.full_table_name
+            part = part.table_name
         return to_camel_case(part.split("__")[-1].strip("`"))
 
     def get_source_from_key(self, key: dict) -> str:
         """Return the source of a given key"""
-        return self._part_name(self & key)
+        return self._part_name(self.merge_get_parent(key))
 
     def parts(self, camel_case=False, *args, **kwargs) -> list:
         """Return a list of part tables, add option for CamelCase names.
