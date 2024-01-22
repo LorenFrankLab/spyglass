@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from non_local_detector.models.base import ClusterlessDetector
+from ripple_detection import get_multiunit_population_firing_rate
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
@@ -418,3 +419,39 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             new_waveform_features.append(elec_waveform_features[is_in_interval])
 
         return new_spike_times, new_waveform_features
+
+    @classmethod
+    def get_spike_indicator(cls, key, time):
+        time = np.asarray(time)
+        min_time, max_time = time[[0, -1]]
+        spike_times = cls.load_spike_data(key)[0]
+        spike_indicator = np.zeros((len(time), len(spike_times)))
+
+        for ind, times in enumerate(spike_times):
+            times = times[np.logical_and(times >= min_time, times <= max_time)]
+            spike_indicator[:, ind] = np.bincount(
+                np.digitize(times, time[1:-1]),
+                minlength=time.shape[0],
+            )
+
+        return spike_indicator
+
+    @classmethod
+    def get_firing_rate(cls, key, time, multiunit=False):
+        spike_indicator = cls.get_spike_indicator(key, time)
+        if spike_indicator.ndim == 1:
+            spike_indicator = spike_indicator[:, np.newaxis]
+
+        sampling_frequency = 1 / np.median(np.diff(time))
+
+        if multiunit:
+            spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
+        return np.stack(
+            [
+                get_multiunit_population_firing_rate(
+                    indicator[:, np.newaxis], sampling_frequency
+                )
+                for indicator in spike_indicator.T
+            ],
+            axis=1,
+        )
