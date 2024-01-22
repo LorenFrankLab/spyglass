@@ -281,6 +281,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             model_params["decoding_kwargs"],
         )
 
+        if decoding_kwargs is None:
+            decoding_kwargs = {}
+
         (
             position_info,
             position_variable_names,
@@ -384,7 +387,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
         spike_times = []
         for merge_id in merge_ids:
-            nwb_file = SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0]
+            nwb_file = SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})[0]
 
             if "object_id" in nwb_file:
                 # v1 spikesorting

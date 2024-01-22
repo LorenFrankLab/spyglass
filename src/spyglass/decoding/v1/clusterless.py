@@ -289,6 +289,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             model_params["decoding_kwargs"],
         )
 
+        if decoding_kwargs is None:
+            decoding_kwargs = {}
+
         (
             position_info,
             position_variable_names,
