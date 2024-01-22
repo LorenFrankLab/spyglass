@@ -1,4 +1,5 @@
 import datajoint as dj
+from numpy import ndarray
 
 from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_session import Session  # noqa: F401
@@ -48,6 +49,9 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             as_dict=True
         )
         primary_key = Electrode.primary_key
+        if isinstance(electrode_list, ndarray):
+            # convert to list if it is an numpy array
+            electrode_list = list(electrode_list.astype(int).reshape(-1))
         for e in all_electrodes:
             # create a dictionary so we can insert the electrodes
             if e["electrode_id"] in electrode_list:

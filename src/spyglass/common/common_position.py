@@ -8,7 +8,6 @@ import pynwb
 import pynwb.behavior
 from position_tools import (
     get_angle,
-    get_centriod,
     get_distance,
     get_speed,
     get_velocity,
@@ -29,6 +28,12 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import raw_dir, video_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import deprecated_factory
+
+try:
+    from position_tools import get_centroid
+except ImportError:
+    logger.warning("Please update position_tools to >= 0.1.0")
+    from position_tools import get_centriod as get_centroid
 
 schema = dj.schema("common_position")
 
@@ -417,7 +422,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
             )
 
         # Calculate position, orientation, velocity, speed
-        position = get_centriod(back_LED, front_LED)  # cm
+        position = get_centroid(back_LED, front_LED)  # cm
 
         orientation = get_angle(back_LED, front_LED)  # radians
         is_nan = np.isnan(orientation)

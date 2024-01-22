@@ -2,8 +2,8 @@ import datajoint as dj
 import ndx_franklab_novela
 
 from spyglass.common.errors import PopulateException
-from spyglass.utils.dj_mixin import SpyglassMixin
-from spyglass.utils.logging import logger
+from spyglass.settings import test_mode
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_device")
@@ -154,25 +154,9 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
         all_values = DataAcquisitionDevice.fetch(
             "data_acquisition_device_name"
         ).tolist()
-        if name not in all_values:
-            # no entry with the same name exists, prompt user to add a new entry
-            logger.info(
-                f"\nData acquisition device '{name}' was not found in the "
-                f"database. The current values are: {all_values}. "
-                "Please ensure that the device you want to add does not already"
-                " exist in the database under a different name or spelling. "
-                "If you want to use an existing device in the database, "
-                "please change the corresponding Device object in the NWB file."
-                " Entering 'N' will raise an exception."
-            )
-            to_db = " to the database"
-            val = input(f"Add data acquisition device '{name}'{to_db}? (y/N)")
-            if val.lower() in ["y", "yes"]:
-                cls.insert1(new_device_dict, skip_duplicates=True)
-                return
-            raise PopulateException(
-                f"User chose not to add device '{name}'{to_db}."
-            )
+        if prompt_insert(name=name, all_values=all_values):
+            cls.insert1(new_device_dict, skip_duplicates=True)
+            return
 
         # Check if values provided match the values stored in the database
         db_dict = (
@@ -213,28 +197,11 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
         all_values = DataAcquisitionDeviceSystem.fetch(
             "data_acquisition_device_system"
         ).tolist()
-        if system not in all_values:
-            logger.info(
-                f"\nData acquisition device system '{system}' was not found in"
-                f" the database. The current values are: {all_values}. "
-                "Please ensure that the system you want to add does not already"
-                " exist in the database under a different name or spelling. "
-                "If you want to use an existing system in the database, "
-                "please change the corresponding Device object in the NWB file."
-                " Entering 'N' will raise an exception."
-            )
-            val = input(
-                f"Do you want to add data acquisition device system '{system}'"
-                + " to the database? (y/N)"
-            )
-            if val.lower() in ["y", "yes"]:
-                key = {"data_acquisition_device_system": system}
-                DataAcquisitionDeviceSystem.insert1(key, skip_duplicates=True)
-            else:
-                raise PopulateException(
-                    "User chose not to add data acquisition device system "
-                    + f"'{system}' to the database."
-                )
+        if prompt_insert(
+            name=system, all_values=all_values, table_type="system"
+        ):
+            key = {"data_acquisition_device_system": system}
+            DataAcquisitionDeviceSystem.insert1(key, skip_duplicates=True)
         return system
 
     @classmethod
@@ -264,30 +231,11 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
         all_values = DataAcquisitionDeviceAmplifier.fetch(
             "data_acquisition_device_amplifier"
         ).tolist()
-        if amplifier not in all_values:
-            logger.info(
-                f"\nData acquisition device amplifier '{amplifier}' was not "
-                f"found in the database. The current values are: {all_values}. "
-                "Please ensure that the amplifier you want to add does not "
-                "already exist in the database under a different name or "
-                "spelling. If you want to use an existing name in the database,"
-                " please change the corresponding Device object in the NWB "
-                "file. Entering 'N' will raise an exception."
-            )
-            val = input(
-                "Do you want to add data acquisition device amplifier "
-                + f"'{amplifier}' to the database? (y/N)"
-            )
-            if val.lower() in ["y", "yes"]:
-                key = {"data_acquisition_device_amplifier": amplifier}
-                DataAcquisitionDeviceAmplifier.insert1(
-                    key, skip_duplicates=True
-                )
-            else:
-                raise PopulateException(
-                    "User chose not to add data acquisition device amplifier "
-                    + f"'{amplifier}' to the database."
-                )
+        if prompt_insert(
+            name=amplifier, all_values=all_values, table_type="amplifier"
+        ):
+            key = {"data_acquisition_device_amplifier": amplifier}
+            DataAcquisitionDeviceAmplifier.insert1(key, skip_duplicates=True)
         return amplifier
 
 
@@ -576,27 +524,9 @@ class Probe(SpyglassMixin, dj.Manual):
         """
         probe_type = new_probe_type_dict["probe_type"]
         all_values = ProbeType.fetch("probe_type").tolist()
-        if probe_type not in all_values:
-            logger.info(
-                f"\nProbe type '{probe_type}' was not found in the database. "
-                f"The current values are: {all_values}. "
-                "Please ensure that the probe type you want to add does not "
-                "already exist in the database under a different name or "
-                "spelling. If you want to use an existing name in the "
-                "database, please change the corresponding Probe object in the "
-                "NWB file. Entering 'N' will raise an exception."
-            )
-            val = input(
-                f"Do you want to add probe type '{probe_type}' to the database?"
-                + " (y/N)"
-            )
-            if val.lower() in ["y", "yes"]:
-                ProbeType.insert1(new_probe_type_dict, skip_duplicates=True)
-                return
-            raise PopulateException(
-                f"User chose not to add probe type '{probe_type}' to the "
-                + "database."
-            )
+        if prompt_insert(probe_type, all_values, table="probe type"):
+            ProbeType.insert1(new_probe_type_dict, skip_duplicates=True)
+            return
 
         # else / entry exists: check whether the values provided match the
         # values stored in the database
@@ -738,3 +668,55 @@ class Probe(SpyglassMixin, dj.Manual):
             cls.Shank.insert1(shank, skip_duplicates=True)
         for electrode in elect_dict.values():
             cls.Electrode.insert1(electrode, skip_duplicates=True)
+
+
+# ---------------------------- Helper functions ----------------------------
+
+
+# Migrated down to reduce redundancy and centralize 'test_mode' check for pytest
+def prompt_insert(
+    name: str,
+    all_values: list,
+    table: str = "Data Acquisition Device",
+    table_type: str = None,
+) -> bool:
+    """Prompt user to add an item to the database. Return True if yes.
+
+    Assume insert during test mode.
+
+    Parameters
+    ----------
+    name : str
+        The name of the item to add.
+    all_values : list
+        List of all values in the database.
+    table : str, optional
+        The name of the table to add to, by default Data Acquisition Device
+    table_type : str, optional
+        The type of item to add, by default None. Data Acquisition Device X
+    """
+    if name in all_values:
+        return False
+
+    if test_mode:
+        return True
+
+    if table_type:
+        table_type += " "
+
+    logger.info(
+        f"{table}{table_type} '{name}' was not found in the"
+        f"database. The current values are: {all_values}.\n"
+        "Please ensure that the device you want to add does not already"
+        "exist in the database under a different name or spelling. If you"
+        "want to use an existing device in the database, please change the"
+        "corresponding Device object in the NWB file.\nEntering 'N' will "
+        "raise an exception."
+    )
+    msg = f"Do you want to add {table}{table_type} '{name}' to the database?"
+    if dj.utils.user_choice(msg).lower() in ["y", "yes"]:
+        return True
+
+    raise PopulateException(
+        f"User chose not to add {table}{table_type} '{name}' to the database."
+    )

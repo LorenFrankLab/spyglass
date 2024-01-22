@@ -1,7 +1,20 @@
 from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: E402
-from spyglass.decoding.visualization.core import (  # noqa: E402
-    create_interactive_1D_decoding_figurl,
-    create_interactive_2D_decoding_figurl,
-    make_multi_environment_movie,
-    make_single_environment_movie,
+from spyglass.decoding.v1.clusterless import (  # noqa: E402
+    ClusterlessDecodingSelection,
+    ClusterlessDecodingV1,
+    UnitWaveformFeaturesGroup,
+)
+from spyglass.decoding.v1.core import (
+    DecodingParameters,
+    PositionGroup,
+)  # noqa: E402
+from spyglass.decoding.v1.sorted_spikes import (  # noqa: E402
+    SortedSpikesDecodingSelection,
+    SortedSpikesDecodingV1,
+    SortedSpikesGroup,
+)
+from spyglass.decoding.v1.waveform_features import (  # noqa: E402
+    UnitWaveformFeatures,
+    UnitWaveformFeaturesSelection,
+    WaveformFeaturesParams,
 )

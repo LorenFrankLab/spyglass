@@ -3,9 +3,11 @@ import unittest
 
 import pynwb
 
-# NOTE: importing this calls spyglass.__init__ whichand spyglass.common.__init__ which both require the
-# DataJoint MySQL server to be already set up and running
-from spyglass.common import get_electrode_indices
+
+def get_electrode_indices(*args, **kwargs):
+    from spyglass.common import get_electrode_indices  # noqa: E402
+
+    return get_electrode_indices(*args, **kwargs)
 
 
 class TestGetElectrodeIndices(unittest.TestCase):
@@ -48,7 +50,7 @@ class TestGetElectrodeIndices(unittest.TestCase):
         )
         self.nwbfile.add_acquisition(eseries)
 
-    def test_nwbfile(self):
+    def test_electrode_nwbfile(self):
         ret = get_electrode_indices(self.nwbfile, [102, 105])
         assert ret == [2, 5]
 
