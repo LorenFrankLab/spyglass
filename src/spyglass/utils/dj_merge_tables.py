@@ -509,9 +509,8 @@ class Merge(dj.Manual):
             self._analysis_nwbfile = AnalysisNwbfile
         return self._analysis_nwbfile
 
-    @classmethod
     def fetch_nwb(
-        cls,
+        self,
         restriction: str = True,
         multi_source=False,
         disable_warning=False,
@@ -530,32 +529,8 @@ class Merge(dj.Manual):
         multi_source: bool
             Return from multiple parents. Default False.
         """
-        if not disable_warning:
-            _warn_on_restriction(table=cls, restriction=restriction)
 
-        part_parents = cls._merge_restrict_parents(
-            restriction=restriction,
-            return_empties=False,
-            add_invalid_restrict=False,
-        )
-
-        if not multi_source and len(part_parents) != 1:
-            raise ValueError(
-                f"{len(part_parents)} possible sources found in Merge Table:"
-                + " and ".join([p.full_table_name for p in part_parents])
-            )
-
-        nwbs = []
-        for part_parent in part_parents:
-            nwbs.extend(
-                fetch_nwb(
-                    part_parent,
-                    cls()._nwb_table_tuple,
-                    *attrs,
-                    **kwargs,
-                )
-            )
-        return nwbs
+        return self.merge_restrict_class(restriction).fetch_nwb()
 
     @classmethod
     def merge_get_part(
