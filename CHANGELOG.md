@@ -15,6 +15,7 @@
 - Increase pytest coverage for `common`, `lfp`, and `utils`. #743
 - Update docs to reflect new notebooks. #776
 - Add overview of Spyglass to docs. #779
+- LFPV1: Fix error for multiple lfp settings on same data #775
 
 ### Pipelines
 
