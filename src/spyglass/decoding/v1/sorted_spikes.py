@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from non_local_detector.models.base import SortedSpikesDetector
+from ripple_detection import get_multiunit_population_firing_rate
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
@@ -404,10 +405,46 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
 
         new_spike_times = []
-        for elec_spike_times in zip(spike_times):
+        for elec_spike_times in spike_times:
             is_in_interval = np.logical_and(
                 elec_spike_times >= min_time, elec_spike_times <= max_time
             )
             new_spike_times.append(elec_spike_times[is_in_interval])
 
         return new_spike_times
+
+    @classmethod
+    def get_spike_indicator(cls, key, time):
+        time = np.asarray(time)
+        min_time, max_time = time[[0, -1]]
+        spike_times = cls.load_spike_data(key)
+        spike_indicator = np.zeros((len(time), len(spike_times)))
+
+        for ind, times in enumerate(spike_times):
+            times = times[np.logical_and(times >= min_time, times <= max_time)]
+            spike_indicator[:, ind] = np.bincount(
+                np.digitize(times, time[1:-1]),
+                minlength=time.shape[0],
+            )
+
+        return spike_indicator
+
+    @classmethod
+    def get_firing_rate(cls, key, time, multiunit=False):
+        spike_indicator = cls.get_spike_indicator(key, time)
+        if spike_indicator.ndim == 1:
+            spike_indicator = spike_indicator[:, np.newaxis]
+
+        sampling_frequency = 1 / np.median(np.diff(time))
+
+        if multiunit:
+            spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
+        return np.stack(
+            [
+                get_multiunit_population_firing_rate(
+                    indicator[:, np.newaxis], sampling_frequency
+                )
+                for indicator in spike_indicator.T
+            ],
+            axis=1,
+        )
