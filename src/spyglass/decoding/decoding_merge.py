@@ -121,11 +121,6 @@ class DecodingOutput(_Merge, SpyglassMixin):
         source_class = cls._get_source_class(key)
         return (source_class & decoding_selection_key).load_results()
 
-    def load_results_new(cls, key):
-        # CB: Please test with populated database. If this works, all Merge
-        #     tables can inherit this get_parent_class method for similar
-        return cls.merge_restrict_class(key).load_results()
-
     @classmethod
     def load_model(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
