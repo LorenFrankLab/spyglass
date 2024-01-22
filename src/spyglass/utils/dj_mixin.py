@@ -226,7 +226,13 @@ class SpyglassMixin:
 
         user_name = LabMember().get_djuser_name(dj_user)
         for experimenter in set(experimenters):
-            if user_name not in LabTeam().get_team_members(experimenter):
+            # Check once with cache, if fails, reload and check again
+            # On eval as set, reload will only be called once
+            if user_name not in LabTeam().get_team_members(
+                experimenter
+            ) and user_name not in LabTeam().get_team_members(
+                experimenter, reload=True
+            ):
                 sess_w_exp = sess_summary & {self._member_pk: experimenter}
                 raise PermissionError(
                     f"User '{user_name}' is not on a team with '{experimenter}'"
@@ -259,7 +265,7 @@ class SpyglassMixin:
 
         merge_deletes = self._merge_del_func(
             self,
-            restriction=self.restriction,
+            restriction=self.restriction if self.restriction else None,
             dry_run=True,
             disable_warning=True,
         )

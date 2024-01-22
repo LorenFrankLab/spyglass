@@ -69,8 +69,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
 
         Parameters
         ----------
-        mark_type : str
-
+        waveform_features : list
         """
         supported_features = set(WAVEFORM_FEATURE_FUNCTIONS)
         return set(waveform_features).issubset(supported_features)

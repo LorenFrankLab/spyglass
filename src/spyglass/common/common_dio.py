@@ -50,7 +50,7 @@ class DIOEvents(SpyglassMixin, dj.Imported):
             key["dio_object_id"] = event_series.object_id
             self.insert1(key, skip_duplicates=True)
 
-    def plot_all_dio_events(self):
+    def plot_all_dio_events(self, return_fig=False):
         """Plot all DIO events in the session.
 
         Examples
@@ -117,3 +117,6 @@ class DIOEvents(SpyglassMixin, dj.Imported):
             plt.suptitle(f"DIO events in {nwb_file_names[0]}")
         else:
             plt.suptitle(f"DIO events in {', '.join(nwb_file_names)}")
+
+        if return_fig:
+            return plt.gcf()
