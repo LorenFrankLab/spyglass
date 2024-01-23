@@ -119,9 +119,10 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 @schema
 class UnitSelection(SpyglassMixin, dj.Manual):
     definition = """
-    # Units to be selected for downstream analysis
+    # Units selected from a sorting for downstream analysis
     -> SpikeSortingOutput
-    unit_group_name : varchar(40)
+    unit_group_name : varchar(40)   # Name of unit group
     ---
-    unit_group : blob
+    unit_group : blob               # List of unit IDs in the group
+    description : varchar(100)      # Description of the unit group
     """
