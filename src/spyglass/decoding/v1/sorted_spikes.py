@@ -356,7 +356,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         environment = SortedSpikesDecodingV1.load_environments(key)[0]
 
         position_df = SortedSpikesDecodingV1.load_position_info(key)[0]
-        position = np.asarray(position_df[["position_x", "position_y"]])
+        position_variable_names = (PositionGroup & key).fetch1(
+            "position_variables"
+        )
+        position = np.asarray(position_df[position_variable_names])
 
         linear_position_df = get_linearized_position(
             position=position,

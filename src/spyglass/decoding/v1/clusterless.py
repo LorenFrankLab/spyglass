@@ -22,13 +22,8 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.decoding.v1.core import (
-    DecodingParameters,
-    PositionGroup,
-)  # noqa: F401
-from spyglass.decoding.v1.waveform_features import (
-    UnitWaveformFeatures,
-)  # noqa: F401
+from spyglass.decoding.v1.core import DecodingParameters, PositionGroup  # noqa: F401
+from spyglass.decoding.v1.waveform_features import UnitWaveformFeatures  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, logger
@@ -365,7 +360,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         environment = ClusterlessDecodingV1.load_environments(key)[0]
 
         position_df = ClusterlessDecodingV1.load_position_info(key)[0]
-        position = np.asarray(position_df[["position_x", "position_y"]])
+        position_variable_names = (PositionGroup & key).fetch1(
+            "position_variables"
+        )
+        position = np.asarray(position_df[position_variable_names])
 
         linear_position_df = get_linearized_position(
             position=position,
