@@ -121,7 +121,7 @@ class UnitSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Units to be selected for downstream analysis
     -> SpikeSortingOutput
-    unit_group_name : varchar(30)
+    unit_group_name : varchar(40)
     ---
     unit_group : blob
     """
