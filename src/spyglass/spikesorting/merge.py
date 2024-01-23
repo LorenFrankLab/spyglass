@@ -114,3 +114,14 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             ],
             axis=1,
         )
+
+
+@schema
+class UnitSelection(SpyglassMixin, dj.Manual):
+    definition = """
+    # Units to be selected for downstream analysis
+    -> SpikeSortingOutput
+    unit_group_name : varchar(30)
+    ---
+    unit_group : blob
+    """
