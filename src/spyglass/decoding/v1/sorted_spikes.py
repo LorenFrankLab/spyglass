@@ -448,3 +448,66 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             ],
             axis=1,
         )
+
+    def spike_times_sorted_by_place_field_peak(self, time_slice=None):
+        if time_slice is None:
+            time_slice = slice(-np.inf, np.inf)
+
+        spike_times = self.load_spike_data(self.proj())
+        classifier = self.load_model()
+
+        new_spike_times = {}
+
+        for encoding_model in classifier.encoding_model_:
+            place_fields = np.asarray(
+                classifier.encoding_model_[encoding_model]["place_fields"]
+            )
+            neuron_sort_ind = np.argsort(
+                np.nanargmax(place_fields, axis=1).squeeze()
+            )
+            new_spike_times[encoding_model] = [
+                spike_times[neuron_ind][
+                    np.logical_and(
+                        spike_times[neuron_ind] >= time_slice.start,
+                        spike_times[neuron_ind] <= time_slice.stop,
+                    )
+                ]
+                for neuron_ind in neuron_sort_ind
+            ]
+
+    def get_ahead_behind_distance(self):
+        import non_local_detector.analysis as analysis
+
+        classifier = self.load_model()
+        results = self.load_results()
+        posterior = results.acausal_posterior.unstack("state_bins").sum("state")
+
+        # TODO: Handle intervals, store in table
+
+        if classifier.environments[0].track_graph is not None:
+            linear_position_info = self.load_linear_position_info(self.proj())
+
+            traj_data = analysis.get_trajectory_data(
+                posterior=posterior,
+                track_graph=classifier.environments[0].track_graph,
+                decoder=classifier,
+                actual_projected_position=linear_position_info[
+                    ["projected_x_position", "projected_y_position"]
+                ],
+                track_segment_id=linear_position_info["track_segment_id"],
+                actual_orientation=linear_position_info["orientation"],
+            )
+
+            return analysis.get_ahead_behind_distance(
+                classifier.environments[0].track_graph, *traj_data
+            )
+        else:
+            position_info = self.load_position_info(self.proj())
+            map_position = analysis.maximum_a_posteriori_estimate(posterior)
+
+            return analysis.get_ahead_behind_distance2D(
+                position_info[["position_x", "position_y"]].to_numpy(),
+                position_info["orientation"].to_numpy(),
+                map_position,
+                classifier.environments[0].track_graphDD,
+            )

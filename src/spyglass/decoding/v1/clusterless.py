@@ -455,3 +455,40 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             ],
             axis=1,
         )
+
+    def get_ahead_behind_distance(self):
+        import non_local_detector.analysis as analysis
+
+        classifier = self.load_model()
+        results = self.load_results()
+        posterior = results.acausal_posterior.unstack("state_bins").sum("state")
+
+        # TODO: Handle intervals, store in table
+
+        if classifier.environments[0].track_graph is not None:
+            linear_position_info = self.load_linear_position_info(self.proj())
+
+            traj_data = analysis.get_trajectory_data(
+                posterior=posterior,
+                track_graph=classifier.environments[0].track_graph,
+                decoder=classifier,
+                actual_projected_position=linear_position_info[
+                    ["projected_x_position", "projected_y_position"]
+                ],
+                track_segment_id=linear_position_info["track_segment_id"],
+                actual_orientation=linear_position_info["orientation"],
+            )
+
+            return analysis.get_ahead_behind_distance(
+                classifier.environments[0].track_graph, *traj_data
+            )
+        else:
+            position_info = self.load_position_info(self.proj())
+            map_position = analysis.maximum_a_posteriori_estimate(posterior)
+
+            return analysis.get_ahead_behind_distance2D(
+                position_info[["position_x", "position_y"]].to_numpy(),
+                position_info["orientation"].to_numpy(),
+                map_position,
+                classifier.environments[0].track_graphDD,
+            )
