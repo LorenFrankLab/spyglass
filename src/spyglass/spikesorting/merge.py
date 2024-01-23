@@ -115,7 +115,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 
 
 @schema
-class UnitSelection(SpyglassMixin, dj.Manual):
+class UnitInclusion(SpyglassMixin, dj.Manual):
     definition = """
     # Units selected from a sorting for downstream analysis
     -> SpikeSortingOutput
