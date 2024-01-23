@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 import datajoint as dj
+import non_local_detector.analysis as analysis
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -479,8 +480,6 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             ]
 
     def get_ahead_behind_distance(self):
-        import non_local_detector.analysis as analysis
-
         classifier = self.load_model()
         results = self.load_results()
         posterior = results.acausal_posterior.unstack("state_bins").sum("state")
@@ -488,7 +487,15 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         # TODO: Handle intervals, store in table
 
         if classifier.environments[0].track_graph is not None:
-            linear_position_info = self.load_linear_position_info(self.proj())
+            linear_position_info = self.load_linear_position_info(
+                self.fetch1("KEY")
+            )
+
+            orientation_name = (
+                "orientation"
+                if "orientation" in linear_position_info.columns
+                else "head_orientation"
+            )
 
             traj_data = analysis.get_trajectory_data(
                 posterior=posterior,
@@ -498,14 +505,14 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                     ["projected_x_position", "projected_y_position"]
                 ],
                 track_segment_id=linear_position_info["track_segment_id"],
-                actual_orientation=linear_position_info["orientation"],
+                actual_orientation=linear_position_info[orientation_name],
             )
 
             return analysis.get_ahead_behind_distance(
                 classifier.environments[0].track_graph, *traj_data
             )
         else:
-            position_info = self.load_position_info(self.proj())
+            position_info = self.load_position_info(self.fetch1("KEY"))
             map_position = analysis.maximum_a_posteriori_estimate(posterior)
 
             return analysis.get_ahead_behind_distance2D(
