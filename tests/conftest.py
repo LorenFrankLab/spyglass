@@ -78,7 +78,7 @@ def pytest_configure(config):
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
 
     SERVER = DockerMySQLManager(
-        restart=False,
+        restart=TEARDOWN,
         shutdown=TEARDOWN,
         null_server=config.option.no_server,
         verbose=VERBOSE,
@@ -162,10 +162,13 @@ def server(request, teardown):
 @pytest.fixture(scope="session")
 def dj_conn(request, server, verbose, teardown):
     """Fixture for datajoint connection."""
-    config_file = "dj_local_conf.json_pytest"
+    config_file = "dj_local_conf.json_test"
+    if Path(config_file).exists():
+        os.remove(config_file)
 
     dj.config.update(server.creds)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
+    dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)
     dj.conn()
     yield dj.conn()

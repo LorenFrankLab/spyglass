@@ -17,6 +17,7 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
@@ -369,7 +370,9 @@ class LFPSelection(SpyglassMixin, dj.Manual):
 
         """
         # remove the session and then recreate the session and Electrode list
-        (LFPSelection() & {"nwb_file_name": nwb_file_name}).delete()
+        (LFPSelection() & {"nwb_file_name": nwb_file_name}).delete(
+            safemode=not test_mode
+        )
         # check to see if the user allowed the deletion
         if (
             len((LFPSelection() & {"nwb_file_name": nwb_file_name}).fetch())

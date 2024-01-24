@@ -57,7 +57,7 @@ class RippleLFPSelection(SpyglassMixin, dj.Manual):
     def validate_key(key):
         filter_name = (LFPBandV1 & key).fetch1("filter_name")
         if "ripple" not in filter_name.lower():
-            raise UserWarning("Please use a ripple filter")
+            raise ValueError("Please use a ripple filter")
 
     @staticmethod
     def set_lfp_electrodes(

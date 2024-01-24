@@ -22,8 +22,13 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.decoding.v1.core import DecodingParameters, PositionGroup  # noqa: F401
-from spyglass.decoding.v1.waveform_features import UnitWaveformFeatures  # noqa: F401
+from spyglass.decoding.v1.core import (
+    DecodingParameters,
+    PositionGroup,
+)  # noqa: F401
+from spyglass.decoding.v1.waveform_features import (
+    UnitWaveformFeatures,
+)  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, logger

@@ -184,8 +184,6 @@ class SpyglassConfig:
                 ).replace('"', "")
 
                 config_dirs.update({dir_env_fmt: str(dir_location)})
-                # if "kachery" in prefix and dir == "temp":
-                #     __import__("pdb").set_trace()
 
         kachery_zone_dict = {
             "KACHERY_ZONE": (
@@ -261,7 +259,11 @@ class SpyglassConfig:
 
         if set_stores:
             if mismatch_raw or mismatch_analysis:
-                logger.warning("Setting DJ stores resolve mismatch.")
+                logger.warning(
+                    "Setting config DJ stores to resolve mismatch.\n\t"
+                    + f"raw     : {self.raw_dir}\n\t"
+                    + f"analysis: {self.analysis_dir}"
+                )
             dj.config.update(self._dj_stores)
             return
 
@@ -542,6 +544,14 @@ sg_config.load_config(on_startup=True)
 if sg_config.load_failed:  # Failed to load
     logger.warning("Failed to load SpyglassConfig. Please set up config file.")
     config = {}  # Let __intit__ fetch empty config for first time setup
+    config, prepopulate, test_mode, base_dir, raw_dir, analysis_dir = (
+        {},
+        False,
+        False,
+        None,
+        None,
+        None,
+    )
 else:
     config = sg_config.config
     base_dir = sg_config.base_dir
