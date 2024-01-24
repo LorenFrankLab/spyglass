@@ -15,6 +15,9 @@
 # # Setup
 #
 
+# ## Intro
+#
+
 # Welcome to [Spyglass](https://lorenfranklab.github.io/spyglass/0.4/),
 # a [DataJoint](https://github.com/datajoint/datajoint-python/)
 # pipeline maintained by the [Frank Lab](https://franklab.ucsf.edu/) at UCSF.
@@ -30,7 +33,8 @@
 
 # ## Local environment
 #
-# Codespace users can skip this step. Frank Lab members should first follow
+
+# JupyterHub users can skip this step. Frank Lab members should first follow
 # 'rec to nwb overview' steps on Google Drive to set up an ssh connection.
 #
 # For local use, download and install ...
@@ -73,7 +77,9 @@
 #
 # _Note:_ Spyglass is also installable via
 # [pip](<https://en.wikipedia.org/wiki/Pip_(package_manager)>)
-# and [pypi](https://pypi.org/project/spyglass-neuro/) with `pip install spyglass-neuro`, but downloading from GitHub will also other files accessible.
+# and [pypi](https://pypi.org/project/spyglass-neuro/) with
+# `pip install spyglass-neuro`, but downloading from GitHub will also download
+# other files.
 #
 # Next, within VSCode,
 # [select the kernel](https://code.visualstudio.com/docs/datascience/jupyter-kernel-management)
@@ -84,108 +90,44 @@
 # details on each of these programs and the role they play in using the pipeline.
 #
 
-# ## Database Connection
+# ## Database
 #
 
 # You have a few options for databases.
 #
 # 1. Connect to an existing database.
-# 2. Use GitHub Codespaces (coming soon...)
-# 3. Run your own database with [Docker](#running-your-own-database)
+# 2. Run your own database with [Docker](#running-your-own-database)
+# 3. JupyterHub (coming soon...)
 #
-# Once your database is set up, be sure to configure the connection
-# with your `dj_local_conf.json` file.
+# Your choice above should result in a set of credentials, including host name,
+# host port, user name, and password. Note these for the next step.
+#
+# <details><summary>Note for MySQL 8 users, including Frank Lab members</summary>
+#
+# Using a MySQL 8 server, like the server hosted by the Frank Lab, will
+# require the pre-release version of DataJoint to change one's password.
+#
+# ```bash
+# # cd /location/for/datajoint/source/files/
+# git clone https://github.com/datajoint/datajoint-python
+# pip install ./datajoint-python
+# ```
+#
+# </details>
 #
 
 # ### Existing Database
 #
 
-# Members of the Frank Lab will need to use DataJoint 0.14.2 (currently in
-# pre-release) in order to change their password on the MySQL 8 server. DataJoint
-# 0.14.2
+# Connecting to an existing database will require a user name and password.
+# Please contact your database administrator for this information.
 #
-# ```bash
-# git clone https://github.com/datajoint/datajoint-python
-# pip install ./datajoint-python
-# ```
-#
-# Members of the lab can run the `dj_config.py` helper script to generate a config
-# like the one below.
-#
-# ```bash
-# # cd spyglass
-# python config/dj_config.py <username> <base_path> <output_filename>
-# ```
-#
-# Outside users should copy/paste `dj_local_conf_example` and adjust values
-# accordingly.
-#
-# The base path (formerly `SPYGLASS_BASE_DIR`) is the directory where all data
-# will be saved. See also
-# [docs](https://lorenfranklab.github.io/spyglass/0.4/installation/) for more
-# information on subdirectories.
-#
-# A different `output_filename` will save different files:
-#
-# - `dj_local_conf.json`: Recommended. Used for tutorials. A file in the current
-#   directory DataJoint will automatically recognize when a Python session is
-#   launched from this directory.
-# - `.datajoint_config.json` or no input: A file in the user's home directory
-#   that will be referenced whenever no local version (see above) is present.
-# - Anything else: A custom name that will need to be loaded (e.g.,
-#   `dj.load('x')`) for each python session.
-#
-# The config will be a `json` file like the following.
-#
-# ```json
-# {
-#     "database.host": "lmf-db.cin.ucsf.edu",
-#     "database.user": "<username>",
-#     "database.password": "Not recommended for shared machines",
-#     "database.port": 3306,
-#     "database.use_tls": true,
-#     "enable_python_native_blobs": true,
-#     "filepath_checksum_size_limit": 1 * 1024**3,
-#     "loglevel": "INFO",
-#     "stores": {
-#         "raw": {
-#             "protocol": "file",
-#             "location": "/stelmo/nwb/raw",
-#             "stage": "/stelmo/nwb/raw"
-#         },
-#         "analysis": {
-#             "protocol": "file",
-#             "location": "/stelmo/nwb/analysis",
-#             "stage": "/stelmo/nwb/analysis"
-#         }
-#     },
-#     "custom": {
-#         "spyglass_dirs": {
-#             "base": "/stelmo/nwb/"
-#         }
-#     }
-# }
-# ```
-#
-# Spyglass will use the log level present in your DataJoint config to decide the
-# appropriate logging level for this session. To change the messages you see,
-# select from one of [these options](https://docs.python.org/3/library/logging.html#levels).
-#
-# If you see an error saying `Could not find SPYGLASS_BASE_DIR`, try loading your
-# config before importing Spyglass.
-#
-# ```python
-# import datajoint as dj
-# dj.load('/path/to/config')
-# import spyglass
-# ```
+# Frank Lab members should contact Chris.
 #
 
-# ### Running your own database
+# ### Running your own database with Docker
 #
 
-# #### Setup Docker
-#
 # - First, [install Docker](https://docs.docker.com/engine/install/).
 # - Add yourself to the
 #   [`docker` group](https://docs.docker.com/engine/install/linux-postinstall/) so
@@ -195,10 +137,6 @@
 #   ```bash
 #   docker pull datajoint/mysql:8.0
 #   ```
-#
-# _Note_: For this demo, MySQL version won't matter. Some
-# [database management](https://lorenfranklab.github.io/spyglass/latest/misc/database_management/#mysql-version)
-# features of Spyglass, however, expect MySQL >= 8.
 #
 # - When run, this is referred to as a 'Docker container'
 # - Next start the container with a couple additional pieces of info...
@@ -219,59 +157,81 @@
 #   docker run --name spyglass-db -v dj-vol:/var/lib/mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql
 #   ```
 #
-# #### Configure
+# Docker credentials are as follows:
 #
-# The `dj_local_conf_example.json` contains all the defaults for a Docker
-# connection. Simply rename to `dj_local_conf.json` and modify the contents
-# accordingly. This includes the host, password and user. For Spyglass, you'll
-# want to set your base path under `custom`:
-#
-# ```json
-# {
-#   "database.host": "localhost",
-#   "database.password": "tutorial",
-#   "database.user": "root",
-#   "custom": {
-#     "database.prefix": "username_",
-#     "spyglass_dirs": {
-#       "base": "/your/base/path"
-#     }
-#   }
-# }
-# ```
+# - Host: localhost
+# - Password: tutorial
+# - User: root
+# - Port: 3306
 #
 
-# ### Loading the config
+# ### Config and Connecting to the database
 #
-# We can check that the paths are correctly set up by loading the config from
-# the main Spyglass directory.
+
+# Spyglass can load settings from either a DataJoint config file (recommended) or
+# environmental variables. The code below will generate a config file, but we
+# first need to decide a 'base path'. This is generally the parent directory
+# where the data will be stored, with subdirectories for `raw`, `analysis`, and
+# other data folders. If they don't exist already, they will be created.
+#
+# The function below will create a config file (`~/.datajoint.config` if global,
+# `./dj_local_conf.json` if local). Local is recommended for the notebooks, as
+# each will start by loading this file. Custom json configs can be saved elsewhere, but will need to be loaded in startup with
+# `dj.config.load('your-path')`.
+#
+# To point spyglass to a folder elsewhere (e.g., an external drive for waveform
+# data), simply edit the json file. Note that the `raw` and `analysis` paths
+# appear under both `stores` and `custom`.
 #
 
 # +
 import os
-import datajoint as dj
+from spyglass.settings import SpyglassConfig
 
+# change to the root directory of the project
 if os.path.basename(os.getcwd()) == "notebooks":
     os.chdir("..")
-dj.config.load("dj_local_conf.json")
 
-from spyglass.settings import config
-
-config
+SpyglassConfig().save_dj_config(
+    save_method="local",  # global or local
+    base_dir="/path/like/stelmo/nwb/",
+    database_user="your username",
+    database_password="your password",  # remove this line for chared machines
+    database_host="localhost or lmf-db.cin.ucsf.edu",
+    database_port=3306,
+    set_password=False,
+)
 # -
 
-# ### Connect
-#
-# Now, you should be able to connect to the database you set up.
-#
-# Let's demonstrate with an example table:
+# If you used either a local or global save method, we can check the connection
+# to the database with ...
 #
 
 # +
+import datajoint as dj
+
+dj.conn()  # test connection
+dj.config  # check config
+
 from spyglass.common import Nwbfile
 
 Nwbfile()
 # -
+
+# If you see an error saying `Could not find SPYGLASS_BASE_DIR`, try loading your
+# config before importing Spyglass, try setting this as an environmental variable
+# before importing Spyglass.
+#
+# ```python
+# os.environ['SPYGLASS_BASE_DIR'] = '/your/base/path'
+#
+# import spyglass
+# from spyglass.settings import SpyglassConfig
+# import datajoint as dj
+# print(SpyglassConfig().config)
+# dj.config.save_local() # or global
+# ```
+#
 
 # # Up Next
 #

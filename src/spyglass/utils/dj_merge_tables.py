@@ -11,7 +11,6 @@ from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, get_master, to_camel_case
 from IPython.core.display import HTML
 
-from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.logging import logger
 
 RESERVED_PRIMARY_KEY = "merge_id"
@@ -530,7 +529,7 @@ class Merge(dj.Manual):
         """
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
-        if restriction == True and self.restriction:
+        if restriction is True and self.restriction:
             if not disable_warning:
                 _warn_on_restriction(self, restriction)
             restriction = self.restriction
