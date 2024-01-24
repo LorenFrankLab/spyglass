@@ -158,6 +158,31 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
     return None
 
 
+def get_position_obj(nwbfile):
+    """Return the Position object from the behavior processing module.
+    Meant to find position spatial series that are not found by
+    `get_data_interface(nwbfile, 'position', pynwb.behavior.Position)`.
+    The code returns the first `pynwb.behavior.Position` object (technically
+    there should only be one).
+
+    Parameters
+    ----------
+    nwbfile : pynwb.NWBFile
+        The NWB file object.
+
+    Returns
+    -------
+    pynwb.behavior.Position object
+    """
+    ret = []
+    for obj in nwbfile.processing["behavior"].data_interfaces.values():
+        if isinstance(obj, pynwb.behavior.Position):
+            ret.append(obj)
+    if len(ret) > 1:
+        raise ValueError(f"Found more than one position object in {nwbfile}")
+    return ret[0] if ret and len(ret) else None
+
+
 def get_raw_eseries(nwbfile):
     """Return all ElectricalSeries in the acquisition group of an NWB file.
 
@@ -459,9 +484,7 @@ def get_all_spatial_series(nwbf, verbose=False, incl_times=True) -> dict:
         the file. The 'raw_position_object_id' is the object ID of the
         SpatialSeries object.
     """
-    pos_interface = get_data_interface(
-        nwbf, "position", pynwb.behavior.Position
-    )
+    pos_interface = get_position_obj(nwbf)
 
     if pos_interface is None:
         return None

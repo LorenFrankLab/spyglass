@@ -5,6 +5,7 @@ from non_local_detector import (
     NonLocalClusterlessDetector,
     NonLocalSortedSpikesDetector,
 )
+from non_local_detector import __version__ as non_local_detector_version
 
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.dj_decoder_conversion import (
@@ -30,19 +31,19 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
 
     contents = [
         {
-            "decoding_param_name": "contfrag_clusterless",
+            "decoding_param_name": f"contfrag_clusterless_{non_local_detector_version}",
             "decoding_params": ContFragClusterlessClassifier(),
         },
         {
-            "decoding_param_name": "nonlocal_clusterless",
+            "decoding_param_name": f"nonlocal_clusterless_{non_local_detector_version}",
             "decoding_params": NonLocalClusterlessDetector(),
         },
         {
-            "decoding_param_name": "contfrag_sorted",
+            "decoding_param_name": f"contfrag_sorted_{non_local_detector_version}",
             "decoding_params": ContFragSortedSpikesClassifier(),
         },
         {
-            "decoding_param_name": "nonlocal_sorted",
+            "decoding_param_name": f"nonlocal_sorted_{non_local_detector_version}",
             "decoding_params": NonLocalSortedSpikesDetector(),
         },
     ]
