@@ -5,11 +5,11 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
-#     display_name: Python [conda env:spyglass-position3] *
+#     display_name: spyglass
 #     language: python
-#     name: conda-env-spyglass-position3-py
+#     name: python3
 # ---
 
 # # Ripple Detection
@@ -131,7 +131,11 @@ group_name = "CA1_test"
 
 lfp_band_key = (
     lfp_analysis.LFPBandV1()
-    & {"filter_name": filter_name, "nwb_file_name": nwb_file_name}
+    & {
+        "filter_name": filter_name,
+        "nwb_file_name": nwb_file_name,
+        "lfp_band_sampling_rate": 1000,
+    }
 ).fetch1("KEY")
 
 sgr.RippleLFPSelection.set_lfp_electrodes(
