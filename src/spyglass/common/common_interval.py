@@ -239,6 +239,7 @@ def interval_list_excludes(interval_list, timestamps):
 
 
 def consolidate_intervals(interval_list):
+    
     if interval_list.ndim == 1:
         interval_list = np.expand_dims(interval_list, 0)
     else:
@@ -269,9 +270,10 @@ def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     """
 
     # Consolidate interval lists to disjoint int'ls by sorting & applying union
+    # import ipdb; ipdb.set_trace()
     interval_list1 = consolidate_intervals(interval_list1)
     interval_list2 = consolidate_intervals(interval_list2)
-
+    
     # then do pairwise comparison and collect intersections
     intersecting_intervals = [
         _intersection(interval2, interval1)
