@@ -1,6 +1,8 @@
 import pytest
 from pandas import DataFrame
 
+from ..conftest import TEARDOWN
+
 
 def test_invalid_interval(pos_src):
     """Test invalid interval"""
@@ -44,6 +46,7 @@ def test_videofile_getabspath(common, mini_restr):
     common.VideoFile().getabspath(mini_restr)
 
 
+@pytest.mark.skipif(not TEARDOWN, reason="No teardown: expect no change.")
 def test_posinterval_no_transaction(verbose_context, common, mini_restr):
     """Test no transaction"""
     before = common.PositionIntervalMap().fetch()

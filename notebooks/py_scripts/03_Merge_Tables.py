@@ -32,11 +32,16 @@
 # - For information on why we use merge tables, and how to make one, see our
 #   [documentation](https://lorenfranklab.github.io/spyglass/0.4/misc/merge_tables/)
 #
+# In short, merge tables represent the end processing point of a given way of
+# processing the data in our pipelines. Merge Tables allow us to build new
+# processing pipeline, or a new version of an existing pipeline, without having to
+# drop or migrate the old tables. They allow data to be processed in different
+# ways, but with a unified end result that downstream pipelines can all access.
+#
 
 # ## Imports
 #
 
-#
 # Let's start by importing the `spyglass` package, along with a few others.
 #
 
@@ -70,6 +75,7 @@ from spyglass.lfp.v1.lfp import LFPV1  # Upstream 2
 #
 
 # Check to make sure the data inserted in the previour notebook is still there.
+#
 
 nwb_file_name = "minirec20230622.nwb"
 nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
@@ -82,6 +88,7 @@ sgc.Session & nwb_file_dict
 # part of the populate methods. This practice will be revised in the future.
 #
 # <!-- TODO: Add entry to another parent to cover mutual exclusivity issues. -->
+#
 
 sgc.FirFilterParameters().create_standard_filters()
 lfp.lfp_electrode.LFPElectrodeGroup.create_lfp_electrode_group(
@@ -103,10 +110,10 @@ LFPOutput.insert([lfp_key], skip_duplicates=True)
 # ## Helper functions
 #
 
-#
 # Merge Tables have multiple custom methods that begin with `merge`.
 #
 # `help` can show us the docstring of each
+#
 
 merge_methods = [d for d in dir(Merge) if d.startswith("merge")]
 print(merge_methods)
@@ -114,6 +121,7 @@ print(merge_methods)
 help(getattr(Merge, merge_methods[-1]))
 
 # ## Showing data
+#
 
 # `merge_view` shows a union of the master and all part tables.
 #
@@ -143,6 +151,7 @@ result2 = (LFPOutput & nwb_key).fetch_nwb()
 result2 == result1
 
 # ## Selecting data
+#
 
 # There are also functions for retrieving part/parent table(s) and fetching data.
 #
@@ -156,7 +165,7 @@ result5 = LFPOutput.merge_get_parent(restriction='nwb_file_name LIKE "mini%"')
 result5
 
 # `fetch` will collect all relevant entries and return them as a list in
-#    the format specified by keyword arguments and one's DataJoint config.
+# the format specified by keyword arguments and one's DataJoint config.
 #
 
 result6 = result5.fetch("lfp_sampling_rate")  # Sample rate for all mini* files
@@ -164,6 +173,7 @@ result6
 
 # `merge_fetch` requires a restriction as the first argument. For no restriction,
 # use `True`.
+#
 
 result7 = LFPOutput.merge_fetch(True, "filter_name", "nwb_file_name")
 result7
@@ -172,6 +182,7 @@ result8 = LFPOutput.merge_fetch(as_dict=True)
 result8
 
 # ## Deletion from Merge Tables
+#
 
 # When deleting from Merge Tables, we can either...
 #
@@ -187,6 +198,7 @@ result8
 # The two latter cases can be destructive, so we include an extra layer of
 # protection with `dry_run`. When true (by default), these functions return
 # a list of tables with the entries that would otherwise be deleted.
+#
 
 LFPOutput.merge_delete(nwb_file_dict)  # Delete from merge table
 LFPOutput.merge_delete_parent(restriction=nwb_file_dict, dry_run=True)
@@ -208,6 +220,8 @@ delete_downstream_merge(
 )
 
 # ## Up Next
+#
 
 # In the [next notebook](./10_Spike_Sorting.ipynb), we'll start working with
 # ephys data with spike sorting.
+#

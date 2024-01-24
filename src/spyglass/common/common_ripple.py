@@ -48,7 +48,7 @@ class RippleLFPSelection(SpyglassMixin, dj.Manual):
     def insert1(self, key, **kwargs):
         filter_name = (LFPBand & key).fetch1("filter_name")
         if "ripple" not in filter_name.lower():
-            raise UserWarning("Please use a ripple filter")
+            logger.warning("Please use a ripple filter")
         super().insert1(key, **kwargs)
 
     @staticmethod

@@ -3,6 +3,7 @@ from contextlib import nullcontext
 from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
+from typing import Union
 
 import datajoint as dj
 from datajoint.condition import make_condition
@@ -11,7 +12,6 @@ from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, get_master, to_camel_case
 from IPython.core.display import HTML
 
-from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.logging import logger
 
 RESERVED_PRIMARY_KEY = "merge_id"
@@ -69,7 +69,7 @@ class Merge(dj.Manual):
 
     def get_source_from_key(self, key: dict) -> str:
         """Return the source of a given key"""
-        return self._part_name(self.merge_get_parent(key))
+        return self._normalize_source(key)
 
     def parts(self, camel_case=False, *args, **kwargs) -> list:
         """Return a list of part tables, add option for CamelCase names.
@@ -499,15 +499,6 @@ class Merge(dj.Manual):
         for part_parent in part_parents:
             super().delete(part_parent, **kwargs)
 
-    @property
-    def analysis_nwbfile(self):
-        """Return the AnalysisNwbfile table. Avoid circular import."""
-        if self._analysis_nwbfile is None:
-            from spyglass.common import AnalysisNwbfile  # noqa F401
-
-            self._analysis_nwbfile = AnalysisNwbfile
-        return self._analysis_nwbfile
-
     def fetch_nwb(
         self,
         restriction: str = True,
@@ -530,7 +521,7 @@ class Merge(dj.Manual):
         """
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
-        if restriction == True and self.restriction:
+        if restriction is True and self.restriction:
             if not disable_warning:
                 _warn_on_restriction(self, restriction)
             restriction = self.restriction
@@ -617,6 +608,7 @@ class Merge(dj.Manual):
         join_master: bool = False,
         multi_source: bool = False,
         return_empties: bool = False,
+        add_invalid_restrict: bool = True,
     ) -> dj.FreeTable:
         """Returns a list of part parents with restrictions applied.
 
@@ -635,6 +627,8 @@ class Merge(dj.Manual):
             Return multiple parents. Default False.
         return_empties: bool
             Default False. Return empty parent tables.
+        add_invalid_restrict: bool
+            Default True. Include parent for which the restriction is invalid.
 
         Returns
         ------
@@ -646,10 +640,11 @@ class Merge(dj.Manual):
             restriction=restriction,
             as_objects=True,
             return_empties=return_empties,
-            add_invalid_restrict=False,
+            add_invalid_restrict=add_invalid_restrict,
         )
 
         if not multi_source and len(part_parents) != 1:
+            __import__("pdb").set_trace()
             raise ValueError(
                 f"Found  {len(part_parents)} potential parents: {part_parents}"
                 + "\n\tTry adding a string restriction when invoking "
@@ -672,6 +667,25 @@ class Merge(dj.Manual):
             }
         return self._source_class_dict
 
+    def _normalize_source(
+        self, source: Union[str, dj.Table, dj.condition.AndList, dict]
+    ) -> str:
+        fetched_source = None
+        if isinstance(source, (Merge, dj.condition.AndList)):
+            try:
+                fetched_source = (self & source).fetch(self._reserved_sk)
+            except DataJointError:
+                raise ValueError(f"Unable to find source for {source}")
+            source = fetched_source[0]
+            if len(fetched_source) > 1:
+                logger.warn(f"Multiple sources. Selecting first: {source}.")
+        if isinstance(source, dj.Table):
+            source = self._part_name(source)
+        if isinstance(source, dict):
+            source = self._part_name(self.merge_get_parent(source))
+
+        return source
+
     def merge_get_parent_class(self, source: str) -> dj.Table:
         """Return the class of the parent table for a given CamelCase source.
 
@@ -687,13 +701,7 @@ class Merge(dj.Manual):
             Class instance of the parent table, including class methods.
         """
 
-        if isinstance(source, dj.Table):
-            source = self._part_name(source)
-        if isinstance(source, dict):
-            source = self.get_source_from_key(source)
-
-        ret = self.source_class_dict.get(source)
-
+        ret = self.source_class_dict.get(self._normalize_source(source))
         if not ret:
             logger.error(
                 f"No source class found for {source}: \n\t"

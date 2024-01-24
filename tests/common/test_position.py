@@ -1,5 +1,4 @@
 import pytest
-from datajoint.hash import key_hash
 
 
 @pytest.fixture
@@ -96,7 +95,9 @@ def upsample_position_error(
         skip_duplicates=True,
     )
     interval_pos_key = {**interval_key, **upsample_param_key}
-    common_position.IntervalPositionInfoSelection.insert1(interval_pos_key)
+    common_position.IntervalPositionInfoSelection.insert1(
+        interval_pos_key, skip_duplicates=not teardown
+    )
     yield interval_pos_key
     if teardown:
         (param_table & upsample_param_key).delete(safemode=False)

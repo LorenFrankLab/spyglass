@@ -177,7 +177,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     def make(self, key):
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
         lfp_key = {"merge_id": key["lfp_merge_id"]}
-        lfp_object = LFPOutput.fetch_nwb(lfp_key)[0]["lfp"]
+        lfp_object = (LFPOutput & lfp_key).fetch_nwb()[0]["lfp"]
 
         # get the electrodes to be filtered and their references
         lfp_band_elect_id, lfp_band_ref_id = (
