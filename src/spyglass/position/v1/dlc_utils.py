@@ -421,7 +421,6 @@ def get_video_path(key):
     from ...common.common_behav import VideoFile
 
     vf_key = {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
-    VideoFile()._no_transaction_make(vf_key, verbose=False)
     video_query = VideoFile & vf_key
 
     if len(video_query) != 1:
