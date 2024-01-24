@@ -196,7 +196,7 @@ SpyglassConfig().save_dj_config(
     save_method="local",  # global or local
     base_dir="/path/like/stelmo/nwb/",
     database_user="your username",
-    database_password="your password",  # remove this line for chared machines
+    database_password="your password",  # remove this line for shared machines
     database_host="localhost or lmf-db.cin.ucsf.edu",
     database_port=3306,
     set_password=False,
