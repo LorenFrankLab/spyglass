@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -291,7 +291,12 @@ linear_key = {
 
 from spyglass.linearization.merge import LinearizedPositionOutput
 
-linear_position_df = (LinearizedPositionOutput & linear_key).fetch1_dataframe()
+linear_merge_key = LinearizedPositionOutput.merge_restrict(linear_key).fetch1(
+    "KEY"
+)
+linear_position_df = (
+    LinearizedPositionOutput & linear_merge_key
+).fetch1_dataframe()
 linear_position_df
 # -
 
