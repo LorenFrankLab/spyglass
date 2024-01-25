@@ -146,7 +146,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 sorter,
             )
 
-        spike_times = SpikeSortingOutput.fetch_nwb(merge_key)[0][
+        spike_times = SpikeSortingOutput().fetch_nwb(merge_key)[0][
             analysis_nwb_key
         ]["spike_times"]
 

@@ -81,13 +81,11 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_spike_indicator(cls, key, time):
         time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
-        spike_times = cls.get_spike_times(key)
+        spike_times = cls.load_spike_data(key)
         spike_indicator = np.zeros((len(time), len(spike_times)))
 
         for ind, times in enumerate(spike_times):
-            times = times[
-                np.logical_and(spike_times >= min_time, spike_times <= max_time)
-            ]
+            times = times[np.logical_and(times >= min_time, times <= max_time)]
             spike_indicator[:, ind] = np.bincount(
                 np.digitize(times, time[1:-1]),
                 minlength=time.shape[0],

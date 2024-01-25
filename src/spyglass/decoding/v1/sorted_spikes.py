@@ -13,10 +13,12 @@ import uuid
 from pathlib import Path
 
 import datajoint as dj
+import non_local_detector.analysis as analysis
 import numpy as np
 import pandas as pd
 import xarray as xr
 from non_local_detector.models.base import SortedSpikesDetector
+from ripple_detection import get_multiunit_population_firing_rate
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
@@ -281,6 +283,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             model_params["decoding_kwargs"],
         )
 
+        if decoding_kwargs is None:
+            decoding_kwargs = {}
+
         (
             position_info,
             position_variable_names,
@@ -352,7 +357,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         environment = SortedSpikesDecodingV1.load_environments(key)[0]
 
         position_df = SortedSpikesDecodingV1.load_position_info(key)[0]
-        position = np.asarray(position_df[["position_x", "position_y"]])
+        position_variable_names = (PositionGroup & key).fetch1(
+            "position_variables"
+        )
+        position = np.asarray(position_df[position_variable_names])
 
         linear_position_df = get_linearized_position(
             position=position,
@@ -384,7 +392,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
         spike_times = []
         for merge_id in merge_ids:
-            nwb_file = SpikeSortingOutput.fetch_nwb({"merge_id": merge_id})[0]
+            nwb_file = SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})[0]
 
             if "object_id" in nwb_file:
                 # v1 spikesorting
@@ -401,10 +409,126 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
 
         new_spike_times = []
-        for elec_spike_times in zip(spike_times):
+        for elec_spike_times in spike_times:
             is_in_interval = np.logical_and(
                 elec_spike_times >= min_time, elec_spike_times <= max_time
             )
             new_spike_times.append(elec_spike_times[is_in_interval])
 
         return new_spike_times
+
+    @classmethod
+    def get_spike_indicator(cls, key, time):
+        time = np.asarray(time)
+        min_time, max_time = time[[0, -1]]
+        spike_times = cls.load_spike_data(key)
+        spike_indicator = np.zeros((len(time), len(spike_times)))
+
+        for ind, times in enumerate(spike_times):
+            times = times[np.logical_and(times >= min_time, times <= max_time)]
+            spike_indicator[:, ind] = np.bincount(
+                np.digitize(times, time[1:-1]),
+                minlength=time.shape[0],
+            )
+
+        return spike_indicator
+
+    @classmethod
+    def get_firing_rate(cls, key, time, multiunit=False):
+        spike_indicator = cls.get_spike_indicator(key, time)
+        if spike_indicator.ndim == 1:
+            spike_indicator = spike_indicator[:, np.newaxis]
+
+        sampling_frequency = 1 / np.median(np.diff(time))
+
+        if multiunit:
+            spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
+        return np.stack(
+            [
+                get_multiunit_population_firing_rate(
+                    indicator[:, np.newaxis], sampling_frequency
+                )
+                for indicator in spike_indicator.T
+            ],
+            axis=1,
+        )
+
+    def spike_times_sorted_by_place_field_peak(self, time_slice=None):
+        if time_slice is None:
+            time_slice = slice(-np.inf, np.inf)
+
+        spike_times = self.load_spike_data(self.proj())
+        classifier = self.load_model()
+
+        new_spike_times = {}
+
+        for encoding_model in classifier.encoding_model_:
+            place_fields = np.asarray(
+                classifier.encoding_model_[encoding_model]["place_fields"]
+            )
+            neuron_sort_ind = np.argsort(
+                np.nanargmax(place_fields, axis=1).squeeze()
+            )
+            new_spike_times[encoding_model] = [
+                spike_times[neuron_ind][
+                    np.logical_and(
+                        spike_times[neuron_ind] >= time_slice.start,
+                        spike_times[neuron_ind] <= time_slice.stop,
+                    )
+                ]
+                for neuron_ind in neuron_sort_ind
+            ]
+
+    def get_ahead_behind_distance(self):
+        # TODO: allow specification of specific time interval
+        # TODO: allow specification of track graph
+        # TODO: Handle decode intervals, store in table
+
+        classifier = self.load_model()
+        results = self.load_results()
+        posterior = results.acausal_posterior.unstack("state_bins").sum("state")
+
+        if classifier.environments[0].track_graph is not None:
+            linear_position_info = self.load_linear_position_info(
+                self.fetch1("KEY")
+            )
+
+            orientation_name = (
+                "orientation"
+                if "orientation" in linear_position_info.columns
+                else "head_orientation"
+            )
+
+            traj_data = analysis.get_trajectory_data(
+                posterior=posterior,
+                track_graph=classifier.environments[0].track_graph,
+                decoder=classifier,
+                actual_projected_position=linear_position_info[
+                    ["projected_x_position", "projected_y_position"]
+                ],
+                track_segment_id=linear_position_info["track_segment_id"],
+                actual_orientation=linear_position_info[orientation_name],
+            )
+
+            return analysis.get_ahead_behind_distance(
+                classifier.environments[0].track_graph, *traj_data
+            )
+        else:
+            position_info = self.load_position_info(self.fetch1("KEY"))
+            map_position = analysis.maximum_a_posteriori_estimate(posterior)
+
+            orientation_name = (
+                "orientation"
+                if "orientation" in position_info.columns
+                else "head_orientation"
+            )
+            position_variable_names = (
+                PositionGroup & self.fetch1("KEY")
+            ).fetch1("position_variables")
+
+            return analysis.get_ahead_behind_distance2D(
+                position_info[position_variable_names].to_numpy(),
+                position_info[orientation_name].to_numpy(),
+                map_position,
+                classifier.environments[0].track_graphDD,
+            )

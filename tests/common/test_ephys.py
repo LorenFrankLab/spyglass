@@ -1,6 +1,8 @@
 import pytest
 from numpy import array_equal
 
+from ..conftest import TEARDOWN
+
 
 def test_create_from_config(mini_insert, common_ephys, mini_path):
     before = common_ephys.Electrode().fetch()
@@ -18,11 +20,11 @@ def test_raw_object(mini_insert, common_ephys, mini_dict, mini_content):
     assert obj_fetch == obj_raw, "Raw.nwb_object did not return expected object"
 
 
+@pytest.mark.skipif(not TEARDOWN, reason="No teardown: expect no change.")
 def test_set_lfp_electrodes(mini_insert, common_ephys, mini_copy_name):
     before = common_ephys.LFPSelection().fetch()
     common_ephys.LFPSelection().set_lfp_electrodes(mini_copy_name, [0])
     after = common_ephys.LFPSelection().fetch()
-    # Because already inserted, expect no change
     assert (
         len(after) == len(before) + 1
     ), "Set LFP electrodes had unexpected effect"

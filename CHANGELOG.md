@@ -20,7 +20,7 @@
 ### Pipelines
 
 - Spike sorting: Add SpikeSorting V1 pipeline. #651
-- LFP: Minor fixes to LFPBandV1 populator. #706
+- LFP: Minor fixes to LFPBandV1 populator and `make`. #706, #795
 - Linearization:
     - Minor fixes to LinearizedPositionV1 pipeline #695
     - Rename `position_linearization` -> `linearization`. #717
@@ -34,6 +34,7 @@
     - Use the new `non_local_detector` package for decoding #731
     - Allow multiple spike waveform features for clusterelss decoding #731
     - Reorder notebooks #731
+    - Add fetch class functionality to `Merge` table. #783, #786
 
 ## [0.4.3] (November 7, 2023)
 

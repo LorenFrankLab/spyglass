@@ -84,18 +84,36 @@ class DecodingOutput(_Merge, SpyglassMixin):
                     except (PermissionError, FileNotFoundError):
                         logger.warning(f"Unable to remove {path}, skipping")
 
-    @classmethod
-    def _get_source_class(cls, key):
-        if cls._source_class_dict is None:
-            cls._source_class_dict = {}
-            module = inspect.getmodule(cls)
-            for part_name in cls.parts():
+    @property
+    def source_class_dict(self) -> dict:
+        """Dictionary of source class names to source classes
+
+        {
+            'ClusterlessDecodingV1': spy...ClusterlessDecodingV1,
+             'SortedSpikesDecodingV1': spy...SortedSpikesDecodingV1
+        }
+
+        Returns
+        -------
+        dict
+            Dictionary of source class names to source classes
+        """
+        if not self._source_class_dict:
+            self._ensure_dependencies_loaded()
+            module = inspect.getmodule(self)
+            for part_name in self.parts():
                 part_name = to_camel_case(part_name.split("__")[-1].strip("`"))
                 part = getattr(module, part_name)
-                cls._source_class_dict[part_name] = part
+                self._source_class_dict[part_name] = part
+        return self._source_class_dict
 
-        source = (cls & key).fetch1("source")
-        return cls._source_class_dict[source]
+    @classmethod
+    def _get_source_class(cls, key):
+        # CB: By making this a property, we can generate the source_class_dict
+        #     without a key. Previously failed on empty table
+        #     This demonstrates pipeline-specific implementation. See also
+        #     merge_restrict_class edits that centralize this logic.
+        return cls.source_class_dict[(cls & key).fetch1("source")]
 
     @classmethod
     def load_results(cls, key):

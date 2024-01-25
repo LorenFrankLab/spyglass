@@ -170,8 +170,6 @@ class RawPosition(SpyglassMixin, dj.Imported):
         _nwb_table = Nwbfile
 
         def fetch1_dataframe(self):
-            INDEX_ADJUST = 1  # adjust 0-index to 1-index (e.g., xloc0 -> xloc1)
-
             id_rp = [(n["id"], n["raw_position"]) for n in self.fetch_nwb()]
 
             if len(set(rp.interval for _, rp in id_rp)) > 1:
@@ -181,18 +179,28 @@ class RawPosition(SpyglassMixin, dj.Imported):
                 pd.DataFrame(
                     data=rp.data,
                     index=pd.Index(rp.timestamps, name="time"),
-                    columns=[
-                        col  # use existing columns if already numbered
-                        if "1" in rp.description or "2" in rp.description
-                        # else number them by id
-                        else col + str(id + INDEX_ADJUST)
-                        for col in rp.description.split(", ")
-                    ],
+                    columns=self._get_column_names(rp, pos_id),
                 )
-                for id, rp in id_rp
+                for pos_id, rp in id_rp
             ]
 
             return reduce(lambda x, y: pd.merge(x, y, on="time"), df_list)
+
+        @staticmethod
+        def _get_column_names(rp, pos_id):
+            INDEX_ADJUST = 1  # adjust 0-index to 1-index (e.g., xloc0 -> xloc1)
+            n_pos_dims = rp.data.shape[1]
+            column_names = [
+                col  # use existing columns if already numbered
+                if "1" in rp.description or "2" in rp.description
+                # else number them by id
+                else col + str(pos_id + INDEX_ADJUST)
+                for col in rp.description.split(", ")
+            ]
+            if len(column_names) != n_pos_dims:
+                # if the string split didn't work, use default names
+                column_names = ["x", "y", "z"][:n_pos_dims]
+            return column_names
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]
