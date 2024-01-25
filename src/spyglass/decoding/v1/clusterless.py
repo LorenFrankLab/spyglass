@@ -469,7 +469,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         results = self.load_results()
         posterior = results.acausal_posterior.unstack("state_bins").sum("state")
 
-        if classifier.environments[0].track_graph is not None:
+       if getattr(classifier.environments[0], "track_graph") is not None:
             linear_position_info = self.load_linear_position_info(
                 self.fetch1("KEY")
             )

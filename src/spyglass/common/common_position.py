@@ -787,21 +787,21 @@ def _fix_col_names(spatial_df):
     DEFAULT_COLS = ["xloc", "yloc", "xloc2", "yloc2"]
     ONE_IDX_COLS = ["xloc1", "yloc1", "xloc2", "yloc2"]
     ZERO_IDX_COLS = ["xloc0", "yloc0", "xloc1", "yloc1"]
-    OTHER_DEFAULT_COLS = ["x", "y", "z"]
+    THREE_D_COLS = ["x", "y", "z"]
 
     input_cols = list(spatial_df.columns)
 
     has_default = all([c in input_cols for c in DEFAULT_COLS])
     has_0_idx = all([c in input_cols for c in ZERO_IDX_COLS])
     has_1_idx = all([c in input_cols for c in ONE_IDX_COLS])
-    has_other_default = all([c in input_cols for c in OTHER_DEFAULT_COLS])
+    has_other_default = all([c in input_cols for c in THREE_D_COLS])
 
     if has_default:
         # move the 4 position columns to front, continue
         spatial_df = spatial_df[DEFAULT_COLS]
     elif has_other_default:
         # move the 4 position columns to front, continue
-        spatial_df = spatial_df[OTHER_DEFAULT_COLS]
+        spatial_df = spatial_df[THREE_D_COLS]
     elif has_0_idx:
         # move the 4 position columns to front, rename to default, continue
         spatial_df = spatial_df[ZERO_IDX_COLS]
