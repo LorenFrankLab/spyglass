@@ -199,8 +199,7 @@ class RawPosition(SpyglassMixin, dj.Imported):
             ]
             if len(column_names) != n_pos_dims:
                 # if the string split didn't work, use default names
-                pos_names = ["x", "y", "z"]
-                column_names = [pos_names[i] for i in range(n_pos_dims)]
+                column_names = ["x", "y", "z"][:len(n_pos_dims)] # select first N of xyz for n dims
             return column_names
 
     def make(self, key):
