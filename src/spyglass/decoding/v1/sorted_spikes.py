@@ -105,11 +105,11 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         (
             position_info,
             position_variable_names,
-        ) = self.load_position_info(key)
+        ) = self.fetch_position_info(key)
 
         # Get the spike times for the selected units
         # Don't need to filter by interval since the non_local_detector code will do that
-        spike_times = self.load_spike_data(key, filter_by_interval=False)
+        spike_times = self.fetch_spike_data(key, filter_by_interval=False)
 
         # Get the encoding and decoding intervals
         encoding_interval = (
@@ -289,7 +289,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         (
             position_info,
             position_variable_names,
-        ) = SortedSpikesDecodingV1.load_position_info(key)
+        ) = SortedSpikesDecodingV1.fetch_position_info(key)
         classifier = SortedSpikesDetector(**decoding_params)
 
         classifier.initialize_environments(
@@ -329,7 +329,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def load_position_info(key):
+    def fetch_position_info(key):
         position_group_key = {
             "position_group_name": key["position_group_name"],
             "nwb_file_name": key["nwb_file_name"],
@@ -356,7 +356,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     def load_linear_position_info(key):
         environment = SortedSpikesDecodingV1.load_environments(key)[0]
 
-        position_df = SortedSpikesDecodingV1.load_position_info(key)[0]
+        position_df = SortedSpikesDecodingV1.fetch_position_info(key)[0]
         position_variable_names = (PositionGroup & key).fetch1(
             "position_variables"
         )
@@ -379,7 +379,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def load_spike_data(key, filter_by_interval=True):
+    def fetch_spike_data(key, filter_by_interval=True):
         merge_ids = (
             (
                 SortedSpikesGroup.SortGroup
@@ -421,7 +421,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     def get_spike_indicator(cls, key, time):
         time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
-        spike_times = cls.load_spike_data(key)
+        spike_times = cls.fetch_spike_data(key)
         spike_indicator = np.zeros((len(time), len(spike_times)))
 
         for ind, times in enumerate(spike_times):
@@ -457,7 +457,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         if time_slice is None:
             time_slice = slice(-np.inf, np.inf)
 
-        spike_times = self.load_spike_data(self.proj())
+        spike_times = self.fetch_spike_data(self.proj())
         classifier = self.load_model()
 
         new_spike_times = {}
@@ -514,7 +514,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 classifier.environments[0].track_graph, *traj_data
             )
         else:
-            position_info = self.load_position_info(self.fetch1("KEY"))
+            position_info = self.fetch_position_info(self.fetch1("KEY"))
             map_position = analysis.maximum_a_posteriori_estimate(posterior)
 
             orientation_name = (

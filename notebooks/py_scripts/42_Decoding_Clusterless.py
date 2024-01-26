@@ -349,12 +349,12 @@ DecodingOutput().cleanup()
 # (
 #     position_info,
 #     position_variable_names,
-# ) = ClusterlessDecodingV1.load_position_info(selection_key)
+# ) = ClusterlessDecodingV1.fetch_position_info(selection_key)
 # results_time = decoding_results.acausal_posterior.isel(intervals=0).time.values
 # position_info = position_info.loc[results_time[0] : results_time[-1]]
 
 # env = ClusterlessDecodingV1.load_environments(selection_key)[0]
-# spike_times, _ = ClusterlessDecodingV1.load_spike_data(selection_key)
+# spike_times, _ = ClusterlessDecodingV1.fetch_spike_data(selection_key)
 
 
 # create_interactive_2D_decoding_figurl(

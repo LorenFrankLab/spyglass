@@ -134,10 +134,10 @@ class DecodingOutput(_Merge, SpyglassMixin):
         return source_class.load_environments(decoding_selection_key)
 
     @classmethod
-    def load_position_info(cls, key):
+    def fetch_position_info(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
         source_class = cls._get_source_class(key)
-        return source_class.load_position_info(decoding_selection_key)
+        return source_class.fetch_position_info(decoding_selection_key)
 
     @classmethod
     def load_linear_position_info(cls, key):
@@ -146,7 +146,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
         return source_class.load_linear_position_info(decoding_selection_key)
 
     @classmethod
-    def load_spike_data(cls, key, filter_by_interval=True):
+    def fetch_spike_data(cls, key, filter_by_interval=True):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
         source_class = cls._get_source_class(key)
         return source_class.load_linear_position_info(
@@ -160,7 +160,9 @@ class DecodingOutput(_Merge, SpyglassMixin):
         env = cls.load_environments(key)[0]
 
         if "x_position" in results.coords:
-            position_info, position_variable_names = cls.load_position_info(key)
+            position_info, position_variable_names = cls.fetch_position_info(
+                key
+            )
             # Not 1D
             bin_size = (
                 np.nanmedian(np.diff(np.unique(results.x_position.values))),
