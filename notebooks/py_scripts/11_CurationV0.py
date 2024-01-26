@@ -49,7 +49,7 @@ if os.path.basename(os.getcwd()) == "notebooks":
     os.chdir("..")
 dj.config.load("dj_local_conf.json")  # load config for database connection info
 
-from spyglass.spikesorting import SpikeSorting
+from spyglass.spikesorting.v0 import SpikeSorting
 
 # -
 

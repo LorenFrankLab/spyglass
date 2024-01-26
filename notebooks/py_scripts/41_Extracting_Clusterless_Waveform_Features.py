@@ -155,7 +155,7 @@ sorting_ids = (
 for sorting_id in sorting_ids:
     try:
         sgs.CurationV1.insert_curation(sorting_id=sorting_id)
-    except KeyError:
+    except KeyError as e:
         pass
 
 SpikeSortingOutput.insert(

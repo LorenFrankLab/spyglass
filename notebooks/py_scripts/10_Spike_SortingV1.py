@@ -52,7 +52,7 @@ sgc.Session()
 # insert SortGroup
 #
 
-sgs.SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name2)
+sgs.v1.SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name2)
 
 # insert SpikeSortingRecordingSelection. use `insert_selection` method. this automatically generates a unique recording id
 #
@@ -65,34 +65,34 @@ key = {
     "team_name": "Alison Comrie",
 }
 
-sgs.SpikeSortingRecordingSelection.insert_selection(key)
+sgs.v1.SpikeSortingRecordingSelection.insert_selection(key)
 
-sgs.SpikeSortingRecordingSelection()
+sgs.v1.SpikeSortingRecordingSelection()
 
 # preprocess recording (filtering and referencing)
 #
 
-sgs.SpikeSortingRecording.populate()
+sgs.v1.SpikeSortingRecording.populate()
 
-sgs.SpikeSortingRecording()
+sgs.v1.SpikeSortingRecording()
 
 key = (
-    sgs.SpikeSortingRecordingSelection & {"nwb_file_name": nwb_file_name2}
+    sgs.v1.SpikeSortingRecordingSelection & {"nwb_file_name": nwb_file_name2}
 ).fetch1()
 
 # insert ArtifactDetectionSelection
 #
 
-sgs.ArtifactDetectionSelection.insert_selection(
+sgs.v1.ArtifactDetectionSelection.insert_selection(
     {"recording_id": key["recording_id"], "artifact_param_name": "default"}
 )
 
 # detect artifact; note the output is stored in IntervalList
 #
 
-sgs.ArtifactDetection.populate()
+sgs.v1.ArtifactDetection.populate()
 
-sgs.ArtifactDetection()
+sgs.v1.ArtifactDetection()
 
 # insert SpikeSortingSelection. again use `insert_selection` method
 #
@@ -110,37 +110,37 @@ key = {
     ),
 }
 
-sgs.SpikeSortingSelection()
+sgs.v1.SpikeSortingSelection()
 
-sgs.SpikeSortingSelection.insert_selection(key)
+sgs.v1.SpikeSortingSelection.insert_selection(key)
 
-sgs.SpikeSortingSelection()
+sgs.v1.SpikeSortingSelection()
 
 # run spike sorting
 #
 
-sgs.SpikeSorting.populate()
+sgs.v1.SpikeSorting.populate()
 
-sgs.SpikeSorting()
+sgs.v1.SpikeSorting()
 
 # we have two main ways of curating spike sorting: by computing quality metrics and applying threshold; and manually applying curation labels. to do so, we first insert CurationV1. use `insert_curation` method.
 #
 
-sgs.CurationV1.insert_curation(
+sgs.v1.CurationV1.insert_curation(
     sorting_id=(
         sgs.SpikeSortingSelection & {"recording_id": key["recording_id"]}
     ).fetch1("sorting_id"),
     description="testing sort",
 )
 
-sgs.CurationV1()
+sgs.v1.CurationV1()
 
 # we will first do an automatic curation based on quality metrics
 #
 
 key = {
     "sorting_id": (
-        sgs.SpikeSortingSelection & {"recording_id": key["recording_id"]}
+        sgs.v1.SpikeSortingSelection & {"recording_id": key["recording_id"]}
     ).fetch1("sorting_id"),
     "curation_id": 0,
     "waveform_param_name": "default_not_whitened",
@@ -148,32 +148,32 @@ key = {
     "metric_curation_param_name": "default",
 }
 
-sgs.MetricCurationSelection.insert_selection(key)
+sgs.v1.MetricCurationSelection.insert_selection(key)
 
-sgs.MetricCurationSelection()
+sgs.v1.MetricCurationSelection()
 
-sgs.MetricCuration.populate()
+sgs.v1.MetricCuration.populate()
 
-sgs.MetricCuration()
+sgs.v1.MetricCuration()
 
 # to do another round of curation, fetch the relevant info and insert back into CurationV1 using `insert_curation`
 #
 
 key = {
     "metric_curation_id": (
-        sgs.MetricCurationSelection & {"sorting_id": key["sorting_id"]}
+        sgs.v1.MetricCurationSelection & {"sorting_id": key["sorting_id"]}
     ).fetch1("metric_curation_id")
 }
 
-labels = sgs.MetricCuration.get_labels(key)
+labels = sgs.v1.MetricCuration.get_labels(key)
 
-merge_groups = sgs.MetricCuration.get_merge_groups(key)
+merge_groups = sgs.v1.MetricCuration.get_merge_groups(key)
 
-metrics = sgs.MetricCuration.get_metrics(key)
+metrics = sgs.v1.MetricCuration.get_metrics(key)
 
-sgs.CurationV1.insert_curation(
+sgs.v1.CurationV1.insert_curation(
     sorting_id=(
-        sgs.MetricCurationSelection
+        sgs.v1.MetricCurationSelection
         & {"metric_curation_id": key["metric_curation_id"]}
     ).fetch1("sorting_id"),
     parent_curation_id=0,
@@ -183,12 +183,12 @@ sgs.CurationV1.insert_curation(
     description="after metric curation",
 )
 
-sgs.CurationV1()
+sgs.v1.CurationV1()
 
 # next we will do manual curation. this is done with figurl. to incorporate info from other stages of processing (e.g. metrics) we have to store that with kachery cloud and get curation uri referring to it. it can be done with `generate_curation_uri`.
 #
 
-curation_uri = sgs.FigURLCurationSelection.generate_curation_uri(
+curation_uri = sgs.v1.FigURLCurationSelection.generate_curation_uri(
     {
         "sorting_id": (
             sgs.MetricCurationSelection
@@ -200,7 +200,7 @@ curation_uri = sgs.FigURLCurationSelection.generate_curation_uri(
 
 key = {
     "sorting_id": (
-        sgs.MetricCurationSelection
+        sgs.v1.MetricCurationSelection
         & {"metric_curation_id": key["metric_curation_id"]}
     ).fetch1("sorting_id"),
     "curation_id": 1,
@@ -208,15 +208,15 @@ key = {
     "metrics_figurl": list(metrics.keys()),
 }
 
-sgs.FigURLCurationSelection()
+sgs.v1.FigURLCurationSelection()
 
-sgs.FigURLCurationSelection.insert_selection(key)
+sgs.v1.FigURLCurationSelection.insert_selection(key)
 
-sgs.FigURLCurationSelection()
+sgs.v1.FigURLCurationSelection()
 
-sgs.FigURLCuration.populate()
+sgs.v1.FigURLCuration.populate()
 
-sgs.FigURLCuration()
+sgs.v1.FigURLCuration()
 
 # or you can manually specify it if you already have a `curation.json`
 #
@@ -234,20 +234,20 @@ key = {
 }
 # -
 
-sgs.FigURLCurationSelection.insert_selection(key)
+sgs.v1.FigURLCurationSelection.insert_selection(key)
 
-sgs.FigURLCuration.populate()
+sgs.v1.FigURLCuration.populate()
 
-sgs.FigURLCuration()
+sgs.v1.FigURLCuration()
 
 # once you apply manual curation (curation labels and merge groups) you can store them as nwb by inserting another row in CurationV1. And then you can do more rounds of curation if you want.
 #
 
-labels = sgs.FigURLCuration.get_labels(gh_curation_uri)
+labels = sgs.v1.FigURLCuration.get_labels(gh_curation_uri)
 
-merge_groups = sgs.FigURLCuration.get_merge_groups(gh_curation_uri)
+merge_groups = sgs.v1.FigURLCuration.get_merge_groups(gh_curation_uri)
 
-sgs.CurationV1.insert_curation(
+sgs.v1.CurationV1.insert_curation(
     sorting_id=key["sorting_id"],
     parent_curation_id=1,
     labels=labels,
@@ -256,12 +256,12 @@ sgs.CurationV1.insert_curation(
     description="after figurl curation",
 )
 
-sgs.CurationV1()
+sgs.v1.CurationV1()
 
 # We now insert the curated spike sorting to a `Merge` table for feeding into downstream processing pipelines.
 #
 
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
 SpikeSortingOutput()
 
