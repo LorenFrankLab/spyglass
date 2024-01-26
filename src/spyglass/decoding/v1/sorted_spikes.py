@@ -269,8 +269,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     def fetch_results(self):
         return SortedSpikesDetector.fetch_results(self.fetch1("results_path"))
 
-    def load_model(self):
-        return SortedSpikesDetector.load_model(self.fetch1("classifier_path"))
+    def fetch_model(self):
+        return SortedSpikesDetector.fetch_model(self.fetch1("classifier_path"))
 
     @staticmethod
     def load_environments(key):
@@ -353,8 +353,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         return position_info, position_variable_names
 
     @staticmethod
-    def load_linear_position_info(key):
-        environment = SortedSpikesDecodingV1.load_environments(key)[0]
+    def fetch_linear_position_info(key):
+        environment = SortedSpikesDecodingV1.fetch_environments(key)[0]
 
         position_df = SortedSpikesDecodingV1.fetch_position_info(key)[0]
         position_variable_names = (PositionGroup & key).fetch1(
@@ -458,7 +458,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             time_slice = slice(-np.inf, np.inf)
 
         spike_times = self.fetch_spike_data(self.proj())
-        classifier = self.load_model()
+        classifier = self.fetch_model()
 
         new_spike_times = {}
 
@@ -484,12 +484,12 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         # TODO: allow specification of track graph
         # TODO: Handle decode intervals, store in table
 
-        classifier = self.load_model()
+        classifier = self.fetch_model()
         results = self.fetch_results()
         posterior = results.acausal_posterior.unstack("state_bins").sum("state")
 
         if classifier.environments[0].track_graph is not None:
-            linear_position_info = self.load_linear_position_info(
+            linear_position_info = self.fetch_linear_position_info(
                 self.fetch1("KEY")
             )
 

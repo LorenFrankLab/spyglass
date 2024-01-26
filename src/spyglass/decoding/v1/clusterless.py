@@ -277,11 +277,11 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     def fetch_results(self):
         return ClusterlessDetector.fetch_results(self.fetch1("results_path"))
 
-    def load_model(self):
-        return ClusterlessDetector.load_model(self.fetch1("classifier_path"))
+    def fetch_model(self):
+        return ClusterlessDetector.fetch_model(self.fetch1("classifier_path"))
 
     @staticmethod
-    def load_environments(key):
+    def fetch_environments(key):
         model_params = (
             DecodingParameters
             & {"decoding_param_name": key["decoding_param_name"]}
@@ -362,8 +362,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return position_info, position_variable_names
 
     @staticmethod
-    def load_linear_position_info(key):
-        environment = ClusterlessDecodingV1.load_environments(key)[0]
+    def fetch_linear_position_info(key):
+        environment = ClusterlessDecodingV1.fetch_environments(key)[0]
 
         position_df = ClusterlessDecodingV1.fetch_position_info(key)[0]
         position_variable_names = (PositionGroup & key).fetch1(
@@ -465,12 +465,12 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # TODO: allow specification of track graph
         # TODO: Handle decode intervals, store in table
 
-        classifier = self.load_model()
+        classifier = self.fetch_model()
         results = self.fetch_results()
         posterior = results.acausal_posterior.unstack("state_bins").sum("state")
 
         if getattr(classifier.environments[0], "track_graph") is not None:
-            linear_position_info = self.load_linear_position_info(
+            linear_position_info = self.fetch_linear_position_info(
                 self.fetch1("KEY")
             )
 
