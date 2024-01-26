@@ -29,7 +29,9 @@ from spyglass.decoding.v1.core import (
 )  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
-from spyglass.spikesorting.merge import SpikeSortingOutput  # noqa: F401
+from spyglass.spikesorting.spikesorting_merge import (
+    SpikeSortingOutput,
+)  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("decoding_sorted_spikes_v1")
