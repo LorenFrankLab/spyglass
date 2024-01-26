@@ -79,7 +79,7 @@ SortedSpikesGroup & {
 }
 # -
 
-SortedSpikesGroup.SortGroup & {
+SortedSpikesGroup.Units & {
     "nwb_file_name": nwb_copy_file_name,
     "sorted_spikes_group_name": "test_group",
 }

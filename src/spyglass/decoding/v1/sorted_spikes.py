@@ -42,7 +42,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     sorted_spikes_group_name: varchar(80)
     """
 
-    class SortGroup(SpyglassMixin, dj.Part):
+    class Units(SpyglassMixin, dj.Part):
         definition = """
         -> SortedSpikesGroup
         -> SpikeSortingOutput.proj(spikesorting_merge_id='merge_id')
@@ -382,7 +382,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     def fetch_spike_data(key, filter_by_interval=True):
         merge_ids = (
             (
-                SortedSpikesGroup.SortGroup
+                SortedSpikesGroup.Units
                 & {
                     "nwb_file_name": key["nwb_file_name"],
                     "sorted_spikes_group_name": key["sorted_spikes_group_name"],
