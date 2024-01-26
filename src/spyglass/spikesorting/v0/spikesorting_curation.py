@@ -16,10 +16,15 @@ import spikeinterface.qualitymetrics as sq
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import waveform_dir
+from spyglass.spikesorting.v0.merged_sorting_extractor import (
+    MergedSortingExtractor,
+)
+from spyglass.spikesorting.v0.spikesorting_recording import (
+    SortInterval,
+    SpikeSortingRecording,
+)
 from spyglass.utils import SpyglassMixin, logger
 
-from .merged_sorting_extractor import MergedSortingExtractor
-from .spikesorting_recording import SortInterval, SpikeSortingRecording
 from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema("spikesorting_curation")

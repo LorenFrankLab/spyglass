@@ -14,7 +14,9 @@ from spyglass.common.common_interval import (
     interval_from_inds,
     interval_set_difference_inds,
 )
-from spyglass.spikesorting.spikesorting_recording import SpikeSortingRecording
+from spyglass.spikesorting.v0.spikesorting_recording import (
+    SpikeSortingRecording,
+)
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_valid_intervals
 
