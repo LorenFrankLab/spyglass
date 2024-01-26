@@ -150,5 +150,5 @@ DecodingOutput.SortedSpikesDecodingV1 & selection_key
 
 # We can load the results as before:
 
-results = (SortedSpikesDecodingV1 & selection_key).load_results()
+results = (SortedSpikesDecodingV1 & selection_key).fetch_results()
 results

@@ -266,8 +266,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
         DecodingOutput.insert1(orig_key, skip_duplicates=True)
 
-    def load_results(self):
-        return SortedSpikesDetector.load_results(self.fetch1("results_path"))
+    def fetch_results(self):
+        return SortedSpikesDetector.fetch_results(self.fetch1("results_path"))
 
     def load_model(self):
         return SortedSpikesDetector.load_model(self.fetch1("classifier_path"))
@@ -485,7 +485,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         # TODO: Handle decode intervals, store in table
 
         classifier = self.load_model()
-        results = self.load_results()
+        results = self.fetch_results()
         posterior = results.acausal_posterior.unstack("state_bins").sum("state")
 
         if classifier.environments[0].track_graph is not None:

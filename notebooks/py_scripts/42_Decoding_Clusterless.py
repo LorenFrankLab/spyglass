@@ -323,7 +323,7 @@ DecodingOutput.ClusterlessDecodingV1 & selection_key
 
 # We can load the results of the decoding:
 
-decoding_results = (ClusterlessDecodingV1 & selection_key).load_results()
+decoding_results = (ClusterlessDecodingV1 & selection_key).fetch_results()
 decoding_results
 
 # Finally, if we deleted the results, we can use the `cleanup` function to delete the results from the file system:

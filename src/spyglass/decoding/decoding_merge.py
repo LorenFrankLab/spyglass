@@ -116,10 +116,10 @@ class DecodingOutput(_Merge, SpyglassMixin):
         return cls.source_class_dict[(cls & key).fetch1("source")]
 
     @classmethod
-    def load_results(cls, key):
+    def fetch_results(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
         source_class = cls._get_source_class(key)
-        return (source_class & decoding_selection_key).load_results()
+        return (source_class & decoding_selection_key).fetch_results()
 
     @classmethod
     def load_model(cls, key):
@@ -155,7 +155,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def create_decoding_view(cls, key, head_direction_name="head_orientation"):
-        results = cls.load_results(key)
+        results = cls.fetch_results(key)
         posterior = results.acausal_posterior.unstack("state_bins").sum("state")
         env = cls.load_environments(key)[0]
 
