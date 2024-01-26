@@ -34,7 +34,7 @@ dj.config.load("dj_local_conf.json")  # load config for database connection info
 #
 
 import spyglass.common as sgc
-import spyglass.spikesorting.v1 as sgs
+import spyglass.spikesorting as sgs
 import spyglass.data_import as sgi
 
 # insert LabMember and Session
