@@ -1,9 +1,14 @@
+from collections.abc import Iterable
+from typing import Dict, List, Union
+
 import datajoint as dj
 from datajoint.table import logger as dj_logger
 from datajoint.utils import user_choice
 
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
+from spyglass.utils.dj_merge_tables import Merge
 from spyglass.utils.logging import logger
 
 
@@ -40,6 +45,9 @@ class SpyglassMixin:
     # pks for delete permission check, assumed to be on field
     _session_pk = None  # Session primary key. Mixin is ambivalent to Session pk
     _member_pk = None  # LabMember primary key. Mixin ambivalent table structure
+    _merge_cache = {}  # Cache of merge tables downstream of self
+    _merge_cache_links = {}  # Cache of merge links downstream of self
+    _session_connection_cache = None  # Cache of path from Session to self
 
     # ------------------------------- fetch_nwb -------------------------------
 
@@ -147,6 +155,148 @@ class SpyglassMixin:
             self._merge_delete_func = delete_downstream_merge
         return self._merge_delete_func
 
+    @staticmethod
+    def _get_instanced(*tables) -> Union[dj.user_tables.Table, list]:
+        """Return instance of table(s) if not already instanced."""
+        ret = []
+        if not isinstance(tables, Iterable):
+            tables = tuple(tables)
+        for table in tables:
+            if not isinstance(table, dj.user_tables.Table):
+                ret.append(table())
+            else:
+                ret.append(table)
+        return ret[0] if len(ret) == 1 else ret
+
+    @staticmethod
+    def _link_repr(parent, child, width=120):
+        len_each = (width - 4) // 2
+        p = parent.full_table_name[:len_each].ljust(len_each)
+        c = child.full_table_name[:len_each].ljust(len_each)
+        return f"{p} -> {c}"
+
+    def _get_connection(
+        self,
+        child: dj.user_tables.TableMeta,
+        parent: dj.user_tables.TableMeta = None,
+        recurse_level: int = 4,
+        visited: set = None,
+    ) -> Union[List[dj.FreeTable], List[List[dj.FreeTable]]]:
+        """
+        Return list of tables connecting the parent and child for a valid join.
+
+        Parameters
+        ----------
+        parent : dj.user_tables.TableMeta
+            DataJoint table upstream in pipeline.
+        child : dj.user_tables.TableMeta
+            DataJoint table downstream in pipeline.
+        recurse_level : int, optional
+            Maximum number of recursion levels. Default is 4.
+        visited : set, optional
+            Set of visited tables (used internally for recursion).
+
+        Returns
+        -------
+        List[dj.FreeTable] or List[List[dj.FreeTable]]
+            List of paths, with each path as a list FreeTables connecting the
+            parent and child for a valid join.
+        """
+        parent = parent or self
+        parent, child = self._get_instanced(parent, child)
+        visited = visited or set()
+        child_is_merge = child.full_table_name in self._merge_tables
+
+        if recurse_level < 1 or (  # if too much recursion
+            not child_is_merge  # merge table ok
+            and (  # already visited, outside spyglass, or no connection
+                child.full_table_name in visited
+                or child.full_table_name.strip("`").split("_")[0]
+                not in SHARED_MODULES
+                or child.full_table_name not in parent.descendants()
+            )
+        ):
+            return []
+
+        if child.full_table_name in parent.children():
+            logger.debug(f"1-{recurse_level}:" + self._link_repr(parent, child))
+            if isinstance(child, dict) or isinstance(parent, dict):
+                __import__("pdb").set_trace()
+            return [parent, child]
+
+        if child_is_merge:
+            ret = []
+            parts = child.parts(as_objects=True)
+            if not parts:
+                logger.warning(f"Merge has no parts: {child.full_table_name}")
+            for part in child.parts(as_objects=True):
+                links = self._get_connection(
+                    parent=parent,
+                    child=part,
+                    recurse_level=recurse_level,
+                    visited=visited,
+                )
+                visited.add(part.full_table_name)
+                if links:
+                    logger.debug(
+                        f"2-{recurse_level}:" + self._link_repr(parent, part)
+                    )
+                    ret.append(links + [child])
+
+            return ret
+
+        for subchild in parent.children(as_objects=True):
+            links = self._get_connection(
+                parent=subchild,
+                child=child,
+                recurse_level=recurse_level - 1,
+                visited=visited,
+            )
+            visited.add(subchild.full_table_name)
+            if links:
+                logger.debug(
+                    f"3-{recurse_level}:" + self._link_repr(subchild, child)
+                )
+                if parent.full_table_name in [l.full_table_name for l in links]:
+                    return links
+                else:
+                    return [parent] + links
+
+        return []
+
+    def _join_list(
+        self,
+        tables: Union[List[dj.FreeTable], List[List[dj.FreeTable]]],
+        restriction: str = None,
+    ) -> dj.expression.QueryExpression:
+        """Return join of all tables in list. Omits empty items."""
+        restriction = restriction or self.restriction or True
+
+        if not isinstance(tables[0], (list, tuple)):
+            tables = [tables]
+        ret = []
+        for table_list in tables:
+            join = table_list[0] & restriction
+            for table in table_list[1:]:
+                join = join * table
+            if join:
+                ret.append(join)
+        return ret[0] if len(ret) == 1 else ret
+
+    def _connection_repr(self, connection) -> str:
+        if not isinstance(connection[0], Iterable):
+            connection = [connection]
+        ret = []
+        for table_list in connection:
+            connection_str = ""
+            for table in table_list:
+                if isinstance(table, str):
+                    connection_str += table + " -> "
+                else:
+                    connection_str += table.table_name + " -> "
+            ret.append(f"\n\tPath: {connection_str[:-4]}")
+        return ret
+
     def _find_session_link(
         self,
         table: dj.user_tables.UserTable,
@@ -185,7 +335,111 @@ class SpyglassMixin:
 
         return table * Session
 
-    def _get_exp_summary(self, sess_link: dj.expression.QueryExpression):
+    def _ensure_dependencies_loaded(self) -> None:
+        """Ensure connection dependencies loaded."""
+        if not self.connection.dependencies._loaded:
+            self.connection.dependencies.load()
+
+    @property
+    def _merge_tables(self) -> Dict[str, dj.FreeTable]:
+        """Dict of merge tables downstream of self.
+
+        Cache of items in parents of self.descendants(as_objects=True) that
+        have a merge primary key.
+        """
+        if self._merge_cache:
+            return self._merge_cache
+
+        def has_merge_pk(table):
+            ret = MERGE_PK in table.heading.names
+            if "output" in table.full_table_name and not ret:
+                logger.warning(
+                    f"Skipping merge table without merge primary key: "
+                    + f"{table.full_table_name}"
+                )
+            return MERGE_PK in table.heading.names
+
+        self._ensure_dependencies_loaded()
+        for desc in self.descendants(as_objects=True):
+            if "output" not in desc.full_table_name:
+                logger.debug(
+                    f"Skipping non-output table: {desc.full_table_name}"
+                )
+            if not has_merge_pk(desc):
+                continue
+            for parent in desc.parents(as_objects=True):
+                if (
+                    has_merge_pk(parent)
+                    and parent.full_table_name not in self._merge_cache
+                ):
+                    self._merge_cache[parent.full_table_name] = parent
+        logger.info(f"Found {len(self._merge_cache)} merge tables")
+
+        return self._merge_cache
+
+    @property
+    def _merge_links(self) -> Dict[str, List[dj.FreeTable]]:
+        """Dict of merge links downstream of self.
+
+        For each merge table found in _merge_tables, find the path from self to
+        merge. If the path is valid, add it to the dict. Cahche prevents need
+        to recompute whenever delete_downstream_merge is called with a new
+        restriction.
+        """
+        if self._merge_cache_links:
+            return self._merge_cache_links
+        for name, merge_table in self._merge_tables.items():
+            connection = self._get_connection(child=merge_table)
+            if connection:
+                self._merge_cache_links[name] = connection
+        return self._merge_cache_links
+
+    def delete_downstream_merge(
+        self,
+        restriction: str = None,
+        dry_run: bool = True,
+        disable_warning: bool = False,
+        **kwargs,
+    ) -> List[dj.expression.QueryExpression]:
+        """Delete downstream merge table entries associated with restricton.
+
+        Requires caching of merge tables and links, which is slow on first call.
+
+        Parameters
+        ----------
+        restriction : str, optional
+            Restriction to apply to merge tables. Default None. Will attempt to
+            use table restriction if None.
+        dry_run : bool, optional
+            If True, return list of merge part entries to be deleted. Default
+            True.
+        **kwargs : Any
+            Passed to datajoint.table.Table.delete.
+        """
+        restriction = restriction or self.restriction or True
+
+        merge_join_dict = {}
+        for merge_name, merge_link in self._merge_links.items():
+            logger.debug(self._connection_repr(merge_link))
+            joined = self._join_list(merge_link, restriction=self.restriction)
+            if joined:
+                merge_join_dict[self._merge_tables[merge_name]] = joined
+
+        if dry_run:
+            return merge_join_dict.values()
+
+        ret = []
+        for table, selection in merge_join_dict.items():
+            keys = selection.fetch(MERGE_PK, as_dict=True)
+            ret.append(table & keys)
+            # (table & keys).delete(**kwargs) # TODO: Run delete here
+        return ret
+
+    def ddm(self, *args, **kwargs):
+        """Alias for delete_downstream_merge."""
+        return self.delete_downstream_merge(*args, **kwargs)
+
+    def _get_exp_summary(self):
         """Get summary of experimenters for session(s), including NULL.
 
         Parameters
@@ -201,6 +455,8 @@ class SpyglassMixin:
         Session = self._delete_deps[-1]
 
         format = dj.U(self._session_pk, self._member_pk)
+
+        sess_link = self._join_list(self._session_connection)
         exp_missing = format & (sess_link - Session.Experimenter).proj(
             **{self._member_pk: "NULL"}
         )
@@ -208,6 +464,19 @@ class SpyglassMixin:
             format & (sess_link * Session.Experimenter - exp_missing).proj()
         )
         return exp_missing + exp_present
+
+    @property
+    def _session_connection(self) -> dj.expression.QueryExpression:
+        """Path from Session table to self.
+
+        None is not yet cached, False if no connection found.
+        """
+        if not self._session_connection_cache is None:
+            self._session_connection_cache = (
+                self._find_connection(parent=self._delete_deps[-1], child=self)
+                or False
+            )
+        return self._session_connection_cache
 
     def _check_delete_permission(self) -> None:
         """Check user name against lab team assoc. w/ self * Session.
@@ -229,18 +498,16 @@ class SpyglassMixin:
         if dj_user in LabMember().admin:  # bypass permission check for admin
             return
 
-        sess_link = self._find_session_link(table=self)
-        if not sess_link:  # Permit delete if not linked to a session
-            logger.warn(
+        if not self._session_connection:
+            logger.warn(  # Permit delete if no session connection
                 "Could not find lab team associated with "
                 + f"{self.__class__.__name__}."
                 + "\nBe careful not to delete others' data."
             )
             return
 
-        sess_summary = self._get_exp_summary(
-            sess_link.restrict(self.restriction)
-        )
+        sess_link = self.join(self._session_connection)
+        sess_summary = self._get_exp_summary(sess_link)
         experimenters = sess_summary.fetch(self._member_pk)
         if None in experimenters:
             raise PermissionError(
@@ -319,101 +586,3 @@ class SpyglassMixin:
     def cdel(self, *args, **kwargs):
         """Alias for cautious_delete."""
         self.cautious_delete(*args, **kwargs)
-
-
-def get_instanced(*tables):
-    ret = []
-    if not isinstance(tables, tuple):
-        tables = [tables]
-    for table in tables:
-        if not isinstance(table, dj.user_tables.Table):
-            ret.append(table())
-        else:
-            ret.append(table)
-    return ret[0] if len(ret) == 1 else ret
-
-
-def find_tables_connecting(
-    parent_table: dj.user_tables.TableMeta,
-    child_table: dj.user_tables.TableMeta,
-    recurse_level: int = 4,
-    visited: set = None,
-) -> list:
-    """
-    Return list of tables connecting the parent and child for a valid join.
-
-    Parameters
-    ----------
-    parent_table : dj.user_tables.TableMeta
-        DataJoint table upstream in pipeline.
-    child_table : dj.user_tables.TableMeta
-        DataJoint table downstream in pipeline.
-    recurse_level : int, optional
-        Maximum number of recursion levels. Default is 4.
-    visited : set, optional
-        Set of visited tables (used internally for recursion).
-
-    Returns
-    -------
-    list
-        List of paths, with each path as a list FreeTables connecting the parent
-        and child for a valid join.
-    """
-    parent_table, child_table = get_instanced(parent_table, child_table)
-    visited = visited or set()
-    child_is_merge = isinstance(child_table, Merge)
-
-    if recurse_level < 1 or (  # if too much recursion
-        not child_is_merge  # merge table ok
-        and (  # already visited, outside spyglass, or no connection
-            child_table.full_table_name in visited
-            or child_table.full_table_name.strip("`").split("_")[0]
-            not in SHARED_MODULES
-            or child_table.full_table_name not in parent_table.descendants()
-        )
-    ):
-        return []
-
-    if child_table.full_table_name in parent_table.children():
-        return [parent_table, child_table]
-
-    if child_is_merge:
-        _ = child_table._ensure_dependencies_loaded()
-        ret = []
-        for part in child_table.parts(as_objects=True):
-            connecting_path = find_tables_connecting(
-                parent_table,
-                part,
-                recurse_level=recurse_level,
-                visited=visited,
-            )
-            visited.add(part.full_table_name)
-            if connecting_path:
-                ret.append(connecting_path + [child_table])
-
-        return ret
-
-    for child in parent_table.children(as_objects=True):
-        connecting_path = find_tables_connecting(
-            child,
-            child_table,
-            recurse_level=recurse_level - 1,
-            visited=visited,
-        )
-        visited.add(child.full_table_name)
-        if connecting_path:
-            return [parent_table] + connecting_path
-
-    return []
-
-
-def join_all(connecting_tables, restriction=True):
-    if not isinstance(connecting_tables, list):
-        connecting_tables = [connecting_tables]
-    ret = []
-    for table_list in connecting_tables:
-        join = table_list[0] & restriction
-        for table in table_list[1:]:
-            join = join * table
-    ret.append(join)
-    return ret[0] if len(ret) == 1 else ret

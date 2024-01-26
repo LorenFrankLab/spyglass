@@ -52,7 +52,6 @@ class Merge(dj.Manual):
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
                     )
-        self._analysis_nwbfile = None
         self._source_class_dict = {}
 
     @property
@@ -64,14 +63,6 @@ class Merge(dj.Manual):
                 for part_name in self.parts(camel_case=True)
             }
         return self._source_class_dict
-
-    @property  # CB: This is a property to avoid circular import
-    def analysis_nwbfile(self):
-        if self._analysis_nwbfile is None:
-            from spyglass.common import AnalysisNwbfile  # noqa F401
-
-            self._analysis_nwbfile = AnalysisNwbfile
-        return self._analysis_nwbfile
 
     def _remove_comments(self, definition):
         """Use regular expressions to remove comments and blank lines"""
