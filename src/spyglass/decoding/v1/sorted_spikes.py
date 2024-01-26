@@ -273,7 +273,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         return SortedSpikesDetector.fetch_model(self.fetch1("classifier_path"))
 
     @staticmethod
-    def load_environments(key):
+    def fetch_environments(key):
         model_params = (
             DecodingParameters
             & {"decoding_param_name": key["decoding_param_name"]}
