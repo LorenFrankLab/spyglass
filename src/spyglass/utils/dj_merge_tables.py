@@ -52,7 +52,26 @@ class Merge(dj.Manual):
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
                     )
+        self._analysis_nwbfile = None
         self._source_class_dict = {}
+
+    @property
+    def source_class_dict(self) -> dict:
+        if not self._source_class_dict:
+            module = getmodule(self)
+            self._source_class_dict = {
+                part_name: getattr(module, part_name)
+                for part_name in self.parts(camel_case=True)
+            }
+        return self._source_class_dict
+
+    @property  # CB: This is a property to avoid circular import
+    def analysis_nwbfile(self):
+        if self._analysis_nwbfile is None:
+            from spyglass.common import AnalysisNwbfile  # noqa F401
+
+            self._analysis_nwbfile = AnalysisNwbfile
+        return self._analysis_nwbfile
 
     def _remove_comments(self, definition):
         """Use regular expressions to remove comments and blank lines"""
@@ -822,23 +841,17 @@ def delete_downstream_merge(
         restriction = True
 
     descendants = _unique_descendants(table, recurse_level)
-    merge_table_pairs = _master_table_pairs(
+    merge_table_dicts = _search_descendants(
         table_list=descendants,
-        restricted_parent=(table & restriction),
+        parent_table=table,
+        restriction=restriction,
     )
 
-    # restrict the merge table based on uuids in part
-    # don't need part for del, but show on dry_run
-    merge_pairs = [
-        (merge & part.fetch(RESERVED_PRIMARY_KEY, as_dict=True), part)
-        for merge, part in merge_table_pairs
-    ]
-
     if dry_run:
-        return merge_pairs
+        return [d["view"] for d in merge_table_dicts]
 
-    for merge_table, _ in merge_pairs:
-        merge_table.delete(**kwargs)
+    for merge_dict in merge_table_dicts:
+        (merge_dict["master"] & merge_dict["keys"]).delete(**kwargs)
 
 
 def _warn_on_restriction(table: dj.Table, restriction: str = None):
@@ -876,12 +889,9 @@ def _unique_descendants(
     """
 
     if recurse_level == 0:
-        return []
+        return {}
 
-    if attribute is None:
-        skip_attr_check = True
-    else:
-        skip_attr_check = False
+    skip_attr_check = True if attribute is None else False
 
     descendants = {}
 
@@ -901,13 +911,14 @@ def _unique_descendants(
     )
 
 
-def _master_table_pairs(
+def _search_descendants(
     table_list: list,
-    restricted_parent: dj.expression.QueryExpression = True,
+    parent_table: dj.Table,
+    restriction: str = True,
     connection: dj.connection.Connection = None,
 ) -> list:
     """
-    Given list of tables, return a list of master table pairs.
+    Given list of descendant tables, find merge tables linked to parent table.
 
     Returns a list of tuples, with master and part. Part will have restriction
     applied. If restriction yield empty list, skip.
@@ -916,20 +927,23 @@ def _master_table_pairs(
     ----------
     table_list : List[dj.Table]
         A list of datajoint tables.
-    restricted_parent : dj.expression.QueryExpression
-        Parent table restricted, to be joined with master and part. Default
-        True, no restriction.
+    parent_table : dj.Table
+        The parent table of the tables in table_list.
+    restiction : str, optional
+        Restriction applies to parent table. Default True, no restriction.
     connection : datajoint.connection.Connection
         A database connection. Default None, use connection from first table.
 
     Returns
     -------
-    List[Tuple[dj.Table, dj.Table]]
-        A list of master table pairs.
+    List[dict]
+        A list of dictionaries, each with keys: master, view, and keys.
+        These are the master table, the restricted view of the master table,
+        and the primary keys of the restricted view.
     """
     conn = connection or table_list[0].connection
 
-    master_table_pairs = []
+    ret = []
     unique_parts = []
 
     # Adapted from Spyglass PR 535
@@ -939,24 +953,33 @@ def _master_table_pairs(
             continue
 
         master_name = get_master(table_name)
-        if not master_name:  # then it's not a part table
+        if not master_name:  # then not a part table
             continue
 
         master = dj.FreeTable(conn, master_name)
-        if RESERVED_PRIMARY_KEY not in master.heading.attributes.keys():
-            continue  # then it's not a merge table
+        # if table has no master, or master is not MergeTable, skip
+        if RESERVED_PRIMARY_KEY not in master.heading.names:
+            continue
 
-        restricted_join = restricted_parent * table
-        if not restricted_join:  # No entries relevant to restriction in part
+        try:
+            restricted_master = (
+                master & restriction
+            )  # .merge_restrict(restriction)
+        except DataJointError:
+            continue
+
+        if not restricted_master:  # No entries relevant to restriction in part
             continue
 
         unique_parts.append(table_name)
-        master_table_pairs.append(
-            (
-                master,
-                table
-                & restricted_join.fetch(RESERVED_PRIMARY_KEY, as_dict=True),
+        ret.append(
+            dict(
+                master=master,
+                view=restricted_master,
+                keys=restricted_master.fetch(
+                    RESERVED_PRIMARY_KEY, as_dict=True
+                ),
             )
         )
 
-    return master_table_pairs
+    return ret

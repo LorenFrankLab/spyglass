@@ -14,6 +14,16 @@ GRANT_SEL = "GRANT SELECT ON "
 CREATE_USR = "CREATE USER IF NOT EXISTS "
 TEMP_PASS = " IDENTIFIED BY 'temppass';"
 ESC = r"\_%"
+SHARED_MODULES = [
+    "common",
+    "spikesorting",
+    "decoding",
+    "position",
+    "position_linearization",
+    "ripple",
+    "lfp",
+    "waveform",
+]
 
 
 class DatabaseSettings:
@@ -40,15 +50,7 @@ class DatabaseSettings:
         target_database : str, optional
             Default is mysql. Can also be docker container id
         """
-        self.shared_modules = [
-            f"common{ESC}",
-            f"spikesorting{ESC}",
-            f"decoding{ESC}",
-            f"position{ESC}",
-            f"position_linearization{ESC}",
-            f"ripple{ESC}",
-            f"lfp{ESC}",
-        ]
+        self.shared_modules = [f"{m}{ESC}" for m in SHARED_MODULES]
         self.user = user_name or dj.config["database.user"]
         self.host = (
             host_name or dj.config["database.host"] or "lmf-db.cin.ucsf.edu"

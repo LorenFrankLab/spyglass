@@ -2,6 +2,7 @@ import datajoint as dj
 from datajoint.table import logger as dj_logger
 from datajoint.utils import user_choice
 
+from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.logging import logger
 
@@ -318,3 +319,101 @@ class SpyglassMixin:
     def cdel(self, *args, **kwargs):
         """Alias for cautious_delete."""
         self.cautious_delete(*args, **kwargs)
+
+
+def get_instanced(*tables):
+    ret = []
+    if not isinstance(tables, tuple):
+        tables = [tables]
+    for table in tables:
+        if not isinstance(table, dj.user_tables.Table):
+            ret.append(table())
+        else:
+            ret.append(table)
+    return ret[0] if len(ret) == 1 else ret
+
+
+def find_tables_connecting(
+    parent_table: dj.user_tables.TableMeta,
+    child_table: dj.user_tables.TableMeta,
+    recurse_level: int = 4,
+    visited: set = None,
+) -> list:
+    """
+    Return list of tables connecting the parent and child for a valid join.
+
+    Parameters
+    ----------
+    parent_table : dj.user_tables.TableMeta
+        DataJoint table upstream in pipeline.
+    child_table : dj.user_tables.TableMeta
+        DataJoint table downstream in pipeline.
+    recurse_level : int, optional
+        Maximum number of recursion levels. Default is 4.
+    visited : set, optional
+        Set of visited tables (used internally for recursion).
+
+    Returns
+    -------
+    list
+        List of paths, with each path as a list FreeTables connecting the parent
+        and child for a valid join.
+    """
+    parent_table, child_table = get_instanced(parent_table, child_table)
+    visited = visited or set()
+    child_is_merge = isinstance(child_table, Merge)
+
+    if recurse_level < 1 or (  # if too much recursion
+        not child_is_merge  # merge table ok
+        and (  # already visited, outside spyglass, or no connection
+            child_table.full_table_name in visited
+            or child_table.full_table_name.strip("`").split("_")[0]
+            not in SHARED_MODULES
+            or child_table.full_table_name not in parent_table.descendants()
+        )
+    ):
+        return []
+
+    if child_table.full_table_name in parent_table.children():
+        return [parent_table, child_table]
+
+    if child_is_merge:
+        _ = child_table._ensure_dependencies_loaded()
+        ret = []
+        for part in child_table.parts(as_objects=True):
+            connecting_path = find_tables_connecting(
+                parent_table,
+                part,
+                recurse_level=recurse_level,
+                visited=visited,
+            )
+            visited.add(part.full_table_name)
+            if connecting_path:
+                ret.append(connecting_path + [child_table])
+
+        return ret
+
+    for child in parent_table.children(as_objects=True):
+        connecting_path = find_tables_connecting(
+            child,
+            child_table,
+            recurse_level=recurse_level - 1,
+            visited=visited,
+        )
+        visited.add(child.full_table_name)
+        if connecting_path:
+            return [parent_table] + connecting_path
+
+    return []
+
+
+def join_all(connecting_tables, restriction=True):
+    if not isinstance(connecting_tables, list):
+        connecting_tables = [connecting_tables]
+    ret = []
+    for table_list in connecting_tables:
+        join = table_list[0] & restriction
+        for table in table_list[1:]:
+            join = join * table
+    ret.append(join)
+    return ret[0] if len(ret) == 1 else ret
