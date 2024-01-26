@@ -84,73 +84,50 @@ class DecodingOutput(_Merge, SpyglassMixin):
                     except (PermissionError, FileNotFoundError):
                         logger.warning(f"Unable to remove {path}, skipping")
 
-    @property
-    def source_class_dict(self) -> dict:
-        """Dictionary of source class names to source classes
-
-        {
-            'ClusterlessDecodingV1': spy...ClusterlessDecodingV1,
-             'SortedSpikesDecodingV1': spy...SortedSpikesDecodingV1
-        }
-
-        Returns
-        -------
-        dict
-            Dictionary of source class names to source classes
-        """
-        if not self._source_class_dict:
-            self._ensure_dependencies_loaded()
-            module = inspect.getmodule(self)
-            for part_name in self.parts():
-                part_name = to_camel_case(part_name.split("__")[-1].strip("`"))
-                part = getattr(module, part_name)
-                self._source_class_dict[part_name] = part
-        return self._source_class_dict
-
-    @classmethod
-    def _get_source_class(cls, key):
-        # CB: By making this a property, we can generate the source_class_dict
-        #     without a key. Previously failed on empty table
-        #     This demonstrates pipeline-specific implementation. See also
-        #     merge_restrict_class edits that centralize this logic.
-        return cls.source_class_dict[(cls & key).fetch1("source")]
-
     @classmethod
     def fetch_results(cls, key):
-        decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return (source_class & decoding_selection_key).fetch_results()
+        return cls().merge_get_parent_class(key).fetch_results()
 
     @classmethod
     def fetch_model(cls, key):
-        decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return (source_class & decoding_selection_key).fetch_model()
+        return cls().merge_get_parent_class(key).fetch_model()
 
     @classmethod
     def fetch_environments(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return source_class.fetch_environments(decoding_selection_key)
+        return (
+            cls()
+            .merge_get_parent_class(key)
+            .fetch_environments(decoding_selection_key)
+        )
 
     @classmethod
     def fetch_position_info(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return source_class.fetch_position_info(decoding_selection_key)
+        return (
+            cls()
+            .merge_get_parent_class(key)
+            .fetch_position_info(decoding_selection_key)
+        )
 
     @classmethod
     def fetch_linear_position_info(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return source_class.fetch_linear_position_info(decoding_selection_key)
+        return (
+            cls()
+            .merge_get_parent_class(key)
+            .fetch_linear_position_info(decoding_selection_key)
+        )
 
     @classmethod
     def fetch_spike_data(cls, key, filter_by_interval=True):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return source_class.fetch_linear_position_info(
-            decoding_selection_key, filter_by_interval=filter_by_interval
+        return (
+            cls()
+            .merge_get_parent_class(key)
+            .fetch_linear_position_info(
+                decoding_selection_key, filter_by_interval=filter_by_interval
+            )
         )
 
     @classmethod
