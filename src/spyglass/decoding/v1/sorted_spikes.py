@@ -32,6 +32,7 @@ from spyglass.settings import config
 from spyglass.spikesorting.spikesorting_merge import (
     SpikeSortingOutput,
 )  # noqa: F401
+from spyglass.spikesorting.unit_inclusion_merge import UnitInclusionOutput
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("decoding_sorted_spikes_v1")
@@ -46,12 +47,15 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
     class Units(SpyglassMixin, dj.Part):
         definition = """
-        -> SortedSpikesGroup
-        -> SpikeSortingOutput.proj(spikesorting_merge_id='merge_id')
+        -> master
+        -> UnitInclusionOutput.proj(unit_inclusion_merge_id='merge_id')
         """
 
     def create_group(
-        self, group_name: str, nwb_file_name: str, keys: list[dict]
+        self,
+        group_name: str,
+        nwb_file_name: str,
+        unit_inclusion_merge_ids: list[str],
     ):
         group_key = {
             "sorted_spikes_group_name": group_name,
@@ -61,9 +65,12 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             group_key,
             skip_duplicates=True,
         )
-        for key in keys:
-            self.SortGroup.insert1(
-                {**key, **group_key},
+        for unit_inclusion_merge_id in unit_inclusion_merge_ids:
+            self.Units.insert1(
+                {
+                    "unit_inclusion_merge_id": unit_inclusion_merge_id,
+                    **group_key,
+                },
                 skip_duplicates=True,
             )
 
@@ -382,29 +389,38 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def fetch_spike_data(key, filter_by_interval=True):
-        merge_ids = (
-            (
-                SortedSpikesGroup.Units
-                & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "sorted_spikes_group_name": key["sorted_spikes_group_name"],
-                }
-            )
-        ).fetch("spikesorting_merge_id")
+        unit_inclusion_merge_ids = (
+            SortedSpikesGroup.Units
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "sorted_spikes_group_name": key["sorted_spikes_group_name"],
+            }
+        ).fetch("unit_inclusion_merge_id")
 
         spike_times = []
-        for merge_id in merge_ids:
-            nwb_file = SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})[0]
+        for unit_inclusion_merge_id in unit_inclusion_merge_ids:
+            part_parent = UnitInclusionOutput.merge_get_parent(
+                {"merge_id": unit_inclusion_merge_id}
+            )
+            spikesorting_merge_id = part_parent.fetch1("spikesorting_merge_id")
+            nwb_file = SpikeSortingOutput().fetch_nwb(
+                {"merge_id": spikesorting_merge_id}
+            )[0]
+            # field name in v0 spikesorting is "units", in v1 it is "object_id"
+            nwb_field_name = "object_id" if "object_id" in nwb_file else "units"
+            sorting_spike_times = nwb_file[nwb_field_name][
+                "spike_times"
+            ].to_list()
 
-            if "object_id" in nwb_file:
-                # v1 spikesorting
-                spike_times.extend(
-                    nwb_file["object_id"]["spike_times"].to_list()
-                )
-            elif "units" in nwb_file:
-                # v0 spikesorting
-                spike_times.extend(nwb_file["units"]["spike_times"].to_list())
+            # Get the included units
+            included_units_ind = part_parent.fetch1("included_units_ind")
+            if included_units_ind is None:
+                included_units_ind = np.arange(len(sorting_spike_times))
 
+            # Find the spike times for the included units
+            spike_times.extend(
+                [sorting_spike_times[ind] for ind in included_units_ind]
+            )
         if not filter_by_interval:
             return spike_times
 
