@@ -155,9 +155,9 @@ sgc.LabMember.insert_from_nwbfile(nwb_file_name)
 #
 
 sgc.LabMember.LabMemberInfo.insert(
-    [  # Full name, Google email address, DataJoint username
-        ["Firstname Lastname", "example1@gmail.com", "example1"],
-        ["Firstname2 Lastname2", "example2@gmail.com", "example2"],
+    [  # Full name, Google email address, DataJoint username, admin
+        ["Firstname Lastname", "example1@gmail.com", "example1", 0],
+        ["Firstname2 Lastname2", "example2@gmail.com", "example2", 0],
     ],
     skip_duplicates=True,
 )
