@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: base
 #     language: python
@@ -33,8 +33,6 @@
 
 # ## Imports
 #
-
-# %env KACHERY_CLOUD_DIR="/home/cb/.kachery-cloud/"
 
 # +
 import os
