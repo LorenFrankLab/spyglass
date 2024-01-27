@@ -14,7 +14,6 @@ from spyglass.common.common_ephys import (
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
-from spyglass.spikesorting.imported import ImportedSpikeSorting
 from spyglass.utils import logger
 
 
@@ -60,4 +59,6 @@ def populate_all_common(nwb_file_name):
     RawPosition.populate(fp)
 
     logger.info("Populate ImportedSpikeSorting...")
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
+
     ImportedSpikeSorting.populate(fp)
