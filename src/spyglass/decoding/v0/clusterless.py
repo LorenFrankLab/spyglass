@@ -6,6 +6,7 @@ References
 [1] Denovellis, E. L. et al. Hippocampal replay of experience at real-world
 speeds. eLife 10, e64505 (2021).
 """
+
 import os
 import shutil
 import uuid
@@ -654,11 +655,11 @@ class MultiunitFiringRate(SpyglassMixin, dj.Computed):
             key["nwb_file_name"]
         )
 
-        key[
-            "multiunit_firing_rate_object_id"
-        ] = nwb_analysis_file.add_nwb_object(
-            analysis_file_name=key["analysis_file_name"],
-            nwb_object=multiunit_firing_rate.reset_index(),
+        key["multiunit_firing_rate_object_id"] = (
+            nwb_analysis_file.add_nwb_object(
+                analysis_file_name=key["analysis_file_name"],
+                nwb_object=multiunit_firing_rate.reset_index(),
+            )
         )
 
         nwb_analysis_file.add(

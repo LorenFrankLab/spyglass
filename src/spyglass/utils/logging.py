@@ -1,4 +1,5 @@
 """Logging configuration based on datajoint/logging.py"""
+
 import logging
 import sys
 
