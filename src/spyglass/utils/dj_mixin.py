@@ -3,8 +3,10 @@ from typing import Dict, List, Union
 
 import datajoint as dj
 from datajoint.table import logger as dj_logger
-from datajoint.utils import user_choice
+from datajoint.user_tables import Table, TableMeta
+from datajoint.utils import get_master, user_choice
 
+from spyglass.settings import test_mode
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
@@ -284,7 +286,9 @@ class SpyglassMixin:
         return ret[0] if len(ret) == 1 else ret
 
     def _connection_repr(self, connection) -> str:
-        if not isinstance(connection[0], Iterable):
+        if isinstance(connection[0], (Table, TableMeta)):
+            connection = [connection]
+        if not isinstance(connection[0], (list, tuple)):
             connection = [connection]
         ret = []
         for table_list in connection:
@@ -296,44 +300,6 @@ class SpyglassMixin:
                     connection_str += table.table_name + " -> "
             ret.append(f"\n\tPath: {connection_str[:-4]}")
         return ret
-
-    def _find_session_link(
-        self,
-        table: dj.user_tables.UserTable,
-        search_limit: int = 2,
-    ) -> dj.expression.QueryExpression:
-        """Find Session table associated with table.
-
-        Parameters
-        ----------
-        table : datajoint.user_tables.UserTable
-            Table to search for Session ancestor.
-        Session : datajoint.user_tables.UserTable
-            Session table to search for. Passed as arg to prevent re-import.
-        search_limit : int, optional
-            Number of levels of children of target table to search. Default 2.
-
-        Returns
-        -------
-        datajoint.expression.QueryExpression or None
-            Join of table link with Session table if found, else None.
-        """
-        Session = self._delete_deps[-1]
-        # TODO: check search_limit default is enough for any table in spyglass
-        if self._session_pk in table.primary_key:
-            # joinable with Session
-            return table * Session
-
-        elif search_limit > 0:
-            for child in table.children(as_objects=True):
-                table = self._find_session_link(child, search_limit - 1)
-                if table:  # table is link, will valid join to Session
-                    return table
-
-        elif not table or search_limit < 1:  # if none found and limit reached
-            return  # Err kept in parent func to centralize permission logic
-
-        return table * Session
 
     def _ensure_dependencies_loaded(self) -> None:
         """Ensure connection dependencies loaded."""
@@ -351,28 +317,17 @@ class SpyglassMixin:
             return self._merge_cache
 
         def has_merge_pk(table):
-            ret = MERGE_PK in table.heading.names
-            if "output" in table.full_table_name and not ret:
-                logger.warning(
-                    f"Skipping merge table without merge primary key: "
-                    + f"{table.full_table_name}"
-                )
             return MERGE_PK in table.heading.names
 
         self._ensure_dependencies_loaded()
         for desc in self.descendants(as_objects=True):
-            if "output" not in desc.full_table_name:
-                logger.debug(
-                    f"Skipping non-output table: {desc.full_table_name}"
-                )
             if not has_merge_pk(desc):
                 continue
-            for parent in desc.parents(as_objects=True):
-                if (
-                    has_merge_pk(parent)
-                    and parent.full_table_name not in self._merge_cache
-                ):
-                    self._merge_cache[parent.full_table_name] = parent
+            if not (master_name := get_master(desc.full_table_name)):
+                continue
+            master = dj.FreeTable(self.connection, master_name)
+            if has_merge_pk(master):
+                self._merge_cache[master_name] = master
         logger.info(f"Found {len(self._merge_cache)} merge tables")
 
         return self._merge_cache
@@ -394,11 +349,21 @@ class SpyglassMixin:
                 self._merge_cache_links[name] = connection
         return self._merge_cache_links
 
+    def _commit_merge_deletes(self, merge_join_dict, **kwargs):
+        ret = []
+        for table, selection in merge_join_dict.items():
+            keys = selection.fetch(MERGE_PK, as_dict=True)
+            ret.append(table & keys)  # NEEDS TESTING WITH ACTUAL DELETE
+            # (table & keys).delete(**kwargs) # TODO: Run delete here
+        return ret
+
     def delete_downstream_merge(
         self,
         restriction: str = None,
         dry_run: bool = True,
+        reload_cache: bool = False,
         disable_warning: bool = False,
+        return_parts: bool = True,
         **kwargs,
     ) -> List[dj.expression.QueryExpression]:
         """Delete downstream merge table entries associated with restricton.
@@ -413,9 +378,20 @@ class SpyglassMixin:
         dry_run : bool, optional
             If True, return list of merge part entries to be deleted. Default
             True.
+        reload_cache : bool, optional
+            If True, reload merge cache. Default False.
+        disable_warning : bool, optional
+            If True, do not warn if no merge tables found. Default False.
+        return_parts : bool, optional
+            If True, return list of merge part entries to be deleted. Default
+            True. If False, return dictionary of merge tables and their joins.
         **kwargs : Any
             Passed to datajoint.table.Table.delete.
         """
+        if reload_cache:
+            self._merge_cache = {}
+            self._merge_cache_links = {}
+
         restriction = restriction or self.restriction or True
 
         merge_join_dict = {}
@@ -425,15 +401,15 @@ class SpyglassMixin:
             if joined:
                 merge_join_dict[self._merge_tables[merge_name]] = joined
 
-        if dry_run:
-            return merge_join_dict.values()
+        if not merge_join_dict and not disable_warning:
+            logger.warning(
+                f"No merge tables found downstream of {self.full_table_name}."
+                + "\n\tIf this is unexpected, try running with `reload_cache`."
+            )
 
-        ret = []
-        for table, selection in merge_join_dict.items():
-            keys = selection.fetch(MERGE_PK, as_dict=True)
-            ret.append(table & keys)
-            # (table & keys).delete(**kwargs) # TODO: Run delete here
-        return ret
+        if dry_run:
+            return merge_join_dict
+        self._commit_merge_deletes(merge_join_dict, **kwargs)
 
     def ddm(self, *args, **kwargs):
         """Alias for delete_downstream_merge."""
@@ -471,9 +447,9 @@ class SpyglassMixin:
 
         None is not yet cached, False if no connection found.
         """
-        if not self._session_connection_cache is None:
+        if self._session_connection_cache is None:
             self._session_connection_cache = (
-                self._find_connection(parent=self._delete_deps[-1], child=self)
+                self._get_connection(parent=self._delete_deps[-1], child=self)
                 or False
             )
         return self._session_connection_cache
@@ -506,10 +482,10 @@ class SpyglassMixin:
             )
             return
 
-        sess_link = self.join(self._session_connection)
-        sess_summary = self._get_exp_summary(sess_link)
+        sess_summary = self._get_exp_summary()
         experimenters = sess_summary.fetch(self._member_pk)
         if None in experimenters:
+            # TODO: Check if allow delete of remainder?
             raise PermissionError(
                 "Please ensure all Sessions have an experimenter in "
                 + f"SessionExperimenter:\n{sess_summary}"
@@ -554,11 +530,10 @@ class SpyglassMixin:
         if not force_permission:
             self._check_delete_permission()
 
-        merge_deletes = self._merge_del_func(
-            self,
-            restriction=self.restriction if self.restriction else None,
+        merge_deletes = self.delete_downstream_merge(
             dry_run=True,
             disable_warning=True,
+            return_parts=False,
         )
 
         safemode = (
@@ -568,15 +543,15 @@ class SpyglassMixin:
         )
 
         if merge_deletes:
-            for table, _ in merge_deletes:
-                count, name = len(table), table.full_table_name
+            for table, content in merge_deletes.items():
+                count, name = len(content), table.full_table_name
                 dj_logger.info(f"Merge: Deleting {count} rows from {name}")
             if (
-                not safemode
+                not test_mode
+                or not safemode
                 or user_choice("Commit deletes?", default="no") == "yes"
             ):
-                for merge_table, _ in merge_deletes:
-                    merge_table.delete({**kwargs, "safemode": False})
+                self._commit_merge_deletes(merge_deletes, **kwargs)
             else:
                 logger.info("Delete aborted.")
                 return

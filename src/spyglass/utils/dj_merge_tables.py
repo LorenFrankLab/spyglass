@@ -813,8 +813,6 @@ def delete_downstream_merge(
     dry_run: bool
         Default True. If true, return list of tuples, merge/part tables
         downstream of table input. Otherwise, delete merge/part table entries.
-    recurse_level: int
-        Default 2. Depth to recurse into table descendants.
     disable_warning: bool
         Default False. If True, don't warn about restrictions on table object.
     kwargs: dict
@@ -825,152 +823,12 @@ def delete_downstream_merge(
     List[Tuple[dj.Table, dj.Table]]
         Entries in merge/part tables downstream of table input.
     """
-    if not disable_warning:
-        _warn_on_restriction(table, restriction)
+    from spyglass.utils.dj_mixin import SpyglassMixin
 
-    if not restriction:
-        restriction = True
+    if not isinstance(table, SpyglassMixin):
+        raise ValueError("Input must be a Spyglass Table.")
+    table = table if isinstance(table, dj.Table) else table()
 
-    descendants = _unique_descendants(table, recurse_level)
-    merge_table_dicts = _search_descendants(
-        table_list=descendants,
-        parent_table=table,
-        restriction=restriction,
+    return table.delete_downstream_merge(
+        restriction=restriction, dry_run=dry_run, **kwargs
     )
-
-    if dry_run:
-        return [d["view"] for d in merge_table_dicts]
-
-    for merge_dict in merge_table_dicts:
-        (merge_dict["master"] & merge_dict["keys"]).delete(**kwargs)
-
-
-def _warn_on_restriction(table: dj.Table, restriction: str = None):
-    """Warn if restriction on table object differs from input restriction"""
-    if restriction is None and table.restriction:
-        logger.warn(
-            f"Warning: ignoring table restriction: {table().restriction}.\n\t"
-            + "Please pass restrictions as an arg"
-        )
-
-
-def _unique_descendants(
-    table: dj.Table,
-    recurse_level: int = 2,
-    return_names: bool = False,
-    attribute=None,
-) -> list:
-    """Recurisively find unique descendants of a given table
-
-    Parameters
-    ----------
-    table: dj.Table
-        The node in the tree from which to find descendants.
-    recurse_level: int
-        The maximum level of descendants to find.
-    return_names: bool
-        If True, return names of descendants found. Else return Table objects.
-    attribute: str, optional
-        If provided, only return descendants that have this attribute.
-
-    Returns
-    -------
-    List[dj.Table, str]
-        List descendants found when recurisively called to recurse_level
-    """
-
-    if recurse_level == 0:
-        return {}
-
-    skip_attr_check = True if attribute is None else False
-
-    descendants = {}
-
-    def recurse_descendants(sub_table, level):
-        for descendant in sub_table.descendants(as_objects=True):
-            if descendant.full_table_name not in descendants and (
-                skip_attr_check or attribute in descendant.heading.attributes
-            ):
-                descendants[descendant.full_table_name] = descendant
-                if level > 1:
-                    recurse_descendants(descendant, level - 1)
-
-    recurse_descendants(table, recurse_level)
-
-    return (
-        list(descendants.keys()) if return_names else list(descendants.values())
-    )
-
-
-def _search_descendants(
-    table_list: list,
-    parent_table: dj.Table,
-    restriction: str = True,
-    connection: dj.connection.Connection = None,
-) -> list:
-    """
-    Given list of descendant tables, find merge tables linked to parent table.
-
-    Returns a list of tuples, with master and part. Part will have restriction
-    applied. If restriction yield empty list, skip.
-
-    Parameters
-    ----------
-    table_list : List[dj.Table]
-        A list of datajoint tables.
-    parent_table : dj.Table
-        The parent table of the tables in table_list.
-    restiction : str, optional
-        Restriction applies to parent table. Default True, no restriction.
-    connection : datajoint.connection.Connection
-        A database connection. Default None, use connection from first table.
-
-    Returns
-    -------
-    List[dict]
-        A list of dictionaries, each with keys: master, view, and keys.
-        These are the master table, the restricted view of the master table,
-        and the primary keys of the restricted view.
-    """
-    conn = connection or table_list[0].connection
-
-    ret = []
-    unique_parts = []
-
-    # Adapted from Spyglass PR 535
-    for table in table_list:
-        table_name = table.full_table_name
-        if table_name in unique_parts:  # then repeat in list
-            continue
-
-        master_name = get_master(table_name)
-        if not master_name:  # then not a part table
-            continue
-
-        master = dj.FreeTable(conn, master_name)
-        # if table has no master, or master is not MergeTable, skip
-        if RESERVED_PRIMARY_KEY not in master.heading.names:
-            continue
-
-        try:
-            restricted_master = (
-                master & restriction
-            )  # .merge_restrict(restriction)
-        except DataJointError:
-            continue
-
-        if not restricted_master:  # No entries relevant to restriction in part
-            continue
-
-        unique_parts.append(table_name)
-        ret.append(
-            dict(
-                master=master,
-                view=restricted_master,
-                keys=restricted_master.fetch(
-                    RESERVED_PRIMARY_KEY, as_dict=True
-                ),
-            )
-        )
-
-    return ret
