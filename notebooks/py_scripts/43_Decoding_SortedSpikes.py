@@ -79,18 +79,6 @@ SortedSpikesGroup()
 SortedSpikesGroup.Units()
 
 # +
-# from spyglass.spikesorting.unit_inclusion_merge import (
-#     ImportedUnitInclusionV1,
-#     UnitInclusionOutput,
-# )
-# from spyglass.decoding import DecodingOutput, SortedSpikesGroup
-
-# DecodingOutput.drop()
-# SortedSpikesGroup.drop()
-# UnitInclusionOutput.drop()
-# ImportedUnitInclusionV1.drop()
-
-# +
 unit_inclusion_merge_ids = (
     UnitInclusionOutput.ImportedUnitInclusionV1
     & [{"spikesorting_merge_id": id} for id in spikesorting_merge_ids]
@@ -181,12 +169,3 @@ DecodingOutput.SortedSpikesDecodingV1 & selection_key
 
 results = (SortedSpikesDecodingV1 & selection_key).fetch_results()
 results
-
-# +
-from spyglass.spikesorting.v1 import CurationV1
-
-nwb = (
-    CurationV1 & {"sorting_id": "08a302b6-5505-40fa-b4d5-62162f8eef58"}
-).fetch_nwb()[0]
-nwb
-# -
