@@ -19,12 +19,10 @@ channels:
 dependencies:
   - python>=3.9, <3.10
   - jupyterlab>=3.*
-  - pydotplus>=2.0.*
+  - pydotplus
   - libgcc
   - dask>=2.30
-  - dask-cuda
-  - cupy
-  - pip>=20.2.*
+  - pip
   - position_tools
   - track_linearization>=2.3
   - ripple_detection
