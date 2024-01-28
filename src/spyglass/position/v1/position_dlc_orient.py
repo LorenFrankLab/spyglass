@@ -2,10 +2,10 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
+from position_tools.core import gaussian_smooth
 
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.utils import gaussian_smooth
 from spyglass.position.v1.dlc_utils import get_span_start_stop
 from spyglass.utils.dj_mixin import SpyglassMixin
 

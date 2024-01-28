@@ -5,6 +5,14 @@ import numpy as np
 import pandas as pd
 import pynwb
 import pynwb.behavior
+from position_tools import (
+    get_angle,
+    get_distance,
+    get_speed,
+    get_velocity,
+    interpolate_nan,
+)
+from position_tools.core import gaussian_smooth
 from tqdm import tqdm_notebook as tqdm
 from track_linearization import (
     get_linearized_position,
@@ -16,18 +24,15 @@ from track_linearization import (
 from spyglass.common.common_behav import RawPosition, VideoFile
 from spyglass.common.common_interval import IntervalList  # noqa F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.utils import (
-    gaussian_smooth,
-    get_angle,
-    get_centroid,
-    get_distance,
-    get_speed,
-    get_velocity,
-    interpolate_nan,
-)
 from spyglass.settings import raw_dir, video_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import deprecated_factory
+
+try:
+    from position_tools import get_centroid
+except ImportError:
+    logger.warning("Please update position_tools to >= 0.1.0")
+    from position_tools import get_centriod as get_centroid
 
 schema = dj.schema("common_position")
 

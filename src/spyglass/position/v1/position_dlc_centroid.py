@@ -4,10 +4,10 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
+from position_tools import get_distance, get_velocity
 
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.utils import get_distance, get_velocity
 from spyglass.position.v1.dlc_utils import (
     _key_to_smooth_func_dict,
     get_span_start_stop,
