@@ -2,10 +2,12 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_mixin import SpyglassMixin
-from .position_dlc_pose_estimation import DLCPoseEstimation  # noqa: F401
-from .position_dlc_position import DLCSmoothInterp
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.position.v1.position_dlc_pose_estimation import (  # noqa: F401
+    DLCPoseEstimation,
+)
+from spyglass.position.v1.position_dlc_position import DLCSmoothInterp
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("position_v1_dlc_cohort")
 

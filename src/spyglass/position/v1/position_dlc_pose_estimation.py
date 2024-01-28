@@ -9,7 +9,7 @@ import pandas as pd
 import pynwb
 from IPython.display import display
 
-from ...common.common_behav import (  # noqa: F401
+from spyglass.common.common_behav import (  # noqa: F401
     RawPosition,
     VideoFile,
     convert_epoch_interval_name_to_position_interval_name,
