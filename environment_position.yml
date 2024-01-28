@@ -27,9 +27,8 @@ dependencies:
   - pip>=20.2.*
   - position_tools
   - track_linearization>=2.3
-  - replay_trajectory_classification
   - ripple_detection
-  - trajectory_analysis_tools
+  - non_local_detector
   - ipython
   - matplotlib>=3.3
   - seaborn
