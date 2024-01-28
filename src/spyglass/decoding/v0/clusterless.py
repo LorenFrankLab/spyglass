@@ -38,7 +38,6 @@ try:
     )
 except ImportError as e:
     logger.warning(e)
-from ripple_detection import get_multiunit_population_firing_rate
 from tqdm.auto import tqdm
 
 from spyglass.common.common_behav import (
@@ -55,12 +54,12 @@ from spyglass.decoding.v0.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
 )
-from spyglass.spikesorting.spikesorting_curation import (
+from spyglass.spikesorting.v0.spikesorting_curation import (
     CuratedSpikeSorting,
     CuratedSpikeSortingSelection,
     Curation,
 )
-from spyglass.spikesorting.spikesorting_sorting import (
+from spyglass.spikesorting.v0.spikesorting_sorting import (
     SpikeSorting,
     SpikeSortingSelection,
 )
