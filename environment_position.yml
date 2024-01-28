@@ -13,7 +13,6 @@
 name: spyglass-position
 channels:
   - conda-forge
-  - defaults
   - pytorch
   - franklab
   - edeno
