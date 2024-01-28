@@ -4,7 +4,6 @@ channels:
   - defaults
   - franklab
   - edeno
-  - menpo
 dependencies:
   - python>=3.9,<3.10
   - jupyterlab>=3.*
@@ -18,7 +17,6 @@ dependencies:
   - non_local_detector
   - matplotlib
   - seaborn
-  - opencv
   - bottleneck
   - ipympl
   - tqdm
