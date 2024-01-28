@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
 
-import cv2
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,6 +13,7 @@ from spyglass.common.common_behav import (  # noqa: F401
     VideoFile,
     convert_epoch_interval_name_to_position_interval_name,
 )
+
 from ...common.common_nwbfile import AnalysisNwbfile
 from ...utils.dj_mixin import SpyglassMixin
 from .dlc_utils import OutputLogger, infer_output_dir
@@ -49,6 +49,7 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         crop_ints : list
             list of 4 integers [x min, x max, y min, y max]
         """
+        import cv2
 
         cap = cv2.VideoCapture(video_path)
         _, frame = cap.read()
