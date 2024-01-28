@@ -173,7 +173,9 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
 
         self.insert1(key)
 
-        from ..merge import LinearizedPositionOutput
+        from spyglass.linearization.linearization_merge import (
+            LinearizedPositionOutput,
+        )
 
         part_name = to_camel_case(self.table_name.split("__")[-1])
 

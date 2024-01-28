@@ -289,7 +289,7 @@ linear_key = {
     "linearization_param_name": "default",
 }
 
-from spyglass.linearization.merge import LinearizedPositionOutput
+from spyglass.linearization.linearization_merge import LinearizedPositionOutput
 
 linear_merge_key = LinearizedPositionOutput.merge_restrict(linear_key).fetch1(
     "KEY"
