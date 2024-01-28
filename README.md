@@ -79,6 +79,10 @@ License and Copyright notice can be found at
 
 ## Citation
 
-Lee, K.H.\*, Denovellis, E.L.\*, Ly, R., Magland, J., Soules, J., Gramling, D.P., Guidera, J.A., Nevers, R., Adenekan, P., Bray, S., et al. (2024). Spyglass: a data analysis framework for reproducible and shareable neuroscience research. bioRxiv. [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295 ).
+> Lee, K.H.\*, Denovellis, E.L.\*, Ly, R., Magland, J., Soules, J., Gramling, D.P.,
+ Guidera, J.A., Nevers, R., Adenekan, P., Bray, S., et al. (2024). Spyglass:
+a data analysis framework for reproducible and shareable neuroscience research.
+   bioRxiv.
+   [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295 ).
 
 *\* Equal contribution*
