@@ -4,11 +4,10 @@ import datajoint as dj
 import kachery_cloud as kcl
 from datajoint.errors import DataJointError
 
+from spyglass.common.common_lab import Lab  # noqa: F401
+from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, logger
-
-from ..common.common_lab import Lab  # noqa: F401
-from ..common.common_nwbfile import AnalysisNwbfile
 
 # define the environment variable name for the kachery zone and the cloud directory
 kachery_zone_envar = "KACHERY_ZONE"

@@ -1,4 +1,4 @@
-from .settings import config  # ensure loaded config dirs
+from spyglass.settings import config  # ensure loaded config dirs
 
 try:
     import ndx_franklab_novela
