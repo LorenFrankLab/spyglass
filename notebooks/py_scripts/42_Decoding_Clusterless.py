@@ -53,7 +53,7 @@ dj.config.load(
 )  # load config for database connection info
 
 # +
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 import spyglass.spikesorting.v1 as sgs
 from spyglass.decoding.v1.waveform_features import UnitWaveformFeaturesSelection
 
