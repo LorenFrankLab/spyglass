@@ -32,6 +32,7 @@
     - Refactor input validation in DLC pipeline. #688
     - DLC path handling from config, and normalize naming convention. #722
     - Fix in place column bug #752
+    - Remove position_tools dependency
 - Decoding:
     - Add `decoding` pipeline V1. #731, #769
     - Add a table to store the decoding results #731
