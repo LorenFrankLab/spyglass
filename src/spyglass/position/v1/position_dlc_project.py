@@ -491,7 +491,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 f"{import_labeled_data_path.as_posix()}/{video_file}/*.h5"
             )[0]
             dlc_df = pd.read_hdf(h5_file)
-            dlc_df.columns.set_levels([team_name], level=0, inplace=True)
+            dlc_df.columns = dlc_df.columns.set_levels([team_name], level=0)
             dlc_df.to_hdf(
                 Path(
                     f"{current_labeled_data_path.as_posix()}/{video_file}/CollectedData_{team_name}.h5"
