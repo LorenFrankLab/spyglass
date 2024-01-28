@@ -26,6 +26,7 @@ dependencies:
   - dask-cuda
   - cupy
   - pip>=20.2.*
+  - position_tools
   - track_linearization>=2.3
   - replay_trajectory_classification
   - ripple_detection
