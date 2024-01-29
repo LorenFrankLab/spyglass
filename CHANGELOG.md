@@ -23,6 +23,7 @@
 - Spike sorting:
     - Add SpikeSorting V1 pipeline. #651
     - Move modules into spikesorting.v0 #682
+    - Add MUA analysis to spike sorting pipeline
 - LFP: Minor fixes to LFPBandV1 populator and `make`. #706, #795
 - Linearization:
     - Minor fixes to LinearizedPositionV1 pipeline #695
