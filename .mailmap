@@ -1,0 +1,24 @@
+# This file maps authors and committers to their canonical names and emails.
+# use "git shortlog --email --summary" to see accurate authorship information
+Chris Brozdowski <Chris.Broz@ucsf.edu> CBroz1 <CBrozdowski@yahoo.com>
+Chris Brozdowski <Chris.Broz@ucsf.edu> Chris Brozdowski <CBrozdowski@yahoo.com>
+Chris Brozdowski <Chris.Broz@ucsf.edu> cbroz1 <chris.broz@ucsf.edu>
+Daniel Gramling <dpeg22@gmail.com> Daniel Gramling <57648931+dpeg22@users.noreply.github.com>
+Daniel Gramling <dpeg22@gmail.com> dpeg22 <57648931+dpeg22@users.noreply.github.com>
+Daniel Gramling <dpeg22@gmail.com> dpeg22 <dpeg22@gmail.com>
+Eric L. Denovellis <eric.denovellis@ucsf.edu> Eric Denovellis <edeno@bu.edu>
+Eric L. Denovellis <eric.denovellis@ucsf.edu> Eric Denovellis <edenovellis@gmail.com>
+Eric L. Denovellis <eric.denovellis@ucsf.edu> Eric Denovellis <edeno@users.noreply.github.com>
+Jeremy Magland <jmagland@flatironinstitute.org> Jeremy Magland <jeremy.magland@gmail.com>
+Jeremy Magland <jmagland@flatironinstitute.org> Jeremy Magland <magland@users.noreply.github.com>
+Kyu Hyun Lee <kyuhyun.lee@ucsf.edu> Kyu Hyun Lee <kyu@cyclone.cin.ucsf.edu>
+Kyu Hyun Lee <kyuhyun.lee@ucsf.edu> Kyu Hyun Lee <kyu@typhoon.cin.ucsf.edu>
+Kyu Hyun Lee <kyuhyun.lee@ucsf.edu> Kyu Hyun Lee <kyuhyun9056@gmail.com>
+Kyu Hyun Lee <kyuhyun.lee@ucsf.edu> kyu <kyuhyun.lee@ucsf.edu>
+Kyu Hyun Lee <kyuhyun.lee@ucsf.edu> kyu <kyuhyun9056@gmail.com>
+Loren Frank <loren@phy.ucsf.edu> Loren <loren@phy.ucsf.edu>
+Samuel Bray <sam.bray@ucsf.edu> Sam Bray <sam.bray@ucsf.edu>
+Ryan Ly <rly@lbl.gov> rly <rly@lbl.gov>
+Jennifer Guidera <jenniferguidera@gmail.com> jguides <jenniferguidera@gmail.com>
+Jennifer Guidera <jenniferguidera@gmail.com> jguides <40403817+jguides@users.noreply.github.com>
+Michael Coulter <michael.e.coulter@gmail.com> MichaelCoulter <37707865+MichaelCoulter@users.noreply.github.com>

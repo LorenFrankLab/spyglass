@@ -96,7 +96,7 @@ class SpyglassConfig:
         }
 
     def load_config(
-        self, base_dir=None, force_reload=False, on_startup: bool = True
+        self, base_dir=None, force_reload=False, on_startup: bool = False
     ):
         """
         Loads the configuration settings for the object.

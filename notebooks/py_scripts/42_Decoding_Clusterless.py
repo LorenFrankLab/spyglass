@@ -53,7 +53,7 @@ dj.config.load(
 )  # load config for database connection info
 
 # +
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 import spyglass.spikesorting.v1 as sgs
 from spyglass.decoding.v1.waveform_features import UnitWaveformFeaturesSelection
 
@@ -323,7 +323,7 @@ DecodingOutput.ClusterlessDecodingV1 & selection_key
 
 # We can load the results of the decoding:
 
-decoding_results = (ClusterlessDecodingV1 & selection_key).load_results()
+decoding_results = (ClusterlessDecodingV1 & selection_key).fetch_results()
 decoding_results
 
 # Finally, if we deleted the results, we can use the `cleanup` function to delete the results from the file system:
@@ -349,12 +349,12 @@ DecodingOutput().cleanup()
 # (
 #     position_info,
 #     position_variable_names,
-# ) = ClusterlessDecodingV1.load_position_info(selection_key)
+# ) = ClusterlessDecodingV1.fetch_position_info(selection_key)
 # results_time = decoding_results.acausal_posterior.isel(intervals=0).time.values
 # position_info = position_info.loc[results_time[0] : results_time[-1]]
 
-# env = ClusterlessDecodingV1.load_environments(selection_key)[0]
-# spike_times, _ = ClusterlessDecodingV1.load_spike_data(selection_key)
+# env = ClusterlessDecodingV1.fetch_environments(selection_key)[0]
+# spike_times, _ = ClusterlessDecodingV1.fetch_spike_data(selection_key)
 
 
 # create_interactive_2D_decoding_figurl(

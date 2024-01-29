@@ -1,16 +1,16 @@
 import datajoint as dj
 
 from spyglass.common import ElectrodeGroup, IntervalList
-from spyglass.spikesorting.curation_figurl import (
+from spyglass.spikesorting.v0.curation_figurl import (
     CurationFigurl,
     CurationFigurlSelection,
 )
-from spyglass.spikesorting.spikesorting_artifact import (
+from spyglass.spikesorting.v0.spikesorting_artifact import (
     ArtifactDetection,
     ArtifactDetectionSelection,
     ArtifactRemovedIntervalList,
 )
-from spyglass.spikesorting.spikesorting_curation import (
+from spyglass.spikesorting.v0.spikesorting_curation import (
     AutomaticCuration,
     AutomaticCurationSelection,
     CuratedSpikeSorting,
@@ -21,13 +21,13 @@ from spyglass.spikesorting.spikesorting_curation import (
     Waveforms,
     WaveformSelection,
 )
-from spyglass.spikesorting.spikesorting_recording import (
+from spyglass.spikesorting.v0.spikesorting_recording import (
     SortGroup,
     SortInterval,
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
-from spyglass.spikesorting.spikesorting_sorting import (
+from spyglass.spikesorting.v0.spikesorting_sorting import (
     SpikeSorting,
     SpikeSortingSelection,
 )

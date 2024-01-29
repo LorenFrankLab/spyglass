@@ -6,9 +6,11 @@ import sortingview.views as vv
 import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
-from spyglass.spikesorting.spikesorting_curation import Curation
-from spyglass.spikesorting.spikesorting_recording import SpikeSortingRecording
-from spyglass.spikesorting.spikesorting_sorting import SpikeSorting
+from spyglass.spikesorting.v0.spikesorting_curation import Curation
+from spyglass.spikesorting.v0.spikesorting_recording import (
+    SpikeSortingRecording,
+)
+from spyglass.spikesorting.v0.spikesorting_sorting import SpikeSorting
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_curation_figurl")

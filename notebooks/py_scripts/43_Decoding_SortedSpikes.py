@@ -37,7 +37,7 @@ dj.config.load(
 )  # load config for database connection info
 
 # +
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 import spyglass.spikesorting.v1 as sgs
 
 
@@ -59,18 +59,35 @@ spikesorting_merge_ids = (
 spikesorting_merge_ids
 
 # +
+from spyglass.spikesorting.unit_inclusion_merge import (
+    ImportedUnitInclusionV1,
+    UnitInclusionOutput,
+)
+
+ImportedUnitInclusionV1().insert_all_units(spikesorting_merge_ids)
+
+UnitInclusionOutput.ImportedUnitInclusionV1() & [
+    {"spikesorting_merge_id": id} for id in spikesorting_merge_ids
+]
+
+# +
 from spyglass.decoding.v1.sorted_spikes import SortedSpikesGroup
 
 SortedSpikesGroup()
+# -
+
+SortedSpikesGroup.Units()
 
 # +
+unit_inclusion_merge_ids = (
+    UnitInclusionOutput.ImportedUnitInclusionV1
+    & [{"spikesorting_merge_id": id} for id in spikesorting_merge_ids]
+).fetch("merge_id")
+
 SortedSpikesGroup().create_group(
     group_name="test_group",
     nwb_file_name=nwb_copy_file_name,
-    keys=[
-        {"spikesorting_merge_id": merge_id}
-        for merge_id in spikesorting_merge_ids
-    ],
+    unit_inclusion_merge_ids=unit_inclusion_merge_ids,
 )
 
 SortedSpikesGroup & {
@@ -79,7 +96,7 @@ SortedSpikesGroup & {
 }
 # -
 
-SortedSpikesGroup.SortGroup & {
+SortedSpikesGroup.Units & {
     "nwb_file_name": nwb_copy_file_name,
     "sorted_spikes_group_name": "test_group",
 }
@@ -150,5 +167,5 @@ DecodingOutput.SortedSpikesDecodingV1 & selection_key
 
 # We can load the results as before:
 
-results = (SortedSpikesDecodingV1 & selection_key).load_results()
+results = (SortedSpikesDecodingV1 & selection_key).fetch_results()
 results

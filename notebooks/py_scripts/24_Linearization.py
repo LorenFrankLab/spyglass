@@ -289,9 +289,14 @@ linear_key = {
     "linearization_param_name": "default",
 }
 
-from spyglass.linearization.merge import LinearizedPositionOutput
+from spyglass.linearization.linearization_merge import LinearizedPositionOutput
 
-linear_position_df = (LinearizedPositionOutput & linear_key).fetch1_dataframe()
+linear_merge_key = LinearizedPositionOutput.merge_restrict(linear_key).fetch1(
+    "KEY"
+)
+linear_position_df = (
+    LinearizedPositionOutput & linear_merge_key
+).fetch1_dataframe()
 linear_position_df
 # -
 

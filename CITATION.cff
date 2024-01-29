@@ -1,15 +1,134 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
 cff-version: 1.2.0
-message: "If you use this software, please cite it as below."
+title: spyglass
+message: 'If you use this software, please cite it as below.'
+type: software
 authors:
-- family-names: "Lee"
-  given-names: "Kyu Hyun"
-- family-names: "Denovellis"
-  given-names: "Eric"
-- family-names: "Ly"
-  given-names: "Ryan"
-- family-names: "Frank"
-  given-names: "Loren"
-title: "spyglass"
+  - given-names: Kyu Hyun
+    family-names: Lee
+    email: kyuhyun.lee@ucsf.edu
+    affiliation: 'University of California, San Francisco'
+    orcid: 'https://orcid.org/0000-0001-6483-9444'
+  - given-names: Eric L.
+    family-names: Denovellis
+    email: eric.denovellis@ucsf.edu
+    affiliation: Howard Hughes Medical Institute
+    orcid: 'https://orcid.org/0000-0003-4606-087X'
+  - given-names: Ryan
+    family-names: Ly
+    email: rly@lbl.gov
+    affiliation: Lawrence Berkeley National Laboratory
+    orcid: 'https://orcid.org/0000-0001-9238-0642'
+  - given-names: Jeremy
+    family-names: Magland
+    email: jmagland@flatironinstitute.org
+    affiliation: Flatiron Institute
+    orcid: 'https://orcid.org/0000-0002-5286-4375'
+  - given-names: Jeff
+    family-names: Soules
+    email: jsoules@flatironinstitute.org
+    affiliation: Flatiron Institute
+  - given-names: Daniel P.
+    family-names: Gramling
+    orcid: 'https://orcid.org/0009-0004-6136-3769'
+    affiliation: University of Tübingen
+  - given-names: Jennifer A.
+    family-names: Guidera
+    email: jennifer.guidera@ucsf.edu
+    affiliation: 'University of California, San Francisco'
+    orcid: 'https://orcid.org/0000-0003-4013-214X'
+  - given-names: Rhino
+    family-names: Nevers
+    email: rhino.nevers@ucsf.edu
+    affiliation: 'University of California, San Francisco'
+  - given-names: Philip
+    family-names: Adenekan
+    email: phil.adenekan@ucsf.edu
+    affiliation: 'University of California, San Francisco'
+    orcid: 'https://orcid.org/0000-0002-4999-7847'
+  - given-names: Samuel
+    family-names: Bray
+    email: sam.bray@ucsf.edu
+    orcid: 'https://orcid.org/0000-0002-9696-6920'
+    affiliation: 'University of California, San Francisco'
+  - given-names: Emily
+    family-names: Monroe
+    affiliation: UCD
+  - given-names: Ji Hyun
+    family-names: Bak
+    orcid: 'https://orcid.org/0000-0002-5700-7823'
+  - given-names: Michael E.
+    family-names: Coulter
+    orcid: 'https://orcid.org/0000-0003-0357-351X'
+    affiliation: 'University of California, San Francisco'
+    email: michael.coulter@ucsf.edu
+  - given-names: Xulu
+    family-names: Sun
+    email: xulu.sun@ucsf.edu
+    affiliation: UCSF
+    orcid: 'https://orcid.org/0000-0003-3076-0994'
+  - given-names: Oliver
+    family-names: Rübel
+    email: oruebel@lbl.gov
+    affiliation: Lawrence Berkeley National Laboratory
+    orcid: 'https://orcid.org/0000-0001-9902-1984'
+  - given-names: Thinh
+    family-names: Nguyen
+    affiliation: Datajoint
+    email: thinh@datajoint.com
+  - given-names: ' Dimitri'
+    family-names: Yatsenko
+    email: dimitri@datajoint.com
+    affiliation: Datajoint
+    orcid: 'https://orcid.org/0000-0002-1844-641X'
+  - given-names: Joshua
+    family-names: Chu
+    email: jpc6@rice.edu
+    affiliation: Rice University
+  - given-names: Caleb
+    family-names: Kemere
+    email: caleb.kemere@rice.edu
+    affiliation: Rice University
+    orcid: 'https://orcid.org/0000-0003-2054-0234'
+  - given-names: Alessio
+    family-names: Buccino
+    email: alessio.buccino@alleninstitute.org
+    affiliation: Allen Institute
+    orcid: 'https://orcid.org/0000-0003-3661-527X'
+  - given-names: Samuel
+    family-names: Garcia
+    email: samuel.garcia@cnrs.fr
+    affiliation: Centre de Recherche en Neurosciences de Lyon
+  - given-names: Loren M.
+    family-names: Frank
+    email: loren.frank@ucsf.edu
+    affiliation: 'University of California, San Francisco'
+    orcid: 'https://orcid.org/0000-0002-1752-5677'
+identifiers:
+  - type: doi
+    value: 10.1101/2024.01.25.577295
+    description: bioRxiv preprint
+repository-code: 'https://github.com/LorenFrankLab/spyglass'
+url: 'https://lorenfranklab.github.io/spyglass/'
+abstract: >-
+  Spyglass is a data analysis framework that facilitates the
+  storage, analysis, visualization, and sharing of
+  neuroscience data to support reproducible research. It is
+  designed to be interoperable with the NWB format and
+  integrates open-source tools into a coherent framework.
+keywords:
+  - neuroscience
+  - open science
+  - electrophysiology
+  - figurl
+  - interactive data visualization
+  - Neurodata Without Borders
+  - Spike interface
+  - Datajoint
+  - spike sorting
+  - kachery
+license: MIT
 version: 0.4.3
-date-released: 2023-11-07
-url: "https://github.com/LorenFrankLab/spyglass"
+date-released: '2023-11-07'

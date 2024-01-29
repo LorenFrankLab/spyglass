@@ -7,6 +7,7 @@ References
 speeds. eLife 10, e64505 (2021).
 
 """
+
 import pprint
 
 import datajoint as dj
@@ -43,7 +44,7 @@ from spyglass.decoding.v0.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
 )
-from spyglass.spikesorting.spikesorting_curation import CuratedSpikeSorting
+from spyglass.spikesorting.v0.spikesorting_curation import CuratedSpikeSorting
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("decoding_sortedspikes")

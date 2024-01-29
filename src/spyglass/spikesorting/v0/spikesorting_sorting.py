@@ -14,10 +14,10 @@ from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
 from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.settings import sorting_dir, temp_dir
-from spyglass.spikesorting.spikesorting_artifact import (
+from spyglass.spikesorting.v0.spikesorting_artifact import (
     ArtifactRemovedIntervalList,
 )
-from spyglass.spikesorting.spikesorting_recording import (
+from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )

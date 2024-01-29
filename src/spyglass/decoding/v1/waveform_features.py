@@ -9,7 +9,7 @@ import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v1 import SpikeSortingSelection
 from spyglass.utils import SpyglassMixin
 

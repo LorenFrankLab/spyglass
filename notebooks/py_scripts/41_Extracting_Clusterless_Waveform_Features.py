@@ -146,7 +146,7 @@ sgs.SpikeSorting.populate(group_keys)
 # For clusterless decoding we do not need any manual curation, but for the sake of the pipeline, we need to store the output of the thresholding in the `CurationV1` table and insert this into the `SpikeSortingOutput` table.
 
 # +
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
 sorting_ids = (
     sgs.SpikeSortingSelection & {"nwb_file_name": nwb_copy_file_name}
@@ -155,7 +155,7 @@ sorting_ids = (
 for sorting_id in sorting_ids:
     try:
         sgs.CurationV1.insert_curation(sorting_id=sorting_id)
-    except KeyError:
+    except KeyError as e:
         pass
 
 SpikeSortingOutput.insert(
@@ -250,7 +250,7 @@ UnitWaveformFeaturesSelection()
 # First we find the units we need:
 
 # +
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
 merge_ids = (
     (SpikeSortingOutput.CurationV1 * sgs.SpikeSortingSelection)

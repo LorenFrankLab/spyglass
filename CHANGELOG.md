@@ -16,10 +16,13 @@
 - Update docs to reflect new notebooks. #776
 - Add overview of Spyglass to docs. #779
 - LFPV1: Fix error for multiple lfp settings on same data #775
+- Update linting for black 24
 
 ### Pipelines
 
-- Spike sorting: Add SpikeSorting V1 pipeline. #651
+- Spike sorting:
+    - Add SpikeSorting V1 pipeline. #651
+    - Move modules into spikesorting.v0 #682
 - LFP: Minor fixes to LFPBandV1 populator and `make`. #706, #795
 - Linearization:
     - Minor fixes to LinearizedPositionV1 pipeline #695
@@ -28,6 +31,7 @@
 - Position:
     - Refactor input validation in DLC pipeline. #688
     - DLC path handling from config, and normalize naming convention. #722
+    - Fix in place column bug #752
 - Decoding:
     - Add `decoding` pipeline V1. #731, #769
     - Add a table to store the decoding results #731
@@ -35,6 +39,10 @@
     - Allow multiple spike waveform features for clusterelss decoding #731
     - Reorder notebooks #731
     - Add fetch class functionality to `Merge` table. #783, #786
+    - Add ability to filter sorted units in decoding #781
+    - Rename SortedSpikesGroup.SortGroup to SortedSpikesGroup.Units
+    - Change methods with load_... to fetch_... for consistency
+    - Use merge table methods to access part methods
 
 ## [0.4.3] (November 7, 2023)
 

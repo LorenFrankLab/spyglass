@@ -13,24 +13,20 @@
 name: spyglass-position
 channels:
   - conda-forge
-  - defaults
   - pytorch
   - franklab
   - edeno
 dependencies:
   - python>=3.9, <3.10
   - jupyterlab>=3.*
-  - pydotplus>=2.0.*
+  - pydotplus
   - libgcc
   - dask>=2.30
-  - dask-cuda
-  - cupy
-  - pip>=20.2.*
+  - pip
   - position_tools
   - track_linearization>=2.3
-  - replay_trajectory_classification
   - ripple_detection
-  - trajectory_analysis_tools
+  - non_local_detector
   - ipython
   - matplotlib>=3.3
   - seaborn

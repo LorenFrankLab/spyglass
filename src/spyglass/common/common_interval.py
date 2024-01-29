@@ -56,9 +56,11 @@ class IntervalList(SpyglassMixin, dj.Manual):
         for _, epoch_data in epochs.iterrows():
             epoch_dict = {
                 "nwb_file_name": nwb_file_name,
-                "interval_list_name": epoch_data.tags[0]
-                if epoch_data.tags
-                else f"interval_{epoch_data[0]}",
+                "interval_list_name": (
+                    epoch_data.tags[0]
+                    if epoch_data.tags
+                    else f"interval_{epoch_data[0]}"
+                ),
                 "valid_times": np.asarray(
                     [[epoch_data.start_time, epoch_data.stop_time]]
                 ),

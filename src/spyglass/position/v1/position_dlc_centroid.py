@@ -6,10 +6,9 @@ import pandas as pd
 import pynwb
 from position_tools import get_distance, get_velocity
 
-from ...common.common_behav import RawPosition
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_mixin import SpyglassMixin
-from .dlc_utils import (
+from spyglass.common.common_behav import RawPosition
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.position.v1.dlc_utils import (
     _key_to_smooth_func_dict,
     get_span_start_stop,
     interp_pos,
@@ -17,8 +16,9 @@ from .dlc_utils import (
     validate_option,
     validate_smooth_params,
 )
-from .position_dlc_cohort import DLCSmoothInterpCohort
-from .position_dlc_position import DLCSmoothInterpParams
+from spyglass.position.v1.position_dlc_cohort import DLCSmoothInterpCohort
+from spyglass.position.v1.position_dlc_position import DLCSmoothInterpParams
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("position_v1_dlc_centroid")
 
