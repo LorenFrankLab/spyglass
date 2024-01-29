@@ -133,7 +133,13 @@ class DecodingOutput(_Merge, SpyglassMixin):
     @classmethod
     def create_decoding_view(cls, key, head_direction_name="head_orientation"):
         results = cls.fetch_results(key)
-        posterior = results.acausal_posterior.unstack("state_bins").sum("state")
+        posterior = (
+            results.squeeze()
+            .acausal_posterior.unstack("state_bins")
+            .drop_sel(state=["Local", "No-Spike"], errors="ignore")
+            .sum("state")
+        )
+        posterior /= posterior.sum("position")
         env = cls.fetch_environments(key)[0]
 
         if "x_position" in results.coords:
