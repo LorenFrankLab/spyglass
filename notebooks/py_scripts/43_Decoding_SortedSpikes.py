@@ -71,14 +71,8 @@ UnitInclusionOutput.ImportedUnitInclusionV1() & [
 ]
 
 # +
-from spyglass.decoding.v1.sorted_spikes import SortedSpikesGroup
+from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 
-SortedSpikesGroup()
-# -
-
-SortedSpikesGroup.Units()
-
-# +
 unit_inclusion_merge_ids = (
     UnitInclusionOutput.ImportedUnitInclusionV1
     & [{"spikesorting_merge_id": id} for id in spikesorting_merge_ids]

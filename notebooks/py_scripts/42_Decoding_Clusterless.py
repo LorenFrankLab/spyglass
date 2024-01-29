@@ -125,8 +125,39 @@ UnitWaveformFeaturesGroup.UnitFeatures & {
 
 # +
 from spyglass.position import PositionOutput
+import spyglass.position as sgp
 
-PositionOutput.TrodesPosV1 & {"nwb_file_name": nwb_copy_file_name}
+
+sgp.v1.TrodesPosParams.insert1(
+    {
+        "trodes_pos_params_name": "default_decoding",
+        "params": {
+            "max_LED_separation": 9.0,
+            "max_plausible_speed": 300.0,
+            "position_smoothing_duration": 0.125,
+            "speed_smoothing_std_dev": 0.100,
+            "orient_smoothing_std_dev": 0.001,
+            "led1_is_front": 1,
+            "is_upsampled": 1,
+            "upsampling_sampling_rate": 250,
+            "upsampling_interpolation_method": "linear",
+        },
+    },
+    skip_duplicates=True,
+)
+
+trodes_s_key = {
+    "nwb_file_name": nwb_copy_file_name,
+    "interval_list_name": "pos 0 valid times",
+    "trodes_pos_params_name": "default_decoding",
+}
+sgp.v1.TrodesPosSelection.insert1(
+    trodes_s_key,
+    skip_duplicates=True,
+)
+sgp.v1.TrodesPosV1.populate(trodes_s_key)
+
+PositionOutput.TrodesPosV1 & trodes_s_key
 
 # +
 from spyglass.decoding.v1.core import PositionGroup
@@ -136,7 +167,7 @@ position_merge_ids = (
     & {
         "nwb_file_name": nwb_copy_file_name,
         "interval_list_name": "pos 0 valid times",
-        "trodes_pos_params_name": "default",
+        "trodes_pos_params_name": "default_decoding",
     }
 ).fetch("merge_id")
 
