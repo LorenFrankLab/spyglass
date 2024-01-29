@@ -18,11 +18,10 @@
 - Update docs to reflect new notebooks. #776
 - Add overview of Spyglass to docs. #779
 
-
 ### Pipelines
 
 - Spike sorting: Add SpikeSorting V1 pipeline. #651
-- LFP: 
+- LFP:
     - Minor fixes to LFPBandV1 populator and `make`. #706, #795
     - LFPV1: Fix error for multiple lfp settings on same data #775
 - Linearization:

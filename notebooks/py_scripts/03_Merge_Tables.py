@@ -192,8 +192,8 @@ result8
 # 2. use `merge_delete_parent` to delete from the parent sources, getting rid of
 #    the entries in the source table they came from.
 #
-# 3. use `delete_downstream_merge` to find Merge Tables downstream and get rid
-#    full entries, avoiding orphaned master table entries.
+# 3. use `delete_downstream_merge` to find Merge Tables downstream of any other
+#    table and get rid full entries, avoiding orphaned master table entries.
 #
 # The two latter cases can be destructive, so we include an extra layer of
 # protection with `dry_run`. When true (by default), these functions return
@@ -201,23 +201,32 @@ result8
 #
 
 LFPOutput.merge_delete(nwb_file_dict)  # Delete from merge table
-LFPOutput.merge_delete_parent(restriction=nwb_file_dict, dry_run=True)
-delete_downstream_merge(
-    table=LFPV1,
-    restriction=nwb_file_dict,
-    dry_run=True,
-)
 
-# To delete all merge table entries associated with an NWB file, use
-# `delete_downstream_merge` with the `Nwbfile` table.
+LFPOutput.merge_delete_parent(restriction=nwb_file_dict, dry_run=True)
+
+# `delete_downstream_merge` is available from any other table in the pipeline,
+# but it does take some time to find the links downstream. If you're using this,
+# you can save time by reassigning your table to a variable, which will preserve
+# a copy of the previous search.
+#
+# Because the copy is stored, this function may not see additional merge tables
+# you've imported. To refresh this copy, set `reload_cache=True`
 #
 
-delete_downstream_merge(
-    table=sgc.Nwbfile,
-    restriction={"nwb_file_name": nwb_copy_file_name},
+# +
+nwbfile = sgc.Nwbfile()
+
+(nwbfile & nwb_file_dict).delete_downstream_merge(
     dry_run=True,
-    recurse_level=3,  # for long pipelines with many tables
+    reload_cache=False,  # if still encountering errors, try setting this to True
 )
+# -
+
+# This function is run automatically whin you use `cautious_delete`, which
+# checks team permissions before deleting.
+#
+
+(nwbfile & nwb_file_dict).cautious_delete()
 
 # ## Up Next
 #

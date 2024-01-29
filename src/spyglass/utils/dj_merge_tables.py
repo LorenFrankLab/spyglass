@@ -54,16 +54,6 @@ class Merge(dj.Manual):
                     )
         self._source_class_dict = {}
 
-    @property
-    def source_class_dict(self) -> dict:
-        if not self._source_class_dict:
-            module = getmodule(self)
-            self._source_class_dict = {
-                part_name: getattr(module, part_name)
-                for part_name in self.parts(camel_case=True)
-            }
-        return self._source_class_dict
-
     def _remove_comments(self, definition):
         """Use regular expressions to remove comments and blank lines"""
         return re.sub(  # First remove comments, then blank lines
@@ -511,7 +501,7 @@ class Merge(dj.Manual):
 
     def fetch_nwb(
         self,
-        restriction: str = True,
+        restriction: str = None,
         multi_source=False,
         disable_warning=False,
         *attrs,
@@ -531,10 +521,7 @@ class Merge(dj.Manual):
         """
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
-        if restriction is True and self.restriction:
-            if not disable_warning:
-                _warn_on_restriction(self, restriction)
-            restriction = self.restriction
+        restriction = restriction or self.restriction or True
 
         return self.merge_restrict_class(restriction).fetch_nwb()
 

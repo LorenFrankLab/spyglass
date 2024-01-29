@@ -1,7 +1,7 @@
 """A schema to store the usage of advanced Spyglass features.
 
 Records show usage of features such as table chains, which will be used to
-determine which features are used, how often, and by whom. This will help 
+determine which features are used, how often, and by whom. This will help
 plan future development of Spyglass.
 """
 

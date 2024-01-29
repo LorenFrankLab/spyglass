@@ -1,6 +1,5 @@
-from collections.abc import Iterable
 from time import time
-from typing import Dict, List, Union
+from typing import Dict, List
 
 import datajoint as dj
 import networkx as nx
@@ -58,6 +57,7 @@ class SpyglassMixin:
     _merge_table_cache = {}  # Cache of merge tables downstream of self
     _merge_chains_cache = {}  # Cache of table chains to merges
     _session_connection_cache = None  # Cache of path from Session to self
+    _test_mode_cache = None  # Cache of test mode setting for delete
     _usage_table_cache = None  # Temporary inclusion for usage tracking
 
     # ------------------------------- fetch_nwb -------------------------------
@@ -106,7 +106,9 @@ class SpyglassMixin:
                 self._nwb_table_resolved = (
                     AnalysisNwbfile
                     if "-> AnalysisNwbfile" in self.definition
-                    else Nwbfile if "-> Nwbfile" in self.definition else None
+                    else Nwbfile
+                    if "-> Nwbfile" in self.definition
+                    else None
                 )
 
             if getattr(self, "_nwb_table_resolved", None) is None:
@@ -440,8 +442,8 @@ class SpyglassMixin:
 
         if merge_deletes:
             for table, content in merge_deletes.items():
-                count, name = len(content), table.full_table_name
-                dj_logger.info(f"Merge: Deleting {count} rows from {name}")
+                count = sum([len(part) for part in content])
+                dj_logger.info(f"Merge: Deleting {count} rows from {table}")
             if (
                 not self._test_mode
                 or not safemode
@@ -519,7 +521,7 @@ class TableChain:
         if not self._has_link:
             return "No link"
         return (
-            f"Chain: "
+            "Chain: "
             + self.parent.table_name
             + self._link_symbol
             + self.child.table_name

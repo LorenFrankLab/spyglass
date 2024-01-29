@@ -16,16 +16,16 @@ deleting a part entry before the master. To circumvent this, you can add
 [`delete` function](https://datajoint.com/docs/core/datajoint-python/0.14/api/datajoint/__init__/#datajoint.table.Table.delete)
 call, but this will leave and orphaned primary key in the master. Instead, use
 `(YourTable & restriction).delete_downstream_merge()` to delete master/part
-pairs. If errors persist, identify and import the offending part table and
-rerun `delete_downstream_merge` with `reload_cache=True`. This process will
-be faster for subsequent calls if you reassign the your table after importing.
+pairs. If errors persist, identify and import the offending part table and rerun
+`delete_downstream_merge` with `reload_cache=True`. This process will be faster
+for subsequent calls if you reassign the your table after importing.
 
 ```python
 from spyglass.common import Nwbfile
+
 nwbfile = Nwbfile()
 (nwbfile & "nwb_file_name LIKE 'Name%'").delete_downstream_merge()
 ```
-
 
 ## What
 
