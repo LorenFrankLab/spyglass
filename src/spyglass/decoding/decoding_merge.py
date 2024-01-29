@@ -163,5 +163,4 @@ class DecodingOutput(_Merge, SpyglassMixin):
             return create_1D_decode_view(
                 posterior=posterior,
                 linear_position=position_info["linear_position"],
-                ref_time_sec=position_info.index[0],
             )
