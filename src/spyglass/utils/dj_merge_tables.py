@@ -601,9 +601,11 @@ class Merge(dj.Manual):
             )
 
         parts = [
-            getattr(cls, source)().restrict(restriction)
-            if restrict_part  # Re-apply restriction or don't
-            else getattr(cls, source)()
+            (
+                getattr(cls, source)().restrict(restriction)
+                if restrict_part  # Re-apply restriction or don't
+                else getattr(cls, source)()
+            )
             for source in sources
         ]
         if join_master:

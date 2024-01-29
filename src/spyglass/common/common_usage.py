@@ -4,6 +4,7 @@ Records show usage of features such as table chains, which will be used to
 determine which features are used, how often, and by whom. This will help 
 plan future development of Spyglass.
 """
+
 import datajoint as dj
 
 schema = dj.schema("common_usage")

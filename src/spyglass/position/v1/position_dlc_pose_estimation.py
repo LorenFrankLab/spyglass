@@ -309,17 +309,17 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     description="video_frame_ind",
                 )
                 nwb_analysis_file = AnalysisNwbfile()
-                key[
-                    "dlc_pose_estimation_position_object_id"
-                ] = nwb_analysis_file.add_nwb_object(
-                    analysis_file_name=key["analysis_file_name"],
-                    nwb_object=position,
+                key["dlc_pose_estimation_position_object_id"] = (
+                    nwb_analysis_file.add_nwb_object(
+                        analysis_file_name=key["analysis_file_name"],
+                        nwb_object=position,
+                    )
                 )
-                key[
-                    "dlc_pose_estimation_likelihood_object_id"
-                ] = nwb_analysis_file.add_nwb_object(
-                    analysis_file_name=key["analysis_file_name"],
-                    nwb_object=likelihood,
+                key["dlc_pose_estimation_likelihood_object_id"] = (
+                    nwb_analysis_file.add_nwb_object(
+                        analysis_file_name=key["analysis_file_name"],
+                        nwb_object=likelihood,
+                    )
                 )
                 nwb_analysis_file.add(
                     nwb_file_name=key["nwb_file_name"],

@@ -106,9 +106,7 @@ class SpyglassMixin:
                 self._nwb_table_resolved = (
                     AnalysisNwbfile
                     if "-> AnalysisNwbfile" in self.definition
-                    else Nwbfile
-                    if "-> Nwbfile" in self.definition
-                    else None
+                    else Nwbfile if "-> Nwbfile" in self.definition else None
                 )
 
             if getattr(self, "_nwb_table_resolved", None) is None:
@@ -195,7 +193,7 @@ class SpyglassMixin:
         """Dict of merge links downstream of self.
 
         For each merge table found in _merge_tables, find the path from self to
-        merge. If the path is valid, add it to the dict. Cahche prevents need
+        merge. If the path is valid, add it to the dict. Cache prevents need
         to recompute whenever delete_downstream_merge is called with a new
         restriction.
         """
@@ -211,7 +209,7 @@ class SpyglassMixin:
     def _commit_merge_deletes(self, merge_join_dict, **kwargs):
         """Commit merge deletes.
 
-        Extraxted for use in cautious_delete and delete_downstream_merge."""
+        Extracted for use in cautious_delete and delete_downstream_merge."""
         for table_name, part_restr in merge_join_dict.items():
             table = self._merge_tables[table_name]
             keys = [part.fetch(MERGE_PK, as_dict=True) for part in part_restr]
