@@ -8,19 +8,23 @@
 - Clean up following pre-commit checks. #688
 - Add Mixin class to centralize `fetch_nwb` functionality. #692, #734
 - Refactor restriction use in `delete_downstream_merge` #703
-- Add `cautious_delete` to Mixin class, initial implementation. #711, #762
+- Add `cautious_delete` to Mixin class
+    - Initial implementation. #711, #762
+    - More robust caching of join to downstream tables. #806
 - Add `deprecation_factory` to facilitate table migration. #717
 - Add Spyglass logger. #730
 - IntervalList: Add secondary key `pipeline` #742
 - Increase pytest coverage for `common`, `lfp`, and `utils`. #743
 - Update docs to reflect new notebooks. #776
 - Add overview of Spyglass to docs. #779
-- LFPV1: Fix error for multiple lfp settings on same data #775
+
 
 ### Pipelines
 
 - Spike sorting: Add SpikeSorting V1 pipeline. #651
-- LFP: Minor fixes to LFPBandV1 populator and `make`. #706, #795
+- LFP: 
+    - Minor fixes to LFPBandV1 populator and `make`. #706, #795
+    - LFPV1: Fix error for multiple lfp settings on same data #775
 - Linearization:
     - Minor fixes to LinearizedPositionV1 pipeline #695
     - Rename `position_linearization` -> `linearization`. #717

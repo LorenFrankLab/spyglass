@@ -391,6 +391,18 @@ class SpyglassMixin:
             self._usage_table_cache = CautiousDelete
         return self._usage_table_cache
 
+    def _log_use(self, start, merge_deletes=None):
+        """Log use of cautious_delete."""
+        self._usage_table.insert1(
+            dict(
+                duration=time() - start,
+                dj_user=dj.config["database.user"],
+                origin=self.full_table_name,
+                restriction=self.restriction,
+                merge_deletes=merge_deletes,
+            )
+        )
+
     # Rename to `delete` when we're ready to use it
     # TODO: Intercept datajoint delete confirmation prompt for merge deletes
     def cautious_delete(self, force_permission: bool = False, *args, **kwargs):
@@ -410,11 +422,6 @@ class SpyglassMixin:
             Passed to datajoint.table.Table.delete.
         """
         start = time()
-        usage_dict = dict(
-            dj_user=dj.config["database.user"],
-            origin=self.full_table_name,
-            restriction=self.restriction,
-        )
 
         if not force_permission:
             self._check_delete_permission()
@@ -443,19 +450,12 @@ class SpyglassMixin:
                 self._commit_merge_deletes(merge_deletes, **kwargs)
             else:
                 logger.info("Delete aborted.")
-                self._usage_table.insert1(
-                    dict(duration=time() - start, **usage_dict)
-                )
+                self._log_use(start)
                 return
 
         super().delete(*args, **kwargs)  # Additional confirm here
 
-        self._usage_table.insert1(
-            dict(
-                duration=time() - start,
-                merge_deletes=merge_deletes,
-            )
-        )
+        self._log_use(start=start, merge_deletes=merge_deletes)
 
     def cdel(self, *args, **kwargs):
         """Alias for cautious_delete."""
