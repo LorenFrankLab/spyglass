@@ -476,9 +476,9 @@ class Probe(SpyglassMixin, dj.Manual):
             {
                 "probe_id": nwb_probe_obj.probe_type,
                 "probe_type": nwb_probe_obj.probe_type,
-                "contact_side_numbering": "True"
-                if nwb_probe_obj.contact_side_numbering
-                else "False",
+                "contact_side_numbering": (
+                    "True" if nwb_probe_obj.contact_side_numbering else "False"
+                ),
             }
         )
         # go through the shanks and add each one to the Shank table

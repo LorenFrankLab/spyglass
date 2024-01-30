@@ -191,10 +191,12 @@ class RawPosition(SpyglassMixin, dj.Imported):
             INDEX_ADJUST = 1  # adjust 0-index to 1-index (e.g., xloc0 -> xloc1)
             n_pos_dims = rp.data.shape[1]
             column_names = [
-                col  # use existing columns if already numbered
-                if "1" in rp.description or "2" in rp.description
-                # else number them by id
-                else col + str(pos_id + INDEX_ADJUST)
+                (
+                    col  # use existing columns if already numbered
+                    if "1" in rp.description or "2" in rp.description
+                    # else number them by id
+                    else col + str(pos_id + INDEX_ADJUST)
+                )
                 for col in rp.description.split(", ")
             ]
             if len(column_names) != n_pos_dims:

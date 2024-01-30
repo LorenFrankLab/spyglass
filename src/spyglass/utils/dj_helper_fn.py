@@ -1,4 +1,5 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
+
 import inspect
 import os
 from typing import Type
@@ -193,9 +194,11 @@ def get_child_tables(table):
     return [
         dj.FreeTable(
             table.connection,
-            s
-            if not s.isdigit()
-            else next(iter(table.connection.dependencies.children(s))),
+            (
+                s
+                if not s.isdigit()
+                else next(iter(table.connection.dependencies.children(s)))
+            ),
         )
         for s in table.children()
     ]
