@@ -16,7 +16,7 @@
 - Update docs to reflect new notebooks. #776
 - Add overview of Spyglass to docs. #779
 - LFPV1: Fix error for multiple lfp settings on same data #775
-- Update linting for black 24
+- Update linting for Black 24. #808
 
 ### Pipelines
 
