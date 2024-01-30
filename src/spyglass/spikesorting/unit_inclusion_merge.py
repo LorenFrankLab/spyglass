@@ -6,7 +6,7 @@ from spyglass.spikesorting.v1.unit_inclusion import (  # noqa: F401
 from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
 
-schema = dj.schema("unit_inclusion_merge")
+schema = dj.schema("spikesorting_unit_inclusion_merge")
 
 
 @schema
