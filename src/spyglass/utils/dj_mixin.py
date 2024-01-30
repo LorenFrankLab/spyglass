@@ -1,14 +1,14 @@
 from functools import cached_property
 from time import time
-from typing import Dict, List
+from typing import Dict, List, Union
 
 import datajoint as dj
-import networkx as nx
+from datajoint.expression import QueryExpression
 from datajoint.logging import logger as dj_logger
 from datajoint.table import Table
 from datajoint.utils import get_master, user_choice
 
-from spyglass.settings import test_mode
+from spyglass.utils.dj_chains import TableChain, TableChains
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.logging import logger
@@ -27,6 +27,14 @@ class SpyglassMixin:
         Fetch NWBFile object from relevant table. Uses either a foreign key to
         a NWBFile table (including AnalysisNwbfile) or a _nwb_table attribute to
         determine which table to use.
+    delte_downstream_merge(restriction=None, dry_run=True, reload_cache=False)
+        Delete downstream merge table entries associated with restricton.
+        Requires caching of merge tables and links, which is slow on first call.
+        `restriction` can be set to a string to restrict the delete. `dry_run`
+        can be set to False to commit the delete. `reload_cache` can be set to
+        True to reload the merge cache.
+    ddm(*args, **kwargs)
+        Alias for delete_downstream_merge.
     cautious_delete(force_permission=False, *args, **kwargs)
         Check user permissions before deleting table rows. Permission is granted
         to users listed as admin in LabMember table or to users on a team with
@@ -37,64 +45,37 @@ class SpyglassMixin:
         raised. `force_permission` can be set to True to bypass permission check.
     cdel(*args, **kwargs)
         Alias for cautious_delete.
-    delte_downstream_merge(restriction=None, dry_run=True, reload_cache=False)
-        Delete downstream merge table entries associated with restricton.
-        Requires caching of merge tables and links, which is slow on first call.
-        `restriction` can be set to a string to restrict the delete. `dry_run`
-        can be set to False to commit the delete. `reload_cache` can be set to
-        True to reload the merge cache.
-    ddm(*args, **kwargs)
-        Alias for delete_downstream_merge.
     """
 
     # _nwb_table = None # NWBFile table class, defined at the table level
 
-    # pks for delete permission check, assumed to be on field
+    # pks for delete permission check, assumed to be one field for each
     _session_pk = None  # Session primary key. Mixin is ambivalent to Session pk
     _member_pk = None  # LabMember primary key. Mixin ambivalent table structure
 
     # ------------------------------- fetch_nwb -------------------------------
 
     @cached_property
-    def _table_dict(self):
-        """Dict mapping NWBFile table to path attribute name.
+    def _nwb_table_tuple(self) -> tuple:
+        """NWBFile table class.
 
-        Used to delay import of NWBFile tables until needed, avoiding circular
-        imports.
-        """
+        Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
+        Implemented as a cached_property to avoid circular imports."""
         from spyglass.common.common_nwbfile import (
             AnalysisNwbfile,
             Nwbfile,
         )  # noqa F401
 
-        return {
+        table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
             Nwbfile: "nwb_file_abs_path",
         }
 
-    @cached_property
-    def _nwb_table_tuple(self):
-        """NWBFile table class.
-
-        Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
-        Multiple copies for different purposes.
-
-        - _nwb_table may be user-set. Don't overwrite.
-        """
-        from spyglass.common.common_nwbfile import (
-            AnalysisNwbfile,
-            Nwbfile,
-        )  # noqa F401
-
-        if hasattr(self, "_nwb_table"):
-            resolved = self._nwb_table
-
-        else:
-            resolved = (
-                AnalysisNwbfile
-                if "-> AnalysisNwbfile" in self.definition
-                else Nwbfile if "-> Nwbfile" in self.definition else None
-            )
+        resolved = getattr(self, "_nwb_table", None) or (
+            AnalysisNwbfile
+            if "-> AnalysisNwbfile" in self.definition
+            else Nwbfile if "-> Nwbfile" in self.definition else None
+        )
 
         if not resolved:
             raise NotImplementedError(
@@ -104,42 +85,27 @@ class SpyglassMixin:
 
         return (
             resolved,
-            self._table_dict[resolved],
+            table_dict[resolved],
         )
 
     def fetch_nwb(self, *attrs, **kwargs):
         """Fetch NWBFile object from relevant table.
 
-        Implementing class must have a foreign key to Nwbfile or
-        AnalysisNwbfile or a _nwb_table attribute.
-
-        A class that does not have with either '-> Nwbfile' or
-        '-> AnalysisNwbfile' in its definition can use a _nwb_table attribute to
-        specify which table to use.
+        Implementing class must have a foreign key reference to Nwbfile or
+        AnalysisNwbfile (i.e., "-> (Analysis)Nwbfile" in definition)
+        or a _nwb_table attribute. If both are present, the attribute takes
+        precedence.
         """
         return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
 
-    # -------------------------------- delete ---------------------------------
-
-    @cached_property
-    def _delete_deps(self) -> list:
-        """List of tables required for delete permission check.
-
-        Used to delay import of tables until needed, avoiding circular imports.
-        Each of these tables inheits SpyglassMixin.
-        """
-        from spyglass.common import LabMember, LabTeam, Session  # noqa F401
-
-        self._session_pk = Session.primary_key[0]
-        self._member_pk = LabMember.primary_key[0]
-        return [LabMember, LabTeam, Session]
+    # ------------------------ delete_downstream_merge ------------------------
 
     @cached_property
     def _merge_tables(self) -> Dict[str, dj.FreeTable]:
-        """Dict of merge tables downstream of self.
+        """Dict of merge tables downstream of self: {full_table_name: FreeTable}.
 
-        Cache of items in parents of self.descendants(as_objects=True) that
-        have a merge primary key.
+        Cache of items in parents of self.descendants(as_objects=True). Both
+        descendant and parent must have the reserved primary key 'merge_id'.
         """
 
         self.connection.dependencies.load()
@@ -162,12 +128,14 @@ class SpyglassMixin:
 
     @cached_property
     def _merge_chains(self) -> Dict[str, List[dj.FreeTable]]:
-        """Dict of merge links downstream of self.
+        """Dict of chains to merges downstream of self
+
+        Format: {full_table_name: TableChains}.
 
         For each merge table found in _merge_tables, find the path from self to
-        merge. If the path is valid, add it to the dict. Cache prevents need
-        to recompute whenever delete_downstream_merge is called with a new
-        restriction.
+        merge via merge parts. If the path is valid, add it to the dict. Cache
+        prevents need to recompute whenever delete_downstream_merge is called
+        with a new restriction. To recompute, add `reload_cache=True` to call.
         """
         merge_chains = {}
         for name, merge_table in self._merge_tables.items():
@@ -176,8 +144,16 @@ class SpyglassMixin:
                 merge_chains[name] = chains
         return merge_chains
 
-    def _commit_merge_deletes(self, merge_join_dict, **kwargs):
+    def _commit_merge_deletes(
+        self, merge_join_dict: Dict[str, List[QueryExpression]], **kwargs
+    ) -> None:
         """Commit merge deletes.
+
+        Parameters
+        ----------
+        merge_join_dict : Dict[str, List[QueryExpression]]
+            Dictionary of merge tables and their joins. Uses 'merge_id' primary
+            key to restrict delete.
 
         Extracted for use in cautious_delete and delete_downstream_merge."""
         for table_name, part_restr in merge_join_dict.items():
@@ -193,7 +169,7 @@ class SpyglassMixin:
         disable_warning: bool = False,
         return_parts: bool = True,
         **kwargs,
-    ) -> List[dj.expression.QueryExpression]:
+    ) -> Union[List[QueryExpression], Dict[str, List[QueryExpression]]]:
         """Delete downstream merge table entries associated with restricton.
 
         Requires caching of merge tables and links, which is slow on first call.
@@ -248,7 +224,7 @@ class SpyglassMixin:
         return_parts: bool = True,
         *args,
         **kwargs,
-    ):
+    ) -> Union[List[QueryExpression], Dict[str, List[QueryExpression]]]:
         """Alias for delete_downstream_merge."""
         return self.delete_downstream_merge(
             restriction=restriction,
@@ -259,6 +235,23 @@ class SpyglassMixin:
             *args,
             **kwargs,
         )
+
+    # ---------------------------- cautious_delete ----------------------------
+
+    @cached_property
+    def _delete_deps(self) -> List[Table]:
+        """List of tables required for delete permission check.
+
+        LabMember, LabTeam, and Session are required for delete permission.
+
+        Used to delay import of tables until needed, avoiding circular imports.
+        Each of these tables inheits SpyglassMixin.
+        """
+        from spyglass.common import LabMember, LabTeam, Session  # noqa F401
+
+        self._session_pk = Session.primary_key[0]
+        self._member_pk = LabMember.primary_key[0]
+        return [LabMember, LabTeam, Session]
 
     def _get_exp_summary(self):
         """Get summary of experimenters for session(s), including NULL.
@@ -286,16 +279,22 @@ class SpyglassMixin:
         return exp_missing + exp_present
 
     @cached_property
-    def _session_connection(self) -> dj.expression.QueryExpression:
-        """Path from Session table to self.
-
-        None is not yet cached, False if no connection found.
-        """
+    def _session_connection(self) -> Union[TableChain, bool]:
+        """Path from Session table to self. False if no connection found."""
         connection = TableChain(parent=self._delete_deps[-1], child=self)
         return connection if connection.has_link else False
 
+    @cached_property
+    def _test_mode(self) -> bool:
+        """Return True if in test mode.
+
+        Avoids circular import. Prevents prompt on delete."""
+        from spyglass.settings import test_mode
+
+        return test_mode
+
     def _check_delete_permission(self) -> None:
-        """Check user name against lab team assoc. w/ self * Session.
+        """Check user name against lab team assoc. w/ self -> Session.
 
         Returns
         -------
@@ -368,7 +367,7 @@ class SpyglassMixin:
         )
 
     # TODO: Intercept datajoint delete confirmation prompt for merge deletes
-    def delete(self, force_permission: bool = False, *args, **kwargs):
+    def cautious_delete(self, force_permission: bool = False, *args, **kwargs):
         """Delete table rows after checking user permission.
 
         Permission is granted to users listed as admin in LabMember table or to
@@ -406,7 +405,7 @@ class SpyglassMixin:
                 count = sum([len(part) for part in content])
                 dj_logger.info(f"Merge: Deleting {count} rows from {table}")
             if (
-                not test_mode
+                not self._test_mode
                 or not safemode
                 or user_choice("Commit deletes?", default="no") == "yes"
             ):
@@ -424,120 +423,6 @@ class SpyglassMixin:
         """Alias for cautious_delete."""
         self.cautious_delete(*args, **kwargs)
 
-
-class TableChains:
-    """Class for representing chains from parent to Merge table via parts."""
-
-    def __init__(self, parent, child, connection=None):
-        self.parent = parent
-        self.child = child
-        self.connection = connection or parent.connection
-        parts = child.parts(as_objects=True)
-        self.part_names = [part.full_table_name for part in parts]
-        self.chains = [TableChain(parent, part) for part in parts]
-        self.has_link = any([chain.has_link for chain in self.chains])
-
-    def __repr__(self):
-        return "\n".join([str(chain) for chain in self.chains])
-
-    def __len__(self):
-        return len([c for c in self.chains if c.has_link])
-
-    def join(self, restriction=None):
-        restriction = restriction or self.parent.restriction or True
-        joins = []
-        for chain in self.chains:
-            if joined := chain.join(restriction):
-                joins.append(joined)
-        return joins
-
-
-class TableChain:
-    """Class for representing a chain of tables.
-
-    Note: Parent -> Merge should use TableChains instead.
-    """
-
-    def __init__(self, parent: Table, child: Table, connection=None):
-        self._connection = connection or parent.connection
-        if not self._connection.dependencies._loaded:
-            self._connection.dependencies.load()
-
-        if (  # if child is a merge table
-            get_master(child.full_table_name) == ""
-            and MERGE_PK in child.heading.names
-        ):
-            logger.error("Child is a merge table. Use TableChains instead.")
-
-        self._link_symbol = " -> "
-        self.parent = parent
-        self.child = child
-        self._has_link = child.full_table_name in parent.descendants()
-
-    def __str__(self):
-        """Return string representation of chain: parent -> child."""
-        if not self._has_link:
-            return "No link"
-        return (
-            "Chain: "
-            + self.parent.table_name
-            + self._link_symbol
-            + self.child.table_name
-        )
-
-    def __repr__(self):
-        """Return full representation of chain: parent -> {links} -> child."""
-        return (
-            "Chain: "
-            + self._link_symbol.join([t.table_name for t in self.objects])
-            if self.names
-            else "No link"
-        )
-
-    def __len__(self):
-        """Return number of tables in chain."""
-        return len(self.names)
-
-    @property
-    def has_link(self) -> bool:
-        """Return True if parent is linked to child.
-
-        Cached as hidden attribute _has_link to set False if nx.NetworkXNoPath
-        is raised by nx.shortest_path.
-        """
-        return self._has_link
-
-    @cached_property
-    def names(self) -> List[str]:
-        """Return list of full table names in chain.
-
-        Uses networkx.shortest_path.
-        """
-        if not self._has_link:
-            return None
-        try:
-            return nx.shortest_path(
-                self.parent.connection.dependencies,
-                self.parent.full_table_name,
-                self.child.full_table_name,
-            )
-        except nx.NetworkXNoPath:
-            self._has_link = False
-            return None
-
-    @cached_property
-    def objects(self) -> List[dj.FreeTable]:
-        """Return list of FreeTable objects for each table in chain."""
-        return (
-            [dj.FreeTable(self._connection, name) for name in self.names]
-            if self.names
-            else None
-        )
-
-    def join(self, restricton: str = None) -> dj.expression.QueryExpression:
-        """Return join of tables in chain with restriction applied to parent."""
-        restriction = restricton or self.parent.restriction or True
-        join = self.objects[0] & restriction
-        for table in self.objects[1:]:
-            join = join * table
-        return join if join else None
+    def delete(self, *args, **kwargs):
+        """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
+        self.cautious_delete(*args, **kwargs)
