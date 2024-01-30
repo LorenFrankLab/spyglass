@@ -37,14 +37,16 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             group_key,
             skip_duplicates=True,
         )
-        for unit_inclusion_merge_id in unit_inclusion_merge_ids:
-            self.Units.insert1(
+        self.Units.insert(
+            [
                 {
-                    "unit_inclusion_merge_id": unit_inclusion_merge_id,
+                    "unit_inclusion_merge_id": id,
                     **group_key,
-                },
-                skip_duplicates=True,
-            )
+                }
+                for id in unit_inclusion_merge_ids
+            ],
+            skip_duplicates=True,
+        )
 
     @staticmethod
     def fetch_spike_data(
