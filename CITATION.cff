@@ -110,7 +110,7 @@ authors:
   - given-names: Samuel
     family-names: Garcia
     email: samuel.garcia@cnrs.fr
-    affiliation: Centre de Recherche en Neurosciences de Lyon
+    affiliation: 'Centre de Recherche en Neurosciences de Lyon'
     orcid: 'https://orcid.org/0000-0001-6389-9779'
   - given-names: Alessio
     family-names: Buccino
