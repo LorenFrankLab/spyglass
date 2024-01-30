@@ -2,7 +2,6 @@ import datajoint as dj
 import numpy as np
 from ripple_detection import multiunit_HSE_detector
 
-from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position import PositionOutput  # noqa: F401
 from spyglass.spikesorting.analysis.v1.group import (
@@ -45,7 +44,7 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
     -> MuaEventsParameters
     -> SortedSpikesGroup
     -> PositionOutput.proj(pos_merge_id='merge_id')
-    -> IntervalList.proj(artifact_interval_list_name='interval_list_name') # exclude artifact times
+
     ---
     -> AnalysisNwbfile
     mua_times_object_id : varchar(40)
@@ -70,22 +69,6 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         sampling_frequency = 1 / np.median(np.diff(time))
 
         mua_params = (MuaEventsParameters & key).fetch1("mua_param_dict")
-
-        # Exclude artifact times
-        # Alternatively could set to NaN and leave them out of the firing rate calculation
-        # in the multiunit_HSE_detector function
-        artifact_key = {
-            "nwb_file_name": key["nwb_file_name"],
-            "interval_list_name": key["artifact_interval_list_name"],
-        }
-        artifact_times = (IntervalList & artifact_key).fetch1("valid_times")
-        mean_n_spikes = np.mean(spike_indicator)
-        for artifact_time in artifact_times:
-            spike_indicator[
-                np.logical_and(
-                    time >= artifact_time.start, time <= artifact_time.stop
-                )
-            ] = mean_n_spikes
 
         mua_times = multiunit_HSE_detector(
             time, spike_indicator, speed, sampling_frequency, **mua_params
