@@ -22,7 +22,7 @@
 
 - Spike sorting:
     - Add SpikeSorting V1 pipeline. #651
-    - Move modules into spikesorting.v0 #682
+    - Move modules into spikesorting.v0 #807
     - Add MUA analysis to spike sorting pipeline
 - LFP: Minor fixes to LFPBandV1 populator and `make`. #706, #795
 - Linearization:
@@ -40,10 +40,10 @@
     - Allow multiple spike waveform features for clusterelss decoding #731
     - Reorder notebooks #731
     - Add fetch class functionality to `Merge` table. #783, #786
-    - Add ability to filter sorted units in decoding #781
-    - Rename SortedSpikesGroup.SortGroup to SortedSpikesGroup.Units
-    - Change methods with load_... to fetch_... for consistency
-    - Use merge table methods to access part methods
+    - Add ability to filter sorted units in decoding #807
+    - Rename SortedSpikesGroup.SortGroup to SortedSpikesGroup.Units #807
+    - Change methods with load_... to fetch_... for consistency #807
+    - Use merge table methods to access part methods #807
 
 ## [0.4.3] (November 7, 2023)
 
