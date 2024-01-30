@@ -30,6 +30,11 @@ authors:
     family-names: Soules
     email: jsoules@flatironinstitute.org
     affiliation: Flatiron Institute
+  - given-names: Alison E.
+    family-names: Comrie
+    orcid: 'https://orcid.org/0000-0002-2251-4892'
+    email: alison.comrie@ucsf.edu
+    affiliation: 'University of California, San Francisco'
   - given-names: Daniel P.
     family-names: Gramling
     orcid: 'https://orcid.org/0009-0004-6136-3769'
@@ -48,6 +53,11 @@ authors:
     email: phil.adenekan@ucsf.edu
     affiliation: 'University of California, San Francisco'
     orcid: 'https://orcid.org/0000-0002-4999-7847'
+  - given-names: Chris
+    family-names: Brozdowski
+    email: chris.broz@ucsf.edu
+    affiliation: 'University of California, San Francisco'
+    orcid: 'https://orcid.org/0000-0002-3055-6718'
   - given-names: Samuel
     family-names: Bray
     email: sam.bray@ucsf.edu
@@ -55,20 +65,25 @@ authors:
     affiliation: 'University of California, San Francisco'
   - given-names: Emily
     family-names: Monroe
-    affiliation: UCD
+    affiliation: University of California, Davis
   - given-names: Ji Hyun
     family-names: Bak
     orcid: 'https://orcid.org/0000-0002-5700-7823'
   - given-names: Michael E.
     family-names: Coulter
+    email: michael.coulter@ucsf.edu
     orcid: 'https://orcid.org/0000-0003-0357-351X'
     affiliation: 'University of California, San Francisco'
-    email: michael.coulter@ucsf.edu
   - given-names: Xulu
     family-names: Sun
     email: xulu.sun@ucsf.edu
-    affiliation: UCSF
+    affiliation: 'University of California, San Francisco'
     orcid: 'https://orcid.org/0000-0003-3076-0994'
+  - given-names: Andrew
+    family-names: Tritt
+    email: ajtritt@lbl.gov
+    affiliation: Lawrence Berkeley National Laboratory
+    orcid: 'https://orcid.org/0000-0002-1617-449X'
   - given-names: Oliver
     family-names: Rübel
     email: oruebel@lbl.gov
@@ -92,15 +107,16 @@ authors:
     email: caleb.kemere@rice.edu
     affiliation: Rice University
     orcid: 'https://orcid.org/0000-0003-2054-0234'
+  - given-names: Samuel
+    family-names: Garcia
+    email: samuel.garcia@cnrs.fr
+    affiliation: Centre de Recherche en Neurosciences de Lyon
+    orcid: 'https://orcid.org/0000-0001-6389-9779'
   - given-names: Alessio
     family-names: Buccino
     email: alessio.buccino@alleninstitute.org
     affiliation: Allen Institute
     orcid: 'https://orcid.org/0000-0003-3661-527X'
-  - given-names: Samuel
-    family-names: Garcia
-    email: samuel.garcia@cnrs.fr
-    affiliation: Centre de Recherche en Neurosciences de Lyon
   - given-names: Loren M.
     family-names: Frank
     email: loren.frank@ucsf.edu
