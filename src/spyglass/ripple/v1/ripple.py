@@ -149,7 +149,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
     -> RippleLFPSelection
     -> RippleParameters
     -> PositionOutput.proj(pos_merge_id='merge_id')
-
+    -> IntervalList.proj(artifact_interval_list_name='interval_list_name')
     ---
     -> AnalysisNwbfile
     ripple_times_object_id : varchar(40)
