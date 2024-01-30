@@ -318,9 +318,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
             timestamps = np.zeros((total_frames,))
             for i in range(recording.get_num_segments()):
-                timestamps[
-                    cumsum_frames[i] : cumsum_frames[i + 1]
-                ] = recording.get_times(segment_index=i)
+                timestamps[cumsum_frames[i] : cumsum_frames[i + 1]] = (
+                    recording.get_times(segment_index=i)
+                )
         else:
             timestamps = recording.get_times()
         return timestamps

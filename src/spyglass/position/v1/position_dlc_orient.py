@@ -241,15 +241,15 @@ def interp_orientation(orientation, spans_to_interp, **kwargs):
     # TODO: add parameters to refine interpolation
     for ind, (span_start, span_stop) in enumerate(spans_to_interp):
         if (span_stop + 1) >= len(orientation):
-            orientation.loc[
-                idx[span_start:span_stop], idx["orientation"]
-            ] = np.nan
+            orientation.loc[idx[span_start:span_stop], idx["orientation"]] = (
+                np.nan
+            )
             print(f"ind: {ind} has no endpoint with which to interpolate")
             continue
         if span_start < 1:
-            orientation.loc[
-                idx[span_start:span_stop], idx["orientation"]
-            ] = np.nan
+            orientation.loc[idx[span_start:span_stop], idx["orientation"]] = (
+                np.nan
+            )
             print(f"ind: {ind} has no startpoint with which to interpolate")
             continue
         orient = [
@@ -263,7 +263,7 @@ def interp_orientation(orientation, spans_to_interp, **kwargs):
             xp=[start_time, stop_time],
             fp=[orient[0], orient[-1]],
         )
-        orientation.loc[
-            idx[start_time:stop_time], idx["orientation"]
-        ] = orientnew
+        orientation.loc[idx[start_time:stop_time], idx["orientation"]] = (
+            orientnew
+        )
     return orientation

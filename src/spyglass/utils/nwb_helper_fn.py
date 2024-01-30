@@ -383,9 +383,11 @@ def get_electrode_indices(nwb_object, electrode_ids):
     # that if it's there and invalid_electrode_index if not.
 
     return [
-        selected_elect_ids.index(elect_id)
-        if elect_id in selected_elect_ids
-        else invalid_electrode_index
+        (
+            selected_elect_ids.index(elect_id)
+            if elect_id in selected_elect_ids
+            else invalid_electrode_index
+        )
         for elect_id in electrode_ids
     ]
 

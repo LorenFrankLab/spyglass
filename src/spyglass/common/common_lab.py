@@ -1,4 +1,5 @@
 """Schema for institution, lab team/name/members. Session-independent."""
+
 import datajoint as dj
 
 from spyglass.utils import SpyglassMixin, logger
