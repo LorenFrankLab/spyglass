@@ -72,7 +72,7 @@ UnitInclusionOutput.ImportedUnitInclusionV1() & [
 ]
 
 # +
-from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+from spyglass.spikesorting.unit_inclusion_merge import SortedSpikesGroup
 
 unit_inclusion_merge_ids = (
     UnitInclusionOutput.ImportedUnitInclusionV1
@@ -145,10 +145,7 @@ axes[1].set_ylabel("speed (cm/s)")
 axes[1].set_xlabel("time (s)")
 
 # +
-from spyglass.spikesorting.analysis.v1.mua import (
-    MuaEventsParameters,
-    MuaEventsV1,
-)
+from spyglass.mua.v1.mua import MuaEventsParameters, MuaEventsV1
 
 MuaEventsParameters().insert_default()
 MuaEventsParameters()
@@ -159,6 +156,7 @@ selection_key = {
     "nwb_file_name": nwb_copy_file_name,
     "sorted_spikes_group_name": "test_group",
     "pos_merge_id": position_merge_id,
+    "artifact_interval_list_name": "test_artifact_times",
 }
 
 MuaEventsV1.populate(selection_key)
@@ -200,4 +198,44 @@ for mua_time in mua_times.loc[in_bounds].itertuples():
 axes[1].set_ylim((0, 80))
 axes[1].axhline(4, color="black", linestyle="--")
 axes[1].set_xlim((time[0], time[-1]))
+
+# +
+from spyglass.common import IntervalList
+
+IntervalList() & {
+    "nwb_file_name": nwb_copy_file_name,
+    "pipeline": "spikesorting_artifact_v1",
+}
 # -
+
+(
+    sgs.ArtifactDetectionParameters
+    * sgs.SpikeSortingRecording
+    * sgs.ArtifactDetectionSelection
+)
+
+SpikeSortingOutput.CurationV1() * (
+    sgs.ArtifactDetectionParameters
+    * sgs.SpikeSortingRecording
+    * sgs.ArtifactDetectionSelection
+)
+
+(
+    IntervalList()
+    & {
+        "nwb_file_name": nwb_copy_file_name,
+        "pipeline": "spikesorting_artifact_v1",
+    }
+).proj(artifact_id="interval_list_name")
+
+sgs.SpikeSortingRecording() * sgs.ArtifactDetectionSelection()
+
+SpikeSortingOutput.CurationV1() * sgs.SpikeSortingRecording()
+
+IntervalList.insert1(
+    {
+        "nwb_file_name": nwb_copy_file_name,
+        "interval_list_name": "test_artifact_times",
+        "valid_times": [],
+    }
+)
