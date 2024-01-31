@@ -190,7 +190,9 @@ class TableChain:
     def names(self) -> List[str]:
         """Return list of full table names in chain.
 
-        Uses networkx.shortest_path.
+        Uses networkx.shortest_path. Ignores numeric table names, which are
+        'gaps' or alias nodes in the graph. See datajoint.Diagram._make_graph
+        source code for comments on alias nodes.
         """
         if not self._has_link:
             return None
