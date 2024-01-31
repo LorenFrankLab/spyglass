@@ -26,7 +26,7 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
         -> ImportedSpikeSorting
         id: int # unit id, corresponds to dataframe index of unit in NWB file
         ---
-        labels = Null: longblob # list of string labels for the unit
+        label = Null: longblob # list of string labels for the unit
         annotations: longblob # dict of other annotations (e.g. metrics)
         """
 
@@ -69,7 +69,7 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
         )
 
     def add_annotation(
-        self, key, id, labels=[], annotations={}, merge_annotations=False
+        self, key, id, label=[], annotations={}, merge_annotations=False
     ):
         """Manually add annotations to the spike sorting output
 
@@ -79,7 +79,7 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
             restriction key for ImportedSpikeSorting
         id : int
             unit id
-        labels : List[str], optional
+        label : List[str], optional
             list of str labels for the unit, by default None
         annotations : _type_, optional
             dictionary of other annotation values for unit, by default None
@@ -95,26 +95,28 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
             existing_annotations = (
                 ImportedSpikeSorting.Annotations & unit_key
             ).fetch(as_dict=True)[0]
-            existing_annotations["labels"] = (
-                existing_annotations["labels"] + labels
+            existing_annotations["label"] = (
+                existing_annotations["label"] + label
             )
             existing_annotations["annotations"].update(annotations)
             self.Annotations.update1(existing_annotations)
         else:
             self.Annotations.insert1(
-                dict(unit_key, labels=labels, annotations=annotations),
+                dict(unit_key, label=label, annotations=annotations),
                 skip_duplicates=True,
             )
 
     def make_df_from_annotations(self):
+        """Convert the annotations part table into a dataframe that can be
+        concatenated to the spikes dataframe in the nwb file."""
         df = []
-        for id, labels, annotations in zip(
-            *self.Annotations.fetch("id", "labels", "annotations")
+        for id, label, annotations in zip(
+            *self.Annotations.fetch("id", "label", "annotations")
         ):
             df.append(
                 dict(
                     id=id,
-                    labels=labels,
+                    label=label,
                     **annotations,
                 )
             )
