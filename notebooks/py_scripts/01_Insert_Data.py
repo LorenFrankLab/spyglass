@@ -128,6 +128,7 @@ nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
 # -
 
 # Spyglass will create a copy with this name.
+#
 
 nwb_copy_file_name
 
@@ -155,9 +156,9 @@ sgc.LabMember.insert_from_nwbfile(nwb_file_name)
 #
 
 sgc.LabMember.LabMemberInfo.insert(
-    [  # Full name, Google email address, DataJoint username
-        ["Firstname Lastname", "example1@gmail.com", "example1"],
-        ["Firstname2 Lastname2", "example2@gmail.com", "example2"],
+    [  # Full name, Google email address, DataJoint username, admin
+        ["Firstname Lastname", "example1@gmail.com", "example1", 0],
+        ["Firstname2 Lastname2", "example2@gmail.com", "example2", 0],
     ],
     skip_duplicates=True,
 )
@@ -187,7 +188,6 @@ sgc.LabTeam.LabTeamMember()
 # ## Inserting from NWB
 #
 
-#
 # `spyglass.data_import.insert_sessions` helps take the many fields of data
 # present in an NWB file and insert them into various tables across Spyglass. If
 # the NWB file is properly composed, this includes...
@@ -199,6 +199,7 @@ sgc.LabTeam.LabTeamMember()
 #
 # _Note:_ this may take time as Spyglass creates the copy. You may see a prompt
 # about inserting device information.
+#
 
 sgi.insert_sessions(nwb_file_name)
 
@@ -306,18 +307,17 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # Because it is a _secondary_ key, it is not required to uniquely identify an entry.
 # Current values for this key from spyglass pipelines are:
 #
-# | pipeline | Source|
-# | ---   | --- |
-# | position | sg.common.PositionSource |
-# | lfp_v0 | sg.common.LFP |
-# | lfp_v1 | sg.lfp.v1.LFPV1 |
-# | lfp_band | sg.common.LFPBand,<br>  sg.lfp.analysis.v1.LFPBandV1 |
-# | lfp_artifact | sg.lfp.v1.LFPArtifactDetection |
-# | spikesorting_artifact_v0 | sg.spikesorting.ArtifactDetection |
-# | spikesorting_artifact_v1 | sg.spikesorting.v1.ArtifactDetection |
-# | spikesorting_recording_v0 | sg.spikesorting.SpikeSortingRecording |
-# | spikesorting_recording_v1 | sg.spikesorting.v1.SpikeSortingRecording |
-#
+# | pipeline                  | Source                                              |
+# | ------------------------- | --------------------------------------------------- |
+# | position                  | sg.common.PositionSource                            |
+# | lfp_v0                    | sg.common.LFP                                       |
+# | lfp_v1                    | sg.lfp.v1.LFPV1                                     |
+# | lfp_band                  | sg.common.LFPBand,<br> sg.lfp.analysis.v1.LFPBandV1 |
+# | lfp_artifact              | sg.lfp.v1.LFPArtifactDetection                      |
+# | spikesorting_artifact_v0  | sg.spikesorting.ArtifactDetection                   |
+# | spikesorting_artifact_v1  | sg.spikesorting.v1.ArtifactDetection                |
+# | spikesorting_recording_v0 | sg.spikesorting.SpikeSortingRecording               |
+# | spikesorting_recording_v1 | sg.spikesorting.v1.SpikeSortingRecording            |
 #
 
 # ## Deleting data
@@ -355,20 +355,24 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # lfp.v1.LFPSelection.insert1(lfp_key, skip_duplicates=True)
 # lfp.v1.LFPV1().populate(lfp_key)
 # ```
+#
 # </details>
 # <details>
 # <summary>Deleting Merge Entries</summary>
 #
 # ```python
-# from spyglass.utils.dj_merge_tables import delete_downstream_merge
+# nwbfile = sgc.Nwbfile()
 #
-# delete_downstream_merge(
-#     sgc.Nwbfile(),
-#     restriction={"nwb_file_name": nwb_copy_file_name},
+# (nwbfile & {"nwb_file_name": nwb_copy_file_name}).delete_downstream_merge(
 #     dry_run=False, # True will show Merge Table entries that would be deleted
 # )
 # ```
+#
+# Please see the [next notebook](./03_Merge_Tables.ipynb) for a more detailed
+# explanation.
+#
 # </details>
+#
 
 session_entry = sgc.Session & {"nwb_file_name": nwb_copy_file_name}
 session_entry
@@ -418,6 +422,7 @@ sgc.Nwbfile().cleanup(delete_files=True)
 # !ls $SPYGLASS_BASE_DIR/raw
 
 # ## Up Next
+#
 
 # In the [next notebook](./02_Data_Sync.ipynb), we'll explore tools for syncing.
 #

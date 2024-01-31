@@ -7,7 +7,7 @@ import datajoint as dj
 import yaml
 from pymysql.err import OperationalError
 
-from spyglass.utils import logger
+from spyglass.utils.logging import logger
 
 
 class SpyglassConfig:
