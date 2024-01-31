@@ -8,7 +8,7 @@ from spyglass.common.common_device import (
 from spyglass.common.common_lab import Institution, Lab, LabMember
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_subject import Subject
-from spyglass.settings import config, debug_mode
+from spyglass.settings import config, debug_mode, test_mode
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_config, get_nwb_file
 
@@ -214,6 +214,8 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         *,
         skip_duplicates: bool = False,
     ):
+        if test_mode:
+            skip_duplicates = True
         SessionGroupSession.insert1(
             {
                 "session_group_name": session_group_name,
@@ -230,12 +232,16 @@ class SessionGroup(SpyglassMixin, dj.Manual):
             "session_group_name": session_group_name,
             "nwb_file_name": nwb_file_name,
         }
-        (SessionGroupSession & query).delete(*args, **kwargs)
+        (SessionGroupSession & query).delete(
+            force_permission=test_mode, *args, **kwargs
+        )
 
     @staticmethod
     def delete_group(session_group_name: str, *args, **kwargs):
         query = {"session_group_name": session_group_name}
-        (SessionGroup & query).delete(*args, **kwargs)
+        (SessionGroup & query).delete(
+            force_permission=test_mode, *args, **kwargs
+        )
 
     @staticmethod
     def get_group_sessions(session_group_name: str):

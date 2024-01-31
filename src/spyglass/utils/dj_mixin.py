@@ -61,7 +61,10 @@ class SpyglassMixin:
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile  # noqa F401
+        from spyglass.common.common_nwbfile import (
+            AnalysisNwbfile,
+            Nwbfile,
+        )  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -71,9 +74,7 @@ class SpyglassMixin:
         resolved = getattr(self, "_nwb_table", None) or (
             AnalysisNwbfile
             if "-> AnalysisNwbfile" in self.definition
-            else Nwbfile
-            if "-> Nwbfile" in self.definition
-            else None
+            else Nwbfile if "-> Nwbfile" in self.definition else None
         )
 
         if not resolved:
@@ -358,7 +359,7 @@ class SpyglassMixin:
         """Temporary inclusion for usage tracking."""
         from spyglass.common.common_usage import CautiousDelete
 
-        return CautiousDelete
+        return CautiousDelete()
 
     def _log_use(self, start, merge_deletes=None):
         """Log use of cautious_delete."""
@@ -367,7 +368,9 @@ class SpyglassMixin:
                 duration=time() - start,
                 dj_user=dj.config["database.user"],
                 origin=self.full_table_name,
-                restriction=self.restriction,
+                restriction=(
+                    str(self.restriction)[:255] if self.restriction else "None"
+                ),
                 merge_deletes=merge_deletes,
             )
         )
@@ -425,10 +428,15 @@ class SpyglassMixin:
 
         self._log_use(start=start, merge_deletes=merge_deletes)
 
-    def cdel(self, *args, **kwargs):
+    def cdel(self, force_permission=False, *args, **kwargs):
         """Alias for cautious_delete."""
-        self.cautious_delete(*args, **kwargs)
+        self.cautious_delete(force_permission=force_permission, *args, **kwargs)
 
-    def delete(self, *args, **kwargs):
+    def delete(self, force_permission=False, *args, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
-        self.cautious_delete(*args, **kwargs)
+        self.cautious_delete(force_permission=force_permission, *args, **kwargs)
+
+    def super_delete(self, *args, **kwargs):
+        """Alias for datajoint.table.Table.delete."""
+        logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
+        super().delete(*args, **kwargs)

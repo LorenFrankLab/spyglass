@@ -7,7 +7,6 @@ from datajoint.expression import QueryExpression
 from datajoint.table import Table
 from datajoint.utils import get_master
 
-from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.logging import logger
 
@@ -66,7 +65,7 @@ class TableChains:
     def __len__(self):
         return len([c for c in self.chains if c.has_link])
 
-    def __getitem__(self, index: Union[int, str]) -> TableChain:
+    def __getitem__(self, index: Union[int, str]):
         """Return FreeTable object at index."""
         if isinstance(index, str):
             for i, part in enumerate(self.part_names):
@@ -234,6 +233,7 @@ class TableChain:
             try:
                 join = join.proj() * table
             except dj.DataJointError as e:
+                attribute = str(e).split("attribute ")[-1]
                 logger.error(
                     f"{str(self)} at {table.table_name} with {attribute}"
                 )
