@@ -7,7 +7,7 @@ from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.unit_inclusion_merge import UnitInclusionOutput
 from spyglass.utils.dj_mixin import SpyglassMixin
 
-schema = dj.schema("sorted_spikes_group_v1")
+schema = dj.schema("spikesorting_group_v1")
 
 
 @schema
