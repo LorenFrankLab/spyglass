@@ -1,1 +1,1 @@
-from spyglass.linearization.linearization_merge import LinearizedPositionOutput
+from spyglass.linearization.merge import LinearizedPositionOutput
