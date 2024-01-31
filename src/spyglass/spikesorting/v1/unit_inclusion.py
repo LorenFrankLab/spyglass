@@ -38,7 +38,7 @@ class ImportedUnitInclusionV1(SpyglassMixin, dj.Manual):
 
         from spyglass.spikesorting.unit_inclusion_merge import (
             UnitInclusionOutput,
-        )
+        )  # noqa: F403
 
         part_name = UnitInclusionOutput._part_name(self.table_name)
         UnitInclusionOutput._merge_insert(
