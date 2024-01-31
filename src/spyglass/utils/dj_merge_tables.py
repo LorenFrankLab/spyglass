@@ -501,7 +501,7 @@ class Merge(dj.Manual):
 
     def fetch_nwb(
         self,
-        restriction: str = True,
+        restriction: str = None,
         multi_source=False,
         disable_warning=False,
         *attrs,
@@ -521,10 +521,7 @@ class Merge(dj.Manual):
         """
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
-        if restriction is True and self.restriction:
-            if not disable_warning:
-                _warn_on_restriction(self, restriction)
-            restriction = self.restriction
+        restriction = restriction or self.restriction or True
 
         return self.merge_restrict_class(restriction).fetch_nwb()
 
@@ -805,8 +802,6 @@ def delete_downstream_merge(
     dry_run: bool
         Default True. If true, return list of tuples, merge/part tables
         downstream of table input. Otherwise, delete merge/part table entries.
-    recurse_level: int
-        Default 2. Depth to recurse into table descendants.
     disable_warning: bool
         Default False. If True, don't warn about restrictions on table object.
     kwargs: dict
@@ -817,148 +812,12 @@ def delete_downstream_merge(
     List[Tuple[dj.Table, dj.Table]]
         Entries in merge/part tables downstream of table input.
     """
-    if not disable_warning:
-        _warn_on_restriction(table, restriction)
+    from spyglass.utils.dj_mixin import SpyglassMixin
 
-    if not restriction:
-        restriction = True
+    if not isinstance(table, SpyglassMixin):
+        raise ValueError("Input must be a Spyglass Table.")
+    table = table if isinstance(table, dj.Table) else table()
 
-    descendants = _unique_descendants(table, recurse_level)
-    merge_table_pairs = _master_table_pairs(
-        table_list=descendants,
-        restricted_parent=(table & restriction),
+    return table.delete_downstream_merge(
+        restriction=restriction, dry_run=dry_run, **kwargs
     )
-
-    # restrict the merge table based on uuids in part
-    # don't need part for del, but show on dry_run
-    merge_pairs = [
-        (merge & part.fetch(RESERVED_PRIMARY_KEY, as_dict=True), part)
-        for merge, part in merge_table_pairs
-    ]
-
-    if dry_run:
-        return merge_pairs
-
-    for merge_table, _ in merge_pairs:
-        merge_table.delete(**kwargs)
-
-
-def _warn_on_restriction(table: dj.Table, restriction: str = None):
-    """Warn if restriction on table object differs from input restriction"""
-    if restriction is None and table.restriction:
-        logger.warn(
-            f"Warning: ignoring table restriction: {table().restriction}.\n\t"
-            + "Please pass restrictions as an arg"
-        )
-
-
-def _unique_descendants(
-    table: dj.Table,
-    recurse_level: int = 2,
-    return_names: bool = False,
-    attribute=None,
-) -> list:
-    """Recurisively find unique descendants of a given table
-
-    Parameters
-    ----------
-    table: dj.Table
-        The node in the tree from which to find descendants.
-    recurse_level: int
-        The maximum level of descendants to find.
-    return_names: bool
-        If True, return names of descendants found. Else return Table objects.
-    attribute: str, optional
-        If provided, only return descendants that have this attribute.
-
-    Returns
-    -------
-    List[dj.Table, str]
-        List descendants found when recurisively called to recurse_level
-    """
-
-    if recurse_level == 0:
-        return []
-
-    if attribute is None:
-        skip_attr_check = True
-    else:
-        skip_attr_check = False
-
-    descendants = {}
-
-    def recurse_descendants(sub_table, level):
-        for descendant in sub_table.descendants(as_objects=True):
-            if descendant.full_table_name not in descendants and (
-                skip_attr_check or attribute in descendant.heading.attributes
-            ):
-                descendants[descendant.full_table_name] = descendant
-                if level > 1:
-                    recurse_descendants(descendant, level - 1)
-
-    recurse_descendants(table, recurse_level)
-
-    return (
-        list(descendants.keys()) if return_names else list(descendants.values())
-    )
-
-
-def _master_table_pairs(
-    table_list: list,
-    restricted_parent: dj.expression.QueryExpression = True,
-    connection: dj.connection.Connection = None,
-) -> list:
-    """
-    Given list of tables, return a list of master table pairs.
-
-    Returns a list of tuples, with master and part. Part will have restriction
-    applied. If restriction yield empty list, skip.
-
-    Parameters
-    ----------
-    table_list : List[dj.Table]
-        A list of datajoint tables.
-    restricted_parent : dj.expression.QueryExpression
-        Parent table restricted, to be joined with master and part. Default
-        True, no restriction.
-    connection : datajoint.connection.Connection
-        A database connection. Default None, use connection from first table.
-
-    Returns
-    -------
-    List[Tuple[dj.Table, dj.Table]]
-        A list of master table pairs.
-    """
-    conn = connection or table_list[0].connection
-
-    master_table_pairs = []
-    unique_parts = []
-
-    # Adapted from Spyglass PR 535
-    for table in table_list:
-        table_name = table.full_table_name
-        if table_name in unique_parts:  # then repeat in list
-            continue
-
-        master_name = get_master(table_name)
-        if not master_name:  # then it's not a part table
-            continue
-
-        master = dj.FreeTable(conn, master_name)
-        if RESERVED_PRIMARY_KEY not in master.heading.attributes.keys():
-            continue  # then it's not a merge table
-
-        restricted_join = restricted_parent * table
-        if not restricted_join:  # No entries relevant to restriction in part
-            continue
-
-        unique_parts.append(table_name)
-        master_table_pairs.append(
-            (
-                master,
-                table
-                & restricted_join.fetch(RESERVED_PRIMARY_KEY, as_dict=True),
-            )
-        )
-
-    return master_table_pairs
