@@ -11,6 +11,7 @@
 - Add `cautious_delete` to Mixin class
     - Initial implementation. #711, #762
     - More robust caching of join to downstream tables. #806
+    - Overwrite datajoint `delete` method to use `cautious_delete`. #806
 - Add `deprecation_factory` to facilitate table migration. #717
 - Add Spyglass logger. #730
 - IntervalList: Add secondary key `pipeline` #742
