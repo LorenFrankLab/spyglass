@@ -83,14 +83,19 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         """
         Filter units based on labels
         """
-        include_labels = set(include_labels)
-        exclude_labels = set(exclude_labels)
+        include_labels = np.unique(include_labels)
+        exclude_labels = np.unique(exclude_labels)
 
         include_mask = np.zeros(len(labels), dtype=bool)
         for ind, unit_labels in enumerate(labels):
-            if include_labels and not include_labels.intersection(unit_labels):
+            if isinstance(unit_labels, str):
+                unit_labels = [unit_labels]
+            if (
+                include_labels
+                and not np.isin(include_labels, unit_labels).any()
+            ):
                 continue
-            if exclude_labels.intersection(unit_labels):
+            if np.isin(exclude_labels, unit_labels).any():
                 continue
             include_mask[ind] = True
         return include_mask
