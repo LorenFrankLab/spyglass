@@ -123,7 +123,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         spike_times = []
         for merge_id in merge_ids:
             nwb_file = SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})[0]
-            nwb_field_name = "object_id" if "object_id" in nwb_file else "units"
+            nwb_field_name = "object_id" if "object_id" in nwb_file else "units" if "units" in nwb_file else None
+            if nwb_field_name is None:
+                # case where no units found or curation removed all units
+                continue
             sorting_spike_times = nwb_file[nwb_field_name][
                 "spike_times"
             ].to_list()
