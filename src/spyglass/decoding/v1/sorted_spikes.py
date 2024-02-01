@@ -375,7 +375,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         if time_slice is None:
             time_slice = slice(-np.inf, np.inf)
 
-        spike_times = self.fetch_spike_data(self.proj())
+        spike_times = self.fetch_spike_data(self.fetch1())
         classifier = self.fetch_model()
 
         new_spike_times = {}
