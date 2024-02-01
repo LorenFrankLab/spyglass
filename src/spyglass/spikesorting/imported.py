@@ -81,7 +81,7 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
             unit id
         label : List[str], optional
             list of str labels for the unit, by default None
-        annotations : _type_, optional
+        annotations : dict, optional
             dictionary of other annotation values for unit, by default None
         merge_annotations : bool, optional
             whether to merge with existing annotations, by default False
@@ -90,11 +90,15 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
             label = [label]
         query = self & key
         if not len(query) == 1:
-            raise ValueError(f"ImportedSpikeSorting key must be unique. Found: {query}")
+            raise ValueError(
+                f"ImportedSpikeSorting key must be unique. Found: {query}"
+            )
         unit_key = {**key, "id": id}
         annotation_query = ImportedSpikeSorting.Annotations & unit_key
         if annotation_query and not merge_annotations:
-            raise ValueError(f"Unit already has annotations: {annotation_query}")
+            raise ValueError(
+                f"Unit already has annotations: {annotation_query}"
+            )
         elif annotation_query:
             existing_annotations = annotation_query.fetch1()
             existing_annotations["label"] += label

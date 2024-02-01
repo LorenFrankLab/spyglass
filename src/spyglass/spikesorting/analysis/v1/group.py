@@ -1,5 +1,6 @@
 import datajoint as dj
 import numpy as np
+from itertools import compress
 from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.common import Session  # noqa: F401
@@ -18,24 +19,27 @@ class SortedSpikesGroupUnitSelectionParams(SpyglassMixin, dj.Manual):
     include_labels = Null: longblob
     exclude_labels = Null: longblob
     """
-
-    @property
-    def default_params(self):
-        return {
-            "unit_filter_params_name": "all_units",
-            "include_labels": [],
-            "exclude_labels": [],
-        }
+    contents = [
+        [
+            "all_units",
+            [],
+            [],
+        ],
+        [
+            "exclude_noise",
+            [],
+            ["noise", "mua"],
+        ],
+        [
+            "default_exclusion",
+            [],
+            ["noise", "mua"],
+        ],
+    ]
 
     @classmethod
-    def insert_default(cls, **kwargs):
-        """
-        Insert default parameter set for position determination
-        """
-        cls.insert1(
-            {**cls().default_params},
-            skip_duplicates=True,
-        )
+    def insert_default(cls):
+        cls.insert(cls.contents, skip_duplicates=True)
 
 
 @schema
@@ -64,15 +68,13 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             "nwb_file_name": nwb_file_name,
             "unit_filter_params_name": unit_filter_params_name,
         }
+        parts_insert = [{**key, **group_key} for key in keys]
+
         self.insert1(
             group_key,
             skip_duplicates=True,
         )
-        for key in keys:
-            self.SortGroup.insert1(
-                {**key, **group_key},
-                skip_duplicates=True,
-            )
+        self.SortGroup.insert(parts_insert)
 
     @staticmethod
     def filter_units(
@@ -133,8 +135,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 include_unit = SortedSpikesGroup.filter_units(
                     group_label_list, include_labels, exclude_labels
                 )
-                from itertools import compress  # worth bumping to top of script
-                sorting_spike_times = list(compress(sorting_spike_times, include_unit))
+
+                sorting_spike_times = list(
+                    compress(sorting_spike_times, include_unit)
+                )
 
             # filter the spike times based on the time slice if provided
             if time_slice is not None:
