@@ -37,7 +37,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
         "ms_after": 0.5,
         "max_spikes_per_unit": None,
         "n_jobs": 5,
-        "total_memory": "5G",
+        "chunk_duration":"1000s",
     }
     contents = [
         [
