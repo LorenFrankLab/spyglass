@@ -133,11 +133,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 include_unit = SortedSpikesGroup.filter_units(
                     group_label_list, include_labels, exclude_labels
                 )
-                sorting_spike_times = [
-                    times
-                    for times, include in zip(sorting_spike_times, include_unit)
-                    if include
-                ]
+                from itertools import compress  # worth bumping to top of script
+                sorting_spike_times = list(compress(sorting_spike_times, include_unit))
 
             # filter the spike times based on the time slice if provided
             if time_slice is not None:
