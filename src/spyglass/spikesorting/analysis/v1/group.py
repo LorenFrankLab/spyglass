@@ -5,7 +5,6 @@ from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-from spyglass.spikesorting.unit_inclusion_merge import UnitInclusionOutput
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("spikesorting_group_v1")
