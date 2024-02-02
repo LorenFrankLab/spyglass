@@ -63,8 +63,6 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         time = position_info.index.to_numpy()
 
         spike_indicator = SortedSpikesGroup.get_spike_indicator(key, time)
-        if spike_indicator.ndim == 1:
-            spike_indicator = spike_indicator[:, np.newaxis]
         spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
 
         sampling_frequency = 1 / np.median(np.diff(time))

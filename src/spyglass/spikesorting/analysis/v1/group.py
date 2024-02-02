@@ -177,6 +177,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 minlength=time.shape[0],
             )
 
+        if spike_indicator.ndim == 1:
+            spike_indicator = spike_indicator[:, np.newaxis]
+
         return spike_indicator
 
     @classmethod
