@@ -144,6 +144,12 @@ class SpyglassMixin:
                 merge_chains[name] = chains
         return merge_chains
 
+    def _get_chain(self, substring) -> TableChains:
+        """Return chain from self to merge table with substring in name."""
+        for name, chain in self._merge_chains.items():
+            if substring.lower() in name:
+                return chain
+
     def _commit_merge_deletes(
         self, merge_join_dict: Dict[str, List[QueryExpression]], **kwargs
     ) -> None:
@@ -206,8 +212,9 @@ class SpyglassMixin:
 
         if not merge_join_dict and not disable_warning:
             logger.warning(
-                f"No merge tables found downstream of {self.full_table_name}."
-                + "\n\tIf this is unexpected, try running with `reload_cache`."
+                f"No merge deletes found w/ {self.table_name} & "
+                + f"{restriction}.\n\tIf this is unexpected, try running with "
+                + "`reload_cache`."
             )
 
         if dry_run:
@@ -352,7 +359,7 @@ class SpyglassMixin:
         """Temporary inclusion for usage tracking."""
         from spyglass.common.common_usage import CautiousDelete
 
-        return CautiousDelete
+        return CautiousDelete()
 
     def _log_use(self, start, merge_deletes=None):
         """Log use of cautious_delete."""
@@ -361,7 +368,9 @@ class SpyglassMixin:
                 duration=time() - start,
                 dj_user=dj.config["database.user"],
                 origin=self.full_table_name,
-                restriction=self.restriction,
+                restriction=(
+                    str(self.restriction)[:255] if self.restriction else "None"
+                ),
                 merge_deletes=merge_deletes,
             )
         )
@@ -419,10 +428,15 @@ class SpyglassMixin:
 
         self._log_use(start=start, merge_deletes=merge_deletes)
 
-    def cdel(self, *args, **kwargs):
+    def cdel(self, force_permission=False, *args, **kwargs):
         """Alias for cautious_delete."""
-        self.cautious_delete(*args, **kwargs)
+        self.cautious_delete(force_permission=force_permission, *args, **kwargs)
 
-    def delete(self, *args, **kwargs):
+    def delete(self, force_permission=False, *args, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
-        self.cautious_delete(*args, **kwargs)
+        self.cautious_delete(force_permission=force_permission, *args, **kwargs)
+
+    def super_delete(self, *args, **kwargs):
+        """Alias for datajoint.table.Table.delete."""
+        logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
+        super().delete(*args, **kwargs)

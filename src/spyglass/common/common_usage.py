@@ -18,6 +18,6 @@ class CautiousDelete(dj.Manual):
     dj_user: varchar(64)
     duration: float
     origin: varchar(64)
-    restriction: varchar(64)
+    restriction: varchar(255)
     merge_deletes = null: blob
     """
