@@ -11,7 +11,7 @@ schema = dj.schema("spikesorting_group_v1")
 
 
 @schema
-class SortedSpikesGroupUnitSelectionParams(SpyglassMixin, dj.Manual):
+class UnitSelectionParams(SpyglassMixin, dj.Manual):
     definition = """
     unit_filter_params_name: varchar(128)
     ---
@@ -45,7 +45,7 @@ class SortedSpikesGroupUnitSelectionParams(SpyglassMixin, dj.Manual):
 class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     definition = """
     -> Session
-    -> SortedSpikesGroupUnitSelectionParams
+    -> UnitSelectionParams
     sorted_spikes_group_name: varchar(80)
     """
 
@@ -115,15 +115,19 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         ).fetch("spikesorting_merge_id")
 
         # get the filtering parameters
-        include_labels, exclude_labels = (
-            SortedSpikesGroupUnitSelectionParams & key
-        ).fetch1("include_labels", "exclude_labels")
+        include_labels, exclude_labels = (UnitSelectionParams & key).fetch1(
+            "include_labels", "exclude_labels"
+        )
 
         # get the spike times for each merge_id
         spike_times = []
         for merge_id in merge_ids:
             nwb_file = SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})[0]
-            nwb_field_name = "object_id" if "object_id" in nwb_file else "units" if "units" in nwb_file else None
+            nwb_field_name = (
+                "object_id"
+                if "object_id" in nwb_file
+                else "units" if "units" in nwb_file else None
+            )
             if nwb_field_name is None:
                 # case where no units found or curation removed all units
                 continue
