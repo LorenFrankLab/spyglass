@@ -1,6 +1,7 @@
+from itertools import compress
+
 import datajoint as dj
 import numpy as np
-from itertools import compress
 from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.common import Session  # noqa: F401
