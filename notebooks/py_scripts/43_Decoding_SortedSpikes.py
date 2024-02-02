@@ -38,7 +38,7 @@ dj.config.load(
 
 # ## SortedSpikesGroup
 #
-# `SortedSpikesGroup` is a child table of `SpikeSortingOutput` in the spikesorting pipeline. It allows us to group the spikesorting results from multiple 
+# `SortedSpikesGroup` is a child table of `SpikeSortingOutput` in the spikesorting pipeline. It allows us to group the spikesorting results from multiple
 # sources (e.g. multiple terode groups or intervals) into a single entry. Here we will group together the spiking of multiple tetrode groups to use for decoding.
 #
 #
@@ -47,12 +47,17 @@ dj.config.load(
 
 # +
 from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
+
 UnitSelectionParams().insert_default()
 
 # look at the filter set we'll use here
 unit_filter_params_name = "default_exclusion"
-print((UnitSelectionParams()
-       & {"unit_filter_params_name":unit_filter_params_name}).fetch1())
+print(
+    (
+        UnitSelectionParams()
+        & {"unit_filter_params_name": unit_filter_params_name}
+    ).fetch1()
+)
 # look at full table
 UnitSelectionParams()
 # -
@@ -68,7 +73,7 @@ nwb_copy_file_name = "mediumnwb20230802_.nwb"
 sorter_keys = {
     "nwb_file_name": nwb_copy_file_name,
     "sorter": "mountainsort4",
-    "curation_id": 1
+    "curation_id": 1,
 }
 # check the set of sorting's we'll use
 (sgs.SpikeSortingSelection & sorter_keys) * SpikeSortingOutput.CurationV1
@@ -151,6 +156,7 @@ selection_key = {
 }
 
 from spyglass.decoding import SortedSpikesDecodingSelection
+
 SortedSpikesDecodingSelection.insert1(
     selection_key,
     skip_duplicates=True,
@@ -177,5 +183,3 @@ DecodingOutput.SortedSpikesDecodingV1 & selection_key
 results = (SortedSpikesDecodingV1 & selection_key).fetch_results()
 results
 # -
-
-
