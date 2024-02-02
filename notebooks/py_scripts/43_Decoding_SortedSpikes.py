@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.16.0
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -42,7 +42,7 @@ dj.config.load(
 # sources (e.g. multiple terode groups or intervals) into a single entry. Here we will group together the spiking of multiple tetrode groups to use for decoding.
 #
 #
-# This table allows us filter units by their annotation labels from curation (e.g only include units labeled "good", exclude units labeld "noise") by defining parameters from `UnitSelectionParams`. When accessing data through `SortedSpikesGroup` the table will include only units with at least one label in `include_labels` and no labels in `exclude_labels`. We can look at those here:
+# This table allows us filter units by their annotation labels from curation (e.g only include units labeled "good", exclude units labeled "noise") by defining parameters from `UnitSelectionParams`. When accessing data through `SortedSpikesGroup` the table will include only units with at least one label in `include_labels` and no labels in `exclude_labels`. We can look at those here:
 #
 
 # +
@@ -75,7 +75,7 @@ sorter_keys = {
     "sorter": "mountainsort4",
     "curation_id": 1,
 }
-# check the set of sorting's we'll use
+# check the set of sorting we'll use
 (sgs.SpikeSortingSelection & sorter_keys) * SpikeSortingOutput.CurationV1
 
 # +
@@ -84,7 +84,7 @@ from spyglass.decoding.v1.sorted_spikes import SortedSpikesGroup
 SortedSpikesGroup()
 
 # +
-# get the merge_ids for the selected sortings
+# get the merge_ids for the selected sorting
 spikesorting_merge_ids = (
     (sgs.SpikeSortingSelection & sorter_keys) * SpikeSortingOutput.CurationV1
 ).fetch("merge_id")
@@ -107,7 +107,7 @@ SortedSpikesGroup & {
 }
 # -
 
-# look at the sortings within the group we just made
+# look at the sorting within the group we just made
 SortedSpikesGroup.SortGroup & {
     "nwb_file_name": nwb_copy_file_name,
     "sorted_spikes_group_name": "test_group",
