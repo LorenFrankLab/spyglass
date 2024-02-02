@@ -33,7 +33,6 @@ from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 from spyglass.spikesorting.spikesorting_merge import (
     SpikeSortingOutput,
 )  # noqa: F401
-from spyglass.spikesorting.unit_inclusion_merge import UnitInclusionOutput
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("decoding_sorted_spikes_v1")

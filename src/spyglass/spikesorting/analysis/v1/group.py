@@ -1,82 +1,152 @@
 import datajoint as dj
 import numpy as np
+from itertools import compress
 from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-from spyglass.spikesorting.unit_inclusion_merge import UnitInclusionOutput
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("spikesorting_group_v1")
 
 
 @schema
+class UnitSelectionParams(SpyglassMixin, dj.Manual):
+    definition = """
+    unit_filter_params_name: varchar(128)
+    ---
+    include_labels = Null: longblob
+    exclude_labels = Null: longblob
+    """
+    contents = [
+        [
+            "all_units",
+            [],
+            [],
+        ],
+        [
+            "exclude_noise",
+            [],
+            ["noise", "mua"],
+        ],
+        [
+            "default_exclusion",
+            [],
+            ["noise", "mua"],
+        ],
+    ]
+
+    @classmethod
+    def insert_default(cls):
+        cls.insert(cls.contents, skip_duplicates=True)
+
+
+@schema
 class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     definition = """
     -> Session
+    -> UnitSelectionParams
     sorted_spikes_group_name: varchar(80)
     """
 
-    class Units(SpyglassMixin, dj.Part):
+    class SortGroup(SpyglassMixin, dj.Part):
         definition = """
         -> master
-        -> UnitInclusionOutput.proj(unit_inclusion_merge_id='merge_id')
+        -> SpikeSortingOutput.proj(spikesorting_merge_id='merge_id')
         """
 
     def create_group(
         self,
         group_name: str,
         nwb_file_name: str,
-        unit_inclusion_merge_ids: list[str],
+        unit_filter_params_name: str = "all_units",
+        keys: list[dict] = [],
     ):
         group_key = {
             "sorted_spikes_group_name": group_name,
             "nwb_file_name": nwb_file_name,
+            "unit_filter_params_name": unit_filter_params_name,
         }
+        parts_insert = [{**key, **group_key} for key in keys]
+
         self.insert1(
             group_key,
             skip_duplicates=True,
         )
-        self.Units.insert(
-            [
-                {
-                    "unit_inclusion_merge_id": id,
-                    **group_key,
-                }
-                for id in unit_inclusion_merge_ids
-            ],
-            skip_duplicates=True,
-        )
+        self.SortGroup.insert(parts_insert)
 
     @staticmethod
-    def fetch_spike_data(
-        key: dict, time_slice: slice = None
-    ) -> list[np.ndarray]:
-        # TODO: provide labels for each unit
-        # TODO: filter out artifact times
-        unit_inclusion_merge_ids = (
-            SortedSpikesGroup.Units
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "sorted_spikes_group_name": key["sorted_spikes_group_name"],
-            }
-        ).fetch("unit_inclusion_merge_id")
+    def filter_units(
+        labels: list[list[str]],
+        include_labels: list[str],
+        exclude_labels: list[str],
+    ) -> np.ndarray:
+        """
+        Filter units based on labels
+        """
+        include_labels = np.unique(include_labels)
+        exclude_labels = np.unique(exclude_labels)
 
-        spike_times = []
-        for unit_inclusion_merge_id in unit_inclusion_merge_ids:
-            part_parent = UnitInclusionOutput.merge_get_parent(
-                {"merge_id": unit_inclusion_merge_id}
+        include_mask = np.zeros(len(labels), dtype=bool)
+        for ind, unit_labels in enumerate(labels):
+            if isinstance(unit_labels, str):
+                unit_labels = [unit_labels]
+            if (
+                include_labels
+                and not np.isin(include_labels, unit_labels).any()
+            ):
+                continue
+            if np.isin(exclude_labels, unit_labels).any():
+                continue
+            include_mask[ind] = True
+        return include_mask
+
+    @staticmethod
+    def fetch_spike_data(key, time_slice=None):
+        # get merge_ids for SpikeSortingOutput
+        merge_ids = (
+            (
+                SortedSpikesGroup.SortGroup
+                & {
+                    "nwb_file_name": key["nwb_file_name"],
+                    "sorted_spikes_group_name": key["sorted_spikes_group_name"],
+                }
             )
-            spikesorting_merge_id = part_parent.fetch1("spikesorting_merge_id")
-            nwb_file = SpikeSortingOutput().fetch_nwb(
-                {"merge_id": spikesorting_merge_id}
-            )[0]
-            # field name in v0 spikesorting is "units", in v1 it is "object_id"
-            nwb_field_name = "object_id" if "object_id" in nwb_file else "units"
+        ).fetch("spikesorting_merge_id")
+
+        # get the filtering parameters
+        include_labels, exclude_labels = (UnitSelectionParams & key).fetch1(
+            "include_labels", "exclude_labels"
+        )
+
+        # get the spike times for each merge_id
+        spike_times = []
+        for merge_id in merge_ids:
+            nwb_file = SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})[0]
+            nwb_field_name = (
+                "object_id"
+                if "object_id" in nwb_file
+                else "units" if "units" in nwb_file else None
+            )
+            if nwb_field_name is None:
+                # case where no units found or curation removed all units
+                continue
             sorting_spike_times = nwb_file[nwb_field_name][
                 "spike_times"
             ].to_list()
 
+            # filter the spike times based on the labels if present
+            if "label" in nwb_file[nwb_field_name]:
+                group_label_list = nwb_file[nwb_field_name]["label"].to_list()
+                include_unit = SortedSpikesGroup.filter_units(
+                    group_label_list, include_labels, exclude_labels
+                )
+
+                sorting_spike_times = list(
+                    compress(sorting_spike_times, include_unit)
+                )
+
+            # filter the spike times based on the time slice if provided
             if time_slice is not None:
                 sorting_spike_times = [
                     times[
@@ -87,15 +157,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                     for times in sorting_spike_times
                 ]
 
-            # Get the included units
-            included_units_ind = part_parent.fetch1("included_units_ind")
-            if included_units_ind is None:
-                included_units_ind = np.arange(len(sorting_spike_times))
+            # append the approved spike times to the list
+            spike_times.extend(sorting_spike_times)
 
-            # Find the spike times for the included units
-            spike_times.extend(
-                [sorting_spike_times[ind] for ind in included_units_ind]
-            )
         return spike_times
 
     @classmethod
