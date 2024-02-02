@@ -46,7 +46,7 @@
     - Add `decoding` pipeline V1. #731, #769
     - Add a table to store the decoding results #731
     - Use the new `non_local_detector` package for decoding #731
-    - Allow multiple spike waveform features for clusterelss decoding #731
+    - Allow multiple spike waveform features for clusterless decoding #731
     - Reorder notebooks #731
     - Add fetch class functionality to `Merge` table. #783, #786
     - Add ability to filter sorted units in decoding #807
