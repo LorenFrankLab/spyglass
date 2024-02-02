@@ -406,6 +406,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         posterior = (
             self.fetch_results()
             .acausal_posterior.sel(time=time_slice)
+            .squeeze()
             .unstack("state_bins")
             .sum("state")
         )
