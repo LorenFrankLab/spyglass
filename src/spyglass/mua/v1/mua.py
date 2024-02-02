@@ -22,21 +22,22 @@ class MuaEventsParameters(SpyglassMixin, dj.Manual):
     ----
     mua_param_dict : BLOB    # dictionary of parameters
     """
-
-    def insert_default(self):
-        """Insert the default parameter set"""
-        self.insert1(
-            {
-                "mua_param_name": "default",
-                "mua_param_dict": {
-                    "minimum_duration": 0.015,  # seconds
-                    "zscore_threshold": 2.0,
-                    "close_event_threshold": 0.0,  # seconds
-                    "speed_threshold": 4.0,  # cm/s
-                },
+    contents = [
+        {
+            "mua_param_name": "default",
+            "mua_param_dict": {
+                "minimum_duration": 0.015,  # seconds
+                "zscore_threshold": 2.0,
+                "close_event_threshold": 0.0,  # seconds
+                "speed_threshold": 4.0,  # cm/s
             },
-            skip_duplicates=True,
-        )
+        },
+    ]
+
+    @classmethod
+    def insert_default(cls):
+        """Insert the default parameter set"""
+        cls.insert(cls.contents, skip_duplicates=True)
 
 
 @schema
