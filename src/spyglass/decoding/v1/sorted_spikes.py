@@ -18,7 +18,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from non_local_detector.models.base import SortedSpikesDetector
-from ripple_detection import get_multiunit_population_firing_rate
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
