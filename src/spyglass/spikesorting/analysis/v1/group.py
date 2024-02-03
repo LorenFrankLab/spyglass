@@ -50,7 +50,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     sorted_spikes_group_name: varchar(80)
     """
 
-    class SortGroup(SpyglassMixin, dj.Part):
+    class Units(SpyglassMixin, dj.Part):
         definition = """
         -> master
         -> SpikeSortingOutput.proj(spikesorting_merge_id='merge_id')
@@ -74,7 +74,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             group_key,
             skip_duplicates=True,
         )
-        self.SortGroup.insert(parts_insert)
+        self.Units.insert(parts_insert, skip_duplicates=True)
 
     @staticmethod
     def filter_units(
@@ -88,16 +88,19 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         include_labels = np.unique(include_labels)
         exclude_labels = np.unique(exclude_labels)
 
+        if include_labels.size == 0 and exclude_labels.size == 0:
+            # if no labels are provided, include all units
+            return np.ones(len(labels), dtype=bool)
+
         include_mask = np.zeros(len(labels), dtype=bool)
         for ind, unit_labels in enumerate(labels):
             if isinstance(unit_labels, str):
                 unit_labels = [unit_labels]
-            if (
-                include_labels
-                and not np.isin(include_labels, unit_labels).any()
+            if np.all(~np.isin(unit_labels, include_labels)) or np.any(
+                np.isin(unit_labels, exclude_labels)
             ):
-                continue
-            if np.isin(exclude_labels, unit_labels).any():
+                # if the unit does not have any of the include labels
+                # or has any of the exclude labels, skip
                 continue
             include_mask[ind] = True
         return include_mask
@@ -107,7 +110,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         # get merge_ids for SpikeSortingOutput
         merge_ids = (
             (
-                SortedSpikesGroup.SortGroup
+                SortedSpikesGroup.Units
                 & {
                     "nwb_file_name": key["nwb_file_name"],
                     "sorted_spikes_group_name": key["sorted_spikes_group_name"],
@@ -127,7 +130,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             nwb_field_name = (
                 "object_id"
                 if "object_id" in nwb_file
-                else "units" if "units" in nwb_file else None
+                else "units"
+                if "units" in nwb_file
+                else None
             )
             if nwb_field_name is None:
                 # case where no units found or curation removed all units
