@@ -8,7 +8,9 @@ import spikeinterface as si
 from sortingview.SpikeSortingView import create_raw_traces_plot
 from sortingview.SpikeSortingView.Figure import Figure
 
-from spyglass.spikesorting.spikesorting_recording import SpikeSortingRecording
+from spyglass.spikesorting.v0.spikesorting_recording import (
+    SpikeSortingRecording,
+)
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("figurl_view_spike_sorting_recording")

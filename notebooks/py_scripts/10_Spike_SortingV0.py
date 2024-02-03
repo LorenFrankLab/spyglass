@@ -69,7 +69,7 @@ if os.path.basename(os.getcwd()) == "notebooks":
 dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 import spyglass.common as sgc
-import spyglass.spikesorting as sgs
+import spyglass.spikesorting.v0 as sgs
 
 # ignore datajoint+jupyter async warnings
 import warnings
@@ -84,15 +84,24 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # If you haven't already done so, add yourself to `LabTeam`
 #
 
-name, email, dj_user = "Firstname Lastname", "example@gmail.com", "user"
+# Full name, Google email address, DataJoint username, admin
+name, email, dj_user, admin = (
+    "Firstname Lastname",
+    "example@gmail.com",
+    "user",
+    0,
+)
 sgc.LabMember.insert_from_name(name)
 sgc.LabMember.LabMemberInfo.insert1(
-    [name, email, dj_user], skip_duplicates=True
-)
-sgc.LabTeam.LabTeamMember.insert1(
-    {"team_name": "My Team", "lab_member_name": name},
+    [
+        name,
+        email,
+        dj_user,
+        admin,
+    ],
     skip_duplicates=True,
 )
+sgc.LabMember.LabMemberInfo()
 
 # We can try `fetch` to confirm.
 #

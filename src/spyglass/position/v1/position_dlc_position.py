@@ -3,15 +3,16 @@ import numpy as np
 import pandas as pd
 import pynwb
 
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_mixin import SpyglassMixin
-from .dlc_utils import (
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.position.v1.dlc_utils import (
     _key_to_smooth_func_dict,
     get_span_start_stop,
     interp_pos,
     validate_option,
     validate_smooth_params,
 )
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .position_dlc_pose_estimation import DLCPoseEstimation
 
 schema = dj.schema("position_v1_dlc_position")

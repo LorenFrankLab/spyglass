@@ -8,7 +8,7 @@ import sortingview.views as vv
 import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
-from spyglass.spikesorting.merged_sorting_extractor import (
+from spyglass.spikesorting.v0.merged_sorting_extractor import (
     MergedSortingExtractor,
 )
 from spyglass.utils import logger

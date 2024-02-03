@@ -245,7 +245,9 @@ def mini_closed(mini_path):
 def mini_insert(mini_path, teardown, server, dj_conn):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
-    from spyglass.spikesorting.merge import SpikeSortingOutput  # noqa: E402
+    from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
+        SpikeSortingOutput,
+    )
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
     LabMember().insert1(

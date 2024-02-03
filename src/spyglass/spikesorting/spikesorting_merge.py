@@ -4,7 +4,7 @@ from datajoint.utils import to_camel_case
 from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
-from spyglass.spikesorting.spikesorting_curation import (  # noqa: F401
+from spyglass.spikesorting.v0.spikesorting_curation import (  # noqa: F401
     CuratedSpikeSorting,
 )
 from spyglass.spikesorting.v1.curation import CurationV1  # noqa: F401
@@ -81,7 +81,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_spike_indicator(cls, key, time):
         time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
-        spike_times = cls.load_spike_data(key)
+        spike_times = cls.fetch_spike_data(key)
         spike_indicator = np.zeros((len(time), len(spike_times)))
 
         for ind, times in enumerate(spike_times):

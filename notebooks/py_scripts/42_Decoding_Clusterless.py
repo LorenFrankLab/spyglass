@@ -53,7 +53,7 @@ dj.config.load(
 )  # load config for database connection info
 
 # +
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 import spyglass.spikesorting.v1 as sgs
 from spyglass.decoding.v1.waveform_features import UnitWaveformFeaturesSelection
 
@@ -125,8 +125,39 @@ UnitWaveformFeaturesGroup.UnitFeatures & {
 
 # +
 from spyglass.position import PositionOutput
+import spyglass.position as sgp
 
-PositionOutput.TrodesPosV1 & {"nwb_file_name": nwb_copy_file_name}
+
+sgp.v1.TrodesPosParams.insert1(
+    {
+        "trodes_pos_params_name": "default_decoding",
+        "params": {
+            "max_LED_separation": 9.0,
+            "max_plausible_speed": 300.0,
+            "position_smoothing_duration": 0.125,
+            "speed_smoothing_std_dev": 0.100,
+            "orient_smoothing_std_dev": 0.001,
+            "led1_is_front": 1,
+            "is_upsampled": 1,
+            "upsampling_sampling_rate": 250,
+            "upsampling_interpolation_method": "linear",
+        },
+    },
+    skip_duplicates=True,
+)
+
+trodes_s_key = {
+    "nwb_file_name": nwb_copy_file_name,
+    "interval_list_name": "pos 0 valid times",
+    "trodes_pos_params_name": "default_decoding",
+}
+sgp.v1.TrodesPosSelection.insert1(
+    trodes_s_key,
+    skip_duplicates=True,
+)
+sgp.v1.TrodesPosV1.populate(trodes_s_key)
+
+PositionOutput.TrodesPosV1 & trodes_s_key
 
 # +
 from spyglass.decoding.v1.core import PositionGroup
@@ -136,7 +167,7 @@ position_merge_ids = (
     & {
         "nwb_file_name": nwb_copy_file_name,
         "interval_list_name": "pos 0 valid times",
-        "trodes_pos_params_name": "default",
+        "trodes_pos_params_name": "default_decoding",
     }
 ).fetch("merge_id")
 
@@ -323,7 +354,7 @@ DecodingOutput.ClusterlessDecodingV1 & selection_key
 
 # We can load the results of the decoding:
 
-decoding_results = (ClusterlessDecodingV1 & selection_key).load_results()
+decoding_results = (ClusterlessDecodingV1 & selection_key).fetch_results()
 decoding_results
 
 # Finally, if we deleted the results, we can use the `cleanup` function to delete the results from the file system:
@@ -349,12 +380,12 @@ DecodingOutput().cleanup()
 # (
 #     position_info,
 #     position_variable_names,
-# ) = ClusterlessDecodingV1.load_position_info(selection_key)
+# ) = ClusterlessDecodingV1.fetch_position_info(selection_key)
 # results_time = decoding_results.acausal_posterior.isel(intervals=0).time.values
 # position_info = position_info.loc[results_time[0] : results_time[-1]]
 
-# env = ClusterlessDecodingV1.load_environments(selection_key)[0]
-# spike_times, _ = ClusterlessDecodingV1.load_spike_data(selection_key)
+# env = ClusterlessDecodingV1.fetch_environments(selection_key)[0]
+# spike_times, _ = ClusterlessDecodingV1.fetch_spike_data(selection_key)
 
 
 # create_interactive_2D_decoding_figurl(

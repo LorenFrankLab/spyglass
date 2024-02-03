@@ -1,5 +1,4 @@
 import bottleneck
-import cv2
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
@@ -642,6 +641,8 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         arrow_radius=15,
         circle_radius=8,
     ):
+        import cv2  # noqa: F401
+
         RGB_PINK = (234, 82, 111)
         RGB_YELLOW = (253, 231, 76)
         RGB_WHITE = (255, 255, 255)

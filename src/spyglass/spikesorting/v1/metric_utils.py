@@ -1,6 +1,6 @@
+import numpy as np
 import spikeinterface as si
 import spikeinterface.qualitymetrics as sq
-import numpy as np
 
 
 def compute_isi_violation_fractions(

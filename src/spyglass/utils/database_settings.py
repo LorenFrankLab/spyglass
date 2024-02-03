@@ -23,6 +23,7 @@ SHARED_MODULES = [
     "ripple",
     "lfp",
     "waveform",
+    "mua",
 ]
 
 

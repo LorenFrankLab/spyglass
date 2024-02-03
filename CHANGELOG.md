@@ -18,6 +18,15 @@
 - Increase pytest coverage for `common`, `lfp`, and `utils`. #743
 - Update docs to reflect new notebooks. #776
 - Add overview of Spyglass to docs. #779
+- Update linting for Black 24. #808
+
+### Pipelines
+
+- Spike sorting:
+    - Add SpikeSorting V1 pipeline. #651
+    - Move modules into spikesorting.v0 #807
+    - Add MUA analysis to spike sorting pipeline
+- LFP: Minor fixes to LFPBandV1 populator and `make`. #706, #795
 
 ### Pipelines
 
@@ -32,13 +41,18 @@
 - Position:
     - Refactor input validation in DLC pipeline. #688
     - DLC path handling from config, and normalize naming convention. #722
+    - Fix in place column bug #752
 - Decoding:
     - Add `decoding` pipeline V1. #731, #769
     - Add a table to store the decoding results #731
     - Use the new `non_local_detector` package for decoding #731
-    - Allow multiple spike waveform features for clusterelss decoding #731
+    - Allow multiple spike waveform features for clusterless decoding #731
     - Reorder notebooks #731
     - Add fetch class functionality to `Merge` table. #783, #786
+    - Add ability to filter sorted units in decoding #807
+    - Rename SortedSpikesGroup.SortGroup to SortedSpikesGroup.Units #807
+    - Change methods with load_... to fetch_... for consistency #807
+    - Use merge table methods to access part methods #807
 
 ## [0.4.3] (November 7, 2023)
 

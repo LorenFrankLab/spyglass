@@ -6,7 +6,7 @@ from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("file_lock")
 
-from ..common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 
 
 @schema

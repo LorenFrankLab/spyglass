@@ -8,12 +8,12 @@ import numpy as np
 from datajoint.utils import to_camel_case
 from tqdm import tqdm as tqdm
 
-from ...common.common_behav import RawPosition
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...common.common_position import IntervalPositionInfo
-from ...utils import logger
-from ...utils.dj_mixin import SpyglassMixin
-from .dlc_utils import check_videofile, get_video_path
+from spyglass.common.common_behav import RawPosition
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_position import IntervalPositionInfo
+from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
+from spyglass.utils import logger
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("position_v1_trodes_position")
 

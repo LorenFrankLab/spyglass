@@ -5,10 +5,11 @@ from sortingview.SpikeSortingView import (
     SpikeSortingView as SortingViewSpikeSortingView,
 )
 
+from spyglass.spikesorting.v0 import SpikeSorting, SpikeSortingRecording
+from spyglass.spikesorting.v0.figurl_views.prepare_spikesortingview_data import (
+    prepare_spikesortingview_data,
+)
 from spyglass.utils import SpyglassMixin, logger
-
-from ..spikesorting import SpikeSorting, SpikeSortingRecording
-from .prepare_spikesortingview_data import prepare_spikesortingview_data
 
 schema = dj.schema("figurl_view_spike_sorting_recording")
 

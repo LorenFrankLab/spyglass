@@ -116,17 +116,17 @@ ignore-words-list = 'nevers'
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = [
-  "-sv",
-  # "--sw", # stepwise: resume with next test after failure
-  # "--pdb", # drop into debugger on failure
-  "-p no:warnings",
-  # "--no-teardown", # don't teardown the database after tests
-  "--quiet-spy", # don't show logging from spyglass
-  "--show-capture=no",
-  "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
-  "--cov=spyglass",
-  "--cov-report=term-missing",
-  "--no-cov-on-fail",
+    "-sv",
+    # "--sw", # stepwise: resume with next test after failure
+    # "--pdb", # drop into debugger on failure
+    "-p no:warnings",
+    # "--no-teardown", # don't teardown the database after tests
+    "--quiet-spy",                                    # don't show logging from spyglass
+    "--show-capture=no",
+    "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
+    "--cov=spyglass",
+    "--cov-report=term-missing",
+    "--no-cov-on-fail",
 ]
 testpaths = ["tests"]
 log_level = "INFO"
@@ -134,19 +134,19 @@ log_level = "INFO"
 [tool.coverage.run]
 source = ["*/src/spyglass/*"]
 omit = [ # which submodules have no tests
-  "*/__init__.py",
-  "*/_version.py",
-  "*/cli/*",
-  # "*/common/*",
-  "*/data_import/*",
-  "*/decoding/*",
-  "*/figurl_views/*",
-  # "*/lfp/*",
-  "*/linearization/*",
-  "*/lock/*",
-  "*/position/*",
-  "*/ripple/*",
-  "*/sharing/*",
-  "*/spikesorting/*",
-  # "*/utils/*",
+    "*/__init__.py",
+    "*/_version.py",
+    "*/cli/*",
+    # "*/common/*",
+    "*/data_import/*",
+    "*/decoding/*",
+    "*/figurl_views/*",
+    # "*/lfp/*",
+    "*/linearization/*",
+    "*/lock/*",
+    "*/position/*",
+    "*/ripple/*",
+    "*/sharing/*",
+    "*/spikesorting/*",
+    # "*/utils/*",
 ]

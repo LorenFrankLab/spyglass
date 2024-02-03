@@ -149,7 +149,6 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
     -> RippleLFPSelection
     -> RippleParameters
     -> PositionOutput.proj(pos_merge_id='merge_id')
-
     ---
     -> AnalysisNwbfile
     ripple_times_object_id : varchar(40)

@@ -4,10 +4,11 @@ import pandas as pd
 import pynwb
 from position_tools.core import gaussian_smooth
 
-from ...common.common_behav import RawPosition
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_mixin import SpyglassMixin
-from .dlc_utils import get_span_start_stop
+from spyglass.common.common_behav import RawPosition
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.position.v1.dlc_utils import get_span_start_stop
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .position_dlc_cohort import DLCSmoothInterpCohort
 
 schema = dj.schema("position_v1_dlc_orient")

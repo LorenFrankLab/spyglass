@@ -102,7 +102,7 @@ session.
     - one or more NWB or data tables
     - optionally, one or more parameter tables
 - Non-primary key: None
-- Examples: `MetricSelection`, `LFPSElection`
+- Examples: `MetricSelection`, `LFPSelection`
 
 It is possible for a Selection table to collect information from more than one
 Parameter table. For example, the Selection table for spike sorting holds
