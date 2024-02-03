@@ -130,9 +130,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             nwb_field_name = (
                 "object_id"
                 if "object_id" in nwb_file
-                else "units"
-                if "units" in nwb_file
-                else None
+                else "units" if "units" in nwb_file else None
             )
             if nwb_field_name is None:
                 # case where no units found or curation removed all units
