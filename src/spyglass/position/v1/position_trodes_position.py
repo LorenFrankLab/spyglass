@@ -2,7 +2,6 @@ import copy
 import os
 from pathlib import Path
 
-import cv2
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
@@ -357,6 +356,8 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         arrow_radius=15,
         circle_radius=8,
     ):
+        import cv2
+
         RGB_PINK = (234, 82, 111)
         RGB_YELLOW = (253, 231, 76)
         RGB_WHITE = (255, 255, 255)
