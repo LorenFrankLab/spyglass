@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.16.1
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -29,7 +29,6 @@
 
 # +
 from pathlib import Path
-
 import datajoint as dj
 
 dj.config.load(
@@ -65,10 +64,9 @@ UnitSelectionParams()
 
 # Now we can make our sorted spikes group with this unit selection parameter
 
-import spyglass.spikesorting.v1 as sgs
-
 # +
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+import spyglass.spikesorting.v1 as sgs
 
 nwb_copy_file_name = "mediumnwb20230802_.nwb"
 
@@ -120,10 +118,10 @@ SortedSpikesGroup.Units & {
 #
 # As before we can specify the model parameters. The only difference is that we will use the `ContFragSortedSpikesClassifier` instead of the `ContFragClusterlessClassifier`.
 
-from non_local_detector.models import ContFragSortedSpikesClassifier
-
 # +
 from spyglass.decoding.v1.core import DecodingParameters
+from non_local_detector.models import ContFragSortedSpikesClassifier
+
 
 DecodingParameters.insert1(
     {

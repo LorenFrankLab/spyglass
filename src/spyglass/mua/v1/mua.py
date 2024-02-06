@@ -48,6 +48,7 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
     -> MuaEventsParameters
     -> SortedSpikesGroup
     -> PositionOutput.proj(pos_merge_id='merge_id')
+    -> IntervalList.proj(detection_interval='interval_list_name')
     ---
     -> AnalysisNwbfile
     mua_times_object_id : varchar(40)
@@ -64,6 +65,21 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         sampling_frequency = 1 / np.median(np.diff(time))
 
         mua_params = (MuaEventsParameters & key).fetch1("mua_param_dict")
+
+        valid_times = (
+            IntervalList
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["detection_interval"],
+            }
+        ).fetch1("valid_times")
+        mask = np.zeros_like(time, dtype=bool)
+        for start, end in valid_times:
+            mask = mask | ((time >= start) & (time <= end))
+
+        time = time[mask]
+        speed = speed[mask]
+        spike_indicator = spike_indicator[mask]
 
         mua_times = multiunit_HSE_detector(
             time, spike_indicator, speed, sampling_frequency, **mua_params
