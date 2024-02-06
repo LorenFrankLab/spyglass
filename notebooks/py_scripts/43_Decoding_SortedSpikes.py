@@ -29,6 +29,7 @@
 
 # +
 from pathlib import Path
+
 import datajoint as dj
 
 dj.config.load(
@@ -64,9 +65,10 @@ UnitSelectionParams()
 
 # Now we can make our sorted spikes group with this unit selection parameter
 
+import spyglass.spikesorting.v1 as sgs
+
 # +
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-import spyglass.spikesorting.v1 as sgs
 
 nwb_copy_file_name = "mediumnwb20230802_.nwb"
 
@@ -108,7 +110,7 @@ SortedSpikesGroup & {
 # -
 
 # look at the sorting within the group we just made
-SortedSpikesGroup.SortGroup & {
+SortedSpikesGroup.Units & {
     "nwb_file_name": nwb_copy_file_name,
     "sorted_spikes_group_name": "test_group",
     "unit_filter_params_name": unit_filter_params_name,
@@ -118,10 +120,10 @@ SortedSpikesGroup.SortGroup & {
 #
 # As before we can specify the model parameters. The only difference is that we will use the `ContFragSortedSpikesClassifier` instead of the `ContFragClusterlessClassifier`.
 
-# +
-from spyglass.decoding.v1.core import DecodingParameters
 from non_local_detector.models import ContFragSortedSpikesClassifier
 
+# +
+from spyglass.decoding.v1.core import DecodingParameters
 
 DecodingParameters.insert1(
     {
