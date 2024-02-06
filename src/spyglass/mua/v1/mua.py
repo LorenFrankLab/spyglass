@@ -1,6 +1,8 @@
 import datajoint as dj
 import numpy as np
+import sortingview.views as vv
 from ripple_detection import multiunit_HSE_detector
+from scipy.stats import zscore
 
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -46,22 +48,15 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
     -> MuaEventsParameters
     -> SortedSpikesGroup
     -> PositionOutput.proj(pos_merge_id='merge_id')
-    -> IntervalList.proj(artifact_interval_list_name='interval_list_name') # exclude artifact times
     ---
     -> AnalysisNwbfile
     mua_times_object_id : varchar(40)
     """
 
     def make(self, key):
-        # TODO: exclude artifact times
-        position_info = (
-            PositionOutput & {"merge_id": key["pos_merge_id"]}
-        ).fetch1_dataframe()
-        speed_name = (
-            "speed" if "speed" in position_info.columns else "head_speed"
-        )
-        speed = position_info[speed_name].to_numpy()
-        time = position_info.index.to_numpy()
+        speed = self.get_speed(key)
+        time = speed.index.to_numpy()
+        speed = speed.to_numpy()
 
         spike_indicator = SortedSpikesGroup.get_spike_indicator(key, time)
         spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
@@ -69,22 +64,6 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         sampling_frequency = 1 / np.median(np.diff(time))
 
         mua_params = (MuaEventsParameters & key).fetch1("mua_param_dict")
-
-        # Exclude artifact times
-        # Alternatively could set to NaN and leave them out of the firing rate calculation
-        # in the multiunit_HSE_detector function
-        artifact_key = {
-            "nwb_file_name": key["nwb_file_name"],
-            "interval_list_name": key["artifact_interval_list_name"],
-        }
-        artifact_times = (IntervalList & artifact_key).fetch1("valid_times")
-        mean_n_spikes = np.mean(spike_indicator)
-        for artifact_time in artifact_times:
-            spike_indicator[
-                np.logical_and(
-                    time >= artifact_time.start, time <= artifact_time.stop
-                )
-            ] = mean_n_spikes
 
         mua_times = multiunit_HSE_detector(
             time, spike_indicator, speed, sampling_frequency, **mua_params
@@ -110,3 +89,90 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
 
     def fetch_dataframe(self):
         return [data["mua_times"] for data in self.fetch_nwb()]
+
+    @classmethod
+    def get_firing_rate(cls, key):
+        time = cls.get_speed(key).index.to_numpy()
+
+        spike_indicator = SortedSpikesGroup.get_spike_indicator(key, time)
+        spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
+
+        return time, SortedSpikesGroup.get_firing_rate(
+            key, time, multiunit=True
+        )
+
+    @staticmethod
+    def get_speed(key):
+        position_info = (
+            PositionOutput & {"merge_id": key["pos_merge_id"]}
+        ).fetch1_dataframe()
+        speed_name = (
+            "speed" if "speed" in position_info.columns else "head_speed"
+        )
+        return position_info[speed_name]
+
+    def create_figurl(
+        self,
+        zscore_mua=True,
+        plot_speed=True,
+        mua_times_color="red",
+        speed_color="black",
+        mua_color="black",
+        view_height=200,
+    ):
+        key = self.fetch1("KEY")
+
+        time, multiunit_firing_rate = self.get_firing_rate(key)
+        if zscore_mua:
+            multiunit_firing_rate = zscore(multiunit_firing_rate)
+
+        mua_times = self.fetch1_dataframe()
+
+        multiunit_firing_rate_view = vv.TimeseriesGraph()
+        multiunit_firing_rate_view.add_interval_series(
+            name="MUA Events",
+            t_start=mua_times.start_time.to_numpy(),
+            t_end=mua_times.end_time.to_numpy(),
+            color=mua_times_color,
+        )
+        name = "Z-Scored Multiunit Rate" if zscore_mua else "Multiunit Rate"
+        multiunit_firing_rate_view.add_line_series(
+            name=name,
+            t=np.asarray(time),
+            y=np.asarray(multiunit_firing_rate, dtype=np.float32),
+            color=mua_color,
+            width=1,
+        )
+        if not plot_speed:
+            return multiunit_firing_rate_view
+        else:
+            speed_view = vv.TimeseriesGraph().add_line_series(
+                name="Speed [cm/s]",
+                t=np.asarray(time),
+                y=np.asarray(self.get_speed(key), dtype=np.float32),
+                color=speed_color,
+                width=1,
+            )
+            vertical_panel_content = [
+                vv.LayoutItem(
+                    multiunit_firing_rate_view, stretch=1, title="Multiunit"
+                ),
+                vv.LayoutItem(speed_view, stretch=1, title="Speed"),
+            ]
+
+            view = vv.Box(
+                direction="horizontal",
+                show_titles=True,
+                height=view_height,
+                items=[
+                    vv.LayoutItem(
+                        vv.Box(
+                            direction="vertical",
+                            show_titles=True,
+                            items=vertical_panel_content,
+                        )
+                    ),
+                ],
+            )
+
+            return view.url(label="Multiunit Detection")
