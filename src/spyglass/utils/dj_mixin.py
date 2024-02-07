@@ -278,7 +278,9 @@ class SpyglassMixin:
         empty_pk = {self._member_pk: "NULL"}
 
         format = dj.U(self._session_pk, self._member_pk)
-        sess_link = self._session_connection.join(self.restriction)
+        sess_link = self._session_connection.join(
+            self.restriction, reverse_order=True
+        )
 
         exp_missing = format & (sess_link - SesExp).proj(**empty_pk)
         exp_present = format & (sess_link * SesExp - exp_missing).proj()
@@ -363,17 +365,29 @@ class SpyglassMixin:
 
     def _log_use(self, start, merge_deletes=None):
         """Log use of cautious_delete."""
-        self._usage_table.insert1(
-            dict(
-                duration=time() - start,
-                dj_user=dj.config["database.user"],
-                origin=self.full_table_name,
-                restriction=(
-                    str(self.restriction)[:255] if self.restriction else "None"
-                ),
-                merge_deletes=merge_deletes,
-            )
+        if isinstance(merge_deletes, QueryExpression):
+            merge_deletes = merge_deletes.fetch(as_dict=True)
+        safe_insert = dict(
+            duration=time() - start,
+            dj_user=dj.config["database.user"],
+            origin=self.full_table_name,
         )
+        try:
+            self._usage_table.insert1(
+                dict(
+                    **safe_insert,
+                    restriction=(
+                        "".join(self.restriction)[255:]  # handle list
+                        if self.restriction
+                        else "None"
+                    ),
+                    merge_deletes=merge_deletes,
+                )
+            )
+        except (DataJointError, DataError):
+            self._usage_table.insert1(
+                dict(**safe_insert, restriction="Unknown")
+            )
 
     # TODO: Intercept datajoint delete confirmation prompt for merge deletes
     def cautious_delete(self, force_permission: bool = False, *args, **kwargs):
