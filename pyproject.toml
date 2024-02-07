@@ -35,6 +35,7 @@ keywords = [
     "sortingview",
 ]
 dependencies = [
+    "black[jupyter]",
     "bottleneck",
     "dask",
     "datajoint>=0.13.6",
@@ -68,7 +69,6 @@ spyglass_cli = "spyglass.cli:cli"
 [project.optional-dependencies]
 dlc = ["ffmpeg", "numba>=0.54", "deeplabcut<2.3.0"]
 test = [
-    "black[jupyter]", # code formatting, rather than a 'dev' install
     "click",          # for CLI subpackage only
     "docker",         # for tests in a container
     "pytest",         # unit testing

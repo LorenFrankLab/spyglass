@@ -16,7 +16,6 @@ channels:
 dependencies:
   - bottleneck
   - cudatoolkit=11.3   # dlc-only
-  - cupy
   - ffmpeg   # dlc-only
   - ipympl
   - jupyterlab>=3.*
@@ -37,6 +36,7 @@ dependencies:
   - torchvision  # dlc-only
   - track_linearization>=2.3
   - pip:
+      - "black[jupyter]"
       - datajoint>=0.13.6
       - deeplabcut<2.3.0
       - ghostipy # for common_filter
