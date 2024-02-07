@@ -130,11 +130,10 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
     def create_figurl(
         self,
         zscore_mua=True,
-        plot_speed=True,
         mua_times_color="red",
         speed_color="black",
         mua_color="black",
-        view_height=200,
+        view_height=800,
     ):
         key = self.fetch1("KEY")
 
@@ -159,36 +158,61 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
             color=mua_color,
             width=1,
         )
-        if not plot_speed:
-            return multiunit_firing_rate_view
-        else:
-            speed_view = vv.TimeseriesGraph().add_line_series(
-                name="Speed [cm/s]",
-                t=np.asarray(time),
-                y=np.asarray(self.get_speed(key), dtype=np.float32),
-                color=speed_color,
+        if zscore_mua:
+            mua_params = (MuaEventsParameters & key).fetch1("mua_param_dict")
+            zscore_threshold = mua_params.get("zscore_threshold")
+            multiunit_firing_rate_view.add_line_series(
+                name="Z-Score Threshold",
+                t=np.asarray(time).squeeze(),
+                y=np.ones_like(
+                    multiunit_firing_rate, dtype=np.float32
+                ).squeeze()
+                * zscore_threshold,
+                color="red",
                 width=1,
+                dash=1,
             )
-            vertical_panel_content = [
+        spike_times = SortedSpikesGroup.get_spike_times(key)
+        raster_view = vv.RasterPlot(
+            start_time_sec=time[0],
+            end_time_sec=time[-1],
+            plots=[
+                vv.RasterPlotItem(
+                    unit_id=str(i),
+                    spike_times_sec=np.asarray(times, dtype=np.float32),
+                )
+                for i, times in enumerate(spike_times)
+            ],
+        )
+
+        speed_view = vv.TimeseriesGraph().add_line_series(
+            name="Speed [cm/s]",
+            t=np.asarray(time),
+            y=np.asarray(self.get_speed(key), dtype=np.float32),
+            color=speed_color,
+            width=1,
+        )
+        vertical_panel_content = [
+            vv.LayoutItem(
+                multiunit_firing_rate_view, stretch=2, title="Multiunit"
+            ),
+            vv.LayoutItem(raster_view, stretch=8, title="Raster"),
+            vv.LayoutItem(speed_view, stretch=2, title="Speed"),
+        ]
+
+        view = vv.Box(
+            direction="horizontal",
+            show_titles=True,
+            height=view_height,
+            items=[
                 vv.LayoutItem(
-                    multiunit_firing_rate_view, stretch=1, title="Multiunit"
+                    vv.Box(
+                        direction="vertical",
+                        show_titles=True,
+                        items=vertical_panel_content,
+                    )
                 ),
-                vv.LayoutItem(speed_view, stretch=1, title="Speed"),
-            ]
+            ],
+        )
 
-            view = vv.Box(
-                direction="horizontal",
-                show_titles=True,
-                height=view_height,
-                items=[
-                    vv.LayoutItem(
-                        vv.Box(
-                            direction="vertical",
-                            show_titles=True,
-                            items=vertical_panel_content,
-                        )
-                    ),
-                ],
-            )
-
-            return view.url(label="Multiunit Detection")
+        return view.url(label="Multiunit Detection")

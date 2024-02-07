@@ -397,6 +397,26 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
             color=consensus_color,
             width=1,
         )
+        if zscore_ripple:
+            ripple_params = (
+                RippleParameters
+                & {"ripple_param_name": key["ripple_param_name"]}
+            ).fetch1("ripple_param_dict")
+
+            zscore_threshold = ripple_params["ripple_detection_params"].get(
+                "zscore_threshold"
+            )
+            consensus_view.add_line_series(
+                name="Z-Score Threshold",
+                t=np.asarray(ripple_consensus_trace.index).squeeze(),
+                y=np.ones_like(
+                    ripple_consensus_trace, dtype=np.float32
+                ).squeeze()
+                * zscore_threshold,
+                color="red",
+                width=1,
+                dash=1,
+            )
 
         if use_ripple_filtered_lfps:
             interval_ripple_lfps = ripple_filtered_lfps
