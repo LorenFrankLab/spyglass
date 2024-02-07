@@ -365,7 +365,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
     def create_figurl(
         self,
         zscore_ripple=False,
-        ripple_times_color="red",
+        ripple_times_color="#d95f02",
         consensus_color="black",
         speed_color="black",
         view_height=800,
@@ -416,7 +416,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
                     ripple_consensus_trace, dtype=np.float32
                 ).squeeze()
                 * zscore_threshold,
-                color="red",
+                color=ripple_times_color,
                 width=1,
             )
 
@@ -454,6 +454,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
             color=speed_color,
             width=1,
         )
+        _add_ripple_times(speed_view, ripple_times, ripple_times_color)
         vertical_panel_content = [
             vv.LayoutItem(consensus_view, stretch=2, title="Consensus"),
             vv.LayoutItem(lfp_view, stretch=8, title="LFPs"),

@@ -130,7 +130,7 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
     def create_figurl(
         self,
         zscore_mua=True,
-        mua_times_color="red",
+        mua_times_color="#7570b3",
         speed_color="black",
         mua_color="black",
         view_height=800,
@@ -168,22 +168,21 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
                     multiunit_firing_rate, dtype=np.float32
                 ).squeeze()
                 * zscore_threshold,
-                color="red",
+                color=mua_times_color,
                 width=1,
             )
-        spike_times = SortedSpikesGroup.fetch_spike_data(key)
-        raster_view = vv.RasterPlot(
-            start_time_sec=time[0],
-            end_time_sec=time[-1],
-            plots=[
-                vv.RasterPlotItem(
-                    unit_id=str(i),
-                    spike_times_sec=np.asarray(times, dtype=np.float32),
-                )
-                for i, times in enumerate(spike_times)
-            ],
-        )
-
+        # spike_times = SortedSpikesGroup.fetch_spike_data(key)
+        # raster_view = vv.RasterPlot(
+        #     start_time_sec=time[0],
+        #     end_time_sec=time[-1],
+        #     plots=[
+        #         vv.RasterPlotItem(
+        #             unit_id=str(i),
+        #             spike_times_sec=np.asarray(times, dtype=np.float32),
+        #         )
+        #         for i, times in enumerate(spike_times)
+        #     ],
+        # )
         speed_view = vv.TimeseriesGraph().add_line_series(
             name="Speed [cm/s]",
             t=np.asarray(time),
@@ -191,11 +190,17 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
             color=speed_color,
             width=1,
         )
+        speed_view.add_interval_series(
+            name="MUA Events",
+            t_start=mua_times.start_time.to_numpy(),
+            t_end=mua_times.end_time.to_numpy(),
+            color=mua_times_color,
+        )
         vertical_panel_content = [
             vv.LayoutItem(
                 multiunit_firing_rate_view, stretch=2, title="Multiunit"
             ),
-            vv.LayoutItem(raster_view, stretch=8, title="Raster"),
+            # vv.LayoutItem(raster_view, stretch=8, title="Raster"),
             vv.LayoutItem(speed_view, stretch=2, title="Speed"),
         ]
 
