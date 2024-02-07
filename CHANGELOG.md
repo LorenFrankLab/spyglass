@@ -21,7 +21,7 @@
 - Update docs to reflect new notebooks. #776
 - Add overview of Spyglass to docs. #779
 - Update linting for Black 24. #808
-- Steamline dependency management. #822 (?)
+- Steamline dependency management. #822
 
 ### Pipelines
 
@@ -49,7 +49,7 @@
     - Add fetch class functionality to `Merge` table. #783, #786
     - Add ability to filter sorted units in decoding #807
     - Rename SortedSpikesGroup.SortGroup to SortedSpikesGroup.Units #807
-    - Change methods with load_... to fetch_... for consistency #807
+    - Change methods with load\_... to fetch\_... for consistency #807
     - Use merge table methods to access part methods #807
 
 ## [0.4.3] (November 7, 2023)

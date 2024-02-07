@@ -27,7 +27,7 @@ dependencies:
   - numpy<1.24
   - pip>=20.2.*
   - position_tools
-  - pybind11 #To avoid isosplit5 build error. Req by mountainsort4
+  - pybind11 # req by mountainsort4 -> isosplit5
   - pydotplus>=2.0.*
   - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
   - python>=3.9,<3.10
