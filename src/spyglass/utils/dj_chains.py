@@ -135,12 +135,12 @@ class TableChain:
             and MERGE_PK in child.heading.names
         ):
             logger.error("Child is a merge table. Use TableChains instead.")
+            return
 
         self._link_symbol = " -> "
         self.parent = parent
         self.child = child
         self._has_link = child.full_table_name in parent.descendants()
-        self._errors = []
 
     def __str__(self):
         """Return string representation of chain: parent -> child."""
@@ -221,17 +221,26 @@ class TableChain:
             else None
         )
 
-    def errors(self) -> List[str]:
-        """Return list of errors for each table in chain."""
-        return self._errors
+    def join(
+        self, restricton: str = None, reverse_order: bool = False
+    ) -> dj.expression.QueryExpression:
+        """Return join of tables in chain with restriction applied to parent.
 
-    def join(self, restricton: str = None) -> dj.expression.QueryExpression:
-        """Return join of tables in chain with restriction applied to parent."""
+        Parameters
+        ----------
+        restriction : str, optional
+            Restriction to apply to first table in the order.
+            Defaults to self.parent.restriction.
+        reverse_order : bool, optional
+            If True, join tables in reverse order. Defaults to False.
+        """
         if not self._has_link:
             return None
+
+        objects = self.objects[::-1] if reverse_order else self.objects
         restriction = restricton or self.parent.restriction or True
-        join = self.objects[0] & restriction
-        for table in self.objects[1:]:
+        join = objects[0] & restriction
+        for table in objects[1:]:
             try:
                 join = join.proj() * table
             except dj.DataJointError as e:

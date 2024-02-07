@@ -61,10 +61,7 @@ class SpyglassMixin:
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (
-            AnalysisNwbfile,
-            Nwbfile,
-        )  # noqa F401
+        from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -74,7 +71,9 @@ class SpyglassMixin:
         resolved = getattr(self, "_nwb_table", None) or (
             AnalysisNwbfile
             if "-> AnalysisNwbfile" in self.definition
-            else Nwbfile if "-> Nwbfile" in self.definition else None
+            else Nwbfile
+            if "-> Nwbfile" in self.definition
+            else None
         )
 
         if not resolved:
@@ -278,7 +277,9 @@ class SpyglassMixin:
         empty_pk = {self._member_pk: "NULL"}
 
         format = dj.U(self._session_pk, self._member_pk)
-        sess_link = self._session_connection.join(self.restriction)
+        sess_link = self._session_connection.join(
+            self.restriction, reverse_order=True
+        )
 
         exp_missing = format & (sess_link - SesExp).proj(**empty_pk)
         exp_present = format & (sess_link * SesExp - exp_missing).proj()
