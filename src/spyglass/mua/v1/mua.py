@@ -130,7 +130,7 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
     def create_figurl(
         self,
         zscore_mua=True,
-        mua_times_color="#7570b3",
+        mua_times_color="red",
         speed_color="black",
         mua_color="black",
         view_height=800,

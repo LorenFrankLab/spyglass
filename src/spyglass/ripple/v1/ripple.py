@@ -365,7 +365,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
     def create_figurl(
         self,
         zscore_ripple=False,
-        ripple_times_color="#d95f02",
+        ripple_times_color="red",
         consensus_color="black",
         speed_color="black",
         view_height=800,
