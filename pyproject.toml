@@ -35,28 +35,26 @@ keywords = [
     "sortingview",
 ]
 dependencies = [
-    "pydotplus",
-    "dask",
-    "position_tools",
-    "track_linearization>=2.3",
-    "non_local_detector",
-    "ripple_detection",
-    "matplotlib",
-    "seaborn",
     "bottleneck",
-    "numpy<1.24",
-    "ipympl",
-    "tqdm",
-    "pubnub<6.4.0",                 # TODO: remove this when sortingview is updated
-    "pynwb>=2.2.0,<3",
-    "hdmf>=3.4.6",
+    "dask",
     "datajoint>=0.13.6",
-    "pymysql",
-    "sortingview>=0.11",
-    "pyyaml",
-    "click",
-    "spikeinterface>=0.98.2,<0.99",
+    # "ghostipy", # removed from list bc M1 users need to install pyfftw first
+    "hdmf>=3.4.6",
+    "ipympl",
+    "matplotlib",
     "ndx_franklab_novela>=0.1.0",
+    "non_local_detector",
+    "numpy<1.24",
+    "opencv-python",
+    "position_tools",
+    "pubnub<6.4.0",            # TODO: remove this when sortingview is updated
+    "pydotplus",
+    "pynwb>=2.2.0,<3",
+    "ripple_detection",
+    "seaborn",
+    "sortingview>=0.11",
+    "spikeinterface>=0.98.2,<0.99",
+    "track_linearization>=2.3",
 ]
 dynamic = ["version"]
 
@@ -68,14 +66,16 @@ spyglass_cli = "spyglass.cli:cli"
 "Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
 
 [project.optional-dependencies]
-position = ["ffmpeg", "numba>=0.54", "deeplabcut<2.3.0"]
+dlc = ["ffmpeg", "numba>=0.54", "deeplabcut<2.3.0"]
 test = [
+    "black[jupyter]", # code formatting, rather than a 'dev' install
+    "click",          # for CLI subpackage only
     "docker",         # for tests in a container
     "pytest",         # unit testing
     "pytest-cov",     # code coverage
     "kachery",        # database access
     "kachery-client",
-    "kachery-cloud",
+    "kachery-cloud>=0.4.0",
 ]
 docs = [
     "hatch",                 # Get version from env
@@ -121,7 +121,7 @@ addopts = [
     # "--pdb", # drop into debugger on failure
     "-p no:warnings",
     # "--no-teardown", # don't teardown the database after tests
-    "--quiet-spy",                                    # don't show logging from spyglass
+    "--quiet-spy",                  # don't show logging from spyglass
     "--show-capture=no",
     "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
     "--cov=spyglass",
@@ -150,3 +150,7 @@ omit = [ # which submodules have no tests
     "*/spikesorting/*",
     # "*/utils/*",
 ]
+
+[tool.ruff] # CB: Propose replacing flake8 with ruff to delete setup.cfg
+line-length = 80
+ignore = ["F401" , "E402", "E501"]

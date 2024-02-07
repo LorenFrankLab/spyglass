@@ -21,6 +21,7 @@
 - Update docs to reflect new notebooks. #776
 - Add overview of Spyglass to docs. #779
 - Update linting for Black 24. #808
+- Steamline dependency management. #822 (?)
 
 ### Pipelines
 
@@ -28,11 +29,6 @@
     - Add SpikeSorting V1 pipeline. #651
     - Move modules into spikesorting.v0 #807
     - Add MUA analysis to spike sorting pipeline
-- LFP: Minor fixes to LFPBandV1 populator and `make`. #706, #795
-
-### Pipelines
-
-- Spike sorting: Add SpikeSorting V1 pipeline. #651
 - LFP:
     - Minor fixes to LFPBandV1 populator and `make`. #706, #795
     - LFPV1: Fix error for multiple lfp settings on same data #775
