@@ -418,7 +418,6 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
                 * zscore_threshold,
                 color="red",
                 width=1,
-                dash=1,
             )
 
         if use_ripple_filtered_lfps:

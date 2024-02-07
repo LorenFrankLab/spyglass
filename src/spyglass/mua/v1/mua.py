@@ -170,9 +170,8 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
                 * zscore_threshold,
                 color="red",
                 width=1,
-                dash=1,
             )
-        spike_times = SortedSpikesGroup.get_spike_times(key)
+        spike_times = SortedSpikesGroup.fetch_spike_data(key)
         raster_view = vv.RasterPlot(
             start_time_sec=time[0],
             end_time_sec=time[-1],
