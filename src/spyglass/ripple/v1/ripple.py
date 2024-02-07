@@ -379,8 +379,11 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
         (
             speed,
             ripple_filtered_lfps,
-            _,
+            sampling_frequency,
         ) = self.get_ripple_lfps_and_position_info(key)
+        ripple_consensus_trace = self.get_Kay_ripple_consensus_trace(
+            ripple_filtered_lfps, sampling_frequency
+        )
 
         if zscore_ripple:
             ripple_consensus_trace = zscore(ripple_consensus_trace)
