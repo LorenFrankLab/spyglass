@@ -371,6 +371,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
         view_height=800,
         use_ripple_filtered_lfps=False,
         lfp_offset=1,
+        lfp_channel_ind=None,
     ):
 
         ripple_times = self.fetch1_dataframe()
@@ -403,6 +404,12 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
             lfp_merge_id = (LFPBandSelection & key).fetch1("lfp_merge_id")
             lfp_df = (LFPOutput & {"merge_id": lfp_merge_id}).fetch1_dataframe()
             interval_ripple_lfps = lfp_df.loc[speed.index[0] : speed.index[-1]]
+        if lfp_channel_ind is not None:
+            if lfp_channel_ind.max() >= interval_ripple_lfps.shape[1]:
+                raise ValueError(
+                    "lfp_channel_ind is out of range for the number of LFPs"
+                )
+            interval_ripple_lfps = interval_ripple_lfps.iloc[:, lfp_channel_ind]
 
         lfp_view = vv.TimeseriesGraph()
         _add_ripple_times(lfp_view, ripple_times, ripple_times_color)
