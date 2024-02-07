@@ -1,4 +1,3 @@
-import inspect
 from itertools import chain
 from pathlib import Path
 

@@ -30,6 +30,7 @@
 #   [the Insert Data notebook](./01_Insert_Data.ipynb)
 #
 # Ripple detection depends on a set of LFPs, the parameters used for detection and the speed of the animal. You will need `RippleLFPSelection`, `RippleParameters`, and `PositionOutput` to be populated accordingly.
+#
 
 # ## Imports
 #
@@ -66,6 +67,7 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 
 # First, we'll pick the electrodes on which we'll run ripple detection on, using
 # `RippleLFPSelection.set_lfp_electrodes`
+#
 
 # ?sgr.RippleLFPSelection.set_lfp_electrodes
 
@@ -75,12 +77,17 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 #   alternatively use PFC.
 # - We use `nwb_file_name` to explore which electrodes are available for the
 #   `electrode_list`.
+#
 
 nwb_file_name = "tonks20211103_.nwb"
 interval_list_name = "test interval"
 filter_name = "Ripple 150-250 Hz"
+if not sgc.Session & {"nwb_file_name": nwb_file_name}:
+    # This error will be raised when notebooks auto-run with 'minirec'
+    raise ValueError(f"Session with nwb_file_name={nwb_file_name} not found")
 
 # Now we can look at `electrode_id` in the `Electrode` table:
+#
 
 electrodes = (
     (sgc.Electrode() & {"nwb_file_name": nwb_file_name})
@@ -97,6 +104,7 @@ electrodes = (
 electrodes
 
 # For ripple detection, we want only tetrodes, and only the first good wire on each tetrode. We will assume that is the first wire on each tetrode. I will do this using pandas syntax but you could use datajoint to filter this table as well. Here is the filtered table.
+#
 
 hpc_names = ["ca1", "hippocampus", "CA1", "Hippocampus"]
 electrodes.loc[
@@ -104,6 +112,7 @@ electrodes.loc[
 ]
 
 # We only want the electrode_id to put in the `electrode_list`:
+#
 
 # +
 electrode_list = np.unique(
@@ -125,6 +134,7 @@ electrode_list.sort()
 # We can insert into `RippleLFPSelection` and the `RippleLFPElectrode` part table,
 # passing the key for the entry from `LFPBandV1`, our `electrode_list`, and the
 # `group_name` into `set_lfp_electrodes`
+#
 
 # +
 group_name = "CA1_test"
@@ -148,6 +158,7 @@ sgr.RippleLFPSelection.set_lfp_electrodes(
 sgr.RippleLFPSelection.RippleLFPElectrode()
 
 # Here's the ripple selection key we'll use downstream
+#
 
 rip_sel_key = (sgrip.RippleLFPSelection & lfp_band_key).fetch1("KEY")
 
@@ -157,6 +168,7 @@ rip_sel_key = (sgrip.RippleLFPSelection & lfp_band_key).fetch1("KEY")
 sgr.RippleParameters()
 
 # Here are the default ripple parameters:
+#
 
 (sgrip.RippleParameters() & {"ripple_param_name": "default"}).fetch1()
 
@@ -177,6 +189,7 @@ sgr.RippleParameters()
 #
 # The speed for this interval should exist under the default position parameter
 # set and for a given interval.
+#
 
 pos_key = sgp.PositionOutput.merge_get_part(
     {
@@ -188,12 +201,13 @@ pos_key = sgp.PositionOutput.merge_get_part(
 (sgp.PositionOutput & pos_key).fetch1_dataframe()
 
 # We'll use the `head_speed` above as part of `RippleParameters`.
+#
 
 # ## Run Ripple Detection
 #
 
-#
 # Now we can put everything together.
+#
 
 key = {
     "ripple_param_name": "default",
@@ -203,6 +217,7 @@ key = {
 sgrip.RippleTimesV1().populate(key)
 
 # And then `fetch1_dataframe` for ripple times
+#
 
 ripple_times = (sgrip.RippleTimesV1() & key).fetch1_dataframe()
 ripple_times
@@ -210,3 +225,4 @@ ripple_times
 # ## Up Next
 #
 # Next, we'll [extract mark indicator](./31_Extract_Mark_Indicators.ipynb).
+#

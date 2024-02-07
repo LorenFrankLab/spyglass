@@ -79,6 +79,7 @@ test = [
 ]
 docs = [
     "hatch",                 # Get version from env
+    "jupytext==1.16.0",      # Convert notebooks to .py
     "mike",                  # Docs versioning
     "mkdocs",                # Docs core
     "mkdocs-exclude",        # Docs exclude files
