@@ -134,8 +134,7 @@ class TableChain:
             get_master(child.full_table_name) == ""
             and MERGE_PK in child.heading.names
         ):
-            logger.error("Child is a merge table. Use TableChains instead.")
-            return
+            raise TypeError("Child is a merge table. Use TableChains instead.")
 
         self._link_symbol = " -> "
         self.parent = parent
