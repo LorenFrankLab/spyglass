@@ -44,6 +44,7 @@ def populate_all_common(nwb_file_name):
     error_constants = dict(
         dj_user=dj.config["database.user"],
         connection_id=dj.conn().connection_id,
+        nwb_file_name=nwb_file_name,
     )
 
     for table in tables:
@@ -62,8 +63,10 @@ def populate_all_common(nwb_file_name):
             )
     query = InsertError & error_constants
     if query:
+        err_tables = query.fetch("table")
         logger.error(
-            f"Errors occurred during population:\n{query}\n"
-            + "See common_useage.InsertError for more details"
+            f"Errors occurred during population for {nwb_file_name}:\n\t"
+            + f"Failed tables {err_tables}\n\t"
+            + "See common_usage.InsertError for more details"
         )
         return query.fetch("KEY")

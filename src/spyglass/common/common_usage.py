@@ -31,6 +31,7 @@ class InsertError(dj.Manual):
     ---
     dj_user: varchar(64)
     connection_id: int     # MySQL CONNECTION_ID()
+    nwb_file_name: varchar(64)
     table: varchar(64)
     error_type: varchar(64)
     error_message: varchar(255)
