@@ -3,13 +3,14 @@ from contextlib import nullcontext
 from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
+from time import time
 from typing import Union
 
 import datajoint as dj
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
-from datajoint.utils import from_camel_case, get_master, to_camel_case
+from datajoint.utils import from_camel_case, to_camel_case
 from IPython.core.display import HTML
 
 from spyglass.utils.logging import logger
@@ -248,6 +249,9 @@ class Merge(dj.Manual):
                 return_empties=False,  # motivated by SpikeSortingOutput.Import
             )
         ]
+        if not parts:
+            logger.warning("No parts found. Try adjusting restriction.")
+            return
 
         attr_dict = {  # NULL for non-numeric, 0 for numeric
             attr.name: "0" if attr.numeric else "NULL"
@@ -758,31 +762,32 @@ class Merge(dj.Manual):
             )
         return results[0] if len(results) == 1 else results
 
-    @classmethod
-    def merge_populate(source: str, key=None):
-        raise NotImplementedError(
-            "CBroz: In the future, this command will support executing "
-            + "part_parent `make` and then inserting all entries into Merge"
-        )
+    def merge_populate(self, source: str, keys=None):
+        """Populate the merge table with entries from the source table."""
+        logger.warning("CBroz: Not fully tested. Use with caution.")
+        parent_class = self.merge_get_parent_class(source)
+        if not keys:
+            keys = parent_class.key_source
+        parent_class.populate(keys)
+        successes = (parent_class & keys).fetch("KEY", as_dict=True)
+        self.insert(successes)
 
     def delete(self, force_permission=False, *args, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
-        raise NotImplementedError(
-            "Please use delete_downstream_merge or cautious_delete "
-            + "to clear merge entries."
-        )
-        # for part in self.merge_get_part(
-        #     restriction=self.restriction,
-        #     multi_source=True,
-        #     return_empties=False,
-        # ):
-        #     part.delete(force_permission=force_permission, *args, **kwargs)
+        for part in self.merge_get_part(
+            restriction=self.restriction,
+            multi_source=True,
+            return_empties=False,
+        ):
+            part.delete(force_permission=force_permission, *args, **kwargs)
 
     def super_delete(self, *args, **kwargs):
         """Alias for datajoint.table.Table.delete.
 
         Added to support MRO of SpyglassMixin"""
         logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
+
+        self._log_use(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
 

@@ -4,31 +4,38 @@
 
 ### Infrastructure
 
-- Additional documentation. #690
-- Clean up following pre-commit checks. #688
-- Add Mixin class to centralize `fetch_nwb` functionality. #692, #734
-- Refactor restriction use in `delete_downstream_merge` #703
-- Add `cautious_delete` to Mixin class
-    - Initial implementation. #711, #762
-    - More robust caching of join to downstream tables. #806
-    - Overwrite datajoint `delete` method to use `cautious_delete`. #806
-    - Reverse join order for session summary. #821
-    - Add temporary logging of use to `common_usage`. #811, #821
-- Add `deprecation_factory` to facilitate table migration. #717
-- Add Spyglass logger. #730
-- IntervalList: Add secondary key `pipeline` #742
-- Increase pytest coverage for `common`, `lfp`, and `utils`. #743
-- Update docs to reflect new notebooks. #776
-- Add overview of Spyglass to docs. #779
-- Update linting for Black 24. #808
-- Steamline dependency management. #822
-- Add catch errors during `populate_all_common`, log in `common_usage`. #XXX
-- Merge UUIDs #XXX
-    - Revise Merge table uuid generation to include source.
-    - Remove mutual exclusivity logic due to new UUID generation.
+- Docs:
+    - Additional documentation. #690
+    - Add overview of Spyglass to docs. #779
+    - Update docs to reflect new notebooks. #776
+- Mixin:
+    - Add Mixin class to centralize `fetch_nwb` functionality. #692, #734
+    - Refactor restriction use in `delete_downstream_merge` #703
+    - Add `cautious_delete` to Mixin class
+        - Initial implementation. #711, #762
+        - More robust caching of join to downstream tables. #806
+        - Overwrite datajoint `delete` method to use `cautious_delete`. #806
+        - Reverse join order for session summary. #821
+        - Add temporary logging of use to `common_usage`. #811, #821
+- Merge Tables:
+    - UUIDs: Revise Merge table uuid generation to include source. #824
+    - UUIDs: Remove mutual exclusivity logic due to new UUID generation. #824
+    - Add method for `merge_populate`. #824
+- Linting:
+    - Clean up following pre-commit checks. #688
+    - Update linting for Black 24. #808
+- Misc:
+    - Add `deprecation_factory` to facilitate table migration. #717
+    - Add Spyglass logger. #730
+    - Increase pytest coverage for `common`, `lfp`, and `utils`. #743
+    - Steamline dependency management. #822
 
 ### Pipelines
 
+- Common:
+    - `IntervalList`: Add secondary key `pipeline` #742
+    - Add `common_usage` table. #811, #821, #824
+    - Add catch errors during `populate_all_common`. #824
 - Spike sorting:
     - Add SpikeSorting V1 pipeline. #651
     - Move modules into spikesorting.v0 #807
