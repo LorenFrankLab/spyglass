@@ -22,7 +22,10 @@
 - Add overview of Spyglass to docs. #779
 - Update linting for Black 24. #808
 - Steamline dependency management. #822
-- Add catch errorst during `populate_all_common`, log in `common_usage`. #XXX
+- Add catch errors during `populate_all_common`, log in `common_usage`. #XXX
+- Merge UUIDs #XXX
+    - Revise Merge table uuid generation to include source.
+    - Remove mutual exclusivity logic due to new UUID generation.
 
 ### Pipelines
 

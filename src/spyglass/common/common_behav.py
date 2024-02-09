@@ -42,19 +42,24 @@ class PositionSource(SpyglassMixin, dj.Manual):
         name=null: varchar(32)       # name of spatial series
         """
 
-    def populate(self, key=None):
+    def populate(self, keys=None):
         """Insert position source data from NWB file.
 
         WARNING: populate method on Manual table is not protected by transaction
                 protections like other DataJoint tables.
         """
-        nwb_file_name = key.get("nwb_file_name")
-        if not nwb_file_name:
-            raise ValueError(
-                "PositionSource.populate is an alias for a non-computed table "
-                + "and must be passed a key with nwb_file_name"
-            )
-        self.insert_from_nwbfile(nwb_file_name)
+        if not isinstance(keys, list):
+            keys = [keys]
+        if isinstance(keys[0], dj.Table):
+            keys = [k for tbl in keys for k in tbl.fetch("KEY", as_dict=True)]
+        for key in keys:
+            nwb_file_name = key.get("nwb_file_name")
+            if not nwb_file_name:
+                raise ValueError(
+                    "PositionSource.populate is an alias for a non-computed table "
+                    + "and must be passed a key with nwb_file_name"
+                )
+            self.insert_from_nwbfile(nwb_file_name)
 
     @classmethod
     def insert_from_nwbfile(cls, nwb_file_name):
@@ -496,6 +501,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Skip populating if no pos interval list names
         if len(pos_intervals) == 0:
+            # TODO: Now that populate_all accept errors, raise here?
             logger.error(f"NO POS INTERVALS FOR {key}; {no_pop_msg}")
             return
 
@@ -533,6 +539,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
+            # TODO: Now that populate_all accept errors, raise here?
             logger.error(
                 f"Found {len(matching_pos_intervals)} pos intervals for {key}; "
                 + f"{no_pop_msg}\n{matching_pos_intervals}"

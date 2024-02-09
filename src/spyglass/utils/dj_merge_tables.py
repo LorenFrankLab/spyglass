@@ -274,10 +274,8 @@ class Merge(dj.Manual):
         return query
 
     @classmethod
-    def _merge_insert(
-        cls, rows: list, part_name: str = None, mutual_exclusvity=True, **kwargs
-    ) -> None:
-        """Insert rows into merge, ensuring db integrity and mutual exclusivity
+    def _merge_insert(cls, rows: list, part_name: str = None, **kwargs) -> None:
+        """Insert rows into merge, ensuring data exists in part parent(s).
 
         Parameters
         ---------
@@ -291,18 +289,17 @@ class Merge(dj.Manual):
         TypeError
             If rows is not a list of dicts
         ValueError
-            If entry already exists, mutual exclusivity errors
             If data doesn't exist in part parents, integrity error
         """
         cls._ensure_dependencies_loaded()
 
+        type_err_msg = "Input `rows` must be a list of dictionaries"
         try:
             for r in iter(rows):
-                assert isinstance(
-                    r, dict
-                ), 'Input "rows" must be a list of dictionaries'
+                if not isinstance(r, dict):
+                    raise TypeError(type_err_msg)
         except TypeError:
-            raise TypeError('Input "rows" must be a list of dictionaries')
+            raise TypeError(type_err_msg)
 
         parts = cls._merge_restrict_parts(as_objects=True)
         if part_name:
@@ -315,30 +312,24 @@ class Merge(dj.Manual):
         master_entries = []
         parts_entries = {p: [] for p in parts}
         for row in rows:
-            keys = []  # empty to-be-inserted key
+            keys = []  # empty to-be-inserted keys
             for part in parts:  # check each part
-                part_parent = part.parents(as_objects=True)[-1]
                 part_name = cls._part_name(part)
+                part_parent = part.parents(as_objects=True)[-1]
                 if part_parent & row:  # if row is in part parent
-                    if keys and mutual_exclusvity:  # if key from other part
-                        raise ValueError(
-                            "Mutual Exclusivity Error! Entry exists in more "
-                            + f"than one table - Entry: {row}"
-                        )
-
                     keys = (part_parent & row).fetch("KEY")  # get pk
                     if len(keys) > 1:
                         raise ValueError(
                             "Ambiguous entry. Data has mult rows in "
                             + f"{part_name}:\n\tData:{row}\n\t{keys}"
                         )
-                    master_pk = {  # make uuid
-                        cls()._reserved_pk: dj.hash.key_hash(keys[0]),
-                    }
-                    parts_entries[part].append({**master_pk, **keys[0]})
-                    master_entries.append(
-                        {**master_pk, cls()._reserved_sk: part_name}
-                    )
+                    key = keys[0]
+                    master_sk = {cls()._reserved_sk: part_name}
+                    uuid = dj.hash.key_hash(key | master_sk)
+                    master_pk = {cls()._reserved_pk: uuid}
+
+                    master_entries.append({**master_pk, **master_sk})
+                    parts_entries[part].append({**master_pk, **key})
 
             if not keys:
                 raise ValueError(
@@ -369,27 +360,22 @@ class Merge(dj.Manual):
         if not dj.conn.connection.dependencies._loaded:
             dj.conn.connection.dependencies.load()
 
-    def insert(self, rows: list, mutual_exclusvity=True, **kwargs):
-        """Merges table specific insert
-
-        Ensuring db integrity and mutual exclusivity
+    def insert(self, rows: list, **kwargs):
+        """Merges table specific insert, ensuring data exists in part parents.
 
         Parameters
         ---------
         rows: List[dict]
             An iterable where an element is a dictionary.
-        mutual_exclusvity: bool
-            Check for mutual exclusivity before insert. Default True.
 
         Raises
         ------
         TypeError
             If rows is not a list of dicts
         ValueError
-            If entry already exists, mutual exclusivity errors
             If data doesn't exist in part parents, integrity error
         """
-        self._merge_insert(rows, mutual_exclusvity=mutual_exclusvity, **kwargs)
+        self._merge_insert(rows, **kwargs)
 
     @classmethod
     def merge_view(cls, restriction: str = True):
@@ -586,6 +572,8 @@ class Merge(dj.Manual):
                 + "Try adding a restriction before invoking `get_part`.\n\t"
                 + "Or permitting multiple sources with `multi_source=True`."
             )
+        if len(sources) == 0:
+            return None
 
         parts = [
             (
@@ -776,6 +764,26 @@ class Merge(dj.Manual):
             "CBroz: In the future, this command will support executing "
             + "part_parent `make` and then inserting all entries into Merge"
         )
+
+    def delete(self, force_permission=False, *args, **kwargs):
+        """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
+        raise NotImplementedError(
+            "Please use delete_downstream_merge or cautious_delete "
+            + "to clear merge entries."
+        )
+        # for part in self.merge_get_part(
+        #     restriction=self.restriction,
+        #     multi_source=True,
+        #     return_empties=False,
+        # ):
+        #     part.delete(force_permission=force_permission, *args, **kwargs)
+
+    def super_delete(self, *args, **kwargs):
+        """Alias for datajoint.table.Table.delete.
+
+        Added to support MRO of SpyglassMixin"""
+        logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
+        super().delete(*args, **kwargs)
 
 
 _Merge = Merge
