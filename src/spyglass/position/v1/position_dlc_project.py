@@ -282,7 +282,14 @@ class DLCProject(SpyglassMixin, dj.Manual):
                     video_filename=video[1],
                 )[0].as_posix()
                 for video in videos_to_convert
+                if video[0] is not None
             ]
+            if len(videos) < 1:
+                raise ValueError(
+                    f"no .mp4 videos found in {videos_to_convert[0][0]}"
+                    + f" for key: {video_list[0]}"
+                )
+
         # If not dict, assume list of video file paths that may or may not need to be converted
         else:
             videos = []

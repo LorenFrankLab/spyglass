@@ -211,7 +211,7 @@ config
 # - Number of frames to extract/label as `frames_per_video`. Note that the DLC creators recommend having 200 frames as the minimum total number for each project.
 #
 
-team_name = "LorenLab"
+team_name = sgc.LabTeam.fetch("team_name")[0]  # If on lab DB, "LorenLab"
 project_name = "tutorial_scratch_DG"
 frames_per_video = 100
 bodyparts = ["redLED_C", "greenLED", "redLED_L", "redLED_R", "tailBase"]

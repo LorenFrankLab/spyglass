@@ -171,8 +171,9 @@ sgc.LabMember.LabMemberInfo()
 # privileges.
 #
 
+team_name = "My Team"
 sgc.LabTeam().create_new_team(
-    team_name="My Team",  # Should be unique
+    team_name=team_name,  # Should be unique
     team_members=["Firstname Lastname", "Firstname2 Lastname2"],
     team_description="test",  # Optional
 )
@@ -377,11 +378,45 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 session_entry = sgc.Session & {"nwb_file_name": nwb_copy_file_name}
 session_entry
 
+# `Session.Experimenter` is used for permissions checks when deleting. The
+# session will need to have an experimenter in order avoid an error being
+# raised during this check.
+#
+
+sess_key = (sgc.Session & {"nwb_file_name": nwb_copy_file_name}).fetch(
+    "KEY", as_dict=True
+)[0]
+exp_key = (sgc.LabMember).fetch("KEY", as_dict=True)[0]
+sgc.Session.Experimenter.insert1(
+    dict(**sess_key, **exp_key), skip_duplicates=True
+)
+
+# Even with the experimenter specified, there are still delete protections
+# in place. To see an example, uncomment the cell below.
+#
+
+# +
+# session_entry.delete()
+# -
+
+# To delete, you'll need to share a team with the session experimenter.
+#
+
+your_name = "YourFirst YourLast"
+parts = your_name.split(" ")
+sgc.LabMember.insert1([your_name, parts[0], parts[1]])
+sgc.LabMember.LabMemberInfo.insert1(
+    [your_name, "your_gmail", dj.config["database.user"], 0]
+)
+sgc.LabTeam.LabTeamMember.insert1([team_name, your_name])
+
 # By default, DataJoint is cautious about deletes and will prompt before deleting.
 # To delete, uncomment the cell below and respond `yes` in the prompt.
 #
 
-session_entry.delete()
+# +
+# session_entry.delete()
+# -
 
 # We can check that delete worked, both for `Session` and `IntervalList`
 #

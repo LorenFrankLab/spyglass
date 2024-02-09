@@ -295,7 +295,11 @@ lfp_band.LFPBandV1() & lfp_band_key
 # of the electrodes we band pass filtered
 #
 # _Note:_ Much of the code below could be replaced by a function calls that would
-# return the data from each electrical series
+# return the data from each electrical series.
+#
+# _Note:_ If you see an error `Qt: Session Management Error`, try running the
+# following unix command: `export -n SESSION_MANAGER`.
+# [See also](https://stackoverflow.com/questions/986964/qt-session-management-error)
 #
 
 orig_eseries = (sgc.Raw() & {"nwb_file_name": nwb_file_name}).fetch_nwb()[0][
@@ -306,7 +310,7 @@ orig_elect_indices = sgc.get_electrode_indices(
 )
 orig_timestamps = np.asarray(orig_eseries.timestamps)
 
-lfp_eseries = lfp.LFPOutput.fetch_nwb(lfp_key)[0]["lfp"]
+lfp_eseries = lfp.LFPOutput().fetch_nwb(lfp_key)[0]["lfp"]
 lfp_elect_indices = sgc.get_electrode_indices(
     lfp_eseries, lfp_band_electrode_ids
 )

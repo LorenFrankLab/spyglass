@@ -31,6 +31,7 @@
 # The goal of this notebook is to populate the `UnitWaveformFeatures` table, which depends `SpikeSortingOutput`. This table contains the features of the waveforms of each unit.
 #
 # While clusterless decoding avoids actual spike sorting, we need to pass through these tables to maintain (relative) pipeline simplicity. Pass-through tables keep spike sorting and clusterless waveform extraction as similar as possible, by using shared steps. Here, "spike sorting" involves simple thresholding (sorter: clusterless_thresholder).
+#
 
 # +
 from pathlib import Path
@@ -44,6 +45,7 @@ dj.config.load(
 # First, if you haven't inserted the the `mediumnwb20230802.wnb` file into the database, you should do so now. This is the file that we will use for the decoding tutorials.
 #
 # It is a truncated version of the full NWB file, so it will run faster, but bigger than the minirec file we used in the previous tutorials so that decoding makes sense.
+#
 
 # +
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
@@ -77,6 +79,7 @@ sgp.v1.TrodesPosV1.populate(trodes_s_key)
 # We first set the `SortGroup` to define which contacts are sorted together.
 #
 # We then setup for spike sorting by bandpass filtering and whitening the data via the `SpikeSortingRecording` table.
+#
 
 # +
 import spyglass.spikesorting.v1 as sgs
@@ -103,6 +106,7 @@ sgs.SpikeSortingRecording.populate(group_keys)
 # -
 
 # Next we do artifact detection. Here we skip it by setting the `artifact_param_name` to `None`, but in practice you should detect artifacts as it will affect the decoding.
+#
 
 # +
 recording_ids = (
@@ -122,6 +126,7 @@ sgs.ArtifactDetection.populate(group_keys)
 # -
 
 # Now we run the "spike sorting", which in our case is simply thresholding the signal to find spikes. We use the `SpikeSorting` table to store the results. Note that `sorter_param_name` defines the parameters for thresholding the signal.
+#
 
 # +
 group_keys = []
@@ -144,6 +149,7 @@ sgs.SpikeSorting.populate(group_keys)
 # -
 
 # For clusterless decoding we do not need any manual curation, but for the sake of the pipeline, we need to store the output of the thresholding in the `CurationV1` table and insert this into the `SpikeSortingOutput` table.
+#
 
 # +
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -155,7 +161,7 @@ sorting_ids = (
 for sorting_id in sorting_ids:
     try:
         sgs.CurationV1.insert_curation(sorting_id=sorting_id)
-    except KeyError as e:
+    except KeyError:
         pass
 
 SpikeSortingOutput.insert(
@@ -168,6 +174,7 @@ SpikeSortingOutput.insert(
 # Finally, we extract the waveform features of each SortGroup. This is done by the `UnitWaveformFeatures` table.
 #
 # To set this up, we use the `WaveformFeaturesParams` to define the time around the spike that we want to use for feature extraction, and which features to extract. Here is an example of the parameters used for extraction the amplitude of the negative peak of the waveform:
+#
 # ```python
 #
 # waveform_extraction_params = {
@@ -187,8 +194,8 @@ SpikeSortingOutput.insert(
 #
 # We see that we want 0.5 ms of time before and after the peak of the negative spike. We also see that we want to extract the amplitude of the negative peak, and that we do not want to estimate the peak time (since we know it is at 0 ms).
 #
-#
 # You can define other features to extract such as spatial location of the spike:
+#
 # ```python
 # waveform_extraction_params = {
 #     "ms_before": 0.5,
@@ -206,6 +213,9 @@ SpikeSortingOutput.insert(
 # }
 #
 # ```
+#
+# _Note_: Members of the Frank Lab can use "ampl_10_jobs_v2" instead of "amplitude"
+# for significant speed improvements.
 #
 
 # +
@@ -240,6 +250,7 @@ WaveformFeaturesParams()
 # -
 
 # Now that we've inserted the waveform features parameters, we need to define which parameters to use for each SortGroup. This is done by the `UnitWaveformFeaturesSelection` table. We need to link the primary key `merge_id` from the `SpikeSortingOutput` table to a features parameter set.
+#
 
 # +
 from spyglass.decoding.v1.waveform_features import UnitWaveformFeaturesSelection
@@ -248,6 +259,7 @@ UnitWaveformFeaturesSelection()
 # -
 
 # First we find the units we need:
+#
 
 # +
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -264,6 +276,7 @@ merge_ids
 # -
 
 # Then we link them with the features parameters:
+#
 
 # +
 selection_keys = [
@@ -279,6 +292,7 @@ UnitWaveformFeaturesSelection & selection_keys
 # -
 
 # Finally, we extract the waveform features, by populating the `UnitWaveformFeatures` table:
+#
 
 # +
 from spyglass.decoding.v1.waveform_features import UnitWaveformFeatures
@@ -289,17 +303,20 @@ UnitWaveformFeatures.populate(selection_keys)
 UnitWaveformFeatures & selection_keys
 
 # Now that we've extracted the data, we can inspect the results. Let's fetch the data:
+#
 
 spike_times, spike_waveform_features = (
     UnitWaveformFeatures & selection_keys
 ).fetch_data()
 
 # Let's look at the features shape. This is a list corresponding to tetrodes, with each element being a numpy array of shape (n_spikes, n_features). The features in this case are the amplitude of each tetrode wire at the negative peak of the waveform.
+#
 
 for features in spike_waveform_features:
     print(features.shape)
 
 # We can plot the amplitudes to see if there is anything that looks neural and to look for outliers:
+#
 
 # +
 import matplotlib.pyplot as plt

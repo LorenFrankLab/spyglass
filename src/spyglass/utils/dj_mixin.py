@@ -3,10 +3,12 @@ from time import time
 from typing import Dict, List, Union
 
 import datajoint as dj
+from datajoint.errors import DataJointError
 from datajoint.expression import QueryExpression
 from datajoint.logging import logger as dj_logger
 from datajoint.table import Table
 from datajoint.utils import get_master, user_choice
+from pymysql.err import DataError
 
 from spyglass.utils.dj_chains import TableChain, TableChains
 from spyglass.utils.dj_helper_fn import fetch_nwb

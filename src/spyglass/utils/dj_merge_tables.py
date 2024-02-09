@@ -658,6 +658,8 @@ class Merge(dj.Manual):
 
     @property
     def source_class_dict(self) -> dict:
+        # NOTE: fails if table is aliased in dj.Part but not merge script
+        # i.e., must import aliased table as part name
         if not self._source_class_dict:
             module = getmodule(self)
             self._source_class_dict = {
