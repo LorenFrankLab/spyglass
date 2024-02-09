@@ -215,8 +215,8 @@ class SpyglassMixin:
         if not merge_join_dict and not disable_warning:
             logger.warning(
                 f"No merge deletes found w/ {self.table_name} & "
-                + f"{restriction}.\n\tIf this is unexpected, try running with "
-                + "`reload_cache`."
+                + f"{restriction}.\n\tIf this is unexpected, try importing "
+                + " Merge table(s) and running with `reload_cache`."
             )
 
         if dry_run:

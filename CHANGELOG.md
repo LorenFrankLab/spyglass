@@ -22,6 +22,7 @@
 - Add overview of Spyglass to docs. #779
 - Update linting for Black 24. #808
 - Steamline dependency management. #822
+- Add catch errorst during `populate_all_common`, log in `common_usage`. #XXX
 
 ### Pipelines
 

@@ -42,6 +42,20 @@ class PositionSource(SpyglassMixin, dj.Manual):
         name=null: varchar(32)       # name of spatial series
         """
 
+    def populate(self, key=None):
+        """Insert position source data from NWB file.
+
+        WARNING: populate method on Manual table is not protected by transaction
+                protections like other DataJoint tables.
+        """
+        nwb_file_name = key.get("nwb_file_name")
+        if not nwb_file_name:
+            raise ValueError(
+                "PositionSource.populate is an alias for a non-computed table "
+                + "and must be passed a key with nwb_file_name"
+            )
+        self.insert_from_nwbfile(nwb_file_name)
+
     @classmethod
     def insert_from_nwbfile(cls, nwb_file_name):
         """Add intervals to ItervalList and PositionSource.

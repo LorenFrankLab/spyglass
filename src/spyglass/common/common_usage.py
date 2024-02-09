@@ -1,6 +1,7 @@
 """A schema to store the usage of advanced Spyglass features.
 
-Records show usage of features such as table chains, which will be used to
+Records show usage of features such as cautious delete and fault-permitting
+insert, which will be used to
 determine which features are used, how often, and by whom. This will help
 plan future development of Spyglass.
 """
@@ -20,4 +21,18 @@ class CautiousDelete(dj.Manual):
     origin: varchar(64)
     restriction: varchar(255)
     merge_deletes = null: blob
+    """
+
+
+@schema
+class InsertError(dj.Manual):
+    definition = """
+    id: int auto_increment
+    ---
+    dj_user: varchar(64)
+    connection_id: int     # MySQL CONNECTION_ID()
+    table: varchar(64)
+    error_type: varchar(64)
+    error_message: varchar(255)
+    error_raw = null: blob
     """
