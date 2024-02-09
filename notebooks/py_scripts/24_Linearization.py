@@ -75,7 +75,7 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # +
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
-nwb_file_name = "chimi20200216_new.nwb"
+nwb_file_name = "minirec20230622.nwb"  # detailed data: chimi20200216_new.nwb
 nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
 nwb_copy_file_name
 # -
@@ -89,8 +89,8 @@ import pandas as pd
 
 pos_key = {
     "nwb_file_name": nwb_copy_file_name,
-    "interval_list_name": "pos 1 valid times",
-    "position_info_param_name": "default",
+    "interval_list_name": "pos 0 valid times",  # For chimi, "pos 1 valid times"
+    "trodes_pos_params_name": "single_led_upsampled",  # For chimi, "default"
 }
 
 # Note: You'll have to change the part table to the one where your data came from

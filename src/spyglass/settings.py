@@ -544,14 +544,20 @@ sg_config.load_config(on_startup=True)
 if sg_config.load_failed:  # Failed to load
     logger.warning("Failed to load SpyglassConfig. Please set up config file.")
     config = {}  # Let __intit__ fetch empty config for first time setup
-    config, prepopulate, test_mode, base_dir, raw_dir, analysis_dir = (
-        {},
-        False,
-        False,
-        None,
-        None,
-        None,
-    )
+    prepopulate = False
+    test_mode = False
+    debug_mode = False
+    base_dir = None
+    raw_dir = None
+    recording_dir = None
+    temp_dir = None
+    analysis_dir = None
+    sorting_dir = None
+    waveform_dir = None
+    video_dir = None
+    dlc_project_dir = None
+    dlc_video_dir = None
+    dlc_output_dir = None
 else:
     config = sg_config.config
     base_dir = sg_config.base_dir
