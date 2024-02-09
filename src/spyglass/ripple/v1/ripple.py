@@ -375,6 +375,19 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
     ):
 
         ripple_times = self.fetch1_dataframe()
+
+        def _add_ripple_times(
+            view,
+            ripple_times=ripple_times,
+            ripple_times_color=ripple_times_color,
+        ):
+            return view.add_interval_series(
+                name="Ripple Events",
+                t_start=ripple_times.start_time.to_numpy(),
+                t_end=ripple_times.end_time.to_numpy(),
+                color=ripple_times_color,
+            )
+
         key = self.fetch1("KEY")
         (
             speed,
@@ -388,8 +401,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
         if zscore_ripple:
             ripple_consensus_trace = zscore(ripple_consensus_trace)
 
-        consensus_view = vv.TimeseriesGraph()
-        _add_ripple_times(consensus_view, ripple_times, ripple_times_color)
+        consensus_view = _add_ripple_times(vv.TimeseriesGraph())
         consensus_name = (
             "Z-Scored Consensus Trace" if zscore_ripple else "Consensus Trace"
         )
@@ -434,8 +446,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
                 )
             interval_ripple_lfps = interval_ripple_lfps.iloc[:, lfp_channel_ind]
 
-        lfp_view = vv.TimeseriesGraph()
-        _add_ripple_times(lfp_view, ripple_times, ripple_times_color)
+        lfp_view = _add_ripple_times(vv.TimeseriesGraph())
         max_lfp_value = interval_ripple_lfps.to_numpy().max()
         lfp_offset *= max_lfp_value
 
@@ -447,15 +458,14 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
                 color="black",
                 width=1,
             )
-
-        speed_view = vv.TimeseriesGraph().add_line_series(
+        speed_view = _add_ripple_times(vv.TimeseriesGraph())
+        speed_view.add_line_series(
             name="Speed [cm/s]",
             t=np.asarray(speed.index).squeeze(),
             y=np.asarray(speed, dtype=np.float32).squeeze(),
             color=speed_color,
             width=1,
         )
-        _add_ripple_times(speed_view, ripple_times, ripple_times_color)
         vertical_panel_content = [
             vv.LayoutItem(consensus_view, stretch=2, title="Consensus"),
             vv.LayoutItem(lfp_view, stretch=8, title="LFPs"),
@@ -478,12 +488,3 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
         )
 
         return view.url(label="Ripple Detection")
-
-
-def _add_ripple_times(view, ripple_times, ripple_times_color):
-    view.add_interval_series(
-        name="Ripple Events",
-        t_start=ripple_times.start_time.to_numpy(),
-        t_end=ripple_times.end_time.to_numpy(),
-        color=ripple_times_color,
-    )
