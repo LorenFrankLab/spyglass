@@ -10,12 +10,11 @@ from IPython.display import display
 
 from spyglass.common.common_behav import (  # noqa: F401
     RawPosition,
-    VideoFile,
     convert_epoch_interval_name_to_position_interval_name,
 )
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.utils.dj_mixin import SpyglassMixin
 
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_mixin import SpyglassMixin
 from .dlc_utils import OutputLogger, infer_output_dir
 from .position_dlc_model import DLCModel
 
@@ -123,43 +122,6 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
             )
         logger.logger.info("inserted entry into Pose Estimation Selection")
         return {**key, "task_mode": task_mode}
-
-    @classmethod
-    def get_video_crop(cls, video_path):
-        """
-        Queries the user to determine the cropping parameters for a given video
-
-        Parameters
-        ----------
-        video_path : str
-            path to the video file
-
-        Returns
-        -------
-        crop_ints : list
-            list of 4 integers [x min, x max, y min, y max]
-        """
-
-        cap = cv2.VideoCapture(video_path)
-        _, frame = cap.read()
-        fig, ax = plt.subplots(figsize=(20, 10))
-        ax.imshow(frame)
-        xlims = ax.get_xlim()
-        ylims = ax.get_ylim()
-        ax.set_xticks(np.arange(xlims[0], xlims[-1], 50))
-        ax.set_yticks(np.arange(ylims[0], ylims[-1], -50))
-        ax.grid(visible=True, color="white", lw=0.5, alpha=0.5)
-        display(fig)
-        crop_input = input(
-            "Please enter the crop parameters for your video in format "
-            "xmin, xmax, ymin, ymax, or 'none'\n"
-        )
-        plt.close()
-        if crop_input.lower() == "none":
-            return None
-        crop_ints = [int(val) for val in crop_input.split(",")]
-        assert all(isinstance(val, int) for val in crop_ints)
-        return crop_ints
 
 
 @schema

@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
+from spyglass.common.common_behav import VideoFile
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
 
 
@@ -418,8 +419,6 @@ def get_video_path(key):
     """
     import pynwb
 
-    from ...common.common_behav import VideoFile
-
     vf_key = {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
     VideoFile()._no_transaction_make(vf_key, verbose=False)
     video_query = VideoFile & vf_key
@@ -434,7 +433,7 @@ def get_video_path(key):
     with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
         nwb_file = in_out.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        video_filepath = common_behav.VideoFile.get_abs_path(video_key)
+        video_filepath = VideoFile.get_abs_path(vf_key)
         video_dir = os.path.dirname(video_filepath) + "/"
         video_filename = video_filepath.split(video_dir)[-1]
         meters_per_pixel = nwb_video.device.meters_per_pixel
