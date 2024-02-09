@@ -28,7 +28,6 @@
 - Spike sorting:
     - Add SpikeSorting V1 pipeline. #651
     - Move modules into spikesorting.v0 #807
-    - Add MUA analysis to spike sorting pipeline
 - LFP:
     - Minor fixes to LFPBandV1 populator and `make`. #706, #795
     - LFPV1: Fix error for multiple lfp settings on same data #775
@@ -41,7 +40,7 @@
     - DLC path handling from config, and normalize naming convention. #722
     - Fix in place column bug #752
 - Decoding:
-    - Add `decoding` pipeline V1. #731, #769
+    - Add `decoding` pipeline V1. #731, #769, #819
     - Add a table to store the decoding results #731
     - Use the new `non_local_detector` package for decoding #731
     - Allow multiple spike waveform features for clusterless decoding #731
@@ -51,6 +50,10 @@
     - Rename SortedSpikesGroup.SortGroup to SortedSpikesGroup.Units #807
     - Change methods with load\_... to fetch\_... for consistency #807
     - Use merge table methods to access part methods #807
+- MUA
+    - Add MUA pipeline V1. #731, #819
+- Ripple
+    - Add figurl to Ripple pipeline #819
 
 ## [0.4.3] (November 7, 2023)
 

@@ -10,6 +10,8 @@ visualization, and sharing of neuroscience data to support reproducible
 research. It is designed to be interoperable with the NWB format and integrates
 open-source tools into a coherent framework.
 
+Try out a demo [here](https://spyglass.hhmi.2i2c.cloud/hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FLorenFrankLab%2Fspyglass-demo&urlpath=lab%2Ftree%2Fspyglass-demo%2Fnotebooks%2F01_Insert_Data.ipynb&branch=main)!
+
 Features of Spyglass include:
 
 - **Standardized data storage** - Spyglass uses the open-source
@@ -86,3 +88,5 @@ a data analysis framework for reproducible and shareable neuroscience research.
    [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295 ).
 
 *\* Equal contribution*
+
+See paper related code [here](https://github.com/LorenFrankLab/spyglass-paper).
