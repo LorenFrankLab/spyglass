@@ -1,5 +1,8 @@
 """Schema for institution, lab team/name/members. Session-independent."""
+
 import datajoint as dj
+
+from spyglass.utils import SpyglassMixin, logger
 
 from ..utils.nwb_helper_fn import get_nwb_file
 from .common_nwbfile import Nwbfile
@@ -8,7 +11,7 @@ schema = dj.schema("common_lab")
 
 
 @schema
-class LabMember(dj.Manual):
+class LabMember(SpyglassMixin, dj.Manual):
     definition = """
     lab_member_name: varchar(80)
     ---
@@ -20,14 +23,23 @@ class LabMember(dj.Manual):
     # named Jack Black that have data in this database, this will create an
     # incorrect linkage. NWB does not yet provide unique IDs for names.
 
-    class LabMemberInfo(dj.Part):
+    # NOTE: PR requires table alter.
+    class LabMemberInfo(SpyglassMixin, dj.Part):
         definition = """
         # Information about lab member in the context of Frank lab network
         -> LabMember
         ---
-        google_user_name: varchar(200)         # For permission to curate
-        datajoint_user_name = "": varchar(200) # For permission to delete ns
+        google_user_name         : varchar(200) # For permission to curate
+        datajoint_user_name = "" : varchar(200) # For permission to delete
+        admin = 0                : bool         # Ignore permission checks
+        unique index (datajoint_user_name)
+        unique index (google_user_name)
         """
+
+        # NOTE: index present for new instances. pending surgery, not enforced
+        # for existing instances.
+
+    _admin = []
 
     @classmethod
     def insert_from_nwbfile(cls, nwbf):
@@ -43,7 +55,7 @@ class LabMember(dj.Manual):
             nwbf = get_nwb_file(nwb_file_abspath)
 
         if nwbf.experimenter is None:
-            print("No experimenter metadata found.\n")
+            logger.info("No experimenter metadata found.\n")
             return
 
         for experimenter in nwbf.experimenter:
@@ -76,20 +88,85 @@ class LabMember(dj.Manual):
             skip_duplicates=True,
         )
 
+    def _load_admin(cls):
+        """Load admin list."""
+        cls._admin = list(
+            (cls.LabMemberInfo & {"admin": True}).fetch("datajoint_user_name")
+        )
+
+    @property
+    def admin(cls) -> list:
+        """Return the list of admin users.
+
+        Note: This is cached. If adding a new admin, run _load_admin
+        """
+        if not cls._admin:
+            cls._load_admin()
+        return cls._admin
+
+    def get_djuser_name(cls, dj_user) -> str:
+        """Return the lab member name associated with a datajoint user name.
+
+        Parameters
+        ----------
+        dj_user: str
+            The datajoint user name.
+
+        Returns
+        -------
+        str
+            The lab member name.
+        """
+        query = (cls.LabMemberInfo & {"datajoint_user_name": dj_user}).fetch(
+            "lab_member_name"
+        )
+
+        if len(query) != 1:
+            raise ValueError(
+                f"Could not find name for datajoint user {dj_user}"
+                + f" in common.LabMember.LabMemberInfo: {query}"
+            )
+
+        return query[0]
+
 
 @schema
-class LabTeam(dj.Manual):
+class LabTeam(SpyglassMixin, dj.Manual):
     definition = """
     team_name: varchar(80)
     ---
     team_description = "": varchar(2000)
     """
 
-    class LabTeamMember(dj.Part):
+    class LabTeamMember(SpyglassMixin, dj.Part):
         definition = """
         -> LabTeam
         -> LabMember
         """
+
+    _shared_teams = {}
+
+    def get_team_members(cls, member, reload=False):
+        """Return the set of lab members that share a team with member.
+
+        Parameters
+        ----------
+        member : str
+            The lab member to check.
+        reload : bool
+            If True, reload the shared teams cache.
+        """
+        if reload or member not in cls._shared_teams:
+            teams = (cls.LabTeamMember & {"lab_member_name": member}).fetch(
+                "team_name"
+            )
+            cls._shared_teams[member] = set(
+                (
+                    LabTeam.LabTeamMember
+                    & [{"team_name": team} for team in teams]
+                ).fetch("lab_member_name")
+            )
+        return cls._shared_teams[member]
 
     @classmethod
     def create_new_team(
@@ -112,15 +189,15 @@ class LabTeam(dj.Manual):
             "team_name": team_name,
             "team_description": team_description,
         }
-        cls.insert1(labteam_dict, skip_duplicates=True)
 
+        member_list = []
         for team_member in team_members:
             LabMember.insert_from_name(team_member)
             query = (
                 LabMember.LabMemberInfo() & {"lab_member_name": team_member}
             ).fetch("google_user_name")
             if not query:
-                print(
+                logger.info(
                     f"Please add the Google user ID for {team_member} in "
                     + "LabMember.LabMemberInfo to help manage permissions."
                 )
@@ -128,11 +205,16 @@ class LabTeam(dj.Manual):
                 "team_name": team_name,
                 "lab_member_name": team_member,
             }
-            cls.LabTeamMember.insert1(labteammember_dict, skip_duplicates=True)
+            member_list.append(labteammember_dict)
+            # clear cache for this member
+            _ = cls._shared_teams.pop(team_member, None)
+
+        cls.insert1(labteam_dict, skip_duplicates=True)
+        cls.LabTeamMember.insert(member_list, skip_duplicates=True)
 
 
 @schema
-class Institution(dj.Manual):
+class Institution(SpyglassMixin, dj.Manual):
     definition = """
     institution_name: varchar(80)
     """
@@ -147,7 +229,7 @@ class Institution(dj.Manual):
             The NWB file with institution information.
         """
         if nwbf.institution is None:
-            print("No institution metadata found.\n")
+            logger.info("No institution metadata found.\n")
             return
 
         cls.insert1(
@@ -156,7 +238,7 @@ class Institution(dj.Manual):
 
 
 @schema
-class Lab(dj.Manual):
+class Lab(SpyglassMixin, dj.Manual):
     definition = """
     lab_name: varchar(80)
     """
@@ -171,7 +253,7 @@ class Lab(dj.Manual):
             The NWB file with lab name information.
         """
         if nwbf.lab is None:
-            print("No lab metadata found.\n")
+            logger.info("No lab metadata found.\n")
             return
         cls.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)
 
@@ -180,6 +262,7 @@ def decompose_name(full_name: str) -> tuple:
     """Return the full, first and last name parts of a full name.
 
     Names capitalized. Decomposes either comma- or space-separated.
+    If name includes spaces, must use exactly one comma.
 
     Parameters
     ----------
@@ -190,16 +273,33 @@ def decompose_name(full_name: str) -> tuple:
     -------
     tuple
         A tuple of the full, first, last name parts.
-    """
-    if full_name.count(", ") != 1 and full_name.count(" ") != 1:
-        raise ValueError(
-            f"Names should be stored as 'last, first'. Skipping {full_name}"
-        )
-    elif ", " in full_name:
-        last, first = full_name.title().split(", ")
-    else:
-        first, last = full_name.title().split(" ")
 
+    Raises
+    ------
+    ValueError
+        When full_name is in an unsupported format
+    """
+
+    full_trimmed = "" if not full_name else full_name.strip()
+
+    delim = (
+        ", "
+        if full_trimmed.count(", ") == 1
+        else " " if full_trimmed.count(" ") == 1 else None
+    )
+
+    parts = full_trimmed.split(delim)
+
+    if delim is None or len(parts) != 2:  # catch unsupported format
+        raise ValueError(
+            f"Name has unsupported format for {full_name}. \n\t"
+            + "Must use exactly one comma+space (i.e., ', ') or space.\n\t"
+            + "And provide exactly two name parts.\n\t"
+            + "For example, 'First Last' or 'Last1 Last2, First1 First2' "
+            + "if name(s) includes spaces."
+        )
+
+    first, last = parts if delim == " " else parts[::-1]
     full = f"{first} {last}"
 
     return full, first, last

@@ -2,7 +2,58 @@
 
 ## [0.4.4] (Unreleased)
 
-- Support multi-cam projects in DeepLabCut.
+### Infrastructure
+
+- Additional documentation. #690
+- Clean up following pre-commit checks. #688
+- Add Mixin class to centralize `fetch_nwb` functionality. #692, #734
+- Refactor restriction use in `delete_downstream_merge` #703
+- Add `cautious_delete` to Mixin class
+    - Initial implementation. #711, #762
+    - More robust caching of join to downstream tables. #806
+    - Overwrite datajoint `delete` method to use `cautious_delete`. #806
+    - Reverse join order for session summary. #821
+    - Add temporary logging of use to `common_usage`. #811, #821
+- Add `deprecation_factory` to facilitate table migration. #717
+- Add Spyglass logger. #730
+- IntervalList: Add secondary key `pipeline` #742
+- Increase pytest coverage for `common`, `lfp`, and `utils`. #743
+- Update docs to reflect new notebooks. #776
+- Add overview of Spyglass to docs. #779
+- Update linting for Black 24. #808
+- Steamline dependency management. #822
+
+### Pipelines
+
+- Spike sorting:
+    - Add SpikeSorting V1 pipeline. #651
+    - Move modules into spikesorting.v0 #807
+- LFP:
+    - Minor fixes to LFPBandV1 populator and `make`. #706, #795
+    - LFPV1: Fix error for multiple lfp settings on same data #775
+- Linearization:
+    - Minor fixes to LinearizedPositionV1 pipeline #695
+    - Rename `position_linearization` -> `linearization`. #717
+    - Migrate tables: `common_position` -> `linearization.v0`. #717
+- Position:
+    - Refactor input validation in DLC pipeline. #688
+    - DLC path handling from config, and normalize naming convention. #722
+    - Fix in place column bug #752
+- Decoding:
+    - Add `decoding` pipeline V1. #731, #769, #819
+    - Add a table to store the decoding results #731
+    - Use the new `non_local_detector` package for decoding #731
+    - Allow multiple spike waveform features for clusterless decoding #731
+    - Reorder notebooks #731
+    - Add fetch class functionality to `Merge` table. #783, #786
+    - Add ability to filter sorted units in decoding #807
+    - Rename SortedSpikesGroup.SortGroup to SortedSpikesGroup.Units #807
+    - Change methods with load\_... to fetch\_... for consistency #807
+    - Use merge table methods to access part methods #807
+- MUA
+    - Add MUA pipeline V1. #731, #819
+- Ripple
+    - Add figurl to Ripple pipeline #819
 
 ## [0.4.3] (November 7, 2023)
 
@@ -27,14 +78,14 @@
     - Added support multiple cameras per epoch. #557
     - Removed `common_backup` schema. #631
     - Added support for multiple position objects per NWB in `common_behav` via
-    PositionSource.SpatialSeries and RawPosition.PosObject #628, #616.
-    _Note:_ Existing functions have been made compatible, but column labels for
-    `RawPosition.fetch1_dataframe` may change.
+        PositionSource.SpatialSeries and RawPosition.PosObject #628, #616. _Note:_
+        Existing functions have been made compatible, but column labels for
+        `RawPosition.fetch1_dataframe` may change.
 - Spike sorting:
     - Added pipeline populator. #637, #646, #647
     - Fixed curation functionality for `nn_isolation`. #597, #598
 - Position: Added position interval/epoch mapping via PositionIntervalMap. #620,
-  #621, #627
+    #621, #627
 - LFP: Refactored pipeline. #594, #588, #605, #606, #607, #608, #615, #629
 
 ## [0.4.1] (June 30, 2023)
@@ -45,12 +96,12 @@
 ## [0.4.0] (May 22, 2023)
 
 - Updated call to `spikeinterface.preprocessing.whiten` to use dtype np.float16.
-  #446,
+    #446,
 - Updated default spike sorting metric parameters. #447
 - Updated whitening to be compatible with recent changes in spikeinterface when
-  using mountainsort. #449
+    using mountainsort. #449
 - Moved LFP pipeline to `src/spyglass/lfp/v1` and addressed related usability
-  issues. #468, #478, #482, #484, #504
+    issues. #468, #478, #482, #484, #504
 - Removed whiten parameter for clusterless thresholder. #454
 - Added plot to plot all DIO events in a session. #457
 - Added file sharing functionality through kachery_cloud. #458, #460
@@ -58,28 +109,28 @@
 - Added scripts to add guests and collaborators as users. #463
 - Cleaned up installation instructions in repo README. #467
 - Added checks in decoding visualization to ensure time dimensions are the
-  correct length.
+    correct length.
 - Fixed artifact removed valid times. #472
 - Added codespell workflow for spell checking and fixed typos. #471
 - Updated LFP code to save LFP as `pynwb.ecephys.LFP` type. #475
 - Added artifact detection to LFP pipeline. #473
 - Replaced calls to `spikeinterface.sorters.get_default_params` with
-  `spikeinterface.sorters.get_default_sorter_params`. #486
+    `spikeinterface.sorters.get_default_sorter_params`. #486
 - Updated position pipeline and added functionality to handle pose estimation
-  through DeepLabCut. #367, #505
+    through DeepLabCut. #367, #505
 - Updated `environment_position.yml`. #502
 - Renamed `FirFilter` class to `FirFilterParameters`. #512
 
 ## [0.3.4] (March 30, 2023)
 
 - Fixed error in spike sorting pipeline referencing the "probe_type" column
-  which is no longer accessible from the `Electrode` table. #437
+    which is no longer accessible from the `Electrode` table. #437
 - Fixed error when inserting an NWB file that does not have a probe
-  manufacturer. #433, #436
+    manufacturer. #433, #436
 - Fixed error when adding a new `DataAcquisitionDevice` and a new `ProbeType`.
-  #436
+    #436
 - Fixed inconsistency between capitalized/uncapitalized versions of "Intan" for
-  DataAcquisitionAmplifier and DataAcquisitionDevice.adc_circuit. #430, #438
+    DataAcquisitionAmplifier and DataAcquisitionDevice.adc_circuit. #430, #438
 
 ## [0.3.3] (March 29, 2023)
 
@@ -99,13 +150,13 @@
 - Allow creation and linkage of device metadata from YAML #400
 - Move helper functions to utils directory #386
 
-[0.4.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.4
-[0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
-[0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
-[0.4.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.1
-[0.4.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.0
-[0.3.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.4
-[0.3.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.3
-[0.3.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.2
-[0.3.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.1
 [0.3.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.0
+[0.3.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.1
+[0.3.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.2
+[0.3.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.3
+[0.3.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.4
+[0.4.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.0
+[0.4.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.1
+[0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
+[0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
+[0.4.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.4

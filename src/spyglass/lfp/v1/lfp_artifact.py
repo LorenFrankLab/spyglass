@@ -8,6 +8,7 @@ from spyglass.lfp.v1.lfp_artifact_difference_detection import (
     difference_artifact_detector,
 )
 from spyglass.lfp.v1.lfp_artifact_MAD_detection import mad_artifact_detector
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("lfp_v1")
 
@@ -20,7 +21,7 @@ ARTIFACT_DETECTION_ALGORITHMS = {
 
 
 @schema
-class LFPArtifactDetectionParameters(dj.Manual):
+class LFPArtifactDetectionParameters(SpyglassMixin, dj.Manual):
     definition = """
     # Parameters for detecting LFP artifact times within a LFP group.
     artifact_params_name: varchar(200)
@@ -100,7 +101,7 @@ class LFPArtifactDetectionParameters(dj.Manual):
 
 
 @schema
-class LFPArtifactDetectionSelection(dj.Manual):
+class LFPArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     definition = """
     # Artifact detection parameters to apply to a sort group's recording.
     -> LFPV1
@@ -110,7 +111,7 @@ class LFPArtifactDetectionSelection(dj.Manual):
 
 
 @schema
-class LFPArtifactDetection(dj.Computed):
+class LFPArtifactDetection(SpyglassMixin, dj.Computed):
     definition = """
     # Stores artifact times and valid no-artifact times as intervals.
     -> LFPArtifactDetectionSelection
@@ -191,6 +192,7 @@ class LFPArtifactDetection(dj.Computed):
             "nwb_file_name": key["nwb_file_name"],
             "interval_list_name": key["artifact_removed_interval_list_name"],
             "valid_times": key["artifact_removed_valid_times"],
+            "pipeline": "lfp_artifact",
         }
 
         LFPArtifactRemovedIntervalList.insert1(key, replace=True)
@@ -199,7 +201,7 @@ class LFPArtifactDetection(dj.Computed):
 
 
 @schema
-class LFPArtifactRemovedIntervalList(dj.Manual):
+class LFPArtifactRemovedIntervalList(SpyglassMixin, dj.Manual):
     definition = """
     # Stores intervals without detected artifacts. Entries can come from either
     # ArtifactDetection() or alternative artifact removal analyses.

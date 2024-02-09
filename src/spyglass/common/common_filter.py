@@ -9,7 +9,8 @@ import psutil
 import pynwb
 import scipy.signal as signal
 
-from ..utils.nwb_helper_fn import get_electrode_indices
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_filter")
 
@@ -28,7 +29,7 @@ def _import_ghostipy():
 
 
 @schema
-class FirFilterParameters(dj.Manual):
+class FirFilterParameters(SpyglassMixin, dj.Manual):
     definition = """
     filter_name: varchar(80)           # descriptive name of this filter
     filter_sampling_rate: int          # sampling rate for this filter
@@ -88,14 +89,16 @@ class FirFilterParameters(dj.Manual):
         #   high pass: [low stop low pass]
         #   band pass: [low_stop low_pass high_pass high_stop].
         if filter_type not in VALID_FILTERS:
-            print(
+            logger.error(
                 FILTER_ERR
                 + f"{filter_type} not valid type: {VALID_FILTERS.keys()}"
             )
             return None
 
         if not len(band_edges) == VALID_FILTERS[filter_type]:
-            print(FILTER_N_ERR.format(filter_name, VALID_FILTERS[filter_type]))
+            logger.error(
+                FILTER_N_ERR.format(filter_name, VALID_FILTERS[filter_type])
+            )
             return None
 
         gsp = _import_ghostipy()
@@ -164,9 +167,9 @@ class FirFilterParameters(dj.Manual):
     def _filter_restrict(self, filter_name, fs):
         return (
             self & {"filter_name": filter_name} & {"filter_sampling_rate": fs}
-        ).fetch1(as_dict=True)
+        ).fetch1()
 
-    def plot_magnitude(self, filter_name, fs):
+    def plot_magnitude(self, filter_name, fs, return_fig=False):
         filter_dict = self._filter_restrict(filter_name, fs)
         plt.figure()
         w, h = signal.freqz(filter_dict["filter_coeff"], worN=65536)
@@ -175,11 +178,13 @@ class FirFilterParameters(dj.Manual):
         plt.xlabel("Frequency (Hz)")
         plt.ylabel("Magnitude")
         plt.title("Frequency Response")
-        plt.xlim(0, np.max(filter_dict["filter_coeffand_edges"] * 2))
+        plt.xlim(0, np.max(filter_dict["filter_band_edges"] * 2))
         plt.ylim(np.min(magnitude), -1 * np.min(magnitude) * 0.1)
         plt.grid(True)
+        if return_fig:
+            return plt.gcf()
 
-    def plot_fir_filter(self, filter_name, fs):
+    def plot_fir_filter(self, filter_name, fs, return_fig=False):
         filter_dict = self._filter_restrict(filter_name, fs)
         plt.figure()
         plt.clf()
@@ -188,6 +193,8 @@ class FirFilterParameters(dj.Manual):
         plt.ylabel("Magnitude")
         plt.title("Filter Taps")
         plt.grid(True)
+        if return_fig:
+            return plt.gcf()
 
     def filter_delay(self, filter_name, fs):
         return self.calc_filter_delay(
@@ -205,7 +212,7 @@ class FirFilterParameters(dj.Manual):
             start = all[0]
 
         if stop > all[-1]:
-            warnings.warn(
+            logger.warning(
                 timestamp_warn
                 + "stop time larger than last timestamp, "
                 + f"substituting last: {stop} < {all[-1]}"
@@ -225,7 +232,7 @@ class FirFilterParameters(dj.Manual):
         electrode_ids: list,
         decimation: int,
         description: str = "filtered data",
-        type: Union[None, str] = None,
+        data_type: Union[None, str] = None,
     ):
         """
         Filter data from an NWB electrical series using the ghostipy package,
@@ -256,6 +263,10 @@ class FirFilterParameters(dj.Manual):
             The NWB object ID of the filtered data and a list containing the
             first and last timestamps.
         """
+        # Note: type -> data_type to avoid conflict with builtin type
+        # All existing refs to this func use positional args, so no need to
+        # adjust elsewhere, but low probability of issues with custom scripts
+
         MEM_USE_LIMIT = 0.9  # % of RAM use permitted
 
         gsp = _import_ghostipy()
@@ -323,7 +334,7 @@ class FirFilterParameters(dj.Manual):
                 timestamps=np.empty(output_shape_list[time_axis]),
                 description=description,
             )
-            if type == "LFP":
+            if data_type == "LFP":
                 ecephys_module = nwbf.create_processing_module(
                     name="ecephys", description=description
                 )
@@ -346,7 +357,7 @@ class FirFilterParameters(dj.Manual):
             # Filter and write the output dataset
             ts_offset = 0
 
-            print("Filtering data")
+            logger.info("Filtering data")
             for ii, (start, stop) in enumerate(indices):
                 # Calc size of timestamps + data, check if < 90% of RAM
                 interval_samples = stop - start
@@ -355,7 +366,7 @@ class FirFilterParameters(dj.Manual):
                     + n_electrodes * data_on_disk[0][0].itemsize
                 )
                 if req_mem < MEM_USE_LIMIT * psutil.virtual_memory().available:
-                    print(f"Interval {ii}: loading data into memory")
+                    logger.info(f"Interval {ii}: loading data into memory")
                     timestamps = np.asarray(
                         timestamps_on_disk[start:stop],
                         dtype=timestamps_on_disk[0].dtype,
@@ -376,7 +387,7 @@ class FirFilterParameters(dj.Manual):
                     input_index_bounds = [0, interval_samples - 1]
 
                 else:
-                    print(f"Interval {ii}: leaving data on disk")
+                    logger.info(f"Interval {ii}: leaving data on disk")
                     data = data_on_disk
                     timestamps = timestamps_on_disk
                     extracted_ts = timestamps[start:stop:decimation]
@@ -457,7 +468,8 @@ class FirFilterParameters(dj.Manual):
             frm, to = self._time_bound_check(
                 a_start, a_stop, timestamps, n_samples
             )
-
+            if np.isclose(frm, to, rtol=0, atol=1e-8):
+                continue
             indices.append((frm, to))
 
             shape, _ = gsp.filter_data_fir(
@@ -488,10 +500,9 @@ class FirFilterParameters(dj.Manual):
         for ii, (start, stop) in enumerate(indices):
             extracted_ts = timestamps[start:stop:decimation]
 
-            # print(f"Diffs {np.diff(extracted_ts)}")
-            new_timestamps[
-                ts_offset : ts_offset + len(extracted_ts)
-            ] = extracted_ts
+            new_timestamps[ts_offset : ts_offset + len(extracted_ts)] = (
+                extracted_ts
+            )
             ts_offset += len(extracted_ts)
 
             # finally ready to filter data!

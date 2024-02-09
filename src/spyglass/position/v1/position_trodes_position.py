@@ -2,23 +2,23 @@ import copy
 import os
 from pathlib import Path
 
-import cv2
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
 from tqdm import tqdm as tqdm
 
-from ...common.common_behav import RawPosition
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...common.common_position import IntervalPositionInfo
-from ...utils.dj_helper_fn import fetch_nwb
-from .dlc_utils import check_videofile, get_video_path
+from spyglass.common.common_behav import RawPosition
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_position import IntervalPositionInfo
+from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
+from spyglass.utils import logger
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("position_v1_trodes_position")
 
 
 @schema
-class TrodesPosParams(dj.Manual):
+class TrodesPosParams(SpyglassMixin, dj.Manual):
     """
     Parameters for calculating the position (centroid, velocity, orientation)
     """
@@ -72,7 +72,7 @@ class TrodesPosParams(dj.Manual):
 
 
 @schema
-class TrodesPosSelection(dj.Manual):
+class TrodesPosSelection(SpyglassMixin, dj.Manual):
     """
     Table to pair an interval with position data
     and position determination parameters
@@ -143,7 +143,7 @@ class TrodesPosSelection(dj.Manual):
 
 
 @schema
-class TrodesPosV1(dj.Computed):
+class TrodesPosV1(SpyglassMixin, dj.Computed):
     """
     Table to calculate the position based on Trodes tracking
     """
@@ -212,19 +212,25 @@ class TrodesPosV1(dj.Computed):
         """Calculate position info from 2D spatial series."""
         return IntervalPositionInfo().calculate_position_info(*args, **kwargs)
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self, add_frame_ind=True):
+        pos_params = self.fetch1("trodes_pos_params_name")
+        if (
+            add_frame_ind
+            and (
+                TrodesPosParams & {"trodes_pos_params_name": pos_params}
+            ).fetch1("params")["is_upsampled"]
+        ):
+            logger.warn(
+                "Upsampled position data, frame indices are invalid. Setting add_frame_ind=False"
+            )
+            add_frame_ind = False
         return IntervalPositionInfo._data_to_df(
-            self.fetch_nwb()[0], prefix="", add_frame_ind=True
+            self.fetch_nwb()[0], prefix="", add_frame_ind=add_frame_ind
         )
 
 
 @schema
-class TrodesPosVideo(dj.Computed):
+class TrodesPosVideo(SpyglassMixin, dj.Computed):
     """Creates a video of the computed head position and orientation as well as
     the original LED positions overlaid on the video of the animal.
 
@@ -350,6 +356,8 @@ class TrodesPosVideo(dj.Computed):
         arrow_radius=15,
         circle_radius=8,
     ):
+        import cv2
+
         RGB_PINK = (234, 82, 111)
         RGB_YELLOW = (253, 231, 76)
         RGB_WHITE = (255, 255, 255)

@@ -13,14 +13,20 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml
 
-from ...common.common_lab import LabTeam
-from .dlc_utils import _set_permissions, check_videofile, get_video_path
+from spyglass.common.common_lab import LabTeam
+from spyglass.position.v1.dlc_utils import (
+    _set_permissions,
+    check_videofile,
+    get_video_path,
+)
+from spyglass.settings import dlc_project_dir, dlc_video_dir
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("position_v1_dlc_project")
 
 
 @schema
-class BodyPart(dj.Manual):
+class BodyPart(SpyglassMixin, dj.Manual):
     """Holds bodyparts for use in DeepLabCut models"""
 
     definition = """
@@ -55,7 +61,7 @@ class BodyPart(dj.Manual):
 
 
 @schema
-class DLCProject(dj.Manual):
+class DLCProject(SpyglassMixin, dj.Manual):
     """Table to facilitate creation of a new DeepLabCut model.
     With ability to edit config, extract frames, label frames
     """
@@ -71,7 +77,7 @@ class DLCProject(dj.Manual):
     config_path      : varchar(120) # path to config.yaml for model
     """
 
-    class BodyPart(dj.Part):
+    class BodyPart(SpyglassMixin, dj.Part):
         """Part table to hold bodyparts used in each project."""
 
         definition = """
@@ -79,7 +85,7 @@ class DLCProject(dj.Manual):
         -> BodyPart
         """
 
-    class File(dj.Part):
+    class File(SpyglassMixin, dj.Part):
         definition = """
         # Paths of training files (e.g., labeled pngs, CSV or video)
         -> DLCProject
@@ -162,7 +168,7 @@ class DLCProject(dj.Manual):
                 )
         config_path = Path(config_path)
         project_path = config_path.parent
-        dlc_project_path = os.environ["DLC_PROJECT_PATH"]
+        dlc_project_path = dlc_project_dir
         if dlc_project_path not in project_path.as_posix():
             project_dirname = project_path.name
             dest_folder = Path(f"{dlc_project_path}/{project_dirname}/")
@@ -215,17 +221,20 @@ class DLCProject(dj.Manual):
         lab_team: str,
         frames_per_video: int,
         video_list: List,
-        project_directory: str = os.getenv("DLC_PROJECT_PATH"),
-        output_path: str = os.getenv("DLC_VIDEO_PATH"),
+        groupname: str = None,
+        project_directory: str = dlc_project_dir,
+        output_path: str = dlc_video_dir,
         set_permissions=False,
         **kwargs,
     ):
-        """
-        insert a new project into DLCProject table.
+        """Insert a new project into DLCProject table.
+
         Parameters
         ----------
         project_name : str
             user-friendly name of project
+        groupname : str, optional
+            Name for project group. If None, defaults to username
         bodyparts : list
             list of bodyparts to label. Should match bodyparts in BodyPart table
         lab_team : str
@@ -236,12 +245,9 @@ class DLCProject(dj.Manual):
         frames_per_video : int
             number of frames to extract from each video
         video_list : list
-            list of dicts of form
-            [{'nwb_file_name': nwb_file_name,
-            'epoch': epoch #,
-            "video_file_num": #},...]
-            to query VideoFile table for videos to train on.
-            Can also be list of absolute paths to import videos from
+            list of (a) dicts of to query VideoFile table for or (b) absolute
+            paths to videos to train on. If dict, use format:
+            [{'nwb_file_name': nwb_file_name, 'epoch': epoch #},...]
         output_path : str
             target path to output converted videos
             (Default is '/nimbus/deeplabcut/videos/')
@@ -262,14 +268,49 @@ class DLCProject(dj.Manual):
         if not bool(LabTeam() & {"team_name": lab_team}):
             raise ValueError(f"team_name: {lab_team} does not exist in LabTeam")
         skeleton_node = None
-        # If dict, assume of form {'nwb_file_name': nwb_file_name,
-        # 'epoch': epoch, "video_file_num": num} and pass to get_video_path
-        # to reference VideoFile table for path
-        videos = cls.add_video_files(
-            video_list=video_list,
-            output_path=output_path,
-            add_to_files=False,
-        )
+        # If dict, assume of form {'nwb_file_name': nwb_file_name, 'epoch': epoch}
+        # and pass to get_video_path to reference VideoFile table for path
+
+        if all(isinstance(n, Dict) for n in video_list):
+            videos_to_convert = [
+                get_video_path(video_key) for video_key in video_list
+            ]
+            videos = [
+                check_videofile(
+                    video_path=video[0],
+                    output_path=output_path,
+                    video_filename=video[1],
+                )[0].as_posix()
+                for video in videos_to_convert
+                if video[0] is not None
+            ]
+            if len(videos) < 1:
+                raise ValueError(
+                    f"no .mp4 videos found in {videos_to_convert[0][0]}"
+                    + f" for key: {video_list[0]}"
+                )
+
+        # If not dict, assume list of video file paths that may or may not need to be converted
+        else:
+            videos = []
+            if not all([Path(video).exists() for video in video_list]):
+                raise OSError("at least one file in video_list does not exist")
+            for video in video_list:
+                video_path = Path(video).parent
+                video_filename = video.rsplit(
+                    video_path.as_posix(), maxsplit=1
+                )[-1].split("/")[-1]
+                videos.extend(
+                    [
+                        check_videofile(
+                            video_path=video_path,
+                            output_path=output_path,
+                            video_filename=video_filename,
+                        )[0].as_posix()
+                    ]
+                )
+            if len(videos) < 1:
+                raise ValueError(f"no .mp4 videos found in{video_path}")
         from deeplabcut import create_new_project
 
         config_path = create_new_project(
@@ -543,7 +584,7 @@ class DLCProject(dj.Manual):
                 f"{import_labeled_data_path.as_posix()}/{video_file}/*.h5"
             )[0]
             dlc_df = pd.read_hdf(h5_file)
-            dlc_df.columns.set_levels([team_name], level=0, inplace=True)
+            dlc_df.columns = dlc_df.columns.set_levels([team_name], level=0)
             dlc_df.to_hdf(
                 Path(
                     f"{current_labeled_data_path.as_posix()}/"

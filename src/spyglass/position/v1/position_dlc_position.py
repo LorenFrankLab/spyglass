@@ -3,16 +3,23 @@ import numpy as np
 import pandas as pd
 import pynwb
 
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_helper_fn import fetch_nwb
-from .dlc_utils import _key_to_smooth_func_dict, get_span_start_stop, interp_pos
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.position.v1.dlc_utils import (
+    _key_to_smooth_func_dict,
+    get_span_start_stop,
+    interp_pos,
+    validate_option,
+    validate_smooth_params,
+)
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .position_dlc_pose_estimation import DLCPoseEstimation
 
 schema = dj.schema("position_v1_dlc_position")
 
 
 @schema
-class DLCSmoothInterpParams(dj.Manual):
+class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
     """
     Parameters for extracting the smoothed head position.
 
@@ -58,8 +65,8 @@ class DLCSmoothInterpParams(dj.Manual):
             "likelihood_thresh": 0.95,
             "interp_params": {"max_cm_to_interp": 15},
             "max_cm_between_pts": 20,
-            # This is for use when finding "good spans" and is how many indices to bridge in between good spans
-            # see inds_to_span in get_good_spans
+            # This is for use when finding "good spans" and is how many indices
+            # to bridge in between good spans see inds_to_span in get_good_spans
             "num_inds_to_span": 20,
         }
         cls.insert1(
@@ -105,60 +112,27 @@ class DLCSmoothInterpParams(dj.Manual):
         return _key_to_smooth_func_dict.keys()
 
     def insert1(self, key, **kwargs):
-        if "params" in key:
-            if not "max_cm_between_pts" in key["params"]:
-                raise KeyError("max_cm_between_pts is a required parameter")
-            if "smooth" in key["params"]:
-                if key["params"]["smooth"]:
-                    if "smoothing_params" in key["params"]:
-                        if "smooth_method" in key["params"]["smoothing_params"]:
-                            smooth_method = key["params"]["smoothing_params"][
-                                "smooth_method"
-                            ]
-                            if smooth_method not in _key_to_smooth_func_dict:
-                                raise KeyError(
-                                    f"smooth_method: {smooth_method} not an available method."
-                                )
-                        if (
-                            not "smoothing_duration"
-                            in key["params"]["smoothing_params"]
-                        ):
-                            raise KeyError(
-                                "smoothing_duration must be passed as a smoothing_params within key['params']"
-                            )
-                        else:
-                            assert isinstance(
-                                key["params"]["smoothing_params"][
-                                    "smoothing_duration"
-                                ],
-                                (float, int),
-                            ), "smoothing_duration must be a float or int"
-                    else:
-                        raise ValueError(
-                            "smoothing_params not in key['params']"
-                        )
-            if "likelihood_thresh" in key["params"]:
-                assert isinstance(
-                    key["params"]["likelihood_thresh"],
-                    float,
-                ), "likelihood_thresh must be a float"
-                assert (
-                    0 < key["params"]["likelihood_thresh"] < 1
-                ), "likelihood_thresh must be between 0 and 1"
-            else:
-                raise ValueError(
-                    "likelihood_thresh must be passed within key['params']"
-                )
-        else:
-            raise KeyError("'params' must be in key")
-        super().insert1(key, **kwargs)
+        params = key.get("params")
+        if not isinstance(params, dict):
+            raise KeyError("'params' must be a dict in key")
 
-    # def delete(self, key, **kwargs):
-    #     super().delete(key, **kwargs)
+        validate_option(
+            option=params.get("max_cm_between_pts"), name="max_cm_between_pts"
+        )
+        validate_smooth_params(params)
+
+        validate_option(
+            params.get("likelihood_thresh"),
+            name="likelihood_thresh",
+            types=(float),
+            val_range=(0, 1),
+        )
+
+        super().insert1(key, **kwargs)
 
 
 @schema
-class DLCSmoothInterpSelection(dj.Manual):
+class DLCSmoothInterpSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> DLCPoseEstimation.BodyPart
     -> DLCSmoothInterpParams
@@ -168,7 +142,7 @@ class DLCSmoothInterpSelection(dj.Manual):
 
 
 @schema
-class DLCSmoothInterp(dj.Computed):
+class DLCSmoothInterp(SpyglassMixin, dj.Computed):
     """
     Interpolates across low likelihood periods and smooths the position
     Can take a few minutes.
@@ -275,17 +249,17 @@ class DLCSmoothInterp(dj.Computed):
                 comments="no comments",
                 description="video_frame_ind",
             )
-            key[
-                "dlc_smooth_interp_position_object_id"
-            ] = nwb_analysis_file.add_nwb_object(
-                analysis_file_name=key["analysis_file_name"],
-                nwb_object=position,
+            key["dlc_smooth_interp_position_object_id"] = (
+                nwb_analysis_file.add_nwb_object(
+                    analysis_file_name=key["analysis_file_name"],
+                    nwb_object=position,
+                )
             )
-            key[
-                "dlc_smooth_interp_info_object_id"
-            ] = nwb_analysis_file.add_nwb_object(
-                analysis_file_name=key["analysis_file_name"],
-                nwb_object=video_frame_ind,
+            key["dlc_smooth_interp_info_object_id"] = (
+                nwb_analysis_file.add_nwb_object(
+                    analysis_file_name=key["analysis_file_name"],
+                    nwb_object=video_frame_ind,
+                )
             )
             nwb_analysis_file.add(
                 nwb_file_name=key["nwb_file_name"],
@@ -293,11 +267,6 @@ class DLCSmoothInterp(dj.Computed):
             )
             self.insert1(key)
             logger.logger.info("inserted entry into DLCSmoothInterp")
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
@@ -343,16 +312,21 @@ def nan_inds(
     inds_to_span: int,
 ):
     idx = pd.IndexSlice
-    # Could either NaN sub-likelihood threshold inds here and then not consider in jumping...
-    # OR just keep in back pocket when checking jumps against last good point
+
+    # Could either NaN sub-likelihood threshold inds here and then not consider
+    # in jumping... OR just keep in back pocket when checking jumps against
+    # last good point
+
     subthresh_inds = get_subthresh_inds(
         dlc_df, likelihood_thresh=likelihood_thresh
     )
     df_subthresh_indices = dlc_df.index[subthresh_inds]
     dlc_df.loc[idx[df_subthresh_indices], idx[("x", "y")]] = np.nan
-    # To further determine which indices are the original point and which are jump points
-    # There could be a more efficient method of doing this
-    # screen inds for jumps to baseline
+
+    # To further determine which indices are the original point and which are
+    # jump points. There could be a more efficient method of doing this screen
+    # inds for jumps to baseline
+
     subthresh_inds_mask = np.zeros(len(dlc_df), dtype=bool)
     subthresh_inds_mask[subthresh_inds] = True
     jump_inds_mask = np.zeros(len(dlc_df), dtype=bool)
@@ -425,8 +399,9 @@ def nan_inds(
 def get_good_spans(bad_inds_mask, inds_to_span: int = 50):
     """
     This function takes in a boolean mask of good and bad indices and
-    determines spans of consecutive good indices. It combines two neighboring spans
-    with a separation of less than inds_to_span and treats them as a single good span.
+    determines spans of consecutive good indices. It combines two neighboring
+    spans with a separation of less than inds_to_span and treats them as a
+    single good span.
 
     Parameters
     ----------
@@ -437,7 +412,8 @@ def get_good_spans(bad_inds_mask, inds_to_span: int = 50):
         be bridged to form a single good span.
         For instance if span A is (1500, 2350) and span B is (2370, 3700),
         then span A and span B would be combined into span A (1500, 3700)
-        since one would want to identify potential jumps in the space in between the original A and B.
+        since one would want to identify potential jumps in the space in between
+        the original A and B.
 
     Returns
     -------
@@ -490,6 +466,6 @@ def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
     nand_inds = np.where(np.isnan(dlc_df["x"]))[0]
     all_nan_inds = list(set(sub_thresh_inds).union(set(nand_inds)))
     all_nan_inds.sort()
-    sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
     # TODO: add option to return sub_thresh_percent
+    # sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
     return all_nan_inds

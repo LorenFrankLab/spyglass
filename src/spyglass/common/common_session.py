@@ -1,19 +1,22 @@
-import os
-
 import datajoint as dj
 
-from ..settings import config, debug_mode
-from ..utils.nwb_helper_fn import get_config, get_nwb_file
-from .common_device import CameraDevice, DataAcquisitionDevice, Probe
-from .common_lab import Institution, Lab, LabMember
-from .common_nwbfile import Nwbfile
-from .common_subject import Subject
+from spyglass.common.common_device import (
+    CameraDevice,
+    DataAcquisitionDevice,
+    Probe,
+)
+from spyglass.common.common_lab import Institution, Lab, LabMember
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_subject import Subject
+from spyglass.settings import config, debug_mode, test_mode
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.nwb_helper_fn import get_config, get_nwb_file
 
 schema = dj.schema("common_session")
 
 
 @schema
-class Session(dj.Imported):
+class Session(SpyglassMixin, dj.Imported):
     definition = """
     # Table for holding experimental sessions.
     # Note that each session can have multiple experimenters and data acquisition devices. See DataAcquisitionDevice
@@ -30,7 +33,7 @@ class Session(dj.Imported):
     experiment_description = NULL: varchar(2000)
     """
 
-    class DataAcquisitionDevice(dj.Part):
+    class DataAcquisitionDevice(SpyglassMixin, dj.Part):
         definition = """
         # Part table that allows a Session to be associated with multiple DataAcquisitionDevice entries.
         -> Session
@@ -41,7 +44,7 @@ class Session(dj.Imported):
         # (see https://docs.datajoint.org/python/computation/03-master-part.html),
         # but you can use `delete(force=True)`.
 
-    class Experimenter(dj.Part):
+    class Experimenter(SpyglassMixin, dj.Part):
         definition = """
         # Part table that allows a Session to be associated with multiple LabMember entries.
         -> Session
@@ -60,39 +63,38 @@ class Session(dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath)
 
-        # certain data are not associated with a single NWB file / session because they may apply to
-        # multiple sessions. these data go into dj.Manual tables.
-        # e.g., a lab member may be associated with multiple experiments, so the lab member table should not
-        # be dependent on (contain a primary key for) a session.
+        # certain data are not associated with a single NWB file / session
+        # because they may apply to multiple sessions. these data go into
+        # dj.Manual tables. e.g., a lab member may be associated with multiple
+        # experiments, so the lab member table should not be dependent on
+        # (contain a primary key for) a session.
 
-        # here, we create new entries in these dj.Manual tables based on the values read from the NWB file
-        # then, they are linked to the session via fields of Session (e.g., Subject, Institution, Lab) or part
+        # here, we create new entries in these dj.Manual tables based on the
+        # values read from the NWB file then, they are linked to the session
+        # via fields of Session (e.g., Subject, Institution, Lab) or part
         # tables (e.g., Experimenter, DataAcquisitionDevice).
 
-        print("Institution...")
+        logger.info("Institution...")
         Institution().insert_from_nwbfile(nwbf)
 
-        print("Lab...")
+        logger.info("Lab...")
         Lab().insert_from_nwbfile(nwbf)
 
-        print("LabMember...")
+        logger.info("LabMember...")
         LabMember().insert_from_nwbfile(nwbf)
 
-        print("Subject...")
+        logger.info("Subject...")
         Subject().insert_from_nwbfile(nwbf)
 
         if not debug_mode:  # TODO: remove when demo files agree on device
-            print("Populate DataAcquisitionDevice...")
+            logger.info("Populate DataAcquisitionDevice...")
             DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
-            print()
 
-        print("Populate CameraDevice...")
+        logger.info("Populate CameraDevice...")
         CameraDevice.insert_from_nwbfile(nwbf)
-        print()
 
-        print("Populate Probe...")
+        logger.info("Populate Probe...")
         Probe.insert_from_nwbfile(nwbf, config)
-        print()
 
         if nwbf.subject is not None:
             subject_id = nwbf.subject.subject_id
@@ -114,16 +116,16 @@ class Session(dj.Imported):
             skip_duplicates=True,
         )
 
-        print("Skipping Apparatus for now...")
+        logger.info("Skipping Apparatus for now...")
         # Apparatus().insert_from_nwbfile(nwbf)
 
         # interval lists depend on Session (as a primary key) but users may want to add these manually so this is
         # a manual table that is also populated from NWB files
 
-        print("IntervalList...")
+        logger.info("IntervalList...")
         IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
-        # print('Unit...')
+        # logger.info('Unit...')
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
         self._add_data_acquisition_device_part(nwb_file_name, nwbf, config)
@@ -141,7 +143,7 @@ class Session(dj.Imported):
                 "data_acquisition_device_name": device_name
             }
             if len(query) == 0:
-                print(
+                logger.warn(
                     f"DataAcquisitionDevice with name {device_name} does not exist. "
                     "Cannot link Session with DataAcquisitionDevice in Session.DataAcquisitionDevice."
                 )
@@ -159,7 +161,7 @@ class Session(dj.Imported):
             # ensure that the foreign key exists and do nothing if not
             query = LabMember & {"lab_member_name": name}
             if len(query) == 0:
-                print(
+                logger.warn(
                     f"LabMember with name {name} does not exist. "
                     "Cannot link Session with LabMember in Session.Experimenter."
                 )
@@ -172,7 +174,7 @@ class Session(dj.Imported):
 
 
 @schema
-class SessionGroup(dj.Manual):
+class SessionGroup(SpyglassMixin, dj.Manual):
     definition = """
     session_group_name: varchar(200)
     ---
@@ -212,6 +214,8 @@ class SessionGroup(dj.Manual):
         *,
         skip_duplicates: bool = False,
     ):
+        if test_mode:
+            skip_duplicates = True
         SessionGroupSession.insert1(
             {
                 "session_group_name": session_group_name,
@@ -221,17 +225,23 @@ class SessionGroup(dj.Manual):
         )
 
     @staticmethod
-    def remove_session_from_group(nwb_file_name: str, session_group_name: str):
+    def remove_session_from_group(
+        nwb_file_name: str, session_group_name: str, *args, **kwargs
+    ):
         query = {
             "session_group_name": session_group_name,
             "nwb_file_name": nwb_file_name,
         }
-        (SessionGroupSession & query).delete()
+        (SessionGroupSession & query).delete(
+            force_permission=test_mode, *args, **kwargs
+        )
 
     @staticmethod
-    def delete_group(session_group_name: str):
+    def delete_group(session_group_name: str, *args, **kwargs):
         query = {"session_group_name": session_group_name}
-        (SessionGroup & query).delete()
+        (SessionGroup & query).delete(
+            force_permission=test_mode, *args, **kwargs
+        )
 
     @staticmethod
     def get_group_sessions(session_group_name: str):
@@ -266,7 +276,7 @@ class SessionGroup(dj.Manual):
 
 
 @schema
-class SessionGroupSession(dj.Manual):
+class SessionGroupSession(SpyglassMixin, dj.Manual):
     definition = """
     -> SessionGroup
     -> Session

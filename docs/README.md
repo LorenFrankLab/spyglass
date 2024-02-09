@@ -16,8 +16,8 @@ The remainder of `mkdocs.yml` specifies the site's
 ## GitHub
 
 Whenever a new tag is pushed, GitHub actions will run
-`.github/workflows/publish-docs.yml`. Progress can be monitored in the
-'Actions' tab within the repo.
+`.github/workflows/publish-docs.yml`. Progress can be monitored in the 'Actions'
+tab within the repo.
 
 Releases should be tagged with `X.Y.Z`. A tag to redeploy docs should use the
 current version, with an alpha release suffix, e.g. `X.Y.Za1`.
@@ -45,9 +45,9 @@ Notably, this will make a copy of notebooks in `docs/src/notebooks`. Changes to
 the root notebooks directory may not be reflected when rebuilding.
 
 Use a browser to navigate to `localhost:8000/` to inspect the site. For
-auto-reload of markdown files during development, use `mkdocs serve -f
-./docs/mkdosc.yaml`. The `mike` package used in the build script manages
-versioning, but does not support dynamic versioning.
+auto-reload of markdown files during development, use
+`mkdocs serve -f ./docs/mkdosc.yaml`. The `mike` package used in the build
+script manages versioning, but does not support dynamic versioning.
 
 The following items can be commented out in `mkdocs.yml` to reduce build time:
 
@@ -55,3 +55,6 @@ The following items can be commented out in `mkdocs.yml` to reduce build time:
 - `mkdocs-jupyter`: Generates tutorial pages from notebooks.
 
 To end the process in your console, use `ctrl+c`.
+
+If your new submodule is causing a build error (e.g., "Could not collect ..."),
+you may need to add `__init__.py` files to the submodule directories.

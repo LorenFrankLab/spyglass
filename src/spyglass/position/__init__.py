@@ -1,1 +1,1 @@
-from .position_merge import PositionOutput
+from spyglass.position.position_merge import PositionOutput

@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
 
-import cv2
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,13 +8,14 @@ import pandas as pd
 import pynwb
 from IPython.display import display
 
-from ...common.common_behav import (
+from spyglass.common.common_behav import (  # noqa: F401
     RawPosition,
     VideoFile,
     convert_epoch_interval_name_to_position_interval_name,
-)  # noqa: F401
+)
+
 from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_helper_fn import fetch_nwb
+from ...utils.dj_mixin import SpyglassMixin
 from .dlc_utils import OutputLogger, infer_output_dir
 from .position_dlc_model import DLCModel
 
@@ -23,7 +23,7 @@ schema = dj.schema("position_v1_dlc_pose_estimation")
 
 
 @schema
-class DLCPoseEstimationSelection(dj.Manual):
+class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> VideoFile                           # Session -> Recording + File part table
     -> DLCModel                                    # Must specify a DLC project_path
@@ -35,10 +35,47 @@ class DLCPoseEstimationSelection(dj.Manual):
     """
 
     @classmethod
+    def get_video_crop(cls, video_path):
+        """
+        Queries the user to determine the cropping parameters for a given video
+
+        Parameters
+        ----------
+        video_path : str
+            path to the video file
+
+        Returns
+        -------
+        crop_ints : list
+            list of 4 integers [x min, x max, y min, y max]
+        """
+        import cv2
+
+        cap = cv2.VideoCapture(video_path)
+        _, frame = cap.read()
+        fig, ax = plt.subplots(figsize=(20, 10))
+        ax.imshow(frame)
+        xlims = ax.get_xlim()
+        ylims = ax.get_ylim()
+        ax.set_xticks(np.arange(xlims[0], xlims[-1], 50))
+        ax.set_yticks(np.arange(ylims[0], ylims[-1], -50))
+        ax.grid(visible=True, color="white", lw=0.5, alpha=0.5)
+        display(fig)
+        crop_input = input(
+            "Please enter the crop parameters for your video in format xmin, xmax, ymin, ymax, or 'none'\n"
+        )
+        plt.close()
+        if crop_input.lower() == "none":
+            return None
+        crop_ints = [int(val) for val in crop_input.split(",")]
+        assert all(isinstance(val, int) for val in crop_ints)
+        return crop_ints
+
+    @classmethod
     def insert_estimation_task(
         cls,
         key,
-        task_mode="trigger",
+        task_mode="trigger",  # load or trigger
         params: dict = None,
         check_crop=None,
         skip_duplicates=True,
@@ -126,7 +163,7 @@ class DLCPoseEstimationSelection(dj.Manual):
 
 
 @schema
-class DLCPoseEstimation(dj.Computed):
+class DLCPoseEstimation(SpyglassMixin, dj.Computed):
     definition = """
     -> DLCPoseEstimationSelection
     ---
@@ -134,7 +171,7 @@ class DLCPoseEstimation(dj.Computed):
     meters_per_pixel : double       # conversion of meters per pixel for analyzed video
     """
 
-    class BodyPart(dj.Part):
+    class BodyPart(SpyglassMixin, dj.Part):
         definition = """ # uses DeepLabCut h5 output for body part position
         -> DLCPoseEstimation
         -> DLCModel.BodyPart
@@ -144,13 +181,7 @@ class DLCPoseEstimation(dj.Computed):
         dlc_pose_estimation_likelihood_object_id : varchar(80)
         """
 
-        def fetch_nwb(self, *attrs, **kwargs):
-            return fetch_nwb(
-                self,
-                (AnalysisNwbfile, "analysis_file_abs_path"),
-                *attrs,
-                **kwargs,
-            )
+        _nwb_table = AnalysisNwbfile
 
         def fetch1_dataframe(self):
             nwb_data = self.fetch_nwb()[0]
@@ -318,17 +349,17 @@ class DLCPoseEstimation(dj.Computed):
                     description="video_frame_ind",
                 )
                 nwb_analysis_file = AnalysisNwbfile()
-                key[
-                    "dlc_pose_estimation_position_object_id"
-                ] = nwb_analysis_file.add_nwb_object(
-                    analysis_file_name=key["analysis_file_name"],
-                    nwb_object=position,
+                key["dlc_pose_estimation_position_object_id"] = (
+                    nwb_analysis_file.add_nwb_object(
+                        analysis_file_name=key["analysis_file_name"],
+                        nwb_object=position,
+                    )
                 )
-                key[
-                    "dlc_pose_estimation_likelihood_object_id"
-                ] = nwb_analysis_file.add_nwb_object(
-                    analysis_file_name=key["analysis_file_name"],
-                    nwb_object=likelihood,
+                key["dlc_pose_estimation_likelihood_object_id"] = (
+                    nwb_analysis_file.add_nwb_object(
+                        analysis_file_name=key["analysis_file_name"],
+                        nwb_object=likelihood,
+                    )
                 )
                 nwb_analysis_file.add(
                     nwb_file_name=key["nwb_file_name"],

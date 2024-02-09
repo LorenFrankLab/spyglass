@@ -7,6 +7,8 @@ import datajoint as dj
 import yaml
 from pymysql.err import OperationalError
 
+from spyglass.utils.logging import logger
+
 
 class SpyglassConfig:
     """Gets Spyglass dirs from dj.config or environment variables.
@@ -18,21 +20,43 @@ class SpyglassConfig:
     facilitate testing.
     """
 
-    def __init__(self, base_dir=None, **kwargs):
+    def __init__(self, base_dir: str = None, **kwargs):
         """
         Initializes a new instance of the class.
 
         Parameters
         ----------
-            base_dir (str): The base directory.
+        base_dir (str)
+            The base directory.
 
-        Returns
-        -------
-            None
+        Attributes
+        ----------
+        supplied_base_dir (str)
+            The base directory passed to the class.
+        config_defaults (dict)
+            Default settings for the config.
+        relative_dirs (dict)
+            Relative dirs for each prefix (spyglass, kachery, dlc). Relative
+            to respective base_dir. Created on init.
+        dj_defaults (dict)
+            Default settings for datajoint.
+        env_defaults (dict)
+            Default settings for environment variables.
+        _config (dict)
+            Cached config settings.
+        _debug_mode (bool)
+            True if debug_mode is set. Supports skipping known bugs in test env.
+        _test_mode (bool)
+            True if test_mode is set. Required for pytests to run without
+            prompts.
         """
         self.supplied_base_dir = base_dir
         self._config = dict()
         self.config_defaults = dict(prepopulate=True)
+        self._debug_mode = kwargs.get("debug_mode", False)
+        self._test_mode = kwargs.get("test_mode", False)
+        self._dlc_base = None
+        self.load_failed = False
 
         self.relative_dirs = {
             # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
@@ -50,8 +74,12 @@ class SpyglassConfig:
                 "storage": "kachery_storage",
                 "temp": "tmp",
             },
+            "dlc": {
+                "project": "projects",
+                "video": "video",
+                "output": "output",
+            },
         }
-
         self.dj_defaults = {
             "database.host": kwargs.get("database_host", "lmf-db.cin.ucsf.edu"),
             "database.user": kwargs.get("database_user"),
@@ -60,14 +88,16 @@ class SpyglassConfig:
             "filepath_checksum_size_limit": 1 * 1024**3,
             "enable_python_native_blobs": True,
         }
-
         self.env_defaults = {
             "FIGURL_CHANNEL": "franklab2",
             "DJ_SUPPORT_FILEPATH_MANAGEMENT": "TRUE",
             "KACHERY_CLOUD_EPHEMERAL": "TRUE",
+            "HD5_USE_FILE_LOCKING": "FALSE",
         }
 
-    def load_config(self, force_reload=False):
+    def load_config(
+        self, base_dir=None, force_reload=False, on_startup: bool = False
+    ):
         """
         Loads the configuration settings for the object.
 
@@ -79,6 +109,9 @@ class SpyglassConfig:
 
         Parameters
         ----------
+        base_dir: str
+            Optional. Default None. The base directory. If not provided, will
+            use the env variable or existing config.
         force_reload: bool
             Optional. Default False. Default skip load if already completed.
 
@@ -92,30 +125,49 @@ class SpyglassConfig:
         dict
             list of relative_dirs and other settings (e.g., prepopulate).
         """
-        if self._config and not force_reload:
+        if not force_reload and self._config:
             return self._config
 
         dj_custom = dj.config.get("custom", {})
         dj_spyglass = dj_custom.get("spyglass_dirs", {})
         dj_kachery = dj_custom.get("kachery_dirs", {})
+        dj_dlc = dj_custom.get("dlc_dirs", {})
+
+        self._debug_mode = dj_custom.get("debug_mode", False)
+        self._test_mode = dj_custom.get("test_mode", False)
 
         resolved_base = (
-            self.supplied_base_dir
+            base_dir
+            or self.supplied_base_dir
             or dj_spyglass.get("base")
             or os.environ.get("SPYGLASS_BASE_DIR")
         )
 
+        if resolved_base and not Path(resolved_base).exists():
+            resolved_base = Path(resolved_base).expanduser()
         if not resolved_base or not Path(resolved_base).exists():
-            raise ValueError(
-                f"Could not find SPYGLASS_BASE_DIR: {resolved_base}"
-                + "\n\tCheck dj.config['custom']['spyglass_dirs']['base']"
-                + "\n\tand os.environ['SPYGLASS_BASE_DIR']"
-            )
+            if not on_startup:  # Only warn if not on startup
+                logger.error(
+                    f"Could not find SPYGLASS_BASE_DIR: {resolved_base}"
+                    + "\n\tCheck dj.config['custom']['spyglass_dirs']['base']"
+                    + "\n\tand os.environ['SPYGLASS_BASE_DIR']"
+                )
+            self.load_failed = True
+            return
 
-        config_dirs = {"SPYGLASS_BASE_DIR": resolved_base}
+        self._dlc_base = (
+            dj_dlc.get("base")
+            or os.environ.get("DLC_BASE_DIR")
+            or os.environ.get("DLC_PROJECT_PATH", "").split("projects")[0]
+            or str(Path(resolved_base) / "deeplabcut")
+        )
+        Path(self._dlc_base).mkdir(exist_ok=True)
+
+        config_dirs = {"SPYGLASS_BASE_DIR": str(resolved_base)}
         for prefix, dirs in self.relative_dirs.items():
+            this_base = self._dlc_base if prefix == "dlc" else resolved_base
             for dir, dir_str in dirs.items():
-                dir_env_fmt = self.dir_to_var(dir, prefix)
+                dir_env_fmt = self.dir_to_var(dir=dir, dir_type=prefix)
 
                 env_loc = (  # Ignore env vars if base was passed to func
                     os.environ.get(dir_env_fmt)
@@ -126,11 +178,12 @@ class SpyglassConfig:
                 dir_location = (
                     dj_spyglass.get(dir)
                     or dj_kachery.get(dir)
+                    or dj_dlc.get(dir)
                     or env_loc
-                    or str(Path(resolved_base) / dir_str)
+                    or str(Path(this_base) / dir_str)
                 ).replace('"', "")
 
-                config_dirs.update({dir_env_fmt: dir_location})
+                config_dirs.update({dir_env_fmt: str(dir_location)})
 
         kachery_zone_dict = {
             "KACHERY_ZONE": (
@@ -147,14 +200,15 @@ class SpyglassConfig:
         self._mkdirs_from_dict_vals(config_dirs)
 
         self._config = dict(
-            debug_mode=dj_custom.get("debug_mode", False),
+            debug_mode=self._debug_mode,
+            test_mode=self._test_mode,
             **self.config_defaults,
             **config_dirs,
             **kachery_zone_dict,
             **loaded_env,
         )
 
-        self._set_dj_config_stores(config_dirs)
+        self._set_dj_config_stores()
 
         return self._config
 
@@ -164,14 +218,15 @@ class SpyglassConfig:
             loaded_dict[var] = os.getenv(var, val)
         return loaded_dict
 
-    @staticmethod
-    def _set_env_with_dict(env_dict):
-        # NOTE: Kept for backwards compatibility. Should be removed in future.
+    def _set_env_with_dict(self, env_dict):
+        # NOTE: Kept for backwards compatibility. Should be removed in future
+        # for custom paths. Keep self.env_defaults.
         for var, val in env_dict.items():
             os.environ[var] = str(val)
 
-    @staticmethod
-    def _mkdirs_from_dict_vals(dir_dict):
+    def _mkdirs_from_dict_vals(self, dir_dict):
+        if self._debug_mode:
+            return
         for dir_str in dir_dict.values():
             Path(dir_str).mkdir(exist_ok=True)
 
@@ -184,48 +239,52 @@ class SpyglassConfig:
         dir_dict: dict
             Dictionary of resolved dirs.
         check_match: bool
-            Optional. Default True. Check that dj.config['stores'] match resolved dirs.
+            Optional. Default True. Check that dj.config['stores'] match
+            resolved dirs.
         set_stores: bool
             Optional. Default True. Set dj.config['stores'] to resolved dirs.
         """
+
+        mismatch_analysis = False
+        mismatch_raw = False
+
         if check_match:
             dj_stores = dj.config.get("stores", {})
-            store_raw = dj_stores.get("raw", {}).get("location")
-            store_analysis = dj_stores.get("analysis", {}).get("location")
-
-            err_template = (
-                "dj.config['stores'] does not match resolved dir."
-                + "\n\tdj.config['stores']['{0}']['location']:\n\t\t{1}"
-                + "\n\tSPYGLASS_{2}_DIR:\n\t\t{3}."
-            )
-            if store_raw and Path(store_raw) != Path(self.raw_dir):
-                raise ValueError(
-                    err_template.format("raw", store_raw, "RAW", self.raw_dir)
-                )
-            if store_analysis and Path(store_analysis) != Path(
+            store_r = dj_stores.get("raw", {}).get("location")
+            store_a = dj_stores.get("analysis", {}).get("location")
+            mismatch_raw = store_r and Path(store_r) != Path(self.raw_dir)
+            mismatch_analysis = store_a and Path(store_a) != Path(
                 self.analysis_dir
-            ):
-                raise ValueError(
-                    err_template.format(
-                        "analysis",
-                        store_analysis,
-                        "ANALYSIS",
-                        self.analysis_dir,
-                    )
-                )
+            )
 
         if set_stores:
+            if mismatch_raw or mismatch_analysis:
+                logger.warning(
+                    "Setting config DJ stores to resolve mismatch.\n\t"
+                    + f"raw     : {self.raw_dir}\n\t"
+                    + f"analysis: {self.analysis_dir}"
+                )
             dj.config.update(self._dj_stores)
+            return
+
+        if mismatch_raw or mismatch_analysis:
+            raise ValueError(
+                "dj.config['stores'] does not match resolved dirs."
+                + f"\n\tdj.config['stores']: {dj_stores}"
+                + f"\n\tResolved dirs: {self._dj_stores}"
+            )
+
+        return
 
     def dir_to_var(self, dir: str, dir_type: str = "spyglass"):
         """Converts a dir string to an env variable name."""
-        dir_string = self.relative_dirs.get(dir_type, {}).get(dir, "base")
-        return f"{dir_type.upper()}_{dir_string.upper()}_DIR"
+        return f"{dir_type.upper()}_{dir.upper()}_DIR"
 
     def _generate_dj_config(
         self,
         base_dir: str = None,
         database_user: str = None,
+        database_password: str = None,
         database_host: str = "lmf-db.cin.ucsf.edu",
         database_port: int = 3306,
         database_use_tls: bool = True,
@@ -235,11 +294,11 @@ class SpyglassConfig:
 
         Parameters
         ----------
-        base_dir : str, optional
-            The base directory. If not provided, will use the env variable or
-            existing config.
         database_user : str, optional
             The database user. If not provided, resulting config will not
+            specify.
+        database_password : str, optional
+            The database password. If not provided, resulting config will not
             specify.
         database_host : str, optional
             Default lmf-db.cin.ucsf.edu. MySQL host name.
@@ -252,12 +311,10 @@ class SpyglassConfig:
             Note: python will raise error for params with `.` in name.
         """
 
-        if base_dir:
-            self.supplied_base_dir = base_dir
-            self.load_config(force_reload=True)
-
         if database_user:
             kwargs.update({"database.user": database_user})
+        if database_password:
+            kwargs.update({"database.password": database_password})
 
         kwargs.update(
             {
@@ -273,9 +330,8 @@ class SpyglassConfig:
     def save_dj_config(
         self,
         save_method: str = "global",
-        filename: str = None,
+        output_filename: str = None,
         base_dir=None,
-        database_user=None,
         set_password=True,
         **kwargs,
     ):
@@ -286,35 +342,51 @@ class SpyglassConfig:
         save_method : {'local', 'global', 'custom'}, optional
             The method to use to save the config. If either 'local' or 'global',
             datajoint builtins will be used to save.
-        filename : str or Path, optional
+        output_filename : str or Path, optional
             Default to datajoint global config. If save_method = 'custom', name
             of file to generate. Must end in either be either yaml or json.
         base_dir : str, optional
             The base directory. If not provided, will default to the env var
-        database_user : str, optional
-            The database user. If not provided, resulting config will not
-            specify.
         set_password : bool, optional
             Default True. Set the database password.
+        kwargs: dict, optional
+            Any other valid datajoint configuration parameters, including
+            database_user, database_password, database_host, database_port, etc.
+            Note: python will raise error for params with `.` in name, so use
+            underscores instead.
         """
-        if save_method == "local":
-            filepath = Path(".") / dj.settings.LOCALCONFIG
-        elif not filename or save_method == "global":
-            save_method = "global"
-            filepath = Path("~").expanduser() / dj.settings.GLOBALCONFIG
-
-        dj.config.update(
-            self._generate_dj_config(
-                base_dir=base_dir, database_user=database_user, **kwargs
+        if base_dir:
+            self.load_config(
+                base_dir=base_dir, force_reload=True, on_startup=False
             )
-        )
+
+        if output_filename:
+            save_method = "custom"
+            path = Path(output_filename).expanduser()  # Expand ~
+            filepath = path if path.is_absolute() else path.absolute()
+            filepath.parent.mkdir(exist_ok=True, parents=True)
+            filepath = (
+                filepath.with_suffix(".json")  # ensure suffix, default json
+                if filepath.suffix not in [".json", ".yaml"]
+                else filepath
+            )
+        elif save_method == "local":
+            filepath = Path(".") / dj.settings.LOCALCONFIG
+        elif save_method == "global":
+            filepath = Path("~").expanduser() / dj.settings.GLOBALCONFIG
+        else:
+            raise ValueError(
+                "For save_dj_config, either (a) save_method must be 'local' "
+                + " or 'global' or (b) must provide custom output_filename."
+            )
+
+        dj.config.update(self._generate_dj_config(**kwargs))
 
         if set_password:
             try:
                 dj.set_password()
             except OperationalError as e:
-                warnings.warn(f"Database connection issues. Wrong pass? {e}")
-                # NOTE: Save anyway? Or raise error?
+                warnings.warn(f"Database connection issues. Wrong pass?\n\t{e}")
 
         user_warn = (
             f"Replace existing file? {filepath.resolve()}\n\t"
@@ -322,8 +394,12 @@ class SpyglassConfig:
             + "\n"
         )
 
-        if filepath.exists() and dj.utils.user_choice(user_warn)[0] != "y":
-            return dj.config
+        if (
+            not self.test_mode
+            and filepath.exists()
+            and dj.utils.user_choice(user_warn)[0] != "y"
+        ):
+            return
 
         if save_method == "global":
             dj.config.save_global(verbose=True)
@@ -333,11 +409,12 @@ class SpyglassConfig:
             dj.config.save_local(verbose=True)
             return
 
-        with open(filename, "w") as outfile:
-            if filename.endswith("json"):
-                json.dump(dj.config, outfile, indent=2)
+        with open(filepath, "w") as outfile:
+            if filepath.suffix == ".yaml":
+                yaml.dump(dj.config._conf, outfile, default_flow_style=False)
             else:
-                yaml.dump(dj.config, outfile, default_flow_style=False)
+                json.dump(dj.config._conf, outfile, indent=2)
+            logger.info(f"Saved config to {filepath}")
 
     @property
     def _dj_stores(self) -> dict:
@@ -363,6 +440,7 @@ class SpyglassConfig:
         return {
             "custom": {
                 "debug_mode": str(self.debug_mode).lower(),
+                "test_mode": str(self._test_mode).lower(),
                 "spyglass_dirs": {
                     "base": self.base_dir,
                     "raw": self.raw_dir,
@@ -380,7 +458,13 @@ class SpyglassConfig:
                     "storage": self.config.get(
                         self.dir_to_var("storage", "kachery")
                     ),
-                    "temp": self.config.get(self.dir_to_var("tmp", "kachery")),
+                    "temp": self.config.get(self.dir_to_var("temp", "kachery")),
+                },
+                "dlc_dirs": {
+                    "base": self._dlc_base,
+                    "project": self.dlc_project_dir,
+                    "video": self.dlc_video_dir,
+                    "output": self.dlc_output_dir,
                 },
                 "kachery_zone": "franklab.default",
             }
@@ -429,16 +513,64 @@ class SpyglassConfig:
 
     @property
     def debug_mode(self) -> bool:
-        return self.config.get("debug_mode", False)
+        """Returns True if debug_mode is set.
+
+        Supports skipping inserts for Dockerized development.
+        """
+        return self._debug_mode
+
+    @property
+    def test_mode(self) -> bool:
+        """Returns True if test_mode is set.
+
+        Required for pytests to run without prompts."""
+        return self._test_mode
+
+    @property
+    def dlc_project_dir(self) -> str:
+        return self.config.get(self.dir_to_var("project", "dlc"))
+
+    @property
+    def dlc_video_dir(self) -> str:
+        return self.config.get(self.dir_to_var("video", "dlc"))
+
+    @property
+    def dlc_output_dir(self) -> str:
+        return self.config.get(self.dir_to_var("output", "dlc"))
 
 
 sg_config = SpyglassConfig()
-config = sg_config.config
-base_dir = sg_config.base_dir
-raw_dir = sg_config.raw_dir
-recording_dir = sg_config.recording_dir
-temp_dir = sg_config.temp_dir
-analysis_dir = sg_config.analysis_dir
-sorting_dir = sg_config.sorting_dir
-waveform_dir = sg_config.waveform_dir
-debug_mode = sg_config.debug_mode
+sg_config.load_config(on_startup=True)
+if sg_config.load_failed:  # Failed to load
+    logger.warning("Failed to load SpyglassConfig. Please set up config file.")
+    config = {}  # Let __intit__ fetch empty config for first time setup
+    prepopulate = False
+    test_mode = False
+    debug_mode = False
+    base_dir = None
+    raw_dir = None
+    recording_dir = None
+    temp_dir = None
+    analysis_dir = None
+    sorting_dir = None
+    waveform_dir = None
+    video_dir = None
+    dlc_project_dir = None
+    dlc_video_dir = None
+    dlc_output_dir = None
+else:
+    config = sg_config.config
+    base_dir = sg_config.base_dir
+    raw_dir = sg_config.raw_dir
+    recording_dir = sg_config.recording_dir
+    temp_dir = sg_config.temp_dir
+    analysis_dir = sg_config.analysis_dir
+    sorting_dir = sg_config.sorting_dir
+    waveform_dir = sg_config.waveform_dir
+    video_dir = sg_config.video_dir
+    debug_mode = sg_config.debug_mode
+    test_mode = sg_config.test_mode
+    prepopulate = config.get("prepopulate", False)
+    dlc_project_dir = sg_config.dlc_project_dir
+    dlc_video_dir = sg_config.dlc_video_dir
+    dlc_output_dir = sg_config.dlc_output_dir

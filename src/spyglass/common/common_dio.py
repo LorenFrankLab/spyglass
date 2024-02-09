@@ -4,18 +4,18 @@ import numpy as np
 import pandas as pd
 import pynwb
 
-from ..utils.dj_helper_fn import fetch_nwb  # dj_replace
-from ..utils.nwb_helper_fn import get_data_interface, get_nwb_file
-from .common_ephys import Raw
-from .common_interval import IntervalList
-from .common_nwbfile import Nwbfile
-from .common_session import Session  # noqa: F401
+from spyglass.common.common_ephys import Raw
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.nwb_helper_fn import get_data_interface, get_nwb_file
 
 schema = dj.schema("common_dio")
 
 
 @schema
-class DIOEvents(dj.Imported):
+class DIOEvents(SpyglassMixin, dj.Imported):
     definition = """
     -> Session
     dio_event_name: varchar(80)   # the name assigned to this DIO event
@@ -23,6 +23,8 @@ class DIOEvents(dj.Imported):
     dio_object_id: varchar(40)    # the object id of the data in the NWB file
     -> IntervalList               # the list of intervals for this object
     """
+
+    _nwb_table = Nwbfile
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]
@@ -33,7 +35,7 @@ class DIOEvents(dj.Imported):
             nwbf, "behavioral_events", pynwb.behavior.BehavioralEvents
         )
         if behav_events is None:
-            print(
+            logger.warn(
                 "No conforming behavioral events data interface found in "
                 + f"{nwb_file_name}\n"
             )
@@ -48,10 +50,7 @@ class DIOEvents(dj.Imported):
             key["dio_object_id"] = event_series.object_id
             self.insert1(key, skip_duplicates=True)
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(self, (Nwbfile, "nwb_file_abs_path"), *attrs, **kwargs)
-
-    def plot_all_dio_events(self):
+    def plot_all_dio_events(self, return_fig=False):
         """Plot all DIO events in the session.
 
         Examples
@@ -118,3 +117,6 @@ class DIOEvents(dj.Imported):
             plt.suptitle(f"DIO events in {nwb_file_names[0]}")
         else:
             plt.suptitle(f"DIO events in {', '.join(nwb_file_names)}")
+
+        if return_fig:
+            return plt.gcf()

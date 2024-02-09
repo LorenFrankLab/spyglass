@@ -5,6 +5,8 @@ from pathlib import Path, PosixPath, PurePath
 import datajoint as dj
 import ruamel.yaml as yaml
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from . import dlc_reader
 from .dlc_decorators import accepts
 from .position_dlc_project import BodyPart, DLCProject  # noqa: F401
@@ -14,7 +16,7 @@ schema = dj.schema("position_v1_dlc_model")
 
 
 @schema
-class DLCModelInput(dj.Manual):
+class DLCModelInput(SpyglassMixin, dj.Manual):
     """Table to hold model path if model is being input
     from local disk instead of Spyglass
     """
@@ -44,7 +46,7 @@ class DLCModelInput(dj.Manual):
 
 
 @schema
-class DLCModelSource(dj.Manual):
+class DLCModelSource(SpyglassMixin, dj.Manual):
     """Table to determine whether model originates from
     upstream DLCModelTraining table, or from local directory
     """
@@ -56,7 +58,7 @@ class DLCModelSource(dj.Manual):
     source         : enum ('FromUpstream', 'FromImport')
     """
 
-    class FromImport(dj.Part):
+    class FromImport(SpyglassMixin, dj.Part):
         definition = """
         -> DLCModelSource
         -> DLCModelInput
@@ -64,7 +66,7 @@ class DLCModelSource(dj.Manual):
         project_path : varchar(255)
         """
 
-    class FromUpstream(dj.Part):
+    class FromUpstream(SpyglassMixin, dj.Part):
         definition = """
         -> DLCModelSource
         -> DLCModelTraining
@@ -107,7 +109,7 @@ class DLCModelSource(dj.Manual):
 
 
 @schema
-class DLCModelParams(dj.Manual):
+class DLCModelParams(SpyglassMixin, dj.Manual):
     definition = """
     dlc_model_params_name: varchar(40)
     ---
@@ -138,7 +140,7 @@ class DLCModelParams(dj.Manual):
 
 
 @schema
-class DLCModelSelection(dj.Manual):
+class DLCModelSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> DLCModelSource
     -> DLCModelParams
@@ -147,7 +149,7 @@ class DLCModelSelection(dj.Manual):
 
 
 @schema
-class DLCModel(dj.Computed):
+class DLCModel(SpyglassMixin, dj.Computed):
     definition = """
     -> DLCModelSelection
     ---
@@ -166,7 +168,7 @@ class DLCModel(dj.Computed):
     """
     # project_path is the only item required downstream in the pose schema
 
-    class BodyPart(dj.Part):
+    class BodyPart(SpyglassMixin, dj.Part):  # noqa: F811
         definition = """
         -> DLCModel
         -> BodyPart
@@ -175,93 +177,85 @@ class DLCModel(dj.Computed):
     def make(self, key):
         from deeplabcut.utils.auxiliaryfunctions import GetScorerName
 
-        from .dlc_utils import OutputLogger
-
         _, model_name, table_source = (DLCModelSource & key).fetch1().values()
         SourceTable = getattr(DLCModelSource, table_source)
         params = (DLCModelParams & key).fetch1("params")
         project_path = (SourceTable & key).fetch1("project_path")
-        with OutputLogger(
-            name="DLC_project_{project_name}_model_{model_name}",
-            path=f"{Path(project_path).as_posix()}/log.log",
-        ) as logger:
-            if not isinstance(project_path, PosixPath):
-                project_path = Path(project_path)
-            config_query = PurePath(project_path, Path("*config.y*ml"))
-            available_config = glob.glob(config_query.as_posix())
-            dj_config = [path for path in available_config if "dj_dlc" in path]
-            if len(dj_config) > 0:
-                config_path = Path(dj_config[0])
-            elif len(available_config) == 1:
-                config_path = Path(available_config[0])
-            else:
-                config_path = PurePath(project_path, Path("config.yaml"))
-            if not config_path.exists():
-                raise OSError(f"config_path {config_path} does not exist.")
-            if config_path.suffix in (".yml", ".yaml"):
-                with open(config_path, "rb") as f:
-                    dlc_config = yaml.safe_load(f)
-                if isinstance(params["params"], dict):
-                    dlc_config.update(params["params"])
-                    del params["params"]
-            # TODO: clean-up. this feels sloppy
-            shuffle = params.pop("shuffle", 1)
-            trainingsetindex = params.pop("trainingsetindex", None)
-            if not isinstance(trainingsetindex, int):
-                raise KeyError("no trainingsetindex specified in key")
-            model_prefix = params.pop("model_prefix", "")
-            model_description = params.pop("model_description", model_name)
-            paramset_name = params.pop("dlc_training_params_name", None)
+        if not isinstance(project_path, PosixPath):
+            project_path = Path(project_path)
+        config_query = PurePath(project_path, Path("*config.y*ml"))
+        available_config = glob.glob(config_query.as_posix())
+        dj_config = [path for path in available_config if "dj_dlc" in path]
+        if len(dj_config) > 0:
+            config_path = Path(dj_config[0])
+        elif len(available_config) == 1:
+            config_path = Path(available_config[0])
+        else:
+            config_path = PurePath(project_path, Path("config.yaml"))
+        if not config_path.exists():
+            raise OSError(f"config_path {config_path} does not exist.")
+        if config_path.suffix in (".yml", ".yaml"):
+            with open(config_path, "rb") as f:
+                dlc_config = yaml.safe_load(f)
+            if isinstance(params["params"], dict):
+                dlc_config.update(params["params"])
+                del params["params"]
+        # TODO: clean-up. this feels sloppy
+        shuffle = params.pop("shuffle", 1)
+        trainingsetindex = params.pop("trainingsetindex", None)
+        if not isinstance(trainingsetindex, int):
+            raise KeyError("no trainingsetindex specified in key")
+        model_prefix = params.pop("model_prefix", "")
+        model_description = params.pop("model_description", model_name)
+        _ = params.pop("dlc_training_params_name", None)
 
-            needed_attributes = [
-                "Task",
-                "date",
-                "iteration",
-                "snapshotindex",
-                "TrainingFraction",
-            ]
-            for attribute in needed_attributes:
-                assert (
-                    attribute in dlc_config
-                ), f"Couldn't find {attribute} in config"
+        needed_attributes = [
+            "Task",
+            "date",
+            "iteration",
+            "snapshotindex",
+            "TrainingFraction",
+        ]
+        for attribute in needed_attributes:
+            assert (
+                attribute in dlc_config
+            ), f"Couldn't find {attribute} in config"
 
-            scorer_legacy = str_to_bool(dlc_config.get("scorer_legacy", "f"))
+        scorer_legacy = str_to_bool(dlc_config.get("scorer_legacy", "f"))
 
-            dlc_scorer = GetScorerName(
-                cfg=dlc_config,
-                shuffle=shuffle,
-                trainFraction=dlc_config["TrainingFraction"][
-                    int(trainingsetindex)
-                ],
-                modelprefix=model_prefix,
-            )[scorer_legacy]
-            if dlc_config["snapshotindex"] == -1:
-                dlc_scorer = "".join(dlc_scorer.split("_")[:-1])
+        dlc_scorer = GetScorerName(
+            cfg=dlc_config,
+            shuffle=shuffle,
+            trainFraction=dlc_config["TrainingFraction"][int(trainingsetindex)],
+            modelprefix=model_prefix,
+        )[scorer_legacy]
+        if dlc_config["snapshotindex"] == -1:
+            dlc_scorer = "".join(dlc_scorer.split("_")[:-1])
 
-            # ---- Insert ----
-            model_dict = {
-                "dlc_model_name": model_name,
-                "model_description": model_description,
-                "scorer": dlc_scorer,
-                "task": dlc_config["Task"],
-                "date": dlc_config["date"],
-                "iteration": dlc_config["iteration"],
-                "snapshotindex": dlc_config["snapshotindex"],
-                "shuffle": shuffle,
-                "trainingsetindex": int(trainingsetindex),
-                "project_path": project_path,
-                "config_template": dlc_config,
-            }
-            part_key = key.copy()
-            key.update(model_dict)
-            # ---- Save DJ-managed config ----
-            _ = dlc_reader.save_yaml(project_path, dlc_config)
+        # ---- Insert ----
+        model_dict = {
+            "dlc_model_name": model_name,
+            "model_description": model_description,
+            "scorer": dlc_scorer,
+            "task": dlc_config["Task"],
+            "date": dlc_config["date"],
+            "iteration": dlc_config["iteration"],
+            "snapshotindex": dlc_config["snapshotindex"],
+            "shuffle": shuffle,
+            "trainingsetindex": int(trainingsetindex),
+            "project_path": project_path,
+            "config_template": dlc_config,
+        }
+        part_key = key.copy()
+        key.update(model_dict)
+        # ---- Save DJ-managed config ----
+        _ = dlc_reader.save_yaml(project_path, dlc_config)
 
-            # ____ Insert into table ----
-            self.insert1(key)
-            self.BodyPart.insert(
-                {**part_key, "bodypart": bp} for bp in dlc_config["bodyparts"]
-            )
+        # ____ Insert into table ----
+        self.insert1(key)
+        self.BodyPart.insert(
+            {**part_key, "bodypart": bp} for bp in dlc_config["bodyparts"]
+        )
         print(
             f"Finished inserting {model_name}, training iteration"
             f" {dlc_config['iteration']} into DLCModel"
@@ -269,7 +263,7 @@ class DLCModel(dj.Computed):
 
 
 @schema
-class DLCModelEvaluation(dj.Computed):
+class DLCModelEvaluation(SpyglassMixin, dj.Computed):
     definition = """
     -> DLCModel
     ---

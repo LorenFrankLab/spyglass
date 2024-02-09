@@ -2,8 +2,10 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import sortingview.views as vv
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
+from scipy.stats import zscore
 
 from spyglass.common.common_interval import (
     IntervalList,
@@ -11,8 +13,9 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
+from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.position import PositionOutput
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("ripple_v1")
@@ -41,13 +44,13 @@ def interpolate_to_new_time(
 
 
 @schema
-class RippleLFPSelection(dj.Manual):
+class RippleLFPSelection(SpyglassMixin, dj.Manual):
     definition = """
      -> LFPBandV1
      group_name = 'CA1' : varchar(80)
      """
 
-    class RippleLFPElectrode(dj.Part):
+    class RippleLFPElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> RippleLFPSelection
         -> LFPBandSelection.LFPBandElectrode
@@ -57,7 +60,7 @@ class RippleLFPSelection(dj.Manual):
     def validate_key(key):
         filter_name = (LFPBandV1 & key).fetch1("filter_name")
         if "ripple" not in filter_name.lower():
-            raise UserWarning("Please use a ripple filter")
+            raise ValueError("Please use a ripple filter")
 
     @staticmethod
     def set_lfp_electrodes(
@@ -96,7 +99,7 @@ class RippleLFPSelection(dj.Manual):
                 .loc[:, LFPBandSelection.LFPBandElectrode.primary_key]
             )
         except KeyError as err:
-            print(err)
+            logger.debug(err)
             raise KeyError(
                 "Attempting to use electrode_ids that aren't in the associated"
                 " LFPBand filtered dataset."
@@ -117,7 +120,7 @@ class RippleLFPSelection(dj.Manual):
 
 
 @schema
-class RippleParameters(dj.Lookup):
+class RippleParameters(SpyglassMixin, dj.Lookup):
     definition = """
     ripple_param_name : varchar(80) # a name for this set of parameters
     ----
@@ -144,23 +147,20 @@ class RippleParameters(dj.Lookup):
 
 
 @schema
-class RippleTimesV1(dj.Computed):
+class RippleTimesV1(SpyglassMixin, dj.Computed):
     definition = """
     -> RippleLFPSelection
     -> RippleParameters
     -> PositionOutput.proj(pos_merge_id='merge_id')
-
     ---
     -> AnalysisNwbfile
     ripple_times_object_id : varchar(40)
      """
 
     def make(self, key):
-        nwb_file_name, interval_list_name = (LFPBandV1 & key).fetch1(
-            "nwb_file_name", "target_interval_list_name"
-        )
+        nwb_file_name = (LFPBandV1 & key).fetch1("nwb_file_name")
 
-        print(f"Computing ripple times for: {key}")
+        logger.info(f"Computing ripple times for: {key}")
         ripple_params = (
             RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
         ).fetch1("ripple_param_dict")
@@ -172,9 +172,7 @@ class RippleTimesV1(dj.Computed):
             speed,
             interval_ripple_lfps,
             sampling_frequency,
-        ) = self.get_ripple_lfps_and_position_info(
-            key, nwb_file_name, interval_list_name
-        )
+        ) = self.get_ripple_lfps_and_position_info(key)
         ripple_times = RIPPLE_DETECTION_ALGORITHMS[ripple_detection_algorithm](
             time=np.asarray(interval_ripple_lfps.index),
             filtered_lfps=np.asarray(interval_ripple_lfps),
@@ -196,11 +194,6 @@ class RippleTimesV1(dj.Computed):
 
         self.insert1(key)
 
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
-
     def fetch1_dataframe(self):
         """Convenience function for returning the marks in a readable format"""
         return self.fetch_dataframe()[0]
@@ -209,9 +202,7 @@ class RippleTimesV1(dj.Computed):
         return [data["ripple_times"] for data in self.fetch_nwb()]
 
     @staticmethod
-    def get_ripple_lfps_and_position_info(
-        key, nwb_file_name, interval_list_name
-    ):
+    def get_ripple_lfps_and_position_info(key):
         ripple_params = (
             RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
         ).fetch1("ripple_param_dict")
@@ -225,7 +216,7 @@ class RippleTimesV1(dj.Computed):
         # warn/validate that there is only one wire per electrode
         ripple_lfp_nwb = (LFPBandV1 & key).fetch_nwb()[0]
         ripple_lfp_electrodes = ripple_lfp_nwb["lfp_band"].electrodes.data[:]
-        elec_mask = np.full_like(ripple_lfp_electrodes, 0, dtype=bool)
+        elec_mask = np.zeros_like(ripple_lfp_electrodes, dtype=bool)
         valid_elecs = [
             elec for elec in electrode_keys if elec in ripple_lfp_electrodes
         ]
@@ -236,16 +227,14 @@ class RippleTimesV1(dj.Computed):
         ripple_lfp = pd.DataFrame(
             ripple_lfp_nwb["lfp_band"].data,
             index=pd.Index(ripple_lfp_nwb["lfp_band"].timestamps, name="time"),
-        )
+        ).loc[:, elec_mask]
         sampling_frequency = ripple_lfp_nwb["lfp_band_sampling_rate"]
-
-        ripple_lfp = ripple_lfp.loc[:, elec_mask]
 
         position_valid_times = (
             IntervalList
             & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": interval_list_name,
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["target_interval_list_name"],
             }
         ).fetch1("valid_times")
         position_info = (
@@ -372,3 +361,130 @@ class RippleTimesV1(dj.Computed):
         )
         ax.set_ylabel("LFPs")
         ax.set_xlabel("Time [s]")
+
+    def create_figurl(
+        self,
+        zscore_ripple=False,
+        ripple_times_color="red",
+        consensus_color="black",
+        speed_color="black",
+        view_height=800,
+        use_ripple_filtered_lfps=False,
+        lfp_offset=1,
+        lfp_channel_ind=None,
+    ):
+
+        ripple_times = self.fetch1_dataframe()
+
+        def _add_ripple_times(
+            view,
+            ripple_times=ripple_times,
+            ripple_times_color=ripple_times_color,
+        ):
+            return view.add_interval_series(
+                name="Ripple Events",
+                t_start=ripple_times.start_time.to_numpy(),
+                t_end=ripple_times.end_time.to_numpy(),
+                color=ripple_times_color,
+            )
+
+        key = self.fetch1("KEY")
+        (
+            speed,
+            ripple_filtered_lfps,
+            sampling_frequency,
+        ) = self.get_ripple_lfps_and_position_info(key)
+        ripple_consensus_trace = self.get_Kay_ripple_consensus_trace(
+            ripple_filtered_lfps, sampling_frequency
+        )
+
+        if zscore_ripple:
+            ripple_consensus_trace = zscore(ripple_consensus_trace)
+
+        consensus_view = _add_ripple_times(vv.TimeseriesGraph())
+        consensus_name = (
+            "Z-Scored Consensus Trace" if zscore_ripple else "Consensus Trace"
+        )
+        consensus_view.add_line_series(
+            name=consensus_name,
+            t=np.asarray(ripple_consensus_trace.index).squeeze(),
+            y=np.asarray(ripple_consensus_trace, dtype=np.float32).squeeze(),
+            color=consensus_color,
+            width=1,
+        )
+        if zscore_ripple:
+            ripple_params = (
+                RippleParameters
+                & {"ripple_param_name": key["ripple_param_name"]}
+            ).fetch1("ripple_param_dict")
+
+            zscore_threshold = ripple_params["ripple_detection_params"].get(
+                "zscore_threshold"
+            )
+            if zscore_threshold is not None:
+                consensus_view.add_line_series(
+                    name="Z-Score Threshold",
+                    t=np.asarray(ripple_consensus_trace.index).squeeze(),
+                    y=np.ones_like(
+                        ripple_consensus_trace, dtype=np.float32
+                    ).squeeze()
+                    * zscore_threshold,
+                    color=ripple_times_color,
+                    width=1,
+                )
+
+        if use_ripple_filtered_lfps:
+            interval_ripple_lfps = ripple_filtered_lfps
+        else:
+            lfp_merge_id = (LFPBandSelection & key).fetch1("lfp_merge_id")
+            lfp_df = (LFPOutput & {"merge_id": lfp_merge_id}).fetch1_dataframe()
+            interval_ripple_lfps = lfp_df.loc[speed.index[0] : speed.index[-1]]
+        if lfp_channel_ind is not None:
+            if lfp_channel_ind.max() >= interval_ripple_lfps.shape[1]:
+                raise ValueError(
+                    "lfp_channel_ind is out of range for the number of LFPs"
+                )
+            interval_ripple_lfps = interval_ripple_lfps.iloc[:, lfp_channel_ind]
+
+        lfp_view = _add_ripple_times(vv.TimeseriesGraph())
+        max_lfp_value = interval_ripple_lfps.to_numpy().max()
+        lfp_offset *= max_lfp_value
+
+        for i, lfp in enumerate(interval_ripple_lfps.to_numpy().T):
+            lfp_view.add_line_series(
+                name=f"LFP {i}",
+                t=np.asarray(interval_ripple_lfps.index).squeeze(),
+                y=np.asarray(lfp + lfp_offset * i, dtype=np.int16).squeeze(),
+                color="black",
+                width=1,
+            )
+        speed_view = _add_ripple_times(vv.TimeseriesGraph())
+        speed_view.add_line_series(
+            name="Speed [cm/s]",
+            t=np.asarray(speed.index).squeeze(),
+            y=np.asarray(speed, dtype=np.float32).squeeze(),
+            color=speed_color,
+            width=1,
+        )
+        vertical_panel_content = [
+            vv.LayoutItem(consensus_view, stretch=2, title="Consensus"),
+            vv.LayoutItem(lfp_view, stretch=8, title="LFPs"),
+            vv.LayoutItem(speed_view, stretch=2, title="Speed"),
+        ]
+
+        view = vv.Box(
+            direction="horizontal",
+            show_titles=True,
+            height=view_height,
+            items=[
+                vv.LayoutItem(
+                    vv.Box(
+                        direction="vertical",
+                        show_titles=True,
+                        items=vertical_panel_content,
+                    )
+                ),
+            ],
+        )
+
+        return view.url(label="Ripple Detection")

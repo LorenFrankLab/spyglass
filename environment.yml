@@ -1,39 +1,50 @@
+# 1. Install a conda distribution.
+#    https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html
+# 2. Run: `mamba env create -f environment.yml`
+# 3. Activate: `conda activate spyglass`
+#
+# (lines intentionally left blank)
+#
+#
 name: spyglass
 channels:
   - conda-forge
   - defaults
+  # - pytorch # dlc-only
   - franklab
   - edeno
 dependencies:
-  - python>=3.9,<3.10
+  - bottleneck
+  # - cudatoolkit=11.3 # dlc-only
+  # - ffmpeg # dlc-only
+  - ipympl
   - jupyterlab>=3.*
-  - pydotplus
-  - dask
+  # - libgcc # dlc-only
+  - matplotlib
+  - non_local_detector
+  - numpy<1.24
   - pip
   - position_tools
-  - numpy<1.24
-  - track_linearization>=2.3
-  - replay_trajectory_classification
+  - pybind11  # req by mountainsort4 -> isosplit5
+  - pydotplus
+  - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
+  - python>=3.9,<3.10
+  - pytorch<1.12.0
   - ripple_detection
-  - trajectory_analysis_tools
-  - matplotlib
   - seaborn
-  - bottleneck
-  - ipympl
-  - tqdm
-  - pyfftw<=0.12.0  # used by ghostipy. install from conda-forge so that it works on Mac ARM processors
+  # - torchaudio # dlc-only
+  # - torchvision # dlc-only
+  - track_linearization>=2.3
   - pip:
-      - pubnub<6.4.0
-      - spikeinterface>=0.98.2,<0.99
-      - pynwb>=2.2.0,<3
-      - hdmf>=3.4.6
-      - datajoint>=0.13.6
-      - ghostipy
-      - pymysql
-      - sortingview>=0.11
-      - figurl-jupyter
-      - git+https://github.com/LorenFrankLab/ndx-franklab-novela.git
-      - pyyaml
-      - click
       - "black[jupyter]"
+      - datajoint>=0.13.6
+      # - deeplabcut<2.3.0 # dlc-only
+      - ghostipy # for common_filter
+      - ndx-franklab-novela>=0.1.0
+      - mountainsort4
+      - panel<=1.3.5 # See panel #6325
+      - pubnub<=6.4.0
+      - pynwb>=2.2.0,<3
+      - sortingview>=0.11
+      - spikeinterface>=0.98.2,<0.99
       - .

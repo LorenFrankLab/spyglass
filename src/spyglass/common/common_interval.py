@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from spyglass.utils import SpyglassMixin, logger
+
 from .common_session import Session  # noqa: F401
 
 schema = dj.schema("common_interval")
@@ -14,13 +16,14 @@ schema = dj.schema("common_interval")
 
 
 @schema
-class IntervalList(dj.Manual):
+class IntervalList(SpyglassMixin, dj.Manual):
     definition = """
     # Time intervals used for analysis
     -> Session
     interval_list_name: varchar(170)  # descriptive name of this interval list
     ---
     valid_times: longblob  # numpy array with start/end times for each interval
+    pipeline = "": varchar(64)  # type of interval list (e.g. 'position', 'spikesorting_recording_v1')
     """
 
     # See #630, #664. Excessive key length.
@@ -45,7 +48,7 @@ class IntervalList(dj.Manual):
             table.
         """
         if nwbf.epochs is None:
-            print("No epochs found in NWB file.")
+            logger.info("No epochs found in NWB file.")
             return
 
         epochs = nwbf.epochs.to_dataframe()
@@ -53,9 +56,11 @@ class IntervalList(dj.Manual):
         for _, epoch_data in epochs.iterrows():
             epoch_dict = {
                 "nwb_file_name": nwb_file_name,
-                "interval_list_name": epoch_data.tags[0]
-                if epoch_data.tags
-                else f"interval_{epoch_data[0]}",
+                "interval_list_name": (
+                    epoch_data.tags[0]
+                    if epoch_data.tags
+                    else f"interval_{epoch_data[0]}"
+                ),
                 "valid_times": np.asarray(
                     [[epoch_data.start_time, epoch_data.stop_time]]
                 ),
@@ -63,7 +68,7 @@ class IntervalList(dj.Manual):
 
             cls.insert1(epoch_dict, skip_duplicates=True)
 
-    def plot_intervals(self, figsize=(20, 5)):
+    def plot_intervals(self, figsize=(20, 5), return_fig=False):
         interval_list = pd.DataFrame(self)
         fig, ax = plt.subplots(figsize=figsize)
         interval_count = 0
@@ -81,8 +86,10 @@ class IntervalList(dj.Manual):
         ax.set_yticklabels(interval_list.interval_list_name)
         ax.set_xlabel("Time [s]")
         ax.grid(True)
+        if return_fig:
+            return fig
 
-    def plot_epoch_pos_raw_intervals(self, figsize=(20, 5)):
+    def plot_epoch_pos_raw_intervals(self, figsize=(20, 5), return_fig=False):
         interval_list = pd.DataFrame(self)
         fig, ax = plt.subplots(figsize=(30, 3))
 
@@ -142,6 +149,8 @@ class IntervalList(dj.Manual):
         ax.set_yticklabels(["pos valid times", "raw data valid times", "epoch"])
         ax.set_xlabel("Time [s]")
         ax.grid(True)
+        if return_fig:
+            return fig
 
 
 def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
@@ -488,3 +497,44 @@ def interval_set_difference_inds(intervals1, intervals2):
                 i += 1
     result += intervals1[i:]
     return result
+
+
+def interval_list_complement(intervals1, intervals2, min_length=0.0):
+    """
+    Finds intervals in intervals1 that are not in intervals2
+
+    Parameters
+    ----------
+    min_length : float, optional
+        Minimum interval length in seconds. Defaults to 0.0.
+    """
+
+    result = []
+
+    for start1, end1 in intervals1:
+        subtracted = [(start1, end1)]
+
+        for start2, end2 in intervals2:
+            new_subtracted = []
+
+            for s, e in subtracted:
+                if start2 <= s and e <= end2:
+                    continue
+
+                if e <= start2 or end2 <= s:
+                    new_subtracted.append((s, e))
+                    continue
+
+                if start2 > s:
+                    new_subtracted.append((s, start2))
+
+                if end2 < e:
+                    new_subtracted.append((end2, e))
+
+            subtracted = new_subtracted
+
+        result.extend(subtracted)
+
+    return intervals_by_length(
+        np.asarray(result), min_length=min_length, max_length=1e100
+    )

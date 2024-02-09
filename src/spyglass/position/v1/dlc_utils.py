@@ -18,7 +18,104 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
-from ...settings import raw_dir
+from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
+
+
+def validate_option(
+    option=None,
+    options: list = None,
+    name="option",
+    types: tuple = None,
+    val_range: tuple = None,
+    permit_none=False,
+):
+    """Validate that option is in a list options or a list of types.
+
+    Parameters
+    ----------
+    option : str, optional
+        If none, runs no checks.
+    options : lis, optional
+        If provided, option must be in options.
+    name : st, optional
+        If provided, name of option to use in error message.
+    types : tuple, optional
+        If provided, option must be an instance of one of the types in types.
+    val_range : tuple, optional
+        If provided, option must be in range (min, max)
+    permit_none : bool, optional
+        If True, permit option to be None. Default False.
+
+    Raises
+    ------
+    ValueError
+        If option is not in options.
+    """
+    if option is None and not permit_none:
+        raise ValueError(f"{name} cannot be None")
+
+    if options and option not in options:
+        raise KeyError(
+            f"Unknown {name}: {option} " f"Available options: {options}"
+        )
+
+    if types and not isinstance(option, tuple(types)):
+        raise TypeError(f"{name} is {type(option)}. Available types {types}")
+
+    if val_range and not (val_range[0] <= option <= val_range[1]):
+        raise ValueError(f"{name} must be in range {val_range}")
+
+
+def validate_list(
+    required_items: list,
+    option_list: list = None,
+    name="List",
+    condition="",
+    permit_none=False,
+):
+    """Validate that option_list contains all items in required_items.
+
+    Parameters
+    ---------
+    required_items : list
+    option_list : list, optional
+        If provided, option_list must contain all items in required_items.
+    name : str, optional
+        If provided, name of option_list to use in error message.
+    condition : str, optional
+        If provided, condition in error message as 'when using X'.
+    permit_none : bool, optional
+        If True, permit option_list to be None. Default False.
+    """
+    if option_list is None:
+        if permit_none:
+            return
+        else:
+            raise ValueError(f"{name} cannot be None")
+    if condition:
+        condition = f" when using {condition}"
+    if any(x not in required_items for x in option_list):
+        raise KeyError(
+            f"{name} must contain all items in {required_items}{condition}."
+        )
+
+
+def validate_smooth_params(params):
+    """If params['smooth'], validate method is in list and duration type"""
+    if not params.get("smooth"):
+        return
+    smoothing_params = params.get("smoothing_params")
+    validate_option(smoother=smoothing_params, name="smoothing_params")
+    validate_option(
+        option=smoothing_params.get("smooth_method"),
+        name="smooth_method",
+        options=_key_to_smooth_func_dict,
+    )
+    validate_option(
+        option=smoothing_params.get("smoothing_duration"),
+        name="smoothing_duration",
+        types=(int, float),
+    )
 
 
 def _set_permissions(directory, mode, username: str, groupname: str = None):
@@ -59,7 +156,7 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
             os.chmod(os.path.join(dirpath, filename), mode)
 
 
-class OutputLogger:
+class OutputLogger:  # TODO: migrate to spyglass.utils.logger
     """
     A class to wrap a logging.Logger object in order to provide context manager capabilities.
 
@@ -284,7 +381,7 @@ def infer_output_dir(key, makedir=True):
     # TODO: add check to make sure interval_list_name refers to a single epoch
     # Or make key include epoch in and of itself instead of interval_list_name
     nwb_file_name = key["nwb_file_name"].split("_.")[0]
-    output_dir = pathlib.Path(os.getenv("DLC_OUTPUT_PATH")) / pathlib.Path(
+    output_dir = pathlib.Path(dlc_output_dir) / pathlib.Path(
         f"{nwb_file_name}/{nwb_file_name}_{key['epoch']:02}"
         f"_model_" + key["dlc_model_name"].replace(" ", "-")
     )
@@ -348,7 +445,7 @@ def get_video_path(key):
 
 def check_videofile(
     video_path: Union[str, pathlib.PosixPath],
-    output_path: Union[str, pathlib.PosixPath] = os.getenv("DLC_VIDEO_PATH"),
+    output_path: Union[str, pathlib.PosixPath] = dlc_video_dir,
     video_filename: str = None,
     video_filetype: str = "h264",
 ):
@@ -684,6 +781,7 @@ def make_video(
     video_filename,
     video_frame_inds,
     position_mean,
+    orientation_mean,
     centroids,
     likelihoods,
     position_time,
@@ -702,7 +800,7 @@ def make_video(
 
     RGB_PINK = (234, 82, 111)
     RGB_YELLOW = (253, 231, 76)
-    RGB_WHITE = (255, 255, 255)
+    # RGB_WHITE = (255, 255, 255)
     RGB_BLUE = (30, 144, 255)
     RGB_ORANGE = (255, 127, 80)
     #     "#29ff3e",
@@ -749,10 +847,12 @@ def make_video(
                 key: fill_nan(
                     position_mean[key]["orientation"], video_time, position_time
                 )
-                for key in orientation_mean.keys()
+                for key in position_mean.keys()
+                # CBroz: Bug was here, using nonexistent orientation_mean dict
             }
         print(
-            f"frames start: {frames[0]}\nvideo_frames start: {video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
+            f"frames start: {frames[0]}\nvideo_frames start: "
+            + f"{video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
         )
         for time_ind in tqdm(
             frames, desc="frames", disable=disable_progressbar
@@ -921,12 +1021,9 @@ def make_video(
 
         position_mean = position_mean["DLC"]
         orientation_mean = orientation_mean["DLC"]
-        frame_offset = -1
-        time_slice = []
         video_slowdown = 1
-        vmax = 0.07  # ?
-        # Set up formatting for the movie files
 
+        # Set up formatting for the movie files
         window_size = 501
         if likelihoods:
             plot_likelihood = True
@@ -1034,16 +1131,7 @@ def make_video(
                 f"time = {time_delta:3.4f}s\n frame = {frame_ind}",
                 fontsize=8,
             )
-            fontprops = fm.FontProperties(size=12)
-            #     scalebar = AnchoredSizeBar(axes[0].transData,
-            #                                20, '20 cm', 'lower right',
-            #                                pad=0.1,
-            #                                color='white',
-            #                                frameon=False,
-            #                                size_vertical=1,
-            #                                fontproperties=fontprops)
-
-            #     axes[0].add_artist(scalebar)
+            _ = fm.FontProperties(size=12)
             axes[0].axis("off")
             if plot_likelihood:
                 likelihood_objs = {
@@ -1173,10 +1261,6 @@ def make_video(
                     centroid_position_dot,
                     orientation_line,
                     title,
-                    # redC_likelihood,
-                    # green_likelihood,
-                    # redL_likelihood,
-                    # redR_likelihood,
                 )
 
             movie = animation.FuncAnimation(

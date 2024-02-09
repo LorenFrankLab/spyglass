@@ -6,14 +6,19 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 from datajoint.utils import to_camel_case
-from tqdm import tqdm as tqdm
 
-from ..common.common_position import IntervalPositionInfo as CommonPos
-from ..utils.dj_merge_tables import _Merge
-from .v1.dlc_utils import check_videofile, get_video_path, make_video
-from .v1.position_dlc_pose_estimation import DLCPoseEstimationSelection
-from .v1.position_dlc_selection import DLCPosV1
-from .v1.position_trodes_position import TrodesPosV1
+from spyglass.common.common_position import IntervalPositionInfo as CommonPos
+from spyglass.position.v1.dlc_utils import (
+    check_videofile,
+    get_video_path,
+    make_video,
+)
+from spyglass.position.v1.position_dlc_pose_estimation import (
+    DLCPoseEstimationSelection,
+)
+from spyglass.position.v1.position_dlc_selection import DLCPosV1
+from spyglass.position.v1.position_trodes_position import TrodesPosV1
+from spyglass.utils import SpyglassMixin, _Merge, logger
 
 schema = dj.schema("position_merge")
 
@@ -25,7 +30,7 @@ source_class_dict = {
 
 
 @schema
-class PositionOutput(_Merge):
+class PositionOutput(_Merge, SpyglassMixin):
     """
     Table to identify source of Position Information from upstream options
     (e.g. DLC, Trodes, etc...) To add another upstream option, a new Part table
@@ -38,7 +43,7 @@ class PositionOutput(_Merge):
     source: varchar(32)
     """
 
-    class DLCPosV1(dj.Part):
+    class DLCPosV1(SpyglassMixin, dj.Part):
         """
         Table to pass-through upstream DLC Pose Estimation information
         """
@@ -49,7 +54,7 @@ class PositionOutput(_Merge):
         -> DLCPosV1
         """
 
-    class TrodesPosV1(dj.Part):
+    class TrodesPosV1(SpyglassMixin, dj.Part):
         """
         Table to pass-through upstream Trodes Position Tracking information
         """
@@ -60,7 +65,7 @@ class PositionOutput(_Merge):
         -> TrodesPosV1
         """
 
-    class CommonPos(dj.Part):
+    class CommonPos(SpyglassMixin, dj.Part):
         """
         Table to pass-through upstream Trodes Position Tracking information
         """
@@ -74,7 +79,7 @@ class PositionOutput(_Merge):
     def fetch1_dataframe(self):
         # proj replaces operator restriction to enable
         # (TableName & restriction).fetch1_dataframe()
-        key = self.merge_restrict(self.proj())
+        key = self.merge_restrict(self.proj()).proj()
         query = (
             source_class_dict[
                 to_camel_case(self.merge_get_parent(self.proj()).table_name)
@@ -85,7 +90,7 @@ class PositionOutput(_Merge):
 
 
 @schema
-class PositionVideoSelection(dj.Manual):
+class PositionVideoSelection(SpyglassMixin, dj.Manual):
     definition = """
     nwb_file_name           : varchar(255)                 # name of the NWB file
     interval_list_name      : varchar(170)                 # descriptive name of this interval list
@@ -119,7 +124,7 @@ class PositionVideoSelection(dj.Manual):
 
 
 @schema
-class PositionVideo(dj.Computed):
+class PositionVideo(SpyglassMixin, dj.Computed):
     """Creates a video of the computed head position and orientation as well as
     the original LED positions overlaid on the video of the animal.
 
@@ -141,7 +146,7 @@ class PositionVideo(dj.Computed):
         M_TO_CM = 100
         output_dir = (PositionVideoSelection & key).fetch1("output_dir")
 
-        print("Loading position data...")
+        logger.info("Loading position data...")
         # raw_position_df = (
         #     RawPosition()
         #     & {
@@ -206,7 +211,8 @@ class PositionVideo(dj.Computed):
                 pos_df[["orientation"]]
             )
 
-        print("Loading video data...")
+        logger.info("Loading video data...")
+        epoch = int("".join(filter(str.isdigit, key["interval_list_name"]))) + 1
 
         (
             video_path,
@@ -214,13 +220,7 @@ class PositionVideo(dj.Computed):
             meters_per_pixel,
             video_time,
         ) = get_video_path(
-            {
-                "nwb_file_name": key["nwb_file_name"],
-                "epoch": int(
-                    "".join(filter(str.isdigit, key["interval_list_name"]))
-                )
-                + 1,
-            }
+            {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         )
         video_dir = os.path.dirname(video_path) + "/"
         video_frame_col_name = [
@@ -246,7 +246,7 @@ class PositionVideo(dj.Computed):
         # centroids = {'red': np.asarray(raw_position_df[['xloc', 'yloc']]),
         #              'green':  np.asarray(raw_position_df[['xloc2', 'yloc2']])}
 
-        print("Making video...")
+        logger.info("Making video...")
 
         make_video(
             video_path,

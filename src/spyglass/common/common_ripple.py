@@ -4,13 +4,11 @@ import numpy as np
 import pandas as pd
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
-from spyglass.common import (
-    IntervalList,  # noqa
-    IntervalPositionInfo,
-)
-from spyglass.common import LFPBand, LFPBandSelection
+
+from spyglass.common import IntervalList  # noqa
+from spyglass.common import IntervalPositionInfo, LFPBand, LFPBandSelection
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("common_ripple")
 
@@ -35,13 +33,13 @@ def interpolate_to_new_time(
 
 
 @schema
-class RippleLFPSelection(dj.Manual):
+class RippleLFPSelection(SpyglassMixin, dj.Manual):
     definition = """
      -> LFPBand
      group_name = 'CA1' : varchar(80)
      """
 
-    class RippleLFPElectrode(dj.Part):
+    class RippleLFPElectrode(SpyglassMixin, dj.Part):
         definition = """
         -> RippleLFPSelection
         -> LFPBandSelection.LFPBandElectrode
@@ -50,7 +48,7 @@ class RippleLFPSelection(dj.Manual):
     def insert1(self, key, **kwargs):
         filter_name = (LFPBand & key).fetch1("filter_name")
         if "ripple" not in filter_name.lower():
-            raise UserWarning("Please use a ripple filter")
+            logger.warning("Please use a ripple filter")
         super().insert1(key, **kwargs)
 
     @staticmethod
@@ -102,7 +100,7 @@ class RippleLFPSelection(dj.Manual):
 
 
 @schema
-class RippleParameters(dj.Lookup):
+class RippleParameters(SpyglassMixin, dj.Lookup):
     definition = """
     ripple_param_name : varchar(80) # a name for this set of parameters
     ----
@@ -129,7 +127,7 @@ class RippleParameters(dj.Lookup):
 
 
 @schema
-class RippleTimes(dj.Computed):
+class RippleTimes(SpyglassMixin, dj.Computed):
     definition = """
     -> RippleParameters
     -> RippleLFPSelection
@@ -140,7 +138,7 @@ class RippleTimes(dj.Computed):
      """
 
     def make(self, key):
-        print(f"Computing ripple times for: {key}")
+        logger.info(f"Computing ripple times for: {key}")
         ripple_params = (
             RippleParameters & {"ripple_param_name": key["ripple_param_name"]}
         ).fetch1("ripple_param_dict")
@@ -177,11 +175,6 @@ class RippleTimes(dj.Computed):
         )
 
         self.insert1(key)
-
-    def fetch_nwb(self, *attrs, **kwargs):
-        return fetch_nwb(
-            self, (AnalysisNwbfile, "analysis_file_abs_path"), *attrs, **kwargs
-        )
 
     def fetch1_dataframe(self):
         """Convenience function for returning the marks in a readable format"""

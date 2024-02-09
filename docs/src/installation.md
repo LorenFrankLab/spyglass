@@ -25,7 +25,7 @@ pip install spikeinterface[full,widgets]
 pip install mountainsort4
 ```
 
-WARNING: If you are on an M1 Mac, you need to install `pyfftw` via `conda`
+__WARNING:__ If you are on an M1 Mac, you need to install `pyfftw` via `conda`
 BEFORE installing `ghostipy`:
 
 ```bash
@@ -49,41 +49,30 @@ additional details, see the
 
 #### Via File (Recommended)
 
-A `dj_local_conf.json` file in your Spyglass directory (or wherever python is
-launched) can hold all the specifics needed to connect to a database. This can
-include different directories for different pipelines. If only the `base` is
-specified, the subfolder names below are included as defaults.
-
-```json
-{
-  "custom": {
-    "database.prefix": "username_",
-    "spyglass_dirs": {
-      "base": "/your/base/path",
-      "raw": "/your/base/path/raw",
-      "analysis": "/your/base/path/analysis",
-      "recording": "/your/base/path/recording",
-      "spike_sorting_storage": "/your/base/path/spikesorting",
-      "waveforms": "/your/base/path/waveforms",
-      "temp": "/your/base/path/tmp"
-    }
-  }
-}
-```
-
-`dj_local_conf_example.json` can be copied and saved as `dj_local_conf.json`
-to set the configuration for a given folder. Alternatively, it can be saved as
-`.datajoint_config.json` in a user's home directory to be accessed globally.
-See
+A `dj_local_conf.json` file in your current directory when launching python can
+hold all the specifics needed to connect to a database. This can include
+different directories for different pipelines. If only the Spyglass `base` is
+specified, other subfolder names are assumed from defaults. See
+`dj_local_conf_example.json` for the full set of options. This example can be
+copied and saved as `dj_local_conf.json` to set the configuration for a given
+folder. Alternatively, it can be saved as `.datajoint_config.json` in a user's
+home directory to be accessed globally. See
 [DataJoint docs](https://datajoint.com/docs/core/datajoint-python/0.14/quick-start/#connection)
 for more details.
+
+Note that raw and analysis folder locations should be specified under both
+`stores` and `custom` sections of the config file. The `stores` section is used
+by DataJoint to store the location of files referenced in database, while the
+`custom` section is used by Spyglass. Spyglass will check that these sections
+match on startup.
 
 #### Via Environment Variables
 
 Older versions of Spyglass relied exclusively on environment for config. If
 `spyglass_dirs` is not found in the config file, Spyglass will look for
 environment variables. These can be set either once in a terminal session, or
-permanently in a `.bashrc` file.
+permanently in a unix settings file (e.g., `.bashrc` or `.bash_profile`) in your
+home directory.
 
 ```bash
 export SPYGLASS_BASE_DIR="/stelmo/nwb"
@@ -100,8 +89,14 @@ To load variables from a `.bashrc` file, run `source ~/.bashrc` in a terminal.
 #### Temporary directory
 
 A temporary directory will speed up spike sorting. If unspecified by either
-method above, it will be assumed as a `tmp` subfolder relative to the base
-path. Be sure it has enough free space (ideally at least 500GB).
+method above, it will be assumed as a `tmp` subfolder relative to the base path.
+Be sure it has enough free space (ideally at least 500GB).
+
+#### Subfolders
+
+If subfolders do not exist, they will be created automatically. If unspecified
+by either method above, they will be assumed as `recording`, `sorting`, `video`,
+etc. subfolders relative to the base path.
 
 ## File manager
 
@@ -109,8 +104,9 @@ path. Be sure it has enough free space (ideally at least 500GB).
 manager for Frank Lab collaborators who do not have access to the lab's
 production database.
 
-To customize `kachery` file paths, the following can similarly be pasted into
-your `.bashrc`. If unspecified, the defaults below are assumed.
+To customize `kachery` file paths, see `dj_local_conf_example.json` or set the
+following variables in your unix settings file (e.g., `.bashrc`). If
+unspecified, the defaults below are assumed.
 
 ```bash
 export KACHERY_CLOUD_DIR="$SPYGLASS_BASE_DIR/.kachery-cloud"
@@ -123,3 +119,9 @@ Be sure to load these with `source ~/.bashrc` to persist changes.
 
 Finally, open up a python console (e.g., run `ipython` from terminal) and import
 `spyglass` to check that the installation has worked.
+
+```python
+from spyglass.common import Nwbfile
+
+Nwbfile()
+```

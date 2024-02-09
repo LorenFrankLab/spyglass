@@ -1,10 +1,12 @@
 import datajoint as dj
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 schema = dj.schema("common_region")
 
 
 @schema
-class BrainRegion(dj.Lookup):
+class BrainRegion(SpyglassMixin, dj.Lookup):
     definition = """
     region_id: smallint auto_increment
     ---
