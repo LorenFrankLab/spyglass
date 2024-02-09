@@ -171,18 +171,6 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
                 color=mua_times_color,
                 width=1,
             )
-        # spike_times = SortedSpikesGroup.fetch_spike_data(key)
-        # raster_view = vv.RasterPlot(
-        #     start_time_sec=time[0],
-        #     end_time_sec=time[-1],
-        #     plots=[
-        #         vv.RasterPlotItem(
-        #             unit_id=str(i),
-        #             spike_times_sec=np.asarray(times, dtype=np.float32),
-        #         )
-        #         for i, times in enumerate(spike_times)
-        #     ],
-        # )
         speed_view = vv.TimeseriesGraph().add_line_series(
             name="Speed [cm/s]",
             t=np.asarray(time),
@@ -200,7 +188,6 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
             vv.LayoutItem(
                 multiunit_firing_rate_view, stretch=2, title="Multiunit"
             ),
-            # vv.LayoutItem(raster_view, stretch=8, title="Raster"),
             vv.LayoutItem(speed_view, stretch=2, title="Speed"),
         ]
 
