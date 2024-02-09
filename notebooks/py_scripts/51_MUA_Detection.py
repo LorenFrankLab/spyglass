@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.1
+#       jupytext_version: 1.16.0
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -75,8 +75,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 fig, axes = plt.subplots(2, 1, sharex=True, figsize=(15, 4))
-time, multiunit_firing_rate = (MuaEventsV1).get_firing_rate(mua_key)
 speed = MuaEventsV1.get_speed(mua_key).to_numpy()
+time = speed.index.to_numpy()
+multiunit_firing_rate = MuaEventsV1.get_firing_rate(mua_key, time)
 
 time_slice = slice(
     np.searchsorted(time, mua_times.loc[10].start_time) - 1_000,
