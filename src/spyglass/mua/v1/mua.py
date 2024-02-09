@@ -107,15 +107,8 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         return [data["mua_times"] for data in self.fetch_nwb()]
 
     @classmethod
-    def get_firing_rate(cls, key):
-        time = cls.get_speed(key).index.to_numpy()
-
-        spike_indicator = SortedSpikesGroup.get_spike_indicator(key, time)
-        spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
-
-        return time, SortedSpikesGroup.get_firing_rate(
-            key, time, multiunit=True
-        )
+    def get_firing_rate(cls, key, time):
+        return SortedSpikesGroup.get_firing_rate(key, time, multiunit=True)
 
     @staticmethod
     def get_speed(key):
@@ -136,8 +129,9 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         view_height=800,
     ):
         key = self.fetch1("KEY")
-
-        time, multiunit_firing_rate = self.get_firing_rate(key)
+        speed = self.get_speed(key)
+        time = speed.index.to_numpy()
+        multiunit_firing_rate = self.get_firing_rate(key, time)
         if zscore_mua:
             multiunit_firing_rate = zscore(multiunit_firing_rate)
 
@@ -174,7 +168,7 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         speed_view = vv.TimeseriesGraph().add_line_series(
             name="Speed [cm/s]",
             t=np.asarray(time),
-            y=np.asarray(self.get_speed(key), dtype=np.float32),
+            y=np.asarray(speed, dtype=np.float32),
             color=speed_color,
             width=1,
         )
