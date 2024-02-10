@@ -1,6 +1,6 @@
 # Change Log
 
-## [0.4.4] (Unreleased)
+## [0.5.0] (February 9, 2024)
 
 ### Infrastructure
 
@@ -159,4 +159,4 @@
 [0.4.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.1
 [0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
 [0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
-[0.4.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.4
+[0.5.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.0
