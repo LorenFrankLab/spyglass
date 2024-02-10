@@ -17,12 +17,13 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
-from spyglass.spikesorting.imported import ImportedSpikeSorting
 from spyglass.utils import logger
 
 
 def populate_all_common(nwb_file_name):
     """Insert all common tables for a given NWB file."""
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
+
     key = [(Nwbfile & f"nwb_file_name LIKE '{nwb_file_name}'").proj()]
     tables = [
         Session,
