@@ -21,6 +21,12 @@ jobs:
       contents: write
       issues: write
     steps:
+      - name: Get version
+        uses: actions/checkout@v3
+        run: |
+          echo "MAJOR_VERSION=${GITHUB_REF#refs/*/}" | cut -c1-3 >> $GITHUB_ENV
+          echo ${{ env.MAJOR_VERSION }}
+
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
