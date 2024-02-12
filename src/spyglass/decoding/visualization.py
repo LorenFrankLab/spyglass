@@ -532,7 +532,7 @@ def create_interactive_2D_decoding_figurl(
     marks: xr.DataArray,
     results: xr.Dataset,
     bin_size: float,
-    position_name: list[str] = ["head_position_x", "head_position_y"],
+    position_name: list = ["head_position_x", "head_position_y"],
     head_direction_name: str = "head_orientation",
     speed_name: str = "head_speed",
     posterior_type: str = "acausal_posterior",

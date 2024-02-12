@@ -372,7 +372,7 @@ class SpikeSortingRecording(dj.Computed):
         if os.path.exists(key["recording_path"]):
             shutil.rmtree(key["recording_path"])
         recording = recording.save(
-            folder=key["recording_path"], chunk_duration="10000ms", n_jobs=8
+            folder=key["recording_path"], chunk_duration="10000ms", n_jobs=1
         )
 
         self.insert1(key)
