@@ -61,7 +61,7 @@ def get_valid_ephys_position_times_from_interval(
     )
 
 
-def get_epoch_interval_names(nwb_file_name: str) -> list[str]:
+def get_epoch_interval_names(nwb_file_name: str) -> list:
     """Find the interval names that are epochs.
 
     Parameters
@@ -86,7 +86,7 @@ def get_epoch_interval_names(nwb_file_name: str) -> list[str]:
 
 def get_valid_ephys_position_times_by_epoch(
     nwb_file_name: str,
-) -> dict[str, np.ndarray]:
+) -> dict:
     """Get the valid ephys position times for each epoch.
 
     Parameters
@@ -123,7 +123,7 @@ def convert_epoch_interval_name_to_position_interval_name(
     return f"pos {pos_interval_number} valid times"
 
 
-def convert_valid_times_to_slice(valid_times: np.ndarray) -> list[slice]:
+def convert_valid_times_to_slice(valid_times: np.ndarray) -> list:
     """Converts the valid times to a list of slices so that arrays can be indexed easily.
 
     Parameters
@@ -140,8 +140,8 @@ def convert_valid_times_to_slice(valid_times: np.ndarray) -> list[slice]:
 
 
 def create_model_for_multiple_epochs(
-    epoch_names: list[str], env_kwargs: dict
-) -> tuple[list[ObservationModel], list[Environment], list[list[object]]]:
+    epoch_names: list, env_kwargs: dict
+):
     """Creates the observation model, environment, and continuous transition types for multiple epochs for decoding
 
     Parameters

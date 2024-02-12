@@ -654,7 +654,7 @@ def get_decoding_data_for_epoch(
     interval_list_name: str,
     position_info_param_name: str = "default_decoding",
     additional_mark_keys: dict = {},
-) -> tuple[pd.DataFrame, xr.DataArray, list[slice]]:
+):
     """Collects necessary data for decoding.
 
     Parameters
@@ -710,10 +710,10 @@ def get_decoding_data_for_epoch(
 
 def get_data_for_multiple_epochs(
     nwb_file_name: str,
-    epoch_names: list[str],
+    epoch_names: list,
     position_info_param_name="default_decoding",
     additional_mark_keys: dict = {},
-) -> tuple[pd.DataFrame, xr.DataArray, dict[str, list[slice]], np.ndarray]:
+):
     """Collects necessary data for decoding multiple environments
 
     Parameters

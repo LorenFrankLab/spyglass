@@ -66,7 +66,7 @@ def _to_dict(transition: object) -> dict:
     return parameters
 
 
-def _convert_transitions_to_dict(transitions: list[list[object]]) -> list[list[dict]]:
+def _convert_transitions_to_dict(transitions: list) -> list:
     """Converts a list of lists of transition classes into a list of lists of dictionaries"""
     return [
         [_to_dict(transition) for transition in transition_rows]
