@@ -92,6 +92,7 @@ class TaskEpoch(dj.Imported):
      -> [nullable] CameraDevice
      -> IntervalList
      task_environment = NULL: varchar(200)  # the environment the animal was in
+     camera_names : blob # a list of keys corresponding to entry in CameraDevice
      """
 
     def make(self, key):
@@ -124,11 +125,22 @@ class TaskEpoch(dj.Imported):
                 # get the CameraDevice used for this task (primary key is camera name so we need
                 # to map from ID to name)
                 camera_id = int(task.camera_id[0])
-                if camera_id in camera_names:
-                    key["camera_name"] = camera_names[camera_id]
+                # get the CameraDevice used for this task (primary key is camera name so we need
+                # to map from ID to name)
+                camera_ids = task.camera_id[0]
+                valid_camera_ids = [
+                    camera_id
+                    for camera_id in camera_ids
+                    if camera_id in camera_names.keys()
+                ]
+                if valid_camera_ids:
+                    key["camera_names"] = [
+                        {"camera_name": camera_names[camera_id]}
+                        for camera_id in valid_camera_ids
+                    ]
                 else:
                     print(
-                        f"No camera device found with ID {camera_id} in NWB file {nwbf}\n"
+                        f"No camera device found with ID {camera_ids} in NWB file {nwbf}\n"
                     )
 
                 # Add task environment

@@ -671,6 +671,10 @@ class LFPBand(dj.Computed):
 
         # load in the timestamps
         timestamps = np.asarray(lfp_object.timestamps)
+        
+        # lead nan timestamps out. Patchwork by Shijie: find out in LFP processing why nan is introduced
+        timestamps = timestamps[~np.isnan(timestamps)]
+        
         # get the indices of the first timestamp and the last timestamp that are within the valid times
         included_indices = interval_list_contains_ind(lfp_band_valid_times, timestamps)
         # pad the indices by 1 on each side to avoid message in filter_data
