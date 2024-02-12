@@ -2,11 +2,15 @@ import os
 
 import datajoint as dj
 
+from spyglass.utils import SpyglassMixin, logger
+
 schema = dj.schema("file_lock")
+
+from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 
 
 @schema
-class NwbfileLock(dj.Manual):
+class NwbfileLock(SpyglassMixin, dj.Manual):
     definition = """
     -> Nwbfile
     """
@@ -19,7 +23,7 @@ class NwbfileLock(dj.Manual):
         if os.path.exists(os.getenv("NWB_LOCK_FILE")):
             lock_file = open(os.getenv("NWB_LOCK_FILE"), "r")
             for line in lock_file:
-                print(line)
+                logger.info(line)
                 key = {"nwb_file_name": line.strip()}
                 self.insert1(key, skip_duplicates="True")
             lock_file.close()
@@ -27,7 +31,7 @@ class NwbfileLock(dj.Manual):
 
 
 @schema
-class AnalysisNwbfileLock(dj.Manual):
+class AnalysisNwbfileLock(SpyglassMixin, dj.Manual):
     definition = """
     -> AnalysisNwbfile
     """

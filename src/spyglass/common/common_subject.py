@@ -1,10 +1,12 @@
 import datajoint as dj
 
+from spyglass.utils import SpyglassMixin, logger
+
 schema = dj.schema("common_subject")
 
 
 @schema
-class Subject(dj.Manual):
+class Subject(SpyglassMixin, dj.Manual):
     definition = """
     subject_id: varchar(80)
     ---
@@ -17,10 +19,10 @@ class Subject(dj.Manual):
 
     @classmethod
     def insert_from_nwbfile(cls, nwbf):
-        """Get the subject information from the NWBFile and insert it into the Subject table."""
+        """Get the subject info from the NWBFile, insert into the Subject."""
         sub = nwbf.subject
         if sub is None:
-            print("No subject metadata found.\n")
+            logger.warn("No subject metadata found.\n")
             return
         subject_dict = dict()
         subject_dict["subject_id"] = sub.subject_id

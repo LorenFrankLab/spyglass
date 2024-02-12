@@ -1,24 +1,32 @@
-import stat
-import glob
-import shutil
-import os
-from itertools import combinations
-from typing import List, Dict, Union
-from pathlib import Path, PosixPath
+import copy
 import getpass
-import ruamel.yaml
+import glob
+import os
+import shutil
+import stat
+from itertools import combinations
+from pathlib import Path, PosixPath
+from typing import Dict, List, Union
+
+import datajoint as dj
 import numpy as np
 import pandas as pd
-import datajoint as dj
-from ...common.common_lab import LabTeam
-from .dlc_utils import check_videofile, _set_permissions, get_video_path
+import ruamel.yaml
 
+from spyglass.common.common_lab import LabTeam
+from spyglass.position.v1.dlc_utils import (
+    _set_permissions,
+    check_videofile,
+    get_video_path,
+)
+from spyglass.settings import dlc_project_dir, dlc_video_dir
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("position_v1_dlc_project")
 
 
 @schema
-class BodyPart(dj.Manual):
+class BodyPart(SpyglassMixin, dj.Manual):
     """Holds bodyparts for use in DeepLabCut models"""
 
     definition = """
@@ -36,7 +44,7 @@ class BodyPart(dj.Manual):
         ----------
         bodyparts : List
             list of bodyparts from config
-        description : List, default None
+        descriptions : List, default None
             optional list of descriptions for bodyparts.
             If None, description is set to bodypart name
         """
@@ -53,7 +61,7 @@ class BodyPart(dj.Manual):
 
 
 @schema
-class DLCProject(dj.Manual):
+class DLCProject(SpyglassMixin, dj.Manual):
     """Table to facilitate creation of a new DeepLabCut model.
     With ability to edit config, extract frames, label frames
     """
@@ -69,7 +77,7 @@ class DLCProject(dj.Manual):
     config_path      : varchar(120) # path to config.yaml for model
     """
 
-    class BodyPart(dj.Part):
+    class BodyPart(SpyglassMixin, dj.Part):
         """Part table to hold bodyparts used in each project."""
 
         definition = """
@@ -77,7 +85,7 @@ class DLCProject(dj.Manual):
         -> BodyPart
         """
 
-    class File(dj.Part):
+    class File(SpyglassMixin, dj.Part):
         definition = """
         # Paths of training files (e.g., labeled pngs, CSV or video)
         -> DLCProject
@@ -88,7 +96,9 @@ class DLCProject(dj.Manual):
         """
 
     def insert1(self, key, **kwargs):
-        assert isinstance(key["project_name"], str), "project_name must be a string"
+        assert isinstance(
+            key["project_name"], str
+        ), "project_name must be a string"
         assert isinstance(
             key["frames_per_video"], int
         ), "frames_per_video must be of type `int`"
@@ -134,7 +144,9 @@ class DLCProject(dj.Manual):
         cfg = read_config(config_path)
         if bodyparts:
             bodyparts_to_add = [
-                bodypart for bodypart in bodyparts if bodypart not in cfg["bodyparts"]
+                bodypart
+                for bodypart in bodyparts
+                if bodypart not in cfg["bodyparts"]
             ]
             all_bodyparts = bodyparts_to_add + cfg["bodyparts"]
         else:
@@ -142,17 +154,21 @@ class DLCProject(dj.Manual):
         BodyPart.add_from_config(cfg["bodyparts"])
         for bodypart in all_bodyparts:
             if not bool(BodyPart() & {"bodypart": bodypart}):
-                raise ValueError(f"bodypart: {bodypart} not found in BodyPart table")
+                raise ValueError(
+                    f"bodypart: {bodypart} not found in BodyPart table"
+                )
         # check bodyparts are in config, if not add
         if len(bodyparts_to_add) > 0:
             add_to_config(config_path, bodyparts=bodyparts_to_add)
         # Get frames per video from config. If passed as arg, check match
         if frames_per_video:
             if frames_per_video != cfg["numframes2pick"]:
-                add_to_config(config_path, **{"numframes2pick": frames_per_video})
+                add_to_config(
+                    config_path, **{"numframes2pick": frames_per_video}
+                )
         config_path = Path(config_path)
         project_path = config_path.parent
-        dlc_project_path = os.environ["DLC_PROJECT_PATH"]
+        dlc_project_path = dlc_project_dir
         if dlc_project_path not in project_path.as_posix():
             project_dirname = project_path.name
             dest_folder = Path(f"{dlc_project_path}/{project_dirname}/")
@@ -160,7 +176,8 @@ class DLCProject(dj.Manual):
                 new_proj_dir = dest_folder.as_posix()
             else:
                 new_proj_dir = shutil.copytree(
-                    src=project_path, dst=f"{dlc_project_path}/{project_dirname}/"
+                    src=project_path,
+                    dst=f"{dlc_project_path}/{project_dirname}/",
                 )
             new_config_path = Path(f"{new_proj_dir}/config.yaml")
             assert (
@@ -178,7 +195,10 @@ class DLCProject(dj.Manual):
         }
         cls.insert1(key, **kwargs)
         cls.BodyPart.insert(
-            [{"project_name": project_name, "bodypart": bp} for bp in all_bodyparts],
+            [
+                {"project_name": project_name, "bodypart": bp}
+                for bp in all_bodyparts
+            ],
             **kwargs,
         )
         if add_to_files:
@@ -188,7 +208,10 @@ class DLCProject(dj.Manual):
             del key["frames_per_video"]
             # Check for training files to add
             cls.add_training_files(key, **kwargs)
-        return {"project_name": project_name, "config_path": config_path.as_posix()}
+        return {
+            "project_name": project_name,
+            "config_path": config_path.as_posix(),
+        }
 
     @classmethod
     def insert_new_project(
@@ -198,17 +221,20 @@ class DLCProject(dj.Manual):
         lab_team: str,
         frames_per_video: int,
         video_list: List,
-        project_directory: str = os.getenv("DLC_PROJECT_PATH"),
-        output_path: str = os.getenv("DLC_VIDEO_PATH"),
+        groupname: str = None,
+        project_directory: str = dlc_project_dir,
+        output_path: str = dlc_video_dir,
         set_permissions=False,
         **kwargs,
     ):
-        """
-        insert a new project into DLCProject table.
+        """Insert a new project into DLCProject table.
+
         Parameters
         ----------
         project_name : str
             user-friendly name of project
+        groupname : str, optional
+            Name for project group. If None, defaults to username
         bodyparts : list
             list of bodyparts to label. Should match bodyparts in BodyPart table
         lab_team : str
@@ -219,9 +245,9 @@ class DLCProject(dj.Manual):
         frames_per_video : int
             number of frames to extract from each video
         video_list : list
-            list of dicts of form [{'nwb_file_name': nwb_file_name, 'epoch': epoch #},...]
-            to query VideoFile table for videos to train on.
-            Can also be list of absolute paths to import videos from
+            list of (a) dicts of to query VideoFile table for or (b) absolute
+            paths to videos to train on. If dict, use format:
+            [{'nwb_file_name': nwb_file_name, 'epoch': epoch #},...]
         output_path : str
             target path to output converted videos
             (Default is '/nimbus/deeplabcut/videos/')
@@ -246,7 +272,9 @@ class DLCProject(dj.Manual):
         # and pass to get_video_path to reference VideoFile table for path
 
         if all(isinstance(n, Dict) for n in video_list):
-            videos_to_convert = [get_video_path(video_key) for video_key in video_list]
+            videos_to_convert = [
+                get_video_path(video_key) for video_key in video_list
+            ]
             videos = [
                 check_videofile(
                     video_path=video[0],
@@ -254,7 +282,14 @@ class DLCProject(dj.Manual):
                     video_filename=video[1],
                 )[0].as_posix()
                 for video in videos_to_convert
+                if video[0] is not None
             ]
+            if len(videos) < 1:
+                raise ValueError(
+                    f"no .mp4 videos found in {videos_to_convert[0][0]}"
+                    + f" for key: {video_list[0]}"
+                )
+
         # If not dict, assume list of video file paths that may or may not need to be converted
         else:
             videos = []
@@ -262,9 +297,9 @@ class DLCProject(dj.Manual):
                 raise OSError("at least one file in video_list does not exist")
             for video in video_list:
                 video_path = Path(video).parent
-                video_filename = video.rsplit(video_path.as_posix(), maxsplit=1)[
-                    -1
-                ].split("/")[-1]
+                video_filename = video.rsplit(
+                    video_path.as_posix(), maxsplit=1
+                )[-1].split("/")[-1]
                 videos.extend(
                     [
                         check_videofile(
@@ -288,9 +323,14 @@ class DLCProject(dj.Manual):
         )
         for bodypart in bodyparts:
             if not bool(BodyPart() & {"bodypart": bodypart}):
-                raise ValueError(f"bodypart: {bodypart} not found in BodyPart table")
-        kwargs.update({"numframes2pick": frames_per_video, "dotsize": 3})
-        add_to_config(config_path, bodyparts, skeleton_node=skeleton_node, **kwargs)
+                raise ValueError(
+                    f"bodypart: {bodypart} not found in BodyPart table"
+                )
+        kwargs_copy = copy.deepcopy(kwargs)
+        kwargs_copy.update({"numframes2pick": frames_per_video, "dotsize": 3})
+        add_to_config(
+            config_path, bodyparts, skeleton_node=skeleton_node, **kwargs_copy
+        )
         key = {
             "project_name": project_name,
             "team_name": lab_team,
@@ -301,7 +341,11 @@ class DLCProject(dj.Manual):
         # TODO: make permissions setting more flexible.
         if set_permissions:
             permissions = (
-                stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH
+                stat.S_IRUSR
+                | stat.S_IWUSR
+                | stat.S_IRGRP
+                | stat.S_IWGRP
+                | stat.S_IROTH
             )
             username = getpass.getuser()
             if not groupname:
@@ -314,7 +358,10 @@ class DLCProject(dj.Manual):
             )
         cls.insert1(key, **kwargs)
         cls.BodyPart.insert(
-            [{"project_name": project_name, "bodypart": bp} for bp in bodyparts],
+            [
+                {"project_name": project_name, "bodypart": bp}
+                for bp in bodyparts
+            ],
             **kwargs,
         )
         if add_to_files:
@@ -352,7 +399,9 @@ class DLCProject(dj.Manual):
             )
         for video in video_names:
             key["file_name"] = f'{os.path.splitext(video.split("/")[-1])[0]}'
-            key["file_ext"] = os.path.splitext(video.split("/")[-1])[-1].split(".")[-1]
+            key["file_ext"] = os.path.splitext(video.split("/")[-1])[-1].split(
+                "."
+            )[-1]
             key["file_path"] = video
             cls.File.insert1(key, **kwargs)
         if len(training_files) > 0:
@@ -436,8 +485,12 @@ class DLCProject(dj.Manual):
         else:
             assert Path(
                 import_project_path
-            ).exists(), f"import_project_path: {import_project_path} does not exist"
-            import_labeled_data_path = Path(f"{import_project_path}/labeled-data")
+            ).exists(), (
+                f"import_project_path: {import_project_path} does not exist"
+            )
+            import_labeled_data_path = Path(
+                f"{import_project_path}/labeled-data"
+            )
         assert (
             import_labeled_data_path.exists()
         ), "import_project has no directory 'labeled-data'"
@@ -448,7 +501,7 @@ class DLCProject(dj.Manual):
                 f"{import_labeled_data_path.as_posix()}/{video_file}/*.h5"
             )[0]
             dlc_df = pd.read_hdf(h5_file)
-            dlc_df.columns.set_levels([team_name], level=0, inplace=True)
+            dlc_df.columns = dlc_df.columns.set_levels([team_name], level=0)
             dlc_df.to_hdf(
                 Path(
                     f"{current_labeled_data_path.as_posix()}/{video_file}/CollectedData_{team_name}.h5"
@@ -458,7 +511,9 @@ class DLCProject(dj.Manual):
         cls.add_training_files(key, **kwargs)
 
 
-def add_to_config(config, bodyparts: List = None, skeleton_node: str = None, **kwargs):
+def add_to_config(
+    config, bodyparts: List = None, skeleton_node: str = None, **kwargs
+):
     """
     Add necessary items to the config.yaml for the model
     Parameters

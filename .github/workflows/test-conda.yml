@@ -1,0 +1,55 @@
+name: Test conda env and run tests
+
+on:
+  push:
+  schedule:  # once a day at midnight UTC
+    - cron: '0 0 * * *'
+
+jobs:
+  run-tests:
+    runs-on: ${{ matrix.os }}
+    defaults:
+     run:
+       shell: bash -l {0}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]  #, macos-latest, windows-latest]
+    env:
+      OS: ${{ matrix.os }}
+      PYTHON: '3.8'
+    steps:
+    - name: Cancel Workflow Action
+      uses: styfle/cancel-workflow-action@0.11.0
+      with:
+        access_token: ${{ github.token }}
+        all_but_latest: true
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON }}
+    - name: Set up conda environment
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        activate-environment: spyglass
+        environment-file: environment.yml
+        miniforge-variant: Mambaforge
+        miniforge-version: latest
+    - name: Install spyglass
+      run: |
+        pip install -e .[test]
+    - name: Download data
+      env:
+        UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }}
+        UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
+        WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/minirec20230622.nwb
+        RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/ 
+      run: |
+        mkdir -p $RAW_DIR
+        wget --recursive --no-verbose --no-host-directories --no-directories \
+        --user $UCSF_BOX_USER --password $UCSF_BOX_TOKEN \
+        -P $RAW_DIR $WEBSITE
+    - name: Run tests
+      run: |
+        pytest -rP  # env vars are set within certain tests

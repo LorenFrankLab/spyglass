@@ -1,10 +1,12 @@
 import datajoint as dj
 
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 schema = dj.schema("common_region")
 
 
 @schema
-class BrainRegion(dj.Lookup):
+class BrainRegion(SpyglassMixin, dj.Lookup):
     definition = """
     region_id: smallint auto_increment
     ---
@@ -13,14 +15,18 @@ class BrainRegion(dj.Lookup):
     subsubregion_name=NULL: varchar(200)  # subregion within subregion
     """
 
-    # TODO consider making (region_name, subregion_name, subsubregion_name) a primary key
-    # subregion_name='' and subsubregion_name='' will be necessary but that seems OK
+    # TODO consider making (region_name, subregion_name, subsubregion_name) a
+    # primary key subregion_name='' and subsubregion_name='' will be necessary
+    # but that seems OK
 
     @classmethod
-    def fetch_add(cls, region_name, subregion_name=None, subsubregion_name=None):
-        """Return the region ID for the given names, and if no match exists, first add it to the BrainRegion table.
+    def fetch_add(
+        cls, region_name, subregion_name=None, subsubregion_name=None
+    ):
+        """Return the region ID for names. If no match, add to the BrainRegion.
 
-        The combination of (region_name, subregion_name, subsubregion_name) is effectively unique, then.
+        The combination of (region_name, subregion_name, subsubregion_name) is
+        effectively unique, then.
 
         Parameters
         ----------
@@ -36,10 +42,11 @@ class BrainRegion(dj.Lookup):
         region_id : int
             The index of the region in the BrainRegion table.
         """
-        key = dict()
-        key["region_name"] = region_name
-        key["subregion_name"] = subregion_name
-        key["subsubregion_name"] = subsubregion_name
+        key = dict(
+            region_name=region_name,
+            subregion_name=subregion_name,
+            subsubregion_name=subsubregion_name,
+        )
         query = BrainRegion & key
         if not query:
             cls.insert1(key)

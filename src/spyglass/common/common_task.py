@@ -2,17 +2,18 @@ import datajoint as dj
 import ndx_franklab_novela
 import pynwb
 
-from .common_device import CameraDevice
-from .common_interval import IntervalList
-from .common_nwbfile import Nwbfile
-from .common_session import Session  # noqa: F401
-from ..utils.nwb_helper_fn import get_nwb_file
+from spyglass.common.common_device import CameraDevice  # noqa: F401
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_task")
 
 
 @schema
-class Task(dj.Manual):
+class Task(SpyglassMixin, dj.Manual):
     definition = """
      task_name: varchar(80)
      ---
@@ -32,7 +33,7 @@ class Task(dj.Manual):
         """
         tasks_mod = nwbf.processing.get("tasks")
         if tasks_mod is None:
-            print(f"No tasks processing module found in {nwbf}\n")
+            logger.warn(f"No tasks processing module found in {nwbf}\n")
             return
         for task in tasks_mod.data_interfaces.values():
             if cls.check_task_table(task):
@@ -82,7 +83,7 @@ class Task(dj.Manual):
 
 
 @schema
-class TaskEpoch(dj.Imported):
+class TaskEpoch(SpyglassMixin, dj.Imported):
     # Tasks, session and time intervals
     definition = """
      -> Session
@@ -92,7 +93,7 @@ class TaskEpoch(dj.Imported):
      -> [nullable] CameraDevice
      -> IntervalList
      task_environment = NULL: varchar(200)  # the environment the animal was in
-     camera_names : blob # a list of keys corresponding to entry in CameraDevice
+     camera_names : blob # list of keys corresponding to entry in CameraDevice
      """
 
     def make(self, key):
@@ -100,20 +101,23 @@ class TaskEpoch(dj.Imported):
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
         camera_names = dict()
-        # the tasks refer to the camera_id which is unique for the NWB file but not for CameraDevice schema, so we
-        # need to look up the right camera
+
+        # the tasks refer to the camera_id which is unique for the NWB file but
+        # not for CameraDevice schema, so we need to look up the right camera
         # map camera ID (in camera name) to camera_name
+
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.CameraDevice):
                 # get the camera ID
                 camera_id = int(str.split(device.name)[1])
                 camera_names[camera_id] = device.camera_name
 
-        # find the task modules and for each one, add the task to the Task schema if it isn't there
-        # and then add an entry for each epoch
+        # find the task modules and for each one, add the task to the Task
+        # schema if it isn't there and then add an entry for each epoch
+
         tasks_mod = nwbf.processing.get("tasks")
         if tasks_mod is None:
-            print(f"No tasks processing module found in {nwbf}\n")
+            logger.warn(f"No tasks processing module found in {nwbf}\n")
             return
 
         for task in tasks_mod.data_interfaces.values():
@@ -122,11 +126,9 @@ class TaskEpoch(dj.Imported):
                 Task.insert_from_task_table(task)
                 key["task_name"] = task.task_name[0]
 
-                # get the CameraDevice used for this task (primary key is camera name so we need
-                # to map from ID to name)
-                camera_id = int(task.camera_id[0])
-                # get the CameraDevice used for this task (primary key is camera name so we need
-                # to map from ID to name)
+                # get the CameraDevice used for this task (primary key is
+                # camera name so we need to map from ID to name)
+
                 camera_ids = task.camera_id[0]
                 valid_camera_ids = [
                     camera_id
@@ -139,21 +141,25 @@ class TaskEpoch(dj.Imported):
                         for camera_id in valid_camera_ids
                     ]
                 else:
-                    print(
-                        f"No camera device found with ID {camera_ids} in NWB file {nwbf}\n"
+                    logger.warn(
+                        f"No camera device found with ID {camera_ids} in NWB "
+                        + f"file {nwbf}\n"
                     )
-
                 # Add task environment
                 if hasattr(task, "task_environment"):
                     key["task_environment"] = task.task_environment[0]
 
-                # get the interval list for this task, which corresponds to the matching epoch for the raw data.
-                # Users should define more restrictive intervals as required for analyses
+                # get the interval list for this task, which corresponds to the
+                # matching epoch for the raw data. Users should define more
+                # restrictive intervals as required for analyses
+
                 session_intervals = (
                     IntervalList() & {"nwb_file_name": nwb_file_name}
                 ).fetch("interval_list_name")
                 for epoch in task.task_epochs[0]:
-                    # TODO in beans file, task_epochs[0] is 1x2 dset of ints, so epoch would be an int
+                    # TODO in beans file, task_epochs[0] is 1x2 dset of ints,
+                    # so epoch would be an int
+
                     key["epoch"] = epoch
                     target_interval = str(epoch).zfill(2)
                     for interval in session_intervals:
@@ -166,11 +172,24 @@ class TaskEpoch(dj.Imported):
                     self.insert1(key)
 
     @classmethod
-    def check_task_table(cls, task_table):
-        """Check whether the pynwb DynamicTable containing task metadata conforms to the expected format.
+    def update_entries(cls, restrict={}):
+        existing_entries = (cls & restrict).fetch("KEY")
+        for row in existing_entries:
+            if (cls & row).fetch1("camera_names"):
+                continue
+            row["camera_names"] = [
+                {"camera_name": (cls & row).fetch1("camera_name")}
+            ]
+            cls.update1(row=row)
 
-        The table should be an instance of pynwb.core.DynamicTable and contain the columns 'task_name',
-        'task_description', 'camera_id', 'and 'task_epochs'.
+    @classmethod
+    def check_task_table(cls, task_table) -> bool:
+        """Check whether the pynwb DynamicTable containing task metadata
+        conforms to the expected format.
+
+        The table should be an instance of pynwb.core.DynamicTable and contain
+        the columns 'task_name', 'task_description', 'camera_id', 'and
+        'task_epochs'.
 
         Parameters
         ----------
@@ -180,10 +199,12 @@ class TaskEpoch(dj.Imported):
         Returns
         -------
         bool
-            Whether the DynamicTable conforms to the expected format for loading data into the TaskEpoch table.
+            Whether the DynamicTable conforms to the expected format for
+            loading data into the TaskEpoch table.
         """
 
-        # TODO this could be more strict and check data types, but really it should be schematized
+        # TODO this could be more strict and check data types, but really it
+        # should be schematized
         return (
             Task.check_task_table(task_table)
             and hasattr(task_table, "camera_id")

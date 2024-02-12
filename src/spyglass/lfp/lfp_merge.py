@@ -1,53 +1,52 @@
 import datajoint as dj
-from spyglass.lfp.v1 import LFPV1, ImportedLFPV1
+import pandas as pd
 
-schema = dj.schema("lfp")
+from spyglass.common.common_ephys import LFP as CommonLFP  # noqa: F401
+from spyglass.common.common_filter import FirFilterParameters  # noqa: F401
+from spyglass.common.common_interval import IntervalList  # noqa: F401
+from spyglass.lfp.lfp_imported import ImportedLFP  # noqa: F401
+from spyglass.lfp.v1.lfp import LFPV1  # noqa: F401
+from spyglass.utils.dj_merge_tables import _Merge
+from spyglass.utils.dj_mixin import SpyglassMixin
+
+schema = dj.schema("lfp_merge")
 
 
 @schema
-class LFPOutput(dj.Manual):
+class LFPOutput(_Merge, SpyglassMixin):
     definition = """
-    lfp_id: uuid
+    merge_id: uuid
     ---
-    stream: varchar(40)
+    source: varchar(32)
     """
 
-    class LFPV1(dj.Part):
+    class LFPV1(SpyglassMixin, dj.Part):  # noqa: F811
         definition = """
-        -> LFPOutput
+        -> master
         ---
         -> LFPV1
         """
 
-    class ImportedLFP(dj.Part):
+    class ImportedLFP(SpyglassMixin, dj.Part):  # noqa: F811
         definition = """
-        -> LFPOutput
+        -> master
         ---
-        -> ImportedLFPV1
+        -> ImportedLFP
         """
 
-    @staticmethod
-    def get_lfp_object(key: dict):
-        """Returns the lfp object corresponding to the key
+    class CommonLFP(SpyglassMixin, dj.Part):  # noqa: F811
+        """Table to pass-through legacy LFP"""
 
-        Parameters
-        ----------
-        key : dict
-            A dictionary containing some combination of
-                                    uuid,
-                                    nwb_file_name,
-                                    lfp_electrode_group_name,
-                                    interval_list_name,
-                                    fir_filter_name
-
-        Returns
-        -------
-        lfp_object
-            The entry or entries in the LFPOutput part table that corresponds to the key
+        definition = """
+        -> master
+        ---
+        -> CommonLFP
         """
-        # first check if this returns anything from the LFP table
-        lfp_object = LFPOutput.LFP & key
-        if lfp_object is not None:
-            return LFPV1 & lfp_object.fetch("KEY")
-        else:
-            return ImportedLFPV1 & (LFPOutput.ImportedLFP & key).fetch("KEY")
+
+    def fetch1_dataframe(self, *attrs, **kwargs):
+        # Note: `proj` below facilitates operator syntax eg Table & restrict
+        nwb_lfp = self.fetch_nwb(self.proj())[0]
+        return pd.DataFrame(
+            nwb_lfp["lfp"].data,
+            index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
+        )

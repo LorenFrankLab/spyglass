@@ -1,1 +1,1 @@
-from .cli import cli
+from spyglass.cli import cli

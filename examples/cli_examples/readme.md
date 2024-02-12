@@ -1,4 +1,6 @@
-### Insert a lab team
+# Using the spyglass CLI
+
+## Insert a lab team
 
 Create a lab team.
 
@@ -9,7 +11,7 @@ spyglass insert-lab-team team.yaml
 spyglass list-lab-teams
 ```
 
-### Insert a lab member
+## Insert a lab member
 
 Create a lab member.
 
@@ -20,7 +22,7 @@ spyglass insert-lab-member labmember.yaml
 spyglass list-lab-members
 ```
 
-### Insert a lab team member
+## Insert a lab team member
 
 Add a lab member to a lab team.
 
@@ -31,7 +33,7 @@ spyglass insert-lab-team-member labteammember.yaml
 spyglass list-lab-team-members
 ```
 
-### Insert a session
+## Insert a session
 
 Insert a session from a raw .nwb file.
 
@@ -47,19 +49,19 @@ spyglass list-sessions
 spyglass list-interval-lists RN2_20191110_.nwb # Note the trailing underscore here
 ```
 
-### Set up the sort groups
+## Set up the sort groups
 
 Set up the electrode sort groups.
 
 See [set_sort_groups_by_shank.py](./set_sort_groups_by_shank.py) for an example.
 
-### Insert a sort interval
+## Insert a sort interval
 
 Create a sort interval (time interval) for spike sorting.
 
 See [insert_sort_interval.py](./insert_sort_interval.py) for an example.
 
-### Insert spike sorting preprocessing parameters
+## Insert spike sorting preprocessing parameters
 
 Define spike sorting preprocessing parameters.
 
@@ -70,7 +72,7 @@ spyglass insert-spike-sorting-preprocessing-parameters parameters.yaml
 spyglass list-spike-sorting-preprocessing-parameters
 ```
 
-### Create spike sorting recording
+## Create spike sorting recording
 
 Create a spike sorting recording.
 
@@ -85,7 +87,7 @@ spyglass create-spike-sorting-recording-view recording.yaml
 # Use --replace to force recreate the view
 ```
 
-### Insert artifact detection parameters
+## Insert artifact detection parameters
 
 Define artifact detection parameters.
 
@@ -96,7 +98,7 @@ spyglass insert-artifact-detection-parameters parameters.yaml
 spyglass list-artifact-detection-parameters
 ```
 
-### Insert spike sorter parameters
+## Insert spike sorter parameters
 
 Define spike sorter parameters.
 
@@ -107,15 +109,16 @@ spyglass insert-spike-sorter-parameters parameters.yaml
 spyglass list-spike-sorter-parameters
 ```
 
-### Create a session group
+## Create a session group
 
 A session group is a collection of sessions that can be viewed via spyglassview.
 
-See [session_groups.md](../../docs/session_groups.md) and [create_session_group.py](./create_session_group.py).
+See [session_groups.md](../../docs/session_groups.md) and
+[create_session_group.py](./create_session_group.py).
 
-### Create spyglass view
+## Create spyglass view
 
 ```bash
 # This will print a URL pointing to the view
-create-spyglass-view <groupname> 
+create-spyglass-view <groupname>
 ```

@@ -1,21 +1,21 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = "spyglass-neuro"
-version = "0.4.0"
+description = "Neuroscience data analysis framework for reproducible research"
+readme = "README.md"
+requires-python = ">=3.9,<3.10"
+license = { file = "LICENSE" }
 authors = [
     { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
     { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
     { name = "Eric Denovellis", email = "eric.denovellis@ucsf.edu" },
     { name = "Ryan Ly", email = "rly@lbl.gov" },
     { name = "Daniel Gramling", email = "daniel.gramling@ucsf.edu" },
+    { name = "Chris Brozdowski", email = "chris.broz@ucsf.edu" },
 ]
-description = "Neuroscience data analysis framework for reproducible research"
-readme = "README.md"
-license = { file = "LICENSE" }
-requires-python = ">=3.8,<3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -35,31 +35,30 @@ keywords = [
     "sortingview",
 ]
 dependencies = [
-    "pydotplus",
-    "dask",
-    "position_tools",
-    "track_linearization>=2.3",
-    "replay_trajectory_classification",
-    "ripple_detection",
-    "trajectory_analysis_tools",
-    "matplotlib",
-    "seaborn",
-    "skan",
+    "black[jupyter]",
     "bottleneck",
-    "numpy<1.24",
-    "ipympl",
-    "tqdm",
-    "pubnub<6.4.0",
-    "pynwb>=2.2.0,<3",
-    "hdmf>=3.4.6",
+    "dask",
     "datajoint>=0.13.6",
-    "pymysql",
-    "sortingview>=0.11",
-    "pyyaml",
-    "click",
-    "spikeinterface",
+    # "ghostipy", # removed from list bc M1 users need to install pyfftw first
+    "hdmf>=3.4.6",
+    "ipympl",
+    "matplotlib",
     "ndx_franklab_novela>=0.1.0",
+    "non_local_detector",
+    "numpy<1.24",
+    "opencv-python",
+    "panel<=1.3.4", # See panel #6325
+    "position_tools",
+    "pubnub<6.4.0",            # TODO: remove this when sortingview is updated
+    "pydotplus",
+    "pynwb>=2.2.0,<3",
+    "ripple_detection",
+    "seaborn",
+    "sortingview>=0.11",
+    "spikeinterface>=0.98.2,<0.99",
+    "track_linearization>=2.3",
 ]
+dynamic = ["version"]
 
 [project.scripts]
 spyglass_cli = "spyglass.cli:cli"
@@ -69,11 +68,93 @@ spyglass_cli = "spyglass.cli:cli"
 "Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
 
 [project.optional-dependencies]
-position = ["ffmpeg", "numba>=0.54", "deeplabcut<2.3.0"]
+dlc = ["ffmpeg", "numba>=0.54", "deeplabcut<2.3.0"]
+test = [
+    "click",          # for CLI subpackage only
+    "docker",         # for tests in a container
+    "ghostipy",
+    "kachery",        # database access
+    "kachery-client",
+    "kachery-cloud>=0.4.0",
+    "pre-commit",     # linting
+    "pytest",         # unit testing
+    "pytest-cov",     # code coverage
+]
+docs = [
+    "hatch",                 # Get version from env
+    "jupytext==1.16.0",      # Convert notebooks to .py
+    "mike",                  # Docs versioning
+    "mkdocs",                # Docs core
+    "mkdocs-exclude",        # Docs exclude files
+    "mkdocs-exclude-search", # Docs exclude files in search
+    "mkdocs-gen-files",      # Docs API generator
+    "mkdocs-jupyter",        # Docs render notebooks
+    "mkdocs-literate-nav",   # Dynamic page list for API docs
+    "mkdocs-material",       # Docs theme
+    "mkdocstrings[python]",  # Docs API docstrings
+]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+# this file is created/updated when the package is installed and used in
+# src/spyglass/__init__.py to set `spyglass.__version__`
+version-file = "src/spyglass/_version.py"
+
+[tool.hatch.build.targets.sdist]
+exclude = [".git_archival.txt"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spyglass"]
+exclude = []
+
 [tool.black]
-# line-length = 120
+line-length = 80
 
 [tool.codespell]
-skip = '.git,*.pdf,*.svg,*.ipynb'
-# Nevers - name in Citation
+skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
 ignore-words-list = 'nevers'
+# Nevers - name in Citation
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+    "-sv",
+    # "--sw", # stepwise: resume with next test after failure
+    # "--pdb", # drop into debugger on failure
+    "-p no:warnings",
+    # "--no-teardown", # don't teardown the database after tests
+    "--quiet-spy",                  # don't show logging from spyglass
+    "--show-capture=no",
+    "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
+    "--cov=spyglass",
+    "--cov-report=term-missing",
+    "--no-cov-on-fail",
+]
+testpaths = ["tests"]
+log_level = "INFO"
+
+[tool.coverage.run]
+source = ["*/src/spyglass/*"]
+omit = [ # which submodules have no tests
+    "*/__init__.py",
+    "*/_version.py",
+    "*/cli/*",
+    # "*/common/*",
+    "*/data_import/*",
+    "*/decoding/*",
+    "*/figurl_views/*",
+    # "*/lfp/*",
+    "*/linearization/*",
+    "*/lock/*",
+    "*/position/*",
+    "*/ripple/*",
+    "*/sharing/*",
+    "*/spikesorting/*",
+    # "*/utils/*",
+]
+
+[tool.ruff] # CB: Propose replacing flake8 with ruff to delete setup.cfg
+line-length = 80
+ignore = ["F401" , "E402", "E501"]

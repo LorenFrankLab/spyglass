@@ -1,46 +1,73 @@
-from .common_behav import PositionSource, RawPosition, StateScriptFile, VideoFile
-from .common_dio import DIOEvents
-from .common_ephys import Electrode, ElectrodeGroup, Raw, SampleCount
-from .common_nwbfile import Nwbfile
-from .common_session import Session
-from .common_task import TaskEpoch
+import datajoint as dj
+
+from spyglass.common.common_behav import (
+    PositionSource,
+    RawPosition,
+    StateScriptFile,
+    VideoFile,
+)
+from spyglass.common.common_dio import DIOEvents
+from spyglass.common.common_ephys import (
+    Electrode,
+    ElectrodeGroup,
+    Raw,
+    SampleCount,
+)
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_session import Session
+from spyglass.common.common_task import TaskEpoch
+from spyglass.common.common_usage import InsertError
+from spyglass.utils import logger
 
 
 def populate_all_common(nwb_file_name):
-    # Insert session one by one
-    fp = [(Nwbfile & {"nwb_file_name": nwb_file_name}).proj()]
-    print("Populate Session...")
-    Session.populate(fp)
+    """Insert all common tables for a given NWB file."""
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
 
-    # If we use Kachery for data sharing we can uncomment the following two lines. TBD
-    # print('Populate NwbfileKachery...')
-    # NwbfileKachery.populate()
+    key = [(Nwbfile & f"nwb_file_name LIKE '{nwb_file_name}'").proj()]
+    tables = [
+        Session,
+        # NwbfileKachery, # Not used by default
+        ElectrodeGroup,
+        Electrode,
+        Raw,
+        SampleCount,
+        DIOEvents,
+        # SensorData, # Not used by default. Generates large files
+        RawPosition,
+        TaskEpoch,
+        StateScriptFile,
+        VideoFile,
+        PositionSource,
+        RawPosition,
+        ImportedSpikeSorting,
+    ]
+    error_constants = dict(
+        dj_user=dj.config["database.user"],
+        connection_id=dj.conn().connection_id,
+        nwb_file_name=nwb_file_name,
+    )
 
-    print("Populate ElectrodeGroup...")
-    ElectrodeGroup.populate(fp)
-
-    print("Populate Electrode...")
-    Electrode.populate(fp)
-
-    print("Populate Raw...")
-    Raw.populate(fp)
-
-    print("Populate SampleCount...")
-    SampleCount.populate(fp)
-
-    print("Populate DIOEvents...")
-    DIOEvents.populate(fp)
-    # sensor data (from analog ProcessingModule) is temporarily removed from NWBFile
-    # to reduce file size while it is not being used. add it back in by commenting out
-    # the removal code in spyglass/data_import/insert_sessions.py when ready
-    # print('Populate SensorData')
-    # SensorData.populate(fp)
-    print("Populate TaskEpochs")
-    TaskEpoch.populate(fp)
-    print("Populate StateScriptFile")
-    StateScriptFile.populate(fp)
-    print("Populate VideoFile")
-    VideoFile.populate(fp)
-    print("RawPosition...")
-    PositionSource.insert_from_nwbfile(nwb_file_name)
-    RawPosition.populate(fp)
+    for table in tables:
+        logger.info(f"Populating {table.__name__}...")
+        try:
+            table.populate(key)
+        except Exception as e:
+            InsertError.insert1(
+                dict(
+                    **error_constants,
+                    table=table.__name__,
+                    error_type=type(e).__name__,
+                    error_message=str(e),
+                    error_raw=str(e),
+                )
+            )
+    query = InsertError & error_constants
+    if query:
+        err_tables = query.fetch("table")
+        logger.error(
+            f"Errors occurred during population for {nwb_file_name}:\n\t"
+            + f"Failed tables {err_tables}\n\t"
+            + "See common_usage.InsertError for more details"
+        )
+        return query.fetch("KEY")

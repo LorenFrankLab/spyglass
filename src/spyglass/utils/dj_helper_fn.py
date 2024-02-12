@@ -1,18 +1,80 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
+
 import inspect
 import os
+from typing import Type
 
 import datajoint as dj
 import numpy as np
 
-from .nwb_helper_fn import get_nwb_file
+from spyglass.utils.logging import logger
+from spyglass.utils.nwb_helper_fn import get_nwb_file
+
+
+def deprecated_factory(classes: list, old_module: str = "") -> list:
+    """Creates a list of classes and logs a warning when instantiated
+
+    Parameters
+    ---------
+    classes : list
+        list of tuples containing old_class, new_class
+
+    Returns
+    ------
+    list
+        list of classes that will log a warning when instantiated
+    """
+
+    if not isinstance(classes, list):
+        classes = [classes]
+
+    ret = [
+        _subclass_factory(old_name=c[0], new_class=c[1], old_module=old_module)
+        for c in classes
+    ]
+
+    return ret[0] if len(ret) == 1 else ret
+
+
+def _subclass_factory(
+    old_name: str, new_class: Type, old_module: str = ""
+) -> Type:
+    """Creates a subclass with a deprecation warning on __init__
+
+    Old class is a subclass of new class, so it will inherit all of the new
+    class's methods. Old class retains its original name and module. Use
+    __name__ to get the module name of the caller.
+
+    Usage: OldClass = _subclass_factory('OldClass', __name__, NewClass)
+    """
+
+    new_module = new_class().__class__.__module__
+
+    # Define the __call__ method for the new class
+    def init_override(self, *args, **kwargs):
+        logger.warn(
+            "Deprecation: this class has been moved out of "
+            + f"{old_module}\n"
+            + f"\t{old_name} -> {new_module}.{new_class.__name__}"
+            + "\nPlease use the new location."
+        )
+        return super(self.__class__, self).__init__(*args, **kwargs)
+
+    class_dict = {
+        "__module__": old_module or new_class.__class__.__module__,
+        "__init__": init_override,
+        "_is_deprecated": True,
+    }
+
+    return type(old_name, (new_class,), class_dict)
 
 
 def dj_replace(original_table, new_values, key_column, replace_column):
-    """Given the output of a fetch() call from a schema and a 2D array made up of (key_value, replace_value) tuples,
-    find each instance of key_value in the key_column of the original table and replace the specified replace_column
-    with the associated replace_value.
-    Key values must be unique.
+    """Given the output of a fetch() call from a schema and a 2D array made up
+    of (key_value, replace_value) tuples, find each instance of key_value in
+    the key_column of the original table and replace the specified
+    replace_column with the associated replace_value. Key values must be
+    unique.
 
     Parameters
     ----------
@@ -20,8 +82,6 @@ def dj_replace(original_table, new_values, key_column, replace_column):
         Result of a datajoint .fetch() call on a schema query.
     new_values : list
         List of tuples, each containing (key_value, replace_value).
-    index_column : str
-        The name of the column where the key_values are located.
     replace_column : str
         The name of the column where to-be-replaced values are located.
 
@@ -38,7 +98,9 @@ def dj_replace(original_table, new_values, key_column, replace_column):
         new_values = tmp
 
     new_val_array = np.asarray(new_values)
-    replace_ind = np.where(np.isin(original_table[key_column], new_val_array[:, 0]))
+    replace_ind = np.where(
+        np.isin(original_table[key_column], new_val_array[:, 0])
+    )
     original_table[replace_column][replace_ind] = new_val_array[:, 1]
     return original_table
 
@@ -48,16 +110,16 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
 
     Parameters
     ----------
-    query_expression
+    query_expression : query
         A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.
     nwb_master : tuple
         Tuple (table, attr) to get the NWB filepath from.
         i.e. absolute path to NWB file can be obtained by looking up attr column of table
         table is usually Nwbfile or AnalysisNwbfile;
         attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'
-    attrs : list
+    *attrs : list
         Attributes from normal DataJoint fetch call.
-    kwargs : dict
+    **kwargs : dict
         Keyword arguments from normal DataJoint fetch call.
 
     Returns
@@ -84,20 +146,23 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
         else Nwbfile.get_abs_path
     )
 
-    nwb_files = (query_expression * tbl.proj(nwb2load_filepath=attr_name)).fetch(
-        file_name_str
-    )
+    # TODO: check that the query_expression restricts tbl - CBroz
+    nwb_files = (
+        query_expression * tbl.proj(nwb2load_filepath=attr_name)
+    ).fetch(file_name_str)
     for file_name in nwb_files:
         file_path = file_path_fn(file_name)
         if not os.path.exists(file_path):
             # retrieve the file from kachery. This also opens the file and stores the file object
             get_nwb_file(file_path)
 
-    rec_dicts = (query_expression * tbl.proj(nwb2load_filepath=attr_name)).fetch(
-        *attrs, "nwb2load_filepath", **kwargs
-    )
+    rec_dicts = (
+        query_expression * tbl.proj(nwb2load_filepath=attr_name)
+    ).fetch(*attrs, "nwb2load_filepath", **kwargs)
 
-    if not rec_dicts or not np.any(["object_id" in key for key in rec_dicts[0]]):
+    if not rec_dicts or not np.any(
+        ["object_id" in key for key in rec_dicts[0]]
+    ):
         return rec_dicts
 
     ret = []
@@ -129,9 +194,11 @@ def get_child_tables(table):
     return [
         dj.FreeTable(
             table.connection,
-            s
-            if not s.isdigit()
-            else next(iter(table.connection.dependencies.children(s))),
+            (
+                s
+                if not s.isdigit()
+                else next(iter(table.connection.dependencies.children(s)))
+            ),
         )
         for s in table.children()
     ]

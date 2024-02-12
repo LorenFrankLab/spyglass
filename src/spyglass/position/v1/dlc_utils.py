@@ -18,6 +18,105 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
+from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
+
+
+def validate_option(
+    option=None,
+    options: list = None,
+    name="option",
+    types: tuple = None,
+    val_range: tuple = None,
+    permit_none=False,
+):
+    """Validate that option is in a list options or a list of types.
+
+    Parameters
+    ----------
+    option : str, optional
+        If none, runs no checks.
+    options : lis, optional
+        If provided, option must be in options.
+    name : st, optional
+        If provided, name of option to use in error message.
+    types : tuple, optional
+        If provided, option must be an instance of one of the types in types.
+    val_range : tuple, optional
+        If provided, option must be in range (min, max)
+    permit_none : bool, optional
+        If True, permit option to be None. Default False.
+
+    Raises
+    ------
+    ValueError
+        If option is not in options.
+    """
+    if option is None and not permit_none:
+        raise ValueError(f"{name} cannot be None")
+
+    if options and option not in options:
+        raise KeyError(
+            f"Unknown {name}: {option} " f"Available options: {options}"
+        )
+
+    if types and not isinstance(option, tuple(types)):
+        raise TypeError(f"{name} is {type(option)}. Available types {types}")
+
+    if val_range and not (val_range[0] <= option <= val_range[1]):
+        raise ValueError(f"{name} must be in range {val_range}")
+
+
+def validate_list(
+    required_items: list,
+    option_list: list = None,
+    name="List",
+    condition="",
+    permit_none=False,
+):
+    """Validate that option_list contains all items in required_items.
+
+    Parameters
+    ---------
+    required_items : list
+    option_list : list, optional
+        If provided, option_list must contain all items in required_items.
+    name : str, optional
+        If provided, name of option_list to use in error message.
+    condition : str, optional
+        If provided, condition in error message as 'when using X'.
+    permit_none : bool, optional
+        If True, permit option_list to be None. Default False.
+    """
+    if option_list is None:
+        if permit_none:
+            return
+        else:
+            raise ValueError(f"{name} cannot be None")
+    if condition:
+        condition = f" when using {condition}"
+    if any(x not in required_items for x in option_list):
+        raise KeyError(
+            f"{name} must contain all items in {required_items}{condition}."
+        )
+
+
+def validate_smooth_params(params):
+    """If params['smooth'], validate method is in list and duration type"""
+    if not params.get("smooth"):
+        return
+    smoothing_params = params.get("smoothing_params")
+    validate_option(smoother=smoothing_params, name="smoothing_params")
+    validate_option(
+        option=smoothing_params.get("smooth_method"),
+        name="smooth_method",
+        options=_key_to_smooth_func_dict,
+    )
+    validate_option(
+        option=smoothing_params.get("smoothing_duration"),
+        name="smoothing_duration",
+        types=(int, float),
+    )
+
 
 def _set_permissions(directory, mode, username: str, groupname: str = None):
     """
@@ -57,7 +156,7 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
             os.chmod(os.path.join(dirpath, filename), mode)
 
 
-class OutputLogger:
+class OutputLogger:  # TODO: migrate to spyglass.utils.logger
     """
     A class to wrap a logging.Logger object in order to provide context manager capabilities.
 
@@ -136,7 +235,8 @@ class OutputLogger:
                         handler.close()
                         logger.removeHandler(handler)
             if print_console and not any(
-                type(handler) == logging.StreamHandler for handler in logger.handlers
+                type(handler) == logging.StreamHandler
+                for handler in logger.handlers
             ):
                 logger.addHandler(self._get_stream_handler())
 
@@ -234,7 +334,8 @@ def find_full_path(root_directories, relative_path):
             return _to_Path(root_dir) / relative_path
 
     raise FileNotFoundError(
-        f"No valid full-path found (from {root_directories})" f" for {relative_path}"
+        f"No valid full-path found (from {root_directories})"
+        f" for {relative_path}"
     )
 
 
@@ -280,7 +381,7 @@ def infer_output_dir(key, makedir=True):
     # TODO: add check to make sure interval_list_name refers to a single epoch
     # Or make key include epoch in and of itself instead of interval_list_name
     nwb_file_name = key["nwb_file_name"].split("_.")[0]
-    output_dir = pathlib.Path(os.getenv("DLC_OUTPUT_PATH")) / pathlib.Path(
+    output_dir = pathlib.Path(dlc_output_dir) / pathlib.Path(
         f"{nwb_file_name}/{nwb_file_name}_{key['epoch']:02}"
         f"_model_" + key["dlc_model_name"].replace(" ", "-")
     )
@@ -319,10 +420,17 @@ def get_video_path(key):
 
     from ...common.common_behav import VideoFile
 
-    video_info = (
-        VideoFile() & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
-    ).fetch1()
-    nwb_path = f"{os.getenv('SPYGLASS_BASE_DIR')}/raw/{video_info['nwb_file_name']}"
+    vf_key = {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
+    VideoFile()._no_transaction_make(vf_key, verbose=False)
+    video_query = VideoFile & vf_key
+
+    if len(video_query) != 1:
+        print(f"Found {len(video_query)} videos for {vf_key}")
+        return None, None, None, None
+
+    video_info = video_query.fetch1()
+    nwb_path = f"{raw_dir}/{video_info['nwb_file_name']}"
+
     with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
         nwb_file = in_out.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
@@ -333,12 +441,13 @@ def get_video_path(key):
         video_filename = video_filepath.split(video_dir)[-1]
         meters_per_pixel = nwb_video.device.meters_per_pixel
         timestamps = np.asarray(nwb_video.timestamps)
+
     return video_dir, video_filename, meters_per_pixel, timestamps
 
 
 def check_videofile(
     video_path: Union[str, pathlib.PosixPath],
-    output_path: Union[str, pathlib.PosixPath] = os.getenv("DLC_VIDEO_PATH"),
+    output_path: Union[str, pathlib.PosixPath] = dlc_video_dir,
     video_filename: str = None,
     video_filetype: str = "h264",
 ):
@@ -412,7 +521,9 @@ def _convert_mp4(
     """
 
     orig_filename = filename
-    video_path = pathlib.PurePath(pathlib.Path(video_path), pathlib.Path(filename))
+    video_path = pathlib.PurePath(
+        pathlib.Path(video_path), pathlib.Path(filename)
+    )
     if videotype not in ["mp4"]:
         raise NotImplementedError
     dest_filename = os.path.splitext(filename)[0]
@@ -474,7 +585,9 @@ def _convert_mp4(
         if count_frames:
             try:
                 check_process = subprocess.Popen(
-                    frames_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                    frames_command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                 )
             except subprocess.CalledProcessError as err:
                 raise RuntimeError(
@@ -483,7 +596,9 @@ def _convert_mp4(
         else:
             try:
                 check_process = subprocess.Popen(
-                    packets_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                    packets_command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                 )
             except subprocess.CalledProcessError as err:
                 raise RuntimeError(
@@ -515,7 +630,9 @@ def get_gpu_memory():
         if subproccess command errors.
     """
 
-    output_to_list = lambda x: x.decode("ascii").split("\n")[:-1]
+    def output_to_list(x):
+        return x.decode("ascii").split("\n")[:-1]
+
     query_cmd = "nvidia-smi --query-gpu=memory.used --format=csv"
     try:
         memory_use_info = output_to_list(
@@ -523,9 +640,12 @@ def get_gpu_memory():
         )[1:]
     except subprocess.CalledProcessError as err:
         raise RuntimeError(
-            f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+            f"command {err.cmd} return with error (code {err.returncode}): "
+            + f"{err.output}"
         ) from err
-    memory_use_values = {i: int(x.split()[0]) for i, x in enumerate(memory_use_info)}
+    memory_use_values = {
+        i: int(x.split()[0]) for i, x in enumerate(memory_use_info)
+    }
     return memory_use_values
 
 
@@ -583,7 +703,9 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
             ):
                 dlc_df.loc[idx[start_time:stop_time], idx["x"]] = np.nan
                 dlc_df.loc[idx[start_time:stop_time], idx["y"]] = np.nan
-                change = np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
+                change = np.linalg.norm(
+                    np.array([x[0], y[0]]) - np.array([x[1], y[1]])
+                )
                 print(
                     f"inds {span_start} to {span_stop + 1} "
                     f"with change in position: {change:.2f} not interpolated"
@@ -612,10 +734,10 @@ def smooth_moving_avg(
     import bottleneck as bn
 
     idx = pd.IndexSlice
-    moving_avg_window = int(smoothing_duration * sampling_rate)
+    moving_avg_window = int(np.round(smoothing_duration * sampling_rate))
     xy_arr = interp_df.loc[:, idx[("x", "y")]].values
     smoothed_xy_arr = bn.move_mean(
-        xy_arr, window=moving_avg_window, axis=0, min_count=2
+        xy_arr, window=moving_avg_window, axis=0, min_count=1
     )
     interp_df.loc[:, idx["x"]], interp_df.loc[:, idx["y"]] = [
         *zip(*smoothed_xy_arr.tolist())
@@ -649,6 +771,7 @@ def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
     data : ndarray, shape (n_time, 2)
     frame_size : array_like, shape (2,)
     cm_to_pixels : float
+
     Returns
     -------
     converted_data : ndarray, shape (n_time, 2)
@@ -679,7 +802,7 @@ def make_video(
 
     RGB_PINK = (234, 82, 111)
     RGB_YELLOW = (253, 231, 76)
-    RGB_WHITE = (255, 255, 255)
+    # RGB_WHITE = (255, 255, 255)
     RGB_BLUE = (30, 144, 255)
     RGB_ORANGE = (255, 127, 80)
     #     "#29ff3e",
@@ -699,7 +822,9 @@ def make_video(
         else:
             n_frames = int(len(video_frame_inds) * percent_frames)
             frames = np.arange(0, n_frames)
-        print(f"video save path: {output_video_filename}\n{n_frames} frames in total.")
+        print(
+            f"video save path: {output_video_filename}\n{n_frames} frames in total."
+        )
         if crop:
             crop_offset_x = crop[0]
             crop_offset_y = crop[2]
@@ -715,17 +840,25 @@ def make_video(
         # }
         if video_time:
             position_mean = {
-                key: fill_nan(position_mean[key], video_time, position_time)
+                key: fill_nan(
+                    position_mean[key]["position"], video_time, position_time
+                )
                 for key in position_mean.keys()
             }
             orientation_mean = {
-                key: fill_nan(orientation_mean[key], video_time, position_time)
-                for key in orientation_mean.keys()
+                key: fill_nan(
+                    position_mean[key]["orientation"], video_time, position_time
+                )
+                for key in position_mean.keys()
+                # CBroz: Bug was here, using nonexistent orientation_mean dict
             }
         print(
-            f"frames start: {frames[0]}\nvideo_frames start: {video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
+            f"frames start: {frames[0]}\nvideo_frames start: "
+            + f"{video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
         )
-        for time_ind in tqdm(frames, desc="frames", disable=disable_progressbar):
+        for time_ind in tqdm(
+            frames, desc="frames", disable=disable_progressbar
+        ):
             if time_ind == 0:
                 video.set(1, time_ind + 1)
             elif int(video.get(1)) != time_ind - 1:
@@ -782,16 +915,26 @@ def make_video(
                     #     )
                     # else:
                     #     position = convert_to_pixels(position, frame_size, cm_to_pixels)
-                    position = convert_to_pixels(position, frame_size, cm_to_pixels)
+                    position = convert_to_pixels(
+                        position, frame_size, cm_to_pixels
+                    )
                     orientation = orientation_mean[key][pos_ind]
                     if key == "DLC":
                         color = RGB_BLUE
                     if key == "Trodes":
                         color = RGB_ORANGE
-                    if np.all(~np.isnan(position)) & np.all(~np.isnan(orientation)):
+                    if key == "Common":
+                        color = RGB_PINK
+                    if np.all(~np.isnan(position)) & np.all(
+                        ~np.isnan(orientation)
+                    ):
                         arrow_tip = (
-                            int(position[0] + arrow_radius * np.cos(orientation)),
-                            int(position[1] + arrow_radius * np.sin(orientation)),
+                            int(
+                                position[0] + arrow_radius * np.cos(orientation)
+                            ),
+                            int(
+                                position[1] + arrow_radius * np.sin(orientation)
+                            ),
                         )
                         cv2.arrowedLine(
                             img=frame,
@@ -880,12 +1023,9 @@ def make_video(
 
         position_mean = position_mean["DLC"]
         orientation_mean = orientation_mean["DLC"]
-        frame_offset = -1
-        time_slice = []
         video_slowdown = 1
-        vmax = 0.07  # ?
-        # Set up formatting for the movie files
 
+        # Set up formatting for the movie files
         window_size = 501
         if likelihoods:
             plot_likelihood = True
@@ -915,7 +1055,9 @@ def make_video(
         else:
             n_frames = int(len(video_frame_inds) * percent_frames)
             frames = np.arange(0, n_frames)
-        print(f"video save path: {output_video_filename}\n{n_frames} frames in total.")
+        print(
+            f"video save path: {output_video_filename}\n{n_frames} frames in total."
+        )
         fps = int(np.round(frame_rate / video_slowdown))
         writer = Writer(fps=fps, bitrate=-1)
         ret, frame = video.read()
@@ -978,7 +1120,9 @@ def make_video(
                 ratio = (crop[3] - crop[2]) / (crop[1] - crop[0])
             x_left, x_right = axes[0].get_xlim()
             y_low, y_high = axes[0].get_ylim()
-            axes[0].set_aspect(abs((x_right - x_left) / (y_low - y_high)) * ratio)
+            axes[0].set_aspect(
+                abs((x_right - x_left) / (y_low - y_high)) * ratio
+            )
             axes[0].spines["top"].set_color("black")
             axes[0].spines["right"].set_color("black")
             time_delta = pd.Timedelta(
@@ -989,16 +1133,7 @@ def make_video(
                 f"time = {time_delta:3.4f}s\n frame = {frame_ind}",
                 fontsize=8,
             )
-            fontprops = fm.FontProperties(size=12)
-            #     scalebar = AnchoredSizeBar(axes[0].transData,
-            #                                20, '20 cm', 'lower right',
-            #                                pad=0.1,
-            #                                color='white',
-            #                                frameon=False,
-            #                                size_vertical=1,
-            #                                fontproperties=fontprops)
-
-            #     axes[0].add_artist(scalebar)
+            _ = fm.FontProperties(size=12)
             axes[0].axis("off")
             if plot_likelihood:
                 likelihood_objs = {
@@ -1039,13 +1174,17 @@ def make_video(
                 if ret:
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     if crop:
-                        frame = frame[crop[2] : crop[3], crop[0] : crop[1]].copy()
+                        frame = frame[
+                            crop[2] : crop[3], crop[0] : crop[1]
+                        ].copy()
                     image.set_array(frame)
                 pos_ind = np.where(video_frame_inds == time_ind)[0]
                 if len(pos_ind) == 0:
                     centroid_position_dot.set_offsets((np.NaN, np.NaN))
                     for bodypart in centroid_plot_objs.keys():
-                        centroid_plot_objs[bodypart].set_offsets((np.NaN, np.NaN))
+                        centroid_plot_objs[bodypart].set_offsets(
+                            (np.NaN, np.NaN)
+                        )
                     orientation_line.set_data((np.NaN, np.NaN))
                     title.set_text(f"time = {0:3.4f}s\n frame = {time_ind}")
                 else:
@@ -1073,7 +1212,9 @@ def make_video(
                     for bodypart in centroid_plot_objs.keys():
                         centroid_plot_objs[bodypart].set_offsets(
                             convert_to_pixels(
-                                centroids[bodypart][pos_ind], frame, cm_to_pixels
+                                centroids[bodypart][pos_ind],
+                                frame,
+                                cm_to_pixels,
                             )
                         )
                     centroid_position_dot.set_offsets(dlc_centroid_data)
@@ -1096,12 +1237,15 @@ def make_video(
                         pd.to_datetime(position_time[pos_ind] * 1e9, unit="ns")
                         - pd.to_datetime(position_time[0] * 1e9, unit="ns")
                     ).total_seconds()
-                    title.set_text(f"time = {time_delta:3.4f}s\n frame = {time_ind}")
+                    title.set_text(
+                        f"time = {time_delta:3.4f}s\n frame = {time_ind}"
+                    )
                     likelihood_inds = pos_ind + window_ind
                     neg_inds = np.where(likelihood_inds < 0)[0]
                     over_inds = np.where(
                         likelihood_inds
-                        > (len(likelihoods[list(likelihood_objs.keys())[0]])) - 1
+                        > (len(likelihoods[list(likelihood_objs.keys())[0]]))
+                        - 1
                     )[0]
                     if len(neg_inds) > 0:
                         likelihood_inds[neg_inds] = 0
@@ -1119,10 +1263,6 @@ def make_video(
                     centroid_position_dot,
                     orientation_line,
                     title,
-                    # redC_likelihood,
-                    # green_likelihood,
-                    # redL_likelihood,
-                    # redR_likelihood,
                 )
 
             movie = animation.FuncAnimation(

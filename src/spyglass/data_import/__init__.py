@@ -1,2 +1,2 @@
-from .insert_sessions import insert_sessions
-from .storage_dirs import base_dir, check_env
+# TODO: change naming to avoid match between module and function
+from spyglass.data_import.insert_sessions import insert_sessions

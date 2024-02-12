@@ -6,23 +6,7 @@ mysql_config
 
 # Notebooks
 *.ipynb
-
-!notebooks/00_intro.ipynb
-!notebooks/01_spikesorting.ipynb
-!notebooks/02_curation.ipynb
-!notebooks/03_lfp.ipynb
-!notebooks/04_Trodes_position.ipynb
-!notebooks/05_DLC_from_scratch.ipynb
-!notebooks/06_DLC_from_dir.ipynb
-!notebooks/4_position_info.ipynb
-!notebooks/07_linearization.ipynb
-!notebooks/08_Extract_Mark_indicators.ipynb
-!notebooks/09_Decoding_with_GPUs_on_the_GPU_cluster.ipynb
-!notebooks/10_1D_Clusterless_Decoding.ipynb
-!notebooks/11_2D_Clusterless_Decoding.ipynb
-!notebooks/12_Ripple_Detection.ipynb
-!notebooks/13_Theta_phase_and_power.ipynb
-
+!notebooks/[0-9]*.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -92,9 +76,6 @@ instance/
 # Scrapy stuff:
 .scrapy
 
-# Sphinx documentation
-docs/_build/
-
 # PyBuilder
 target/
 
@@ -137,9 +118,6 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
-
 # mypy
 .mypy_cache/
 .dmypy.json
@@ -165,7 +143,6 @@ dmypy.json
 temp_nwb/*s
 
 *.mp4
-dj_local_conf.json
 *.png
 *.npy
 *.nc
@@ -174,8 +151,27 @@ dj_local_conf.json
 *.json
 *.gz
 *.pdf
+*.lock
+*.npz
+*.xz
+*.zip
+*.pb
+*.pem
+dj_local_conf*
+!dj_local_conf_example.json
 
 !/.vscode/extensions.json
 !/.vscode/settings.json
-!/notebooks/dlc_scratch.png
-!/notebooks/dlc_existing.png
+!/notebooks/notebook-images/dlc_scratch.png
+!/notebooks/notebook-images/dlc_existing.png
+
+# Documentation
+docs/site/
+docs/src/CHANGELOG.md
+docs/src/LICENSE.md
+docs/src/notebooks/
+!docs/src/images/*png
+temp*
+
+# Version
+_version.py

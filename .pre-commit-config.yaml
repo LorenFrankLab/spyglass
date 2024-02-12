@@ -1,0 +1,83 @@
+default_stages: [commit, push]
+exclude: (^.github/|^docs/site/|^images/)
+
+repos:
+  - repo: https://github.com/executablebooks/mdformat
+    # Do this before other tools "fixing" the line endings
+    rev: 0.7.17
+    hooks:
+      - id: mdformat
+        name: Format Markdown
+        entry: mdformat # Executable to run, with fixed options
+        language: python
+        types: [markdown]
+        args: [--wrap, "80", --number]
+        additional_dependencies:
+          - mdformat-mkdocs
+          - mdformat-toc
+          - mdformat-beautysh
+          - mdformat-config
+          - mdformat-black
+          - mdformat-web
+          - mdformat-gfm
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-toml
+      - id: check-yaml
+        args: [--unsafe]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+        description: Forces to replace line ending by the UNIX 'lf' character.
+      - id: trailing-whitespace
+      - id: debug-statements
+      - id: check-added-large-files # prevent giant files from being committed
+      # - id: check-builtin-literals
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: check-docstring-first
+      - id: check-case-conflict
+      - id: fix-byte-order-marker
+
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.33.0
+    hooks:
+      - id: yamllint
+        args:
+          - --no-warnings
+          - -d
+          - "{extends: relaxed, rules: {line-length: {max: 80}}}"
+
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.1.6
+    hooks:
+      - id: ruff
+        args: [
+          "--exclude", "./notebooks/py_scripts/",
+          "--ignore", "F401,E402,E501"
+        ]
+        # F401: Unused import - May flag tables in DataJoint foreign keys
+        # E402: Module level import not at top of file - May want lazyloading
+        # E501: Line too long - Allow longer lines in table definitions
+
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.2.1
+    hooks:
+      - id: autoflake
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.2.6
+    hooks:
+      - id: codespell
+        args: [--toml, pyproject.toml]
+        additional_dependencies:
+          - tomli
+
+  - repo: https://github.com/ambv/black
+    rev: 24.1.1
+    hooks:
+      - id: black
+        language_version: python3.9

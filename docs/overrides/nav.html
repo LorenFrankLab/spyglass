@@ -1,0 +1,7 @@
+{% set class = "md-nav md-nav--primary" %}
+{% if "navigation.tabs" in features %}
+{% set class = class ~ " md-nav--lifted" %}
+{% endif %}
+{% if "toc.integrate" in features %}
+{% set class = class ~ " md-nav--integrated" %}
+{% endif %}

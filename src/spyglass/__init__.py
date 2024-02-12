@@ -1,14 +1,13 @@
-# Configure datajoint
-# You can use:
-# export DJ_HOST=...
-# export DJ_USER=...
-# export DJ_PASS=...
+from spyglass.settings import config  # ensure loaded config dirs
 
-# Important to do this so that we add the franklab namespace for pynwb
-# Note: This is franklab-specific
-import ndx_franklab_novela
+try:
+    import ndx_franklab_novela
+except ImportError:
+    pass
 
-import importlib.metadata
-from .settings import config
+try:
+    from ._version import __version__
+except ImportError:
+    pass
 
-__version__ = importlib.metadata.version("spyglass-neuro")
+__all__ = ["ndx_franklab_novela", "__version__", "config"]

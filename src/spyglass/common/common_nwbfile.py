@@ -1,8 +1,8 @@
 import os
-import pathlib
 import random
 import stat
 import string
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -11,8 +11,10 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
-from ..utils.dj_helper_fn import get_child_tables
-from ..utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
+from spyglass.settings import analysis_dir, raw_dir
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
 schema = dj.schema("common_nwbfile")
 
@@ -37,16 +39,18 @@ NWB_KEEP_FIELDS = (
 
 
 @schema
-class Nwbfile(dj.Manual):
+class Nwbfile(SpyglassMixin, dj.Manual):
     definition = """
     # Table for holding the NWB files.
-    nwb_file_name: varchar(255)   # name of the NWB file
+    nwb_file_name: varchar(64)   # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
     INDEX (nwb_file_abs_path)
     """
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
     # so that alter() can work
+
+    # NOTE: See #630, #664. Excessive key length.
 
     @classmethod
     def insert_from_relative_file_name(cls, nwb_file_name):
@@ -57,7 +61,7 @@ class Nwbfile(dj.Manual):
         nwb_file_name : str
             The relative path to the NWB file.
         """
-        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name, new_file=True)
         assert os.path.exists(
             nwb_file_abs_path
         ), f"File does not exist: {nwb_file_abs_path}"
@@ -67,29 +71,48 @@ class Nwbfile(dj.Manual):
         key["nwb_file_abs_path"] = nwb_file_abs_path
         cls.insert1(key, skip_duplicates=True)
 
-    @staticmethod
-    def get_abs_path(nwb_file_name):
-        """Return the absolute path for a stored raw NWB file given just the file name.
+    @classmethod
+    def _get_file_name(cls, nwb_file_name: str) -> str:
+        """Get valid nwb file name given substring."""
+        query = cls & f'nwb_file_name LIKE "%{nwb_file_name}%"'
 
-        The SPYGLASS_BASE_DIR environment variable must be set.
+        if len(query) == 1:
+            return query.fetch1("nwb_file_name")
+
+        raise ValueError(
+            f"Found {len(query)} matches for {nwb_file_name} in Nwbfile table:"
+            + f" \n{query}"
+        )
+
+    @classmethod
+    def get_file_key(cls, nwb_file_name: str) -> dict:
+        """Return primary key using nwb_file_name substring."""
+        return {"nwb_file_name": cls._get_file_name(nwb_file_name)}
+
+    @classmethod
+    def get_abs_path(cls, nwb_file_name, new_file=False) -> str:
+        """Return absolute path for a stored raw NWB file given file name.
+
+        The SPYGLASS_BASE_DIR must be set, either as an environment or part of
+        dj.config['custom']. See spyglass.settings.load_config
 
         Parameters
         ----------
         nwb_file_name : str
-            The name of an NWB file that has been inserted into the Nwbfile() schema.
+            The name of an NWB file that has been inserted into the Nwbfile()
+            table. May be file substring. May include % wildcard(s).
+        new_file : bool, optional
+            Adding a new file to Nwbfile table. Defaults to False.
 
         Returns
         -------
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
-        assert (
-            base_dir is not None
-        ), "You must set SPYGLASS_BASE_DIR or provide the base_dir argument"
+        if new_file:
+            return raw_dir + "/" + nwb_file_name
 
-        nwb_file_abspath = base_dir / "raw" / nwb_file_name
-        return str(nwb_file_abspath)
+        return raw_dir + "/" + cls._get_file_name(nwb_file_name)
 
     @staticmethod
     def add_to_lock(nwb_file_name):
@@ -125,10 +148,10 @@ class Nwbfile(dj.Manual):
 # TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
 # We therefore need another way to keep track of the
 @schema
-class AnalysisNwbfile(dj.Manual):
+class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting.
-    analysis_file_name: varchar(255)               # name of the file
+    analysis_file_name: varchar(64)               # name of the file
     ---
     -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
     analysis_file_abs_path: filepath@analysis      # the full path to the file
@@ -139,6 +162,8 @@ class AnalysisNwbfile(dj.Manual):
     """
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
     # so that alter() can work
+
+    # See #630, #664. Excessive key length.
 
     def create(self, nwb_file_name):
         """Open the NWB file, create a copy, write the copy to disk and return the name of the new file.
@@ -171,8 +196,10 @@ class AnalysisNwbfile(dj.Manual):
 
             analysis_file_name = self.__get_new_file_name(nwb_file_name)
             # write the new file
-            print(f"Writing new NWB file {analysis_file_name}")
-            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            logger.info(f"Writing new NWB file {analysis_file_name}")
+            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+                analysis_file_name
+            )
             # export the new NWB file
             with pynwb.NWBHDF5IO(
                 path=analysis_file_abs_path, mode="w", manager=io.manager
@@ -187,16 +214,20 @@ class AnalysisNwbfile(dj.Manual):
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
-        # each file ends with a random string of 10 digits, so we generate that string and redo if by some miracle
-        # it's already there
+        # each file ends with a random string of 10 digits, so we generate that
+        # string and redo if by some miracle it's already there
         file_in_table = True
         while file_in_table:
             analysis_file_name = (
                 os.path.splitext(nwb_file_name)[0]
-                + "".join(random.choices(string.ascii_uppercase + string.digits, k=10))
+                + "".join(
+                    random.choices(string.ascii_uppercase + string.digits, k=10)
+                )
                 + ".nwb"
             )
-            file_in_table = AnalysisNwbfile & {"analysis_file_name": analysis_file_name}
+            file_in_table = AnalysisNwbfile & {
+                "analysis_file_name": analysis_file_name
+            }
 
         return analysis_file_name
 
@@ -231,8 +262,10 @@ class AnalysisNwbfile(dj.Manual):
             original_nwb_file_name = query.fetch("nwb_file_name")[0]
             analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
             # write the new file
-            print(f"Writing new NWB file {analysis_file_name}...")
-            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            logger.info(f"Writing new NWB file {analysis_file_name}...")
+            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+                analysis_file_name
+            )
             # export the new NWB file
             with pynwb.NWBHDF5IO(
                 path=analysis_file_abs_path, mode="w", manager=io.manager
@@ -255,14 +288,16 @@ class AnalysisNwbfile(dj.Manual):
         key["nwb_file_name"] = nwb_file_name
         key["analysis_file_name"] = analysis_file_name
         key["analysis_file_description"] = ""
-        key["analysis_file_abs_path"] = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        key["analysis_file_abs_path"] = AnalysisNwbfile.get_abs_path(
+            analysis_file_name
+        )
         self.insert1(key)
 
     @staticmethod
     def get_abs_path(analysis_nwb_file_name):
         """Return the absolute path for a stored analysis NWB file given just the file name.
 
-        The SPYGLASS_BASE_DIR environment variable must be set.
+        The spyglass config from settings.py must be set.
 
         Parameters
         ----------
@@ -274,28 +309,23 @@ class AnalysisNwbfile(dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        base_dir = pathlib.Path(os.getenv("SPYGLASS_BASE_DIR", None))
-        assert (
-            base_dir is not None
-        ), "You must set SPYGLASS_BASE_DIR environment variable."
-
         # see if the file exists and is stored in the base analysis dir
-        test_path = str(base_dir / "analysis" / analysis_nwb_file_name)
+        test_path = f"{analysis_dir}/{analysis_nwb_file_name}"
 
         if os.path.exists(test_path):
             return test_path
         else:
             # use the new path
-            analysis_file_base_path = (
-                base_dir
-                / "analysis"
-                / AnalysisNwbfile.__get_analysis_file_dir(analysis_nwb_file_name)
-            )
+            analysis_file_base_path = Path(
+                analysis_dir
+            ) / AnalysisNwbfile.__get_analysis_file_dir(analysis_nwb_file_name)
             if not analysis_file_base_path.exists():
                 os.mkdir(str(analysis_file_base_path))
             return str(analysis_file_base_path / analysis_nwb_file_name)
 
-    def add_nwb_object(self, analysis_file_name, nwb_object, table_name="pandas_table"):
+    def add_nwb_object(
+        self, analysis_file_name, nwb_object, table_name="pandas_table"
+    ):
         # TODO: change to add_object with checks for object type and a name parameter, which should be specified if
         # it is not an NWB container
         """Add an NWB object to the analysis file in the scratch area and returns the NWB object ID
@@ -315,11 +345,15 @@ class AnalysisNwbfile(dj.Manual):
             The NWB object ID of the added object.
         """
         with pynwb.NWBHDF5IO(
-            path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True
+            path=self.get_abs_path(analysis_file_name),
+            mode="a",
+            load_namespaces=True,
         ) as io:
             nwbf = io.read()
             if isinstance(nwb_object, pd.DataFrame):
-                dt_object = DynamicTable.from_dataframe(name=table_name, df=nwb_object)
+                dt_object = DynamicTable.from_dataframe(
+                    name=table_name, df=nwb_object
+                )
                 nwbf.add_scratch(dt_object)
                 io.write(nwbf)
                 return dt_object.object_id
@@ -363,7 +397,9 @@ class AnalysisNwbfile(dj.Manual):
             The NWB object id of the Units object and the object id of the waveforms object ('' if None)
         """
         with pynwb.NWBHDF5IO(
-            path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True
+            path=self.get_abs_path(analysis_file_name),
+            mode="a",
+            load_namespaces=True,
         ) as io:
             nwbf = io.read()
             sort_intervals = list()
@@ -388,10 +424,14 @@ class AnalysisNwbfile(dj.Manual):
                     for metric in metrics:
                         if metrics[metric]:
                             unit_ids = np.array(list(metrics[metric].keys()))
-                            metric_values = np.array(list(metrics[metric].values()))
+                            metric_values = np.array(
+                                list(metrics[metric].values())
+                            )
                             # sort by unit_ids and apply that sorting to values to ensure that things go in the right order
                             metric_values = metric_values[np.argsort(unit_ids)]
-                            print(f"Adding metric {metric} : {metric_values}")
+                            logger.info(
+                                f"Adding metric {metric} : {metric_values}"
+                            )
                             nwbf.add_unit_column(
                                 name=metric,
                                 description=f"{metric} metric",
@@ -421,7 +461,9 @@ class AnalysisNwbfile(dj.Manual):
                         name="units_waveforms",
                         notes="spike waveforms for each unit",
                     )
-                    waveforms_object_id = nwbf.scratch["units_waveforms"].object_id
+                    waveforms_object_id = nwbf.scratch[
+                        "units_waveforms"
+                    ].object_id
 
                 io.write(nwbf)
                 return nwbf.units.object_id, waveforms_object_id
@@ -454,7 +496,9 @@ class AnalysisNwbfile(dj.Manual):
         """
 
         with pynwb.NWBHDF5IO(
-            path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True
+            path=self.get_abs_path(analysis_file_name),
+            mode="a",
+            load_namespaces=True,
         ) as io:
             nwbf = io.read()
             for id in waveform_extractor.sorting.get_unit_ids():
@@ -500,14 +544,18 @@ class AnalysisNwbfile(dj.Manual):
             # If metrics were specified, add one column per metric
             if metrics is not None:
                 for metric_name, metric_dict in metrics.items():
-                    print(f"Adding metric {metric_name} : {metric_dict}")
+                    logger.info(f"Adding metric {metric_name} : {metric_dict}")
                     metric_data = metric_dict.values().to_list()
                     nwbf.add_unit_column(
-                        name=metric_name, description=metric_name, data=metric_data
+                        name=metric_name,
+                        description=metric_name,
+                        data=metric_data,
                     )
             if labels is not None:
                 nwbf.add_unit_column(
-                    name="label", description="label given during curation", data=labels
+                    name="label",
+                    description="label given during curation",
+                    data=labels,
                 )
 
             io.write(nwbf)
@@ -520,11 +568,8 @@ class AnalysisNwbfile(dj.Manual):
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        waveform_extractor : si.WaveformExtractor object
         metrics : dict, optional
             Cluster metrics.
-        labels : dict, optional
-            Curation labels for clusters
 
         Returns
         -------
@@ -534,14 +579,16 @@ class AnalysisNwbfile(dj.Manual):
         metric_names = list(metrics.keys())
         unit_ids = list(metrics[metric_names[0]].keys())
         with pynwb.NWBHDF5IO(
-            path=self.get_abs_path(analysis_file_name), mode="a", load_namespaces=True
+            path=self.get_abs_path(analysis_file_name),
+            mode="a",
+            load_namespaces=True,
         ) as io:
             nwbf = io.read()
             for id in unit_ids:
                 nwbf.add_unit(id=id)
 
             for metric_name, metric_dict in metrics.items():
-                print(f"Adding metric {metric_name} : {metric_dict}")
+                logger.info(f"Adding metric {metric_name} : {metric_dict}")
                 metric_data = list(metric_dict.values())
                 nwbf.add_unit_column(
                     name=metric_name, description=metric_name, data=metric_data
@@ -596,7 +643,7 @@ class AnalysisNwbfile(dj.Manual):
 
 
 @schema
-class NwbfileKachery(dj.Computed):
+class NwbfileKachery(SpyglassMixin, dj.Computed):
     definition = """
     -> Nwbfile
     ---
@@ -604,13 +651,17 @@ class NwbfileKachery(dj.Computed):
     """
 
     def make(self, key):
-        print(f'Linking {key["nwb_file_name"]} and storing in kachery...')
-        key["nwb_file_uri"] = kc.link_file(Nwbfile().get_abs_path(key["nwb_file_name"]))
+        import kachery_client as kc
+
+        logger.info(f'Linking {key["nwb_file_name"]} and storing in kachery...')
+        key["nwb_file_uri"] = kc.link_file(
+            Nwbfile().get_abs_path(key["nwb_file_name"])
+        )
         self.insert1(key)
 
 
 @schema
-class AnalysisNwbfileKachery(dj.Computed):
+class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
     definition = """
     -> AnalysisNwbfile
     ---
@@ -618,7 +669,11 @@ class AnalysisNwbfileKachery(dj.Computed):
     """
 
     def make(self, key):
-        print(f'Linking {key["analysis_file_name"]} and storing in kachery...')
+        import kachery_client as kc
+
+        logger.info(
+            f'Linking {key["analysis_file_name"]} and storing in kachery...'
+        )
         key["analysis_file_uri"] = kc.link_file(
             AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
         )
