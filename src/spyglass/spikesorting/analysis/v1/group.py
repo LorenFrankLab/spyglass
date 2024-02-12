@@ -97,7 +97,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             if isinstance(unit_labels, str):
                 unit_labels = [unit_labels]
             if (
-                include_labels and np.all(~np.isin(unit_labels, include_labels))
+                include_labels.size > 0
+                and np.all(~np.isin(unit_labels, include_labels))
             ) or np.any(np.isin(unit_labels, exclude_labels)):
                 # if the unit does not have any of the include labels
                 # or has any of the exclude labels, skip
