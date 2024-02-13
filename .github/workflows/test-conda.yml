@@ -2,6 +2,8 @@ name: Test conda env and run tests
 
 on:
   push:
+    branches: 
+      - '!test_branch'
   schedule:  # once a day at midnight UTC
     - cron: '0 0 * * *'
 

@@ -61,7 +61,7 @@ nav:
       - Spikes:
           - Spike Sorting V0: notebooks/10_Spike_SortingV0.ipynb
           - Spike Sorting V1: notebooks/10_Spike_SortingV1.ipynb
-          - Curation: notebooks/11_Curation.ipynb
+          - Curation: notebooks/11_CurationV0.ipynb
       - Position:
           - Position Trodes: notebooks/20_Position_Trodes.ipynb
           - DLC Models: notebooks/21_DLC.ipynb
@@ -75,6 +75,7 @@ nav:
           - Extract Clusterless: notebooks/41_Extracting_Clusterless_Waveform_Features.ipynb
           - Decoding Clusterless: notebooks/42_Decoding_Clusterless.ipynb
           - Decoding Sorted Spikes: notebooks/43_Decoding_SortedSpikes.ipynb
+      - MUA Detection: notebooks/51_MUA_Detection.ipynb
   - API Reference: api/ # defer to gen-files + literate-nav
   - How to Contribute: contribute.md
   - Change Log: CHANGELOG.md
