@@ -68,8 +68,7 @@ nav:
           - Extracting Waveforms: notebooks/40_Extracting_Clusterless_Waveform_Features.ipynb
           - Decoding Clusterless: notebooks/41_Decoding_Clusterless.ipynb
           - Decoding Sorted Spikes: notebooks/42_Decoding_SortedSpikes.ipynb
-      - MUA:
-          - MUA Detection: notebooks/50_MUA_Detection.ipynb
+      - MUA Detection: notebooks/51_MUA_Detection.ipynb
   - Miscellaneous:
       - Overview: misc/index.md
       - FigURL: misc/figurl_views.md

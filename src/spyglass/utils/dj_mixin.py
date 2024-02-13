@@ -30,7 +30,7 @@ class SpyglassMixin:
         a NWBFile table (including AnalysisNwbfile) or a _nwb_table attribute to
         determine which table to use.
     delte_downstream_merge(restriction=None, dry_run=True, reload_cache=False)
-        Delete downstream merge table entries associated with restricton.
+        Delete downstream merge table entries associated with restriction.
         Requires caching of merge tables and links, which is slow on first call.
         `restriction` can be set to a string to restrict the delete. `dry_run`
         can be set to False to commit the delete. `reload_cache` can be set to
@@ -178,7 +178,7 @@ class SpyglassMixin:
         return_parts: bool = True,
         **kwargs,
     ) -> Union[List[QueryExpression], Dict[str, List[QueryExpression]]]:
-        """Delete downstream merge table entries associated with restricton.
+        """Delete downstream merge table entries associated with restriction.
 
         Requires caching of merge tables and links, which is slow on first call.
 
