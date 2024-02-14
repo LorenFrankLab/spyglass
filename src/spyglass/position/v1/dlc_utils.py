@@ -419,7 +419,8 @@ def get_video_path(key):
     """
     import pynwb
 
-    vf_key = {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
+    valid_fields = VideoFile.fetch().dtype.fields.keys()
+    vf_key = {k: val for k, val in key.items() if k in valid_fields}
     VideoFile()._no_transaction_make(vf_key, verbose=False)
     video_query = VideoFile & vf_key
 
