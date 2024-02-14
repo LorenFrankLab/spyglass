@@ -61,8 +61,20 @@ class SpyglassMixin:
 
         Checks that schema prefix is in SHARED_MODULES.
         """
-        if self.database and self.database.split("_")[0] not in SHARED_MODULES:
-            raise ValueError(f"Database {self.database} not in SHARED_MODULES")
+        if (
+            self.database  # Connected to a database
+            and not self.is_declared  # New table
+            and self.database.split("_")[0]  # Prefix
+            not in [
+                *SHARED_MODULES,  # Shared modules
+                dj.config["database.user"],  # User schema
+                "temp",
+                "test",
+            ]
+        ):
+            logger.error(
+                f"Schema prefix not in SHARED_MODULES: {self.database}"
+            )
 
     # ------------------------------- fetch_nwb -------------------------------
 

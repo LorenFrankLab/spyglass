@@ -1,5 +1,11 @@
 # Change Log
 
+## Unreleased
+
+### Infrastructure
+
+- Add user roles to `database_settings.py`. #832
+
 ## [0.5.0] (February 9, 2024)
 
 ### Infrastructure
