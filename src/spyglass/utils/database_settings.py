@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import grp
 import os
 import sys
 import tempfile
@@ -33,7 +32,6 @@ class DatabaseSettings:
         self,
         user_name=None,
         host_name=None,
-        target_group=None,
         debug=False,
         target_database=None,
     ):
@@ -45,14 +43,18 @@ class DatabaseSettings:
         - dj_user:   select for all prefix, all for user prefix, all for shared
         - dj_admin:     all for all prefix
 
+        Note: To add dj_user role to all those with common access, run:
+            query = "SELECT user, host FROM mysql.db WHERE Db LIKE 'common%';"
+            users = dj.conn().query(query).fetchall()
+            for user in users:
+                dj.conn().query(f"GRANT dj_user TO '{user[0][0]}'@'%';")
+
         Parameters
         ----------
         user_name : str, optional
             The name of the user to add to the database. Default from dj.config
         host_name : str, optional
             The name of the host to add to the database. Default from dj.config
-        target_group : str, optional
-            Group to which user belongs. Default is kachery-users
         debug : bool, optional
             Default False. If True, pprint sql instead of running
         target_database : str, optional
@@ -63,7 +65,6 @@ class DatabaseSettings:
         self.host = (
             host_name or dj.config["database.host"] or "lmf-db.cin.ucsf.edu"
         )
-        self.target_group = target_group or "kachery-users"
         self.debug = debug
         self.target_database = target_database or "mysql"
 
@@ -129,24 +130,6 @@ class DatabaseSettings:
         """Add guest user with select permissions to shared modules"""
         file = self.write_temp_file(self._add_guest_sql)
         self.exec(file)
-
-    def _find_group(self):
-        groups = grp.getgrall()  # find the kachery-users group
-        group_found = False  # initialize the flag as False
-        for group in groups:
-            if group.gr_name == self.target_group:
-                # set the flag to True when the group is found
-                group_found = True
-                break
-
-        if not group_found:  # Check if the group was found
-            if self.debug:
-                logger.info(f"All groups: {[g.gr_name for g in groups]}")
-            sys.exit(
-                f"Error: The target group {self.target_group} was not found."
-            )
-
-        return group
 
     def add_module(self, module_name):
         """Add module to database. Grant permissions to all users in group"""
