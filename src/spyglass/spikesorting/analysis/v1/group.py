@@ -14,11 +14,12 @@ schema = dj.schema("spikesorting_group_v1")
 @schema
 class UnitSelectionParams(SpyglassMixin, dj.Manual):
     definition = """
-    unit_filter_params_name: varchar(128)
+    unit_filter_params_name: varchar(32)
     ---
     include_labels = Null: longblob
     exclude_labels = Null: longblob
     """
+    # NOTE: pk reduced from 128 to 32 to avoid long primary key error
     contents = [
         [
             "all_units",

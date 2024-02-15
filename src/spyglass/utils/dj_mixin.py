@@ -10,6 +10,7 @@ from datajoint.table import Table
 from datajoint.utils import get_master, user_choice
 from pymysql.err import DataError
 
+from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_chains import TableChain, TableChains
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
@@ -54,6 +55,26 @@ class SpyglassMixin:
     # pks for delete permission check, assumed to be one field for each
     _session_pk = None  # Session primary key. Mixin is ambivalent to Session pk
     _member_pk = None  # LabMember primary key. Mixin ambivalent table structure
+
+    def __init__(self, *args, **kwargs):
+        """Initialize SpyglassMixin.
+
+        Checks that schema prefix is in SHARED_MODULES.
+        """
+        if (
+            self.database  # Connected to a database
+            and not self.is_declared  # New table
+            and self.database.split("_")[0]  # Prefix
+            not in [
+                *SHARED_MODULES,  # Shared modules
+                dj.config["database.user"],  # User schema
+                "temp",
+                "test",
+            ]
+        ):
+            logger.error(
+                f"Schema prefix not in SHARED_MODULES: {self.database}"
+            )
 
     # ------------------------------- fetch_nwb -------------------------------
 
