@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from functools import cached_property
 from typing import List, Union
 
@@ -9,6 +10,21 @@ from datajoint.utils import get_master
 
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.logging import logger
+
+# Tables that should be excluded from the undirected graph when finding paths
+# to maintain valid joins.
+PERIPHERAL_TABLES = [
+    "`common_interval`.`interval_list`",
+    "`common_nwbfile`.`__analysis_nwbfile_kachery`",
+    "`common_nwbfile`.`__nwbfile_kachery`",
+    "`common_nwbfile`.`analysis_nwbfile_kachery_selection`",
+    "`common_nwbfile`.`analysis_nwbfile_kachery`",
+    "`common_nwbfile`.`analysis_nwbfile`",
+    "`common_nwbfile`.`kachery_channel`",
+    "`common_nwbfile`.`nwbfile_kachery_selection`",
+    "`common_nwbfile`.`nwbfile_kachery`",
+    "`common_nwbfile`.`nwbfile`",
+]
 
 
 class TableChains:
@@ -139,7 +155,9 @@ class TableChain:
         self._link_symbol = " -> "
         self.parent = parent
         self.child = child
+        self.graph = self._connection.dependencies
         self._has_link = True
+        self._has_directed_link = None
 
     def __str__(self):
         """Return string representation of chain: parent -> child."""
@@ -188,65 +206,71 @@ class TableChain:
         """
         return 1 if data["primary"] else float("inf")
 
-    def shortest_path(self, directed=True) -> List[str]:
+    def find_path(self, directed=True) -> OrderedDict:
         """Return list of full table names in chain.
 
         Parameters
         ----------
         directed : bool, optional
             If True, use directed graph. If False, use undirected graph.
+            Defaults to True. Undirected permits paths to traverse from merge
+            part-parent -> merge part -> merge table. Undirected excludes
+            PERIPHERAL_TABLES likne interval_list, nwbfile, etc.
 
-        Uses networkx.shortest_path. Ignores numeric table names, which are
+        Returns
+        -------
+        OrderedDict
+            Dictionary of full table names in chain. Keys are full table names.
+            Values are dict attribute maps on the table upstream of an alias
+            node that can be used in .proj(). Returns None if no path is found.
+
+        Ignores numeric table names in paths, which are
         'gaps' or alias nodes in the graph. See datajoint.Diagram._make_graph
         source code for comments on alias nodes.
         """
-
-        graph = (
-            self._connection.dependencies
-            if directed
-            else self._connection.dependencies.to_undirected()
-        )
+        source, target = self.parent.full_table_name, self.child.full_table_name
+        if not directed:
+            self.graph = self.graph.to_undirected()
+            self.graph.remove_nodes_from(PERIPHERAL_TABLES)
         try:
-            return [
-                name
-                for name in nx.shortest_path(
-                    graph,
-                    self.parent.full_table_name,
-                    self.child.full_table_name,
-                )
-                if not name.isdigit()
-            ]
+            path = nx.shortest_path(self.graph, source, target)
         except nx.NetworkXNoPath:
             return None
 
-    @cached_property
-    def names(self) -> List[str]:
-        """Return list of full table names in chain.
+        ret = OrderedDict(), ""
+        for i, table in enumerate(path):
+            if table.isnumeric():
+                ret[path[i - 1]] = table["attr_map"]
+            else:
+                ret[table], prev_table = {}, table
+        return ret
 
-        Tries to do a directed shortest path first, then undirected. If neither
-        sets _has_link to False and returns None. Undirected permits paths to
-        traverse from merge part-parent -> merge part -> merge table.
-        """
+    @cached_property
+    def path(self) -> OrderedDict:
+        """Return list of full table names in chain."""
         if not self._has_link:
-            logger.debug(f"Early exit {self}")
             return None
 
-        if directed_link := self.shortest_path(directed=True):
-            return directed_link
-        if undirected_link := self.shortest_path(directed=False):
-            # Note: currently finds shortest path, which may be through
-            # peripheral tables like Analysisfile.
-            # Need to check that join still works for these
-            logger.debug(f"Path undirected {self}")
-            return undirected_link
-
-        logger.debug(f"Set nolink {self}")
+        if link := self.find_path(directed=True):
+            self._has_directed_link = True
+        if link := self.find_path(directed=False):
+            self._has_directed_link = False
+        if link:
+            return link
         self._has_link = False
+        return None
+
+    @cached_property
+    def names(self) -> List[str]:
+        """Return list of full table names in chain."""
+        if self.path:
+            return list(self.path.keys())
         return None
 
     @cached_property
     def objects(self) -> List[dj.FreeTable]:
         """Return list of FreeTable objects for each table in chain."""
+        # TODO: need fix now that path is an OrderedDict
         return (
             [dj.FreeTable(self._connection, name) for name in self.names]
             if self.names
@@ -269,6 +293,8 @@ class TableChain:
         if not self._has_link:
             return None
 
+        # TODO: need fix now that path is an OrderedDict. Incorporate attr_map
+        # in proj() call.
         objects = self.objects[::-1] if reverse_order else self.objects
         restriction = restriction or self.parent.restriction or True
         join = objects[0] & restriction

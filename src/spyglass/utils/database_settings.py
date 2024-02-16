@@ -21,6 +21,7 @@ SHARED_MODULES = [
 ]
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SEL = "GRANT SELECT ON "
+GRANT_SHOW = "GRANT SHOW DATABASES ON "
 CREATE_USR = "CREATE USER IF NOT EXISTS "
 CREATE_ROLE = "CREATE ROLE IF NOT EXISTS "
 TEMP_PASS = " IDENTIFIED BY 'temppass';"
@@ -73,11 +74,17 @@ class DatabaseSettings:
         guest_role = [
             f"{CREATE_ROLE}'dj_guest';\n",
             f"{GRANT_SEL}`%`.* TO 'dj_guest';\n",
+        ] + [
+            f"{GRANT_SHOW}`{module}`.* TO 'dj_guest';\n"
+            for module in self.shared_modules
         ]
         collab_role = [
             f"{CREATE_ROLE}'dj_collab';\n",
-            f"{GRANT_SEL}`%`.* TO 'dj_collab';\n",
-        ]  # also gets own prefix below
+            f"{GRANT_SEL}`%`.* TO 'dj_collab';\n",  # also own prefix below
+        ] + [
+            f"{GRANT_SHOW}`{module}`.* TO 'dj_guest';\n"
+            for module in self.shared_modules
+        ]
         user_role = [
             f"{CREATE_ROLE}'dj_user';\n",
             f"{GRANT_SEL}`%`.* TO 'dj_user';\n",

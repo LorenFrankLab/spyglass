@@ -130,17 +130,23 @@ class SpyglassMixin:
         Cache of items in parents of self.descendants(as_objects=True). Both
         descendant and parent must have the reserved primary key 'merge_id'.
         """
-
         self.connection.dependencies.load()
         merge_tables = {}
-        for desc in self.descendants(as_objects=True):
-            if MERGE_PK not in desc.heading.names or not (
-                master_name := get_master(desc.full_table_name)
-            ):
-                continue
-            master = dj.FreeTable(self.connection, master_name)
-            if MERGE_PK in master.heading.names:
-                merge_tables[master_name] = master
+
+        def search_descendants(parent):
+            for desc in parent.descendants(as_objects=True):
+                if (
+                    MERGE_PK not in desc.heading.names
+                    or not (master_name := get_master(desc.full_table_name))
+                    or master_name in merge_tables
+                ):
+                    continue
+                master = dj.FreeTable(self.connection, master_name)
+                if MERGE_PK in master.heading.names:
+                    merge_tables[master_name] = master
+                    search_descendants(master)
+
+        _ = search_descendants(self)
 
         logger.info(
             f"Building merge cache for {self.table_name}.\n\t"
