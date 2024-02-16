@@ -139,7 +139,7 @@ class TableChain:
         self._link_symbol = " -> "
         self.parent = parent
         self.child = child
-        self._has_link = child.full_table_name in parent.descendants()
+        self._has_link = True
 
     def __str__(self):
         """Return string representation of chain: parent -> child."""
@@ -182,34 +182,67 @@ class TableChain:
     def pk_link(self, src, trg, data) -> float:
         """Return 1 if data["primary"] else float("inf").
 
-        Currently unused. Preserved for future debugging."""
+        Currently unused. Preserved for future debugging. shortest_path accepts
+        an option weight callable parameter.
+        nx.shortest_path(G, source, target,weight=pk_link)
+        """
         return 1 if data["primary"] else float("inf")
 
-    @cached_property
-    def names(self) -> List[str]:
+    def shortest_path(self, directed=True) -> List[str]:
         """Return list of full table names in chain.
+
+        Parameters
+        ----------
+        directed : bool, optional
+            If True, use directed graph. If False, use undirected graph.
 
         Uses networkx.shortest_path. Ignores numeric table names, which are
         'gaps' or alias nodes in the graph. See datajoint.Diagram._make_graph
         source code for comments on alias nodes.
         """
-        if not self._has_link:
-            return None
+
+        graph = (
+            self._connection.dependencies
+            if directed
+            else self._connection.dependencies.to_undirected()
+        )
         try:
             return [
                 name
                 for name in nx.shortest_path(
-                    self.parent.connection.dependencies,
+                    graph,
                     self.parent.full_table_name,
                     self.child.full_table_name,
-                    # weight: optional callable to determine edge weight
-                    # weight=self.pk_link,
                 )
                 if not name.isdigit()
             ]
         except nx.NetworkXNoPath:
-            self._has_link = False
             return None
+
+    @cached_property
+    def names(self) -> List[str]:
+        """Return list of full table names in chain.
+
+        Tries to do a directed shortest path first, then undirected. If neither
+        sets _has_link to False and returns None. Undirected permits paths to
+        traverse from merge part-parent -> merge part -> merge table.
+        """
+        if not self._has_link:
+            logger.debug(f"Early exit {self}")
+            return None
+
+        if directed_link := self.shortest_path(directed=True):
+            return directed_link
+        if undirected_link := self.shortest_path(directed=False):
+            # Note: currently finds shortest path, which may be through
+            # peripheral tables like Analysisfile.
+            # Need to check that join still works for these
+            logger.debug(f"Path undirected {self}")
+            return undirected_link
+
+        logger.debug(f"Set nolink {self}")
+        self._has_link = False
+        return None
 
     @cached_property
     def objects(self) -> List[dj.FreeTable]:
