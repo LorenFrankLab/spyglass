@@ -6,6 +6,7 @@ import os
 import pathlib
 import pwd
 import subprocess
+import sys
 from collections import abc
 from contextlib import redirect_stdout
 from itertools import groupby
@@ -538,17 +539,23 @@ def _convert_mp4(
         "copy",
         f"{dest_path.as_posix()}",
     ]
-    try:
-        convert_process = subprocess.Popen(
-            convert_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-        )
-    except subprocess.CalledProcessError as err:
-        raise RuntimeError(
-            f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
-        ) from err
-    out, _ = convert_process.communicate()
-    print(out.decode("utf-8"))
-    print(f"finished converting {filename}")
+    if dest_path.exists():
+        print(f"{dest_path} already exists, skipping conversion")
+    else:
+        try:
+            sys.stdout.flush()
+            convert_process = subprocess.Popen(
+                convert_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        except subprocess.CalledProcessError as err:
+            raise RuntimeError(
+                f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+            ) from err
+        out, _ = convert_process.communicate()
+        print(out.decode("utf-8"))
+        print(f"finished converting {filename}")
     print(
         f"Checking that number of packets match between {orig_filename} and {dest_filename}"
     )
