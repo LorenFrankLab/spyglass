@@ -146,5 +146,5 @@ keywords:
   - spike sorting
   - kachery
 license: MIT
-version: 0.4.3
-date-released: '2023-11-07'
+version: 0.5.0
+date-released: '2024-02-09'

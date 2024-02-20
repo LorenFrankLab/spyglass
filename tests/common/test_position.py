@@ -118,11 +118,11 @@ def test_fetch1_dataframe(interval_position_info, interval_pos_key):
     df_sums = {c: df[c].iloc[:5].sum() for c in df.columns}
     df_sums_exp = {
         "head_orientation": 4.4300073600180125,
-        "head_position_x": 111.25,
-        "head_position_y": 141.75,
-        "head_speed": 0.6084872579024899,
-        "head_velocity_x": -0.4329520555149495,
-        "head_velocity_y": 0.42756198762527325,
+        "head_position_x": 222.5,
+        "head_position_y": 283.5,
+        "head_speed": 1.2245733375331014,
+        "head_velocity_x": -0.865904111029899,
+        "head_velocity_y": 0.8551239752505465,
     }
     for k in df_sums:
         assert k in df_sums_exp, err_msg

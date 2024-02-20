@@ -14,11 +14,12 @@ schema = dj.schema("spikesorting_group_v1")
 @schema
 class UnitSelectionParams(SpyglassMixin, dj.Manual):
     definition = """
-    unit_filter_params_name: varchar(128)
+    unit_filter_params_name: varchar(32)
     ---
     include_labels = Null: longblob
     exclude_labels = Null: longblob
     """
+    # NOTE: pk reduced from 128 to 32 to avoid long primary key error
     contents = [
         [
             "all_units",
@@ -96,9 +97,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         for ind, unit_labels in enumerate(labels):
             if isinstance(unit_labels, str):
                 unit_labels = [unit_labels]
-            if np.all(~np.isin(unit_labels, include_labels)) or np.any(
-                np.isin(unit_labels, exclude_labels)
-            ):
+            if (
+                include_labels.size > 0
+                and np.all(~np.isin(unit_labels, include_labels))
+            ) or np.any(np.isin(unit_labels, exclude_labels)):
                 # if the unit does not have any of the include labels
                 # or has any of the exclude labels, skip
                 continue
