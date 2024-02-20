@@ -6,6 +6,7 @@ import os
 import pathlib
 import pwd
 import subprocess
+import sys
 from collections import abc
 from contextlib import redirect_stdout
 from itertools import groupby
@@ -419,8 +420,10 @@ def get_video_path(key):
     """
     import pynwb
 
-    vf_key = {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
-    VideoFile()._no_transaction_make(vf_key, verbose=False)
+    valid_fields = VideoFile.fetch().dtype.fields.keys()
+    vf_key = {k: val for k, val in key.items() if k in valid_fields}
+    if not VideoFile & vf_key:
+        VideoFile()._no_transaction_make(vf_key, verbose=False)
     video_query = VideoFile & vf_key
 
     if len(video_query) != 1:
@@ -537,17 +540,23 @@ def _convert_mp4(
         "copy",
         f"{dest_path.as_posix()}",
     ]
-    try:
-        convert_process = subprocess.Popen(
-            convert_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-        )
-    except subprocess.CalledProcessError as err:
-        raise RuntimeError(
-            f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
-        ) from err
-    out, _ = convert_process.communicate()
-    print(out.decode("utf-8"))
-    print(f"finished converting {filename}")
+    if dest_path.exists():
+        print(f"{dest_path} already exists, skipping conversion")
+    else:
+        try:
+            sys.stdout.flush()
+            convert_process = subprocess.Popen(
+                convert_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        except subprocess.CalledProcessError as err:
+            raise RuntimeError(
+                f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+            ) from err
+        out, _ = convert_process.communicate()
+        print(out.decode("utf-8"))
+        print(f"finished converting {filename}")
     print(
         f"Checking that number of packets match between {orig_filename} and {dest_filename}"
     )

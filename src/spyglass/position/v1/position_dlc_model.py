@@ -196,7 +196,8 @@ class DLCModel(SpyglassMixin, dj.Computed):
             raise OSError(f"config_path {config_path} does not exist.")
         if config_path.suffix in (".yml", ".yaml"):
             with open(config_path, "rb") as f:
-                dlc_config = yaml.safe_load(f)
+                safe_yaml = yaml.YAML(typ="safe", pure=True)
+                dlc_config = safe_yaml.load(f)
             if isinstance(params["params"], dict):
                 dlc_config.update(params["params"])
                 del params["params"]
