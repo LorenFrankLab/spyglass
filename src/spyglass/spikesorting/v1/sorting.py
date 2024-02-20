@@ -67,7 +67,7 @@ class SpikeSorterParameters(SpyglassMixin, dj.Lookup):
                 "detect_threshold": 3,
                 "detect_interval": 10,
             },
-        ],
+        ],       
         [
             "clusterless_thresholder",
             "default_clusterless",
@@ -241,19 +241,41 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         else:
             # Specify tempdir (expected by some sorters like mountainsort4)
             sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
+        
+
             sorter_params["tempdir"] = sorter_temp_dir.name
+
+            if sorter == 'mountainsort5':
+                 sorter_params.pop("tempdir", None)
+            
+            
             # if whitening is specified in sorter params, apply whitening separately
             # prior to sorting and turn off "sorter whitening"
-            if sorter_params["whiten"]:
+            if sorter_params.get("whiten", False):
                 recording = sip.whiten(recording, dtype=np.float64)
                 sorter_params["whiten"] = False
-            sorting = sis.run_sorter(
-                sorter,
-                recording,
-                output_folder=sorter_temp_dir.name,
-                remove_existing_folder=True,
-                **sorter_params,
-            )
+
+            if 'kilosort' in sorter:
+                sorter_params.pop("tempdir", None)
+                sorter_params.pop("mp_context", None)
+                sorter_params.pop("max_threads_per_process", None)
+                sorting = sis.run_sorter(
+                    sorter,
+                    recording,
+                    output_folder=sorter_temp_dir.name,
+                    remove_existing_folder=True,
+                    verbose = True,
+                    singularity_image=True,
+                    **sorter_params,
+                )
+            else:           
+                sorting = sis.run_sorter(
+                    sorter,
+                    recording,
+                    output_folder=sorter_temp_dir.name,
+                    remove_existing_folder=True,
+                    **sorter_params,
+                )
         key["time_of_sort"] = int(time.time())
         sorting = sic.remove_excess_spikes(sorting, recording)
         key["analysis_file_name"], key["object_id"] = _write_sorting_to_nwb(
