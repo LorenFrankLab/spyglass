@@ -269,7 +269,6 @@ class TableChain:
                     raise ValueError("Alias node found without prev table.")
                 attr_map = self.graph[table][prev_table]["attr_map"]
                 ret[prev_table]["attr_map"] = attr_map
-                # __import__("pdb").set_trace()
             else:
                 free_table = dj.FreeTable(self._connection, table)
                 ret[table] = {"free_table": free_table, "attr_map": {}}

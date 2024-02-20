@@ -635,7 +635,6 @@ class Merge(dj.Manual):
         )
 
         if not multi_source and len(part_parents) != 1:
-            __import__("pdb").set_trace()
             raise ValueError(
                 f"Found  {len(part_parents)} potential parents: {part_parents}"
                 + "\n\tTry adding a string restriction when invoking "
