@@ -10,6 +10,7 @@ from datajoint.table import Table
 from datajoint.utils import get_master, user_choice
 from pymysql.err import DataError
 
+from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_chains import TableChain, TableChains
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
@@ -30,7 +31,7 @@ class SpyglassMixin:
         a NWBFile table (including AnalysisNwbfile) or a _nwb_table attribute to
         determine which table to use.
     delte_downstream_merge(restriction=None, dry_run=True, reload_cache=False)
-        Delete downstream merge table entries associated with restricton.
+        Delete downstream merge table entries associated with restriction.
         Requires caching of merge tables and links, which is slow on first call.
         `restriction` can be set to a string to restrict the delete. `dry_run`
         can be set to False to commit the delete. `reload_cache` can be set to
@@ -54,6 +55,26 @@ class SpyglassMixin:
     # pks for delete permission check, assumed to be one field for each
     _session_pk = None  # Session primary key. Mixin is ambivalent to Session pk
     _member_pk = None  # LabMember primary key. Mixin ambivalent table structure
+
+    def __init__(self, *args, **kwargs):
+        """Initialize SpyglassMixin.
+
+        Checks that schema prefix is in SHARED_MODULES.
+        """
+        if (
+            self.database  # Connected to a database
+            and not self.is_declared  # New table
+            and self.database.split("_")[0]  # Prefix
+            not in [
+                *SHARED_MODULES,  # Shared modules
+                dj.config["database.user"],  # User schema
+                "temp",
+                "test",
+            ]
+        ):
+            logger.error(
+                f"Schema prefix not in SHARED_MODULES: {self.database}"
+            )
 
     # ------------------------------- fetch_nwb -------------------------------
 
@@ -178,7 +199,7 @@ class SpyglassMixin:
         return_parts: bool = True,
         **kwargs,
     ) -> Union[List[QueryExpression], Dict[str, List[QueryExpression]]]:
-        """Delete downstream merge table entries associated with restricton.
+        """Delete downstream merge table entries associated with restriction.
 
         Requires caching of merge tables and links, which is slow on first call.
 
@@ -215,8 +236,8 @@ class SpyglassMixin:
         if not merge_join_dict and not disable_warning:
             logger.warning(
                 f"No merge deletes found w/ {self.table_name} & "
-                + f"{restriction}.\n\tIf this is unexpected, try running with "
-                + "`reload_cache`."
+                + f"{restriction}.\n\tIf this is unexpected, try importing "
+                + " Merge table(s) and running with `reload_cache`."
             )
 
         if dry_run:
@@ -365,7 +386,7 @@ class SpyglassMixin:
 
         return CautiousDelete()
 
-    def _log_use(self, start, merge_deletes=None):
+    def _log_use(self, start, merge_deletes=None, super_delete=False):
         """Log use of cautious_delete."""
         if isinstance(merge_deletes, QueryExpression):
             merge_deletes = merge_deletes.fetch(as_dict=True)
@@ -374,15 +395,13 @@ class SpyglassMixin:
             dj_user=dj.config["database.user"],
             origin=self.full_table_name,
         )
+        restr_str = "Super delete: " if super_delete else ""
+        restr_str += "".join(self.restriction) if self.restriction else "None"
         try:
             self._usage_table.insert1(
                 dict(
                     **safe_insert,
-                    restriction=(
-                        "".join(self.restriction)[255:]  # handle list
-                        if self.restriction
-                        else "None"
-                    ),
+                    restriction=restr_str[:255],
                     merge_deletes=merge_deletes,
                 )
             )
@@ -455,4 +474,5 @@ class SpyglassMixin:
     def super_delete(self, *args, **kwargs):
         """Alias for datajoint.table.Table.delete."""
         logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
+        self._log_use(start=time(), super_delete=True)
         super().delete(*args, **kwargs)

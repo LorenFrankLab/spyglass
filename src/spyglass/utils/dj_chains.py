@@ -221,7 +221,7 @@ class TableChain:
         )
 
     def join(
-        self, restricton: str = None, reverse_order: bool = False
+        self, restriction: str = None, reverse_order: bool = False
     ) -> dj.expression.QueryExpression:
         """Return join of tables in chain with restriction applied to parent.
 
@@ -237,7 +237,7 @@ class TableChain:
             return None
 
         objects = self.objects[::-1] if reverse_order else self.objects
-        restriction = restricton or self.parent.restriction or True
+        restriction = restriction or self.parent.restriction or True
         join = objects[0] & restriction
         for table in objects[1:]:
             try:
