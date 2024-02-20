@@ -3,13 +3,14 @@ from contextlib import nullcontext
 from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
+from time import time
 from typing import Union
 
 import datajoint as dj
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
-from datajoint.utils import from_camel_case, get_master, to_camel_case
+from datajoint.utils import from_camel_case, to_camel_case
 from IPython.core.display import HTML
 
 from spyglass.utils.logging import logger
@@ -248,6 +249,9 @@ class Merge(dj.Manual):
                 return_empties=False,  # motivated by SpikeSortingOutput.Import
             )
         ]
+        if not parts:
+            logger.warning("No parts found. Try adjusting restriction.")
+            return
 
         attr_dict = {  # NULL for non-numeric, 0 for numeric
             attr.name: "0" if attr.numeric else "NULL"
@@ -274,10 +278,8 @@ class Merge(dj.Manual):
         return query
 
     @classmethod
-    def _merge_insert(
-        cls, rows: list, part_name: str = None, mutual_exclusvity=True, **kwargs
-    ) -> None:
-        """Insert rows into merge, ensuring db integrity and mutual exclusivity
+    def _merge_insert(cls, rows: list, part_name: str = None, **kwargs) -> None:
+        """Insert rows into merge, ensuring data exists in part parent(s).
 
         Parameters
         ---------
@@ -291,18 +293,17 @@ class Merge(dj.Manual):
         TypeError
             If rows is not a list of dicts
         ValueError
-            If entry already exists, mutual exclusivity errors
             If data doesn't exist in part parents, integrity error
         """
         cls._ensure_dependencies_loaded()
 
+        type_err_msg = "Input `rows` must be a list of dictionaries"
         try:
             for r in iter(rows):
-                assert isinstance(
-                    r, dict
-                ), 'Input "rows" must be a list of dictionaries'
+                if not isinstance(r, dict):
+                    raise TypeError(type_err_msg)
         except TypeError:
-            raise TypeError('Input "rows" must be a list of dictionaries')
+            raise TypeError(type_err_msg)
 
         parts = cls._merge_restrict_parts(as_objects=True)
         if part_name:
@@ -315,30 +316,24 @@ class Merge(dj.Manual):
         master_entries = []
         parts_entries = {p: [] for p in parts}
         for row in rows:
-            keys = []  # empty to-be-inserted key
+            keys = []  # empty to-be-inserted keys
             for part in parts:  # check each part
-                part_parent = part.parents(as_objects=True)[-1]
                 part_name = cls._part_name(part)
+                part_parent = part.parents(as_objects=True)[-1]
                 if part_parent & row:  # if row is in part parent
-                    if keys and mutual_exclusvity:  # if key from other part
-                        raise ValueError(
-                            "Mutual Exclusivity Error! Entry exists in more "
-                            + f"than one table - Entry: {row}"
-                        )
-
                     keys = (part_parent & row).fetch("KEY")  # get pk
                     if len(keys) > 1:
                         raise ValueError(
                             "Ambiguous entry. Data has mult rows in "
                             + f"{part_name}:\n\tData:{row}\n\t{keys}"
                         )
-                    master_pk = {  # make uuid
-                        cls()._reserved_pk: dj.hash.key_hash(keys[0]),
-                    }
-                    parts_entries[part].append({**master_pk, **keys[0]})
-                    master_entries.append(
-                        {**master_pk, cls()._reserved_sk: part_name}
-                    )
+                    key = keys[0]
+                    master_sk = {cls()._reserved_sk: part_name}
+                    uuid = dj.hash.key_hash(key | master_sk)
+                    master_pk = {cls()._reserved_pk: uuid}
+
+                    master_entries.append({**master_pk, **master_sk})
+                    parts_entries[part].append({**master_pk, **key})
 
             if not keys:
                 raise ValueError(
@@ -369,27 +364,22 @@ class Merge(dj.Manual):
         if not dj.conn.connection.dependencies._loaded:
             dj.conn.connection.dependencies.load()
 
-    def insert(self, rows: list, mutual_exclusvity=True, **kwargs):
-        """Merges table specific insert
-
-        Ensuring db integrity and mutual exclusivity
+    def insert(self, rows: list, **kwargs):
+        """Merges table specific insert, ensuring data exists in part parents.
 
         Parameters
         ---------
         rows: List[dict]
             An iterable where an element is a dictionary.
-        mutual_exclusvity: bool
-            Check for mutual exclusivity before insert. Default True.
 
         Raises
         ------
         TypeError
             If rows is not a list of dicts
         ValueError
-            If entry already exists, mutual exclusivity errors
             If data doesn't exist in part parents, integrity error
         """
-        self._merge_insert(rows, mutual_exclusvity=mutual_exclusvity, **kwargs)
+        self._merge_insert(rows, **kwargs)
 
     @classmethod
     def merge_view(cls, restriction: str = True):
@@ -586,6 +576,8 @@ class Merge(dj.Manual):
                 + "Try adding a restriction before invoking `get_part`.\n\t"
                 + "Or permitting multiple sources with `multi_source=True`."
             )
+        if len(sources) == 0:
+            return None
 
         parts = [
             (
@@ -658,6 +650,8 @@ class Merge(dj.Manual):
 
     @property
     def source_class_dict(self) -> dict:
+        # NOTE: fails if table is aliased in dj.Part but not merge script
+        # i.e., must import aliased table as part name
         if not self._source_class_dict:
             module = getmodule(self)
             self._source_class_dict = {
@@ -768,12 +762,33 @@ class Merge(dj.Manual):
             )
         return results[0] if len(results) == 1 else results
 
-    @classmethod
-    def merge_populate(source: str, key=None):
-        raise NotImplementedError(
-            "CBroz: In the future, this command will support executing "
-            + "part_parent `make` and then inserting all entries into Merge"
-        )
+    def merge_populate(self, source: str, keys=None):
+        """Populate the merge table with entries from the source table."""
+        logger.warning("CBroz: Not fully tested. Use with caution.")
+        parent_class = self.merge_get_parent_class(source)
+        if not keys:
+            keys = parent_class.key_source
+        parent_class.populate(keys)
+        successes = (parent_class & keys).fetch("KEY", as_dict=True)
+        self.insert(successes)
+
+    def delete(self, force_permission=False, *args, **kwargs):
+        """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
+        for part in self.merge_get_part(
+            restriction=self.restriction,
+            multi_source=True,
+            return_empties=False,
+        ):
+            part.delete(force_permission=force_permission, *args, **kwargs)
+
+    def super_delete(self, *args, **kwargs):
+        """Alias for datajoint.table.Table.delete.
+
+        Added to support MRO of SpyglassMixin"""
+        logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
+
+        self._log_use(start=time(), super_delete=True)
+        super().delete(*args, **kwargs)
 
 
 _Merge = Merge

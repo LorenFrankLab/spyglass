@@ -5,10 +5,14 @@
 
 ![Spyglass Figure](docs/src/images/fig1.png)
 
+[Demo](https://spyglass.hhmi.2i2c.cloud/hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FLorenFrankLab%2Fspyglass-demo&urlpath=lab%2Ftree%2Fspyglass-demo%2Fnotebooks%2F01_Insert_Data.ipynb&branch=main) | [Installation](https://lorenfranklab.github.io/spyglass/latest/installation/) | [Docs](https://lorenfranklab.github.io/spyglass/) | [Tutorials](https://github.com/LorenFrankLab/spyglass/tree/master/notebooks) | [Citation](#citation)
+
 `spyglass` is a data analysis framework that facilitates the storage, analysis,
 visualization, and sharing of neuroscience data to support reproducible
 research. It is designed to be interoperable with the NWB format and integrates
 open-source tools into a coherent framework.
+
+Try out a demo [here](https://spyglass.hhmi.2i2c.cloud/hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FLorenFrankLab%2Fspyglass-demo&urlpath=lab%2Ftree%2Fspyglass-demo%2Fnotebooks%2F01_Insert_Data.ipynb&branch=main)!
 
 Features of Spyglass include:
 
@@ -79,10 +83,8 @@ License and Copyright notice can be found at
 
 ## Citation
 
-> Lee, K.H.\*, Denovellis, E.L.\*, Ly, R., Magland, J., Soules, J., Gramling, D.P.,
- Guidera, J.A., Nevers, R., Adenekan, P., Bray, S., et al. (2024). Spyglass:
-a data analysis framework for reproducible and shareable neuroscience research.
-   bioRxiv.
-   [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295 ).
+> Lee, K.H.\*, Denovellis, E.L.\*, Ly, R., Magland, J., Soules, J., Comrie, A.E., Gramling, D.P., Guidera, J.A., Nevers, R., Adenekan, P., Brozdowski, C., Bray, S., Monroe, E., Bak, J.H., Coulter, M.E., Sun, X., Tritt, A., Rübel, O., Nguyen, T., Yatsenko, D., Chu, J., Kemere, C., Garcia, S., Buccino, A., Frank, L.M., 2024. Spyglass: a data analysis framework for reproducible and shareable neuroscience research. bioRxiv. [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295 ).
 
 *\* Equal contribution*
+
+See paper related code [here](https://github.com/LorenFrankLab/spyglass-paper).

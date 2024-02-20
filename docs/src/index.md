@@ -68,12 +68,10 @@ contains license information.
 
 ## Citing Spyglass
 
-Kyu Hyun Lee, Eric Denovellis, Ryan Ly, Jeremy Magland, Jeff Soules, Alison
-Comrie, Jennifer Guidera, Rhino Nevers, Daniel Gramling, Philip Adenekan, Ji
-Hyun Bak, Emily Monroe, Andrew Tritt, Oliver Rübel, Thinh Nguyen, Dimitri
-Yatsenko, Joshua Chu, Caleb Kemere, Samuel Garcia, Alessio Buccino, Emily Aery
-Jones, Lisa Giocomo, and Loren Frank. 'Spyglass: A Data Analysis Framework for
-Reproducible and Shareable Neuroscience Research.' (2022) Society for
-Neuroscience, San Diego, CA.
+> Lee, K.H.\*, Denovellis, E.L.\*, Ly, R., Magland, J., Soules, J., Comrie, A.E., Gramling, D.P., Guidera, J.A., Nevers, R., Adenekan, P., Brozdowski, C., Bray, S., Monroe, E., Bak, J.H., Coulter, M.E., Sun, X., Tritt, A., Rübel, O., Nguyen, T., Yatsenko, D., Chu, J., Kemere, C., Garcia, S., Buccino, A., Frank, L.M., 2024. Spyglass: a data analysis framework for reproducible and shareable neuroscience research. bioRxiv. [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295 ).
+
+*\* Equal contribution*
+
+See paper related code [here](https://github.com/LorenFrankLab/spyglass-paper).
 
 <!-- TODO: Convert ccf file and insert here  -->

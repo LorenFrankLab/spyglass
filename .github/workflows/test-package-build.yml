@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - maint/*
+      - '!test_branch'
     tags:
       - "*"
   pull_request:

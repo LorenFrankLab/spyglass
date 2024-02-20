@@ -1,36 +1,50 @@
 # Change Log
 
-## [0.4.4] (Unreleased)
+## Unreleased
 
 ### Infrastructure
 
-- Additional documentation. #690
-- Clean up following pre-commit checks. #688
-- Add Mixin class to centralize `fetch_nwb` functionality. #692, #734
-- Refactor restriction use in `delete_downstream_merge` #703
-- Add `cautious_delete` to Mixin class
-    - Initial implementation. #711, #762
-    - More robust caching of join to downstream tables. #806
-    - Overwrite datajoint `delete` method to use `cautious_delete`. #806
-- Add `deprecation_factory` to facilitate table migration. #717
-- Add Spyglass logger. #730
-- IntervalList: Add secondary key `pipeline` #742
-- Increase pytest coverage for `common`, `lfp`, and `utils`. #743
-- Update docs to reflect new notebooks. #776
-- Add overview of Spyglass to docs. #779
-- Update linting for Black 24. #808
+- Add user roles to `database_settings.py`. #832
+
+## [0.5.0] (February 9, 2024)
+
+### Infrastructure
+
+- Docs:
+    - Additional documentation. #690
+    - Add overview of Spyglass to docs. #779
+    - Update docs to reflect new notebooks. #776
+- Mixin:
+    - Add Mixin class to centralize `fetch_nwb` functionality. #692, #734
+    - Refactor restriction use in `delete_downstream_merge` #703
+    - Add `cautious_delete` to Mixin class
+        - Initial implementation. #711, #762
+        - More robust caching of join to downstream tables. #806
+        - Overwrite datajoint `delete` method to use `cautious_delete`. #806
+        - Reverse join order for session summary. #821
+        - Add temporary logging of use to `common_usage`. #811, #821
+- Merge Tables:
+    - UUIDs: Revise Merge table uuid generation to include source. #824
+    - UUIDs: Remove mutual exclusivity logic due to new UUID generation. #824
+    - Add method for `merge_populate`. #824
+- Linting:
+    - Clean up following pre-commit checks. #688
+    - Update linting for Black 24. #808
+- Misc:
+    - Add `deprecation_factory` to facilitate table migration. #717
+    - Add Spyglass logger. #730
+    - Increase pytest coverage for `common`, `lfp`, and `utils`. #743
+    - Steamline dependency management. #822
 
 ### Pipelines
 
+- Common:
+    - `IntervalList`: Add secondary key `pipeline` #742
+    - Add `common_usage` table. #811, #821, #824
+    - Add catch errors during `populate_all_common`. #824
 - Spike sorting:
     - Add SpikeSorting V1 pipeline. #651
     - Move modules into spikesorting.v0 #807
-    - Add MUA analysis to spike sorting pipeline
-- LFP: Minor fixes to LFPBandV1 populator and `make`. #706, #795
-
-### Pipelines
-
-- Spike sorting: Add SpikeSorting V1 pipeline. #651
 - LFP:
     - Minor fixes to LFPBandV1 populator and `make`. #706, #795
     - LFPV1: Fix error for multiple lfp settings on same data #775
@@ -43,7 +57,7 @@
     - DLC path handling from config, and normalize naming convention. #722
     - Fix in place column bug #752
 - Decoding:
-    - Add `decoding` pipeline V1. #731, #769
+    - Add `decoding` pipeline V1. #731, #769, #819
     - Add a table to store the decoding results #731
     - Use the new `non_local_detector` package for decoding #731
     - Allow multiple spike waveform features for clusterless decoding #731
@@ -51,8 +65,12 @@
     - Add fetch class functionality to `Merge` table. #783, #786
     - Add ability to filter sorted units in decoding #807
     - Rename SortedSpikesGroup.SortGroup to SortedSpikesGroup.Units #807
-    - Change methods with load_... to fetch_... for consistency #807
+    - Change methods with load\_... to fetch\_... for consistency #807
     - Use merge table methods to access part methods #807
+- MUA
+    - Add MUA pipeline V1. #731, #819
+- Ripple
+    - Add figurl to Ripple pipeline #819
 
 ## [0.4.3] (November 7, 2023)
 
@@ -158,4 +176,4 @@
 [0.4.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.1
 [0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
 [0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
-[0.4.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.4
+[0.5.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.0

@@ -13,8 +13,10 @@
 # ---
 
 # ## Position- DeepLabCut from Scratch
+#
 
 # ### Overview
+#
 
 # _Developer Note:_ if you may make a PR in the future, be sure to copy this
 # notebook, and use the `gitignore` prefix `temp` to avoid future conflicts.
@@ -37,6 +39,7 @@
 # - inserting the resulting information into the `PositionOutput` table
 #
 # **Note 2: Make sure you are running this within the spyglass-position Conda environment (instructions for install are in the environment_position.yml)**
+#
 
 # Here is a schematic showing the tables used in this pipeline.
 #
@@ -44,6 +47,7 @@
 #
 
 # ### Table of Contents<a id='TableOfContents'></a>
+#
 # [`DLCProject`](#DLCProject1)<br>
 # [`DLCModelTraining`](#DLCModelTraining1)<br>
 # [`DLCModel`](#DLCModel1)<br>
@@ -54,10 +58,13 @@
 # [`DLCPosV1`](#DLCPosV1-1)<br>
 # [`DLCPosVideo`](#DLCPosVideo1)<br>
 # [`PositionOutput`](#PositionOutput1)<br>
+#
 
-# __You can click on any header to return to the Table of Contents__
+# **You can click on any header to return to the Table of Contents**
+#
 
 # ### Imports
+#
 
 # %load_ext autoreload
 # %autoreload 2
@@ -87,6 +94,7 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # -
 
 # #### [DLCProject](#TableOfContents) <a id="DLCProject1"></a>
+#
 
 # <div class="alert alert-block alert-info">
 #     <b>Notes:</b><ul>
@@ -103,8 +111,10 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 #
 
 # ### Body Parts
+#
 
 # We'll begin by looking at the `BodyPart` table, which stores standard names of body parts used in DLC models throughout the lab with a concise description.
+#
 
 sgp.BodyPart()
 
@@ -119,19 +129,23 @@ sgp.BodyPart()
 #     skip_duplicates=True,
 # )
 # ```
+#
 
 # ### Define videos and camera name (optional) for training set
+#
 
 # To train a model, we'll need to extract frames, which we can label as training data. We can construct a list of videos from which we'll extract frames.
 #
 # The list can either contain dictionaries identifying behavioral videos for NWB files that have already been added to Spyglass, or absolute file paths to the videos you want to use.
 #
 # For this tutorial, we'll use two videos for which we already have frames labeled.
+#
 
 # Defining camera name is optional: it should be done in cases where there are multiple cameras streaming per epoch, but not necessary otherwise. <br>
 # example:
 # `camera_name = "HomeBox_camera"
 #    `
+#
 
 # _NOTE:_ The official release of Spyglass does not yet support multicamera
 # projects. You can monitor progress on the effort to add this feature by checking
@@ -178,6 +192,7 @@ video_list = [
 # relative directories shown.
 #
 # You can check the result of this setup process with...
+#
 
 # +
 from spyglass.settings import config
@@ -194,8 +209,9 @@ config
 # - `bodyparts` is a list of body parts for which we want to extract position.
 #   The pre-labeled frames we're using include the bodyparts listed below.
 # - Number of frames to extract/label as `frames_per_video`. Note that the DLC creators recommend having 200 frames as the minimum total number for each project.
+#
 
-team_name = "LorenLab"
+team_name = sgc.LabTeam.fetch("team_name")[0]  # If on lab DB, "LorenLab"
 project_name = "tutorial_scratch_DG"
 frames_per_video = 100
 bodyparts = ["redLED_C", "greenLED", "redLED_L", "redLED_R", "tailBase"]
@@ -209,35 +225,42 @@ project_key = sgp.DLCProject.insert_new_project(
 )
 
 # Now that we've initialized our project we'll need to extract frames which we will then label.
+#
 
 # comment this line out after you finish frame extraction for each project
 sgp.DLCProject().run_extract_frames(project_key)
 
 # This is the line used to label the frames you extracted, if you wish to use the DLC GUI on the computer you are currently using.
+#
 # ```#comment this line out after frames are labeled for your project
 # sgp.DLCProject().run_label_frames(project_key)
 # ```
+#
 
 # Otherwise, it is best/easiest practice to label the frames on your local computer (like a MacBook) that can run DeepLabCut's GUI well. Instructions: <br>
+#
 # 1. Install DLC on your local (preferably into a 'Src' folder): https://deeplabcut.github.io/DeepLabCut/docs/installation.html
 # 2. Upload frames extracted and saved in nimbus (should be `/nimbus/deeplabcut/<YOUR_PROJECT_NAME>/labeled-data`) AND the project's associated config file (should be `/nimbus/deeplabcut/<YOUR_PROJECT_NAME>/config.yaml`) to Box (we get free with UCSF)
 # 3. Download labeled-data and config files on your local from Box
 # 4. Create a 'projects' folder where you installed DeepLabCut; create a new folder with your complete project name there; save the downloaded files there.
-# 4. Edit the config.yaml file: line 9 defining `project_path` needs to be the file path where it is saved on your local (ex: `/Users/lorenlab/Src/DeepLabCut/projects/tutorial_sratch_DG-LorenLab-2023-08-16`)
-# 5. Open the DLC GUI through terminal
-#     <br>(ex: `conda activate miniconda/envs/DEEPLABCUT_M1`
-# 		<br>`pythonw -m deeplabcut`)
-# 6. Load an existing project; choose the config.yaml file
-# 7. Label frames; labeling tutorial: https://www.youtube.com/watch?v=hsA9IB5r73E.
-# 8. Once all frames are labeled, you should re-upload labeled-data folder back to Box and overwrite it in the original nimbus location so that your completed frames are ready to be used in the model.
+# 5. Edit the config.yaml file: line 9 defining `project_path` needs to be the file path where it is saved on your local (ex: `/Users/lorenlab/Src/DeepLabCut/projects/tutorial_sratch_DG-LorenLab-2023-08-16`)
+# 6. Open the DLC GUI through terminal
+#    <br>(ex: `conda activate miniconda/envs/DEEPLABCUT_M1`
+#    <br>`pythonw -m deeplabcut`)
+# 7. Load an existing project; choose the config.yaml file
+# 8. Label frames; labeling tutorial: https://www.youtube.com/watch?v=hsA9IB5r73E.
+# 9. Once all frames are labeled, you should re-upload labeled-data folder back to Box and overwrite it in the original nimbus location so that your completed frames are ready to be used in the model.
+#
 
 # Now we can check the `DLCProject.File` part table and see all of our training files and videos there!
+#
 
 sgp.DLCProject.File & project_key
 
 # <div class="alert alert-block alert-warning">
 #     This step and beyond should be run on a GPU-enabled machine.</b>
 # </div>
+#
 
 # #### [DLCModelTraining](#ToC)<a id='DLCModelTraining1'></a>
 #
@@ -282,6 +305,7 @@ sgp.DLCModelTrainingParams.insert_new_params(
 )
 
 # Next we'll modify the `project_key` from above to include the necessary entries for `DLCModelTraining`
+#
 
 # project_key['project_path'] = os.path.dirname(project_key['config_path'])
 if "config_path" in project_key:
@@ -314,16 +338,19 @@ model_training_key = (
 sgp.DLCModelTraining.populate(model_training_key)
 
 # Here we'll make sure that the entry made it into the table properly!
+#
 
 sgp.DLCModelTraining() & model_training_key
 
 # Populating `DLCModelTraining` automatically inserts the entry into
 # `DLCModelSource`, which is used to select between models trained using Spyglass
 # vs. other tools.
+#
 
 sgp.DLCModelSource() & model_training_key
 
 # The `source` field will only accept _"FromImport"_ or _"FromUpstream"_ as entries. Let's checkout the `FromUpstream` part table attached to `DLCModelSource` below.
+#
 
 sgp.DLCModelSource.FromUpstream() & model_training_key
 
@@ -334,6 +361,7 @@ sgp.DLCModelSource.FromUpstream() & model_training_key
 #
 # First, we'll need to determine a set of parameters for our model to select the
 # correct model file. Here is the default:
+#
 
 sgp.DLCModelParams.get_default()
 
@@ -356,6 +384,7 @@ sgp.DLCModelParams.get_default()
 
 # We can insert sets of parameters into `DLCModelSelection` and populate
 # `DLCModel`.
+#
 
 temp_model_key = (sgp.DLCModelSource & model_training_key).fetch1("KEY")
 
@@ -368,12 +397,15 @@ model_key = (sgp.DLCModelSelection & temp_model_key).fetch1("KEY")
 sgp.DLCModel.populate(model_key)
 
 # Again, let's make sure that everything looks correct in `DLCModel`.
+#
 
 sgp.DLCModel() & model_key
 
 # ## Loop Begins
+#
 
 # We can view all `VideoFile` entries with the specidied `camera_ name` for this project to ensure the rat whose position you wish to model is in this table `matching_rows`
+#
 
 camera_name = "SleepBox_camera"
 matching_rows = sgc.VideoFile() & {"camera_name": camera_name}
@@ -382,10 +414,12 @@ matching_rows
 # The `DLCPoseEstimationSelection` insertion step will convert your .h264 video to an .mp4 first and save it in `/nimbus/deeplabcut/video`. If this video already exists here, the insertion will never complete.
 #
 # We first delete any .mp4 that exists for this video from the nimbus folder:
+#
 
 # ! find /nimbus/deeplabcut/video -type f -name '*20230606_SC38*' -delete # change based on date and rat with which you are training the model
 
 # If the first insertion step (for pose estimation task) fails in either trigger or load mode for an epoch, run the following lines:
+#
 # ```
 # (pose_estimation_key = sgp.DLCPoseEstimationSelection.insert_estimation_task(
 #     {
@@ -395,13 +429,15 @@ matching_rows
 #         **model_key,
 #     }).delete()
 # ```
+#
 
-# This loop will generate posiiton data for all epochs associated with the pre-defined camera in one day, for one rat (based on the NWB file; see ***)
+# This loop will generate posiiton data for all epochs associated with the pre-defined camera in one day, for one rat (based on the NWB file; see \*\*\*)
 # <br>The output should print Pose Estimation and Centroid plots for each epoch.
 #
 # - It defines `col1val` as each `nwb_file_name` entry in the table, one at a time.
 # - Next, it sees if the trial on which you are testing this model is in the string for the current `col1val`; if not, it re-defines `col1val` as the next `nwb_file_name` entry and re-tries this step.
 # - If the previous step works, it then saves `col2val` and `col3val` as the `epoch` and the `video_file_num`, respectively, based on the nwb_file_name. From there, it iterates through the insertion and population steps required to extract position data, which we see laid out in notebook 05_DLC.ipynb.
+#
 
 for row in matching_rows:
     col1val = row["nwb_file_name"]
@@ -515,6 +551,9 @@ for row in matching_rows:
         continue
 
 # ### _CONGRATULATIONS!!_
+#
 # Please treat yourself to a nice tea break :-)
+#
 
 # ### [Return To Table of Contents](#TableOfContents)<br>
+#

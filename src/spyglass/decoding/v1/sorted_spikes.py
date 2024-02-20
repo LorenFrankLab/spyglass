@@ -47,6 +47,7 @@ class SortedSpikesDecodingSelection(SpyglassMixin, dj.Manual):
     -> IntervalList.proj(decoding_interval='interval_list_name')
     estimate_decoding_params = 1 : bool # whether to estimate the decoding parameters
     """
+    # NOTE: Excessive key length fixed by reducing UnitSelectionParams.unit_filter_params_name
 
 
 @schema
