@@ -541,7 +541,7 @@ def _convert_mp4(
         f"{dest_path.as_posix()}",
     ]
     if dest_path.exists():
-        print(f"{dest_path} already exists, skipping conversion")
+        logger.info(f"{dest_path} already exists, skipping conversion")
     else:
         try:
             sys.stdout.flush()
@@ -555,9 +555,9 @@ def _convert_mp4(
                 f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
             ) from err
         out, _ = convert_process.communicate()
-        print(out.decode("utf-8"))
-        print(f"finished converting {filename}")
-    print(
+        logger.info(out.decode("utf-8"))
+        logger.info(f"finished converting {filename}")
+    logger.info(
         f"Checking that number of packets match between {orig_filename} and {dest_filename}"
     )
     num_packets = []

@@ -432,14 +432,12 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 video_filename = video.rsplit(
                     video_path.as_posix(), maxsplit=1
                 )[-1].split("/")[-1]
-                videos.extend(
-                    [
-                        check_videofile(
-                            video_path=video_path,
-                            output_path=output_path,
-                            video_filename=video_filename,
-                        )[0].as_posix()
-                    ]
+                videos.append(
+                    check_videofile(
+                        video_path=video_path,
+                        output_path=output_path,
+                        video_filename=video_filename,
+                    )[0].as_posix()
                 )
             if len(videos) < 1:
                 raise ValueError(f"no .mp4 videos found in{video_path}")
