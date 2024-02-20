@@ -389,25 +389,18 @@ class DLCProject(SpyglassMixin, dj.Manual):
         add_to_files=True,
         **kwargs,
     ):
-        if add_new & (not config_path):
-            if not key:
-                raise ValueError(
-                    "at least one of config_path or key have to be passed if add_new=True"
-                )
-            else:
-                config_path = (cls & key).fetch1("config_path")
-        if (not key) & add_to_files:
-            if config_path:
-                if len(cls & {"config_path": config_path}) == 1:
-                    pass
-                else:
-                    raise ValueError(
-                        "Cannot set add_to_files=True without passing key"
-                    )
-            else:
-                raise ValueError(
-                    "Cannot set add_to_files=True without passing key"
-                )
+        has_config_or_key = bool(config_path) or bool(key)
+
+        if add_new and not has_config_or_key:
+            raise ValueError("If add_new, must provide key or config_path")
+        config_path = config_path or (cls & key).fetch1("config_path")
+
+        if (
+            add_to_files
+            and not key
+            and len(cls & {"config_path": config_path}) != 1
+        ):
+            raise ValueError("Cannot set add_to_files=True without passing key")
 
         if all(isinstance(n, Dict) for n in video_list):
             videos_to_convert = [
