@@ -246,7 +246,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             sorter_params["tempdir"] = sorter_temp_dir.name
 
             if sorter == 'mountainsort5':
-                 sorter_params.pop("tempdir", None)
+                 _ = sorter_params.pop("tempdir", None)
             
             
             # if whitening is specified in sorter params, apply whitening separately
