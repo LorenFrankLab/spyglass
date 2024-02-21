@@ -224,7 +224,6 @@ class DLCProject(SpyglassMixin, dj.Manual):
         groupname: str = None,
         project_directory: str = dlc_project_dir,
         output_path: str = dlc_video_dir,
-        set_permissions=False,
         **kwargs,
     ):
         """Insert a new project into DLCProject table.
@@ -251,9 +250,6 @@ class DLCProject(SpyglassMixin, dj.Manual):
         output_path : str
             target path to output converted videos
             (Default is '/nimbus/deeplabcut/videos/')
-        set_permissions : bool
-            if True, will set permissions for user and group to be read+write
-            (Default is False)
         """
         project_names_in_use = np.unique(cls.fetch("project_name"))
         if project_name in project_names_in_use:
@@ -338,27 +334,6 @@ class DLCProject(SpyglassMixin, dj.Manual):
             "config_path": config_path,
             "frames_per_video": frames_per_video,
         }
-        # TODO: make permissions setting more flexible.
-        if set_permissions:
-            raise NotImplementedError(
-                "permission-setting is not functional at this time"
-            )
-            permissions = (
-                stat.S_IRUSR
-                | stat.S_IWUSR
-                | stat.S_IRGRP
-                | stat.S_IWGRP
-                | stat.S_IROTH
-            )
-            username = getpass.getuser()
-            if not groupname:
-                groupname = username
-            _set_permissions(
-                directory=project_directory,
-                mode=permissions,
-                username=username,
-                groupname=groupname,
-            )
         cls.insert1(key, **kwargs)
         cls.BodyPart.insert(
             [
