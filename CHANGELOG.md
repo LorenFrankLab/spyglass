@@ -6,6 +6,14 @@
 
 - Add user roles to `database_settings.py`. #832
 
+### Pipelines
+
+- Position:
+    - Fixes to `environment-dlc.yml` restricting tensortflow #834
+    - Video restriction for multicamera epochs #834
+    - Fixes to `_convert_mp4` #834
+    - Replace deprecated calls to `yaml.safe_load()` #834
+
 ## [0.5.0] (February 9, 2024)
 
 ### Infrastructure
