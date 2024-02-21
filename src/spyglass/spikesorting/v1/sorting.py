@@ -67,7 +67,7 @@ class SpikeSorterParameters(SpyglassMixin, dj.Lookup):
                 "detect_threshold": 3,
                 "detect_interval": 10,
             },
-        ],       
+        ],
         [
             "clusterless_thresholder",
             "default_clusterless",
@@ -241,34 +241,33 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         else:
             # Specify tempdir (expected by some sorters like mountainsort4)
             sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
-        
-
             sorter_params["tempdir"] = sorter_temp_dir.name
 
-            if sorter == 'mountainsort5':
-                 sorter_params.pop("tempdir", None)
-            
-            
+            if sorter == "mountainsort5":
+                _ = sorter_params.pop("tempdir", None)
+
             # if whitening is specified in sorter params, apply whitening separately
             # prior to sorting and turn off "sorter whitening"
             if sorter_params.get("whiten", False):
                 recording = sip.whiten(recording, dtype=np.float64)
                 sorter_params["whiten"] = False
 
-            if 'kilosort' in sorter:
-                sorter_params.pop("tempdir", None)
-                sorter_params.pop("mp_context", None)
-                sorter_params.pop("max_threads_per_process", None)
+            if sorter.lower() in ["kilosort2_5", "kilosort3", "ironclust"]:
+                sorter_params = {
+                    k: v
+                    for k, v in sorter_params.items()
+                    if k
+                    not in ["tempdir", "mp_context", "max_threads_per_process"]
+                }
                 sorting = sis.run_sorter(
                     sorter,
                     recording,
                     output_folder=sorter_temp_dir.name,
                     remove_existing_folder=True,
-                    verbose = True,
                     singularity_image=True,
                     **sorter_params,
                 )
-            else:           
+            else:
                 sorting = sis.run_sorter(
                     sorter,
                     recording,
