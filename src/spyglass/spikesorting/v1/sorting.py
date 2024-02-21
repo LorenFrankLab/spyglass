@@ -22,6 +22,7 @@ from spyglass.spikesorting.v1.recording import (  # noqa: F401
     _consolidate_intervals,
 )
 from spyglass.utils import SpyglassMixin, logger
+import os
 
 schema = dj.schema("spikesorting_v1_sorting")
 
@@ -253,6 +254,9 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 recording = sip.whiten(recording, dtype=np.float64)
                 sorter_params["whiten"] = False
 
+
+            common_sorter_items = { 'sorter_name': sorter, 'recording': recording, 
+                                   'output_folder':sorter_temp_dir.name, 'remove_existing_folder': True }
             if sorter.lower() in ["kilosort2_5", "kilosort3", "ironclust"]:
                 sorter_params = {
                     k: v
@@ -261,19 +265,13 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                     not in ["tempdir", "mp_context", "max_threads_per_process"]
                 }
                 sorting = sis.run_sorter(
-                    sorter,
-                    recording,
-                    output_folder=sorter_temp_dir.name,
-                    remove_existing_folder=True,
+                    **common_sorter_items,
                     singularity_image=True,
                     **sorter_params,
                 )
             else:
                 sorting = sis.run_sorter(
-                    sorter,
-                    recording,
-                    output_folder=sorter_temp_dir.name,
-                    remove_existing_folder=True,
+                    **common_sorter_items,
                     **sorter_params,
                 )
         key["time_of_sort"] = int(time.time())
