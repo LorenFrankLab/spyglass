@@ -20,6 +20,7 @@ import pandas as pd
 from tqdm import tqdm as tqdm
 
 from spyglass.common.common_behav import VideoFile
+from spyglass.utils import logger
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
 
 
@@ -420,8 +421,7 @@ def get_video_path(key):
     """
     import pynwb
 
-    valid_fields = VideoFile.fetch().dtype.fields.keys()
-    vf_key = {k: val for k, val in key.items() if k in valid_fields}
+    vf_key = {k: val for k, val in key.items() if k in VideoFile.heading.names}
     if not VideoFile & vf_key:
         VideoFile()._no_transaction_make(vf_key, verbose=False)
     video_query = VideoFile & vf_key
