@@ -43,10 +43,6 @@ import spyglass.data_import as sgi
 nwb_file_name = "mediumnwb20230802.nwb"
 nwb_file_name2 = "mediumnwb20230802_.nwb"
 
-# +
-# sgc.LabMember.insert_from_nwbfile(nwb_file_name)
-# -
-
 sgi.insert_sessions(nwb_file_name)
 
 sgc.Session()
@@ -54,9 +50,7 @@ sgc.Session()
 # insert SortGroup
 #
 
-# +
-# sgs.SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name2)
-# -
+sgs.SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name2)
 
 # insert SpikeSortingRecordingSelection. use `insert_selection` method. this automatically generates a unique recording id
 #
@@ -71,22 +65,12 @@ sgs.SpikeSortingRecordingSelection() & key
 
 sgs.SpikeSortingRecordingSelection.insert_selection(key)
 
-# +
 # Assuming 'key' is a dictionary with fields that you want to include in 'ssr_key'
 ssr_key = {
     "recording_id": (sgs.SpikeSortingRecordingSelection() & key).fetch1(
         "recording_id"
     ),
-}
-
-# Update ssr_key with all items from 'key'
-ssr_key.update(key)
-
-# Optionally, add or update additional fields in 'ssr_key'
-# Uncomment and adjust the following lines according to your specific requirements
-# ssr_key["n
-ssr_key
-# -
+} | key
 
 # preprocess recording (filtering and referencing)
 #
@@ -128,32 +112,29 @@ sgs.ArtifactDetection()
 # +
 sorter = "kilosort2_5"
 
+common_key = {
+    "recording_id": key["recording_id"],
+    "sorter": sorter,
+    "nwb_file_name": nwb_file_name2,
+    "interval_list_name": str(
+        (
+            sgs.ArtifactDetectionSelection
+            & {"recording_id": key["recording_id"]}
+        ).fetch1("artifact_id")
+    ),
+}
+
+
 if sorter == "mountainsort4":
     key = {
-        "recording_id": key["recording_id"],
-        "sorter": sorter,
+        **common_key,
         "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
-        "nwb_file_name": nwb_file_name2,
-        "interval_list_name": str(
-            (
-                sgs.ArtifactDetectionSelection
-                & {"recording_id": key["recording_id"]}
-            ).fetch1("artifact_id")
-        ),
     }
 
 else:
     key = {
-        "recording_id": key["recording_id"],
-        "sorter": sorter,
+        **common_key,
         "sorter_param_name": "default",
-        "nwb_file_name": nwb_file_name2,
-        "interval_list_name": str(
-            (
-                sgs.ArtifactDetectionSelection
-                & {"recording_id": key["recording_id"]}
-            ).fetch1("artifact_id")
-        ),
     }
 # -
 
