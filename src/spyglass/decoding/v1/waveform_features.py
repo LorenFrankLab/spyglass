@@ -9,11 +9,11 @@ import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v1 import SpikeSortingSelection
 from spyglass.utils import SpyglassMixin
 
-schema = dj.schema("waveform_features")
+schema = dj.schema("decoding_waveform_features")
 
 
 @schema
@@ -37,7 +37,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
         "ms_after": 0.5,
         "max_spikes_per_unit": None,
         "n_jobs": 5,
-        "total_memory": "5G",
+        "chunk_duration": "1000s",
     }
     contents = [
         [
@@ -146,7 +146,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 sorter,
             )
 
-        spike_times = SpikeSortingOutput.fetch_nwb(merge_key)[0][
+        spike_times = SpikeSortingOutput().fetch_nwb(merge_key)[0][
             analysis_nwb_key
         ]["spike_times"]
 

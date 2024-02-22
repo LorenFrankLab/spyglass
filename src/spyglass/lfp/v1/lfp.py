@@ -14,8 +14,6 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
-
-# from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("lfp_v1")

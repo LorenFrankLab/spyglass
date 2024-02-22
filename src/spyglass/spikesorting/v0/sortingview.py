@@ -2,13 +2,15 @@ import datajoint as dj
 import sortingview as sv
 
 from spyglass.common.common_lab import LabMember, LabTeam
-from spyglass.spikesorting.sortingview_helper_fn import (
+from spyglass.spikesorting.v0.sortingview_helper_fn import (
     _create_spikesortingview_workspace,
     _generate_url,
 )
-from spyglass.spikesorting.spikesorting_curation import Curation
-from spyglass.spikesorting.spikesorting_recording import SpikeSortingRecording
-from spyglass.spikesorting.spikesorting_sorting import SpikeSorting
+from spyglass.spikesorting.v0.spikesorting_curation import Curation
+from spyglass.spikesorting.v0.spikesorting_recording import (
+    SpikeSortingRecording,
+)
+from spyglass.spikesorting.v0.spikesorting_sorting import SpikeSorting
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_sortingview")

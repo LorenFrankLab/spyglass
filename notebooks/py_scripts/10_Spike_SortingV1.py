@@ -261,7 +261,7 @@ sgs.CurationV1()
 # We now insert the curated spike sorting to a `Merge` table for feeding into downstream processing pipelines.
 #
 
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
 SpikeSortingOutput()
 

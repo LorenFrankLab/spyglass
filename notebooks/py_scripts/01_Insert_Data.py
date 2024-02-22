@@ -128,6 +128,7 @@ nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
 # -
 
 # Spyglass will create a copy with this name.
+#
 
 nwb_copy_file_name
 
@@ -155,9 +156,9 @@ sgc.LabMember.insert_from_nwbfile(nwb_file_name)
 #
 
 sgc.LabMember.LabMemberInfo.insert(
-    [  # Full name, Google email address, DataJoint username
-        ["Firstname Lastname", "example1@gmail.com", "example1"],
-        ["Firstname2 Lastname2", "example2@gmail.com", "example2"],
+    [  # Full name, Google email address, DataJoint username, admin
+        ["Firstname Lastname", "example1@gmail.com", "example1", 0],
+        ["Firstname2 Lastname2", "example2@gmail.com", "example2", 0],
     ],
     skip_duplicates=True,
 )
@@ -170,8 +171,9 @@ sgc.LabMember.LabMemberInfo()
 # privileges.
 #
 
+team_name = "My Team"
 sgc.LabTeam().create_new_team(
-    team_name="My Team",  # Should be unique
+    team_name=team_name,  # Should be unique
     team_members=["Firstname Lastname", "Firstname2 Lastname2"],
     team_description="test",  # Optional
 )
@@ -187,7 +189,6 @@ sgc.LabTeam.LabTeamMember()
 # ## Inserting from NWB
 #
 
-#
 # `spyglass.data_import.insert_sessions` helps take the many fields of data
 # present in an NWB file and insert them into various tables across Spyglass. If
 # the NWB file is properly composed, this includes...
@@ -199,6 +200,7 @@ sgc.LabTeam.LabTeamMember()
 #
 # _Note:_ this may take time as Spyglass creates the copy. You may see a prompt
 # about inserting device information.
+#
 
 sgi.insert_sessions(nwb_file_name)
 
@@ -306,18 +308,17 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # Because it is a _secondary_ key, it is not required to uniquely identify an entry.
 # Current values for this key from spyglass pipelines are:
 #
-# | pipeline | Source|
-# | ---   | --- |
-# | position | sg.common.PositionSource |
-# | lfp_v0 | sg.common.LFP |
-# | lfp_v1 | sg.lfp.v1.LFPV1 |
-# | lfp_band | sg.common.LFPBand,<br>  sg.lfp.analysis.v1.LFPBandV1 |
-# | lfp_artifact | sg.lfp.v1.LFPArtifactDetection |
-# | spikesorting_artifact_v0 | sg.spikesorting.ArtifactDetection |
-# | spikesorting_artifact_v1 | sg.spikesorting.v1.ArtifactDetection |
-# | spikesorting_recording_v0 | sg.spikesorting.SpikeSortingRecording |
-# | spikesorting_recording_v1 | sg.spikesorting.v1.SpikeSortingRecording |
-#
+# | pipeline                  | Source                                              |
+# | ------------------------- | --------------------------------------------------- |
+# | position                  | sg.common.PositionSource                            |
+# | lfp_v0                    | sg.common.LFP                                       |
+# | lfp_v1                    | sg.lfp.v1.LFPV1                                     |
+# | lfp_band                  | sg.common.LFPBand,<br> sg.lfp.analysis.v1.LFPBandV1 |
+# | lfp_artifact              | sg.lfp.v1.LFPArtifactDetection                      |
+# | spikesorting_artifact_v0  | sg.spikesorting.ArtifactDetection                   |
+# | spikesorting_artifact_v1  | sg.spikesorting.v1.ArtifactDetection                |
+# | spikesorting_recording_v0 | sg.spikesorting.SpikeSortingRecording               |
+# | spikesorting_recording_v1 | sg.spikesorting.v1.SpikeSortingRecording            |
 #
 
 # ## Deleting data
@@ -355,29 +356,67 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # lfp.v1.LFPSelection.insert1(lfp_key, skip_duplicates=True)
 # lfp.v1.LFPV1().populate(lfp_key)
 # ```
+#
 # </details>
 # <details>
 # <summary>Deleting Merge Entries</summary>
 #
 # ```python
-# from spyglass.utils.dj_merge_tables import delete_downstream_merge
+# nwbfile = sgc.Nwbfile()
 #
-# delete_downstream_merge(
-#     sgc.Nwbfile(),
-#     restriction={"nwb_file_name": nwb_copy_file_name},
+# (nwbfile & {"nwb_file_name": nwb_copy_file_name}).delete_downstream_merge(
 #     dry_run=False, # True will show Merge Table entries that would be deleted
 # )
 # ```
+#
+# Please see the [next notebook](./03_Merge_Tables.ipynb) for a more detailed
+# explanation.
+#
 # </details>
+#
 
 session_entry = sgc.Session & {"nwb_file_name": nwb_copy_file_name}
 session_entry
+
+# `Session.Experimenter` is used for permissions checks when deleting. The
+# session will need to have an experimenter in order avoid an error being
+# raised during this check.
+#
+
+sess_key = (sgc.Session & {"nwb_file_name": nwb_copy_file_name}).fetch(
+    "KEY", as_dict=True
+)[0]
+exp_key = (sgc.LabMember).fetch("KEY", as_dict=True)[0]
+sgc.Session.Experimenter.insert1(
+    dict(**sess_key, **exp_key), skip_duplicates=True
+)
+
+# Even with the experimenter specified, there are still delete protections
+# in place. To see an example, uncomment the cell below.
+#
+
+# +
+# session_entry.delete()
+# -
+
+# To delete, you'll need to share a team with the session experimenter.
+#
+
+your_name = "YourFirst YourLast"
+parts = your_name.split(" ")
+sgc.LabMember.insert1([your_name, parts[0], parts[1]])
+sgc.LabMember.LabMemberInfo.insert1(
+    [your_name, "your_gmail", dj.config["database.user"], 0]
+)
+sgc.LabTeam.LabTeamMember.insert1([team_name, your_name])
 
 # By default, DataJoint is cautious about deletes and will prompt before deleting.
 # To delete, uncomment the cell below and respond `yes` in the prompt.
 #
 
-session_entry.delete()
+# +
+# session_entry.delete()
+# -
 
 # We can check that delete worked, both for `Session` and `IntervalList`
 #
@@ -418,6 +457,7 @@ sgc.Nwbfile().cleanup(delete_files=True)
 # !ls $SPYGLASS_BASE_DIR/raw
 
 # ## Up Next
+#
 
 # In the [next notebook](./02_Data_Sync.ipynb), we'll explore tools for syncing.
 #

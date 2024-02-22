@@ -36,19 +36,28 @@ schema/database prefix.
 - `ALL` privileges allow users to create, alter, or drop tables and schemas in
     addition to operations above.
 
-In practice, DataJoint only permits alerations of secondary keys on existing
+In practice, DataJoint only permits alterations of secondary keys on existing
 tables, and more derstructive operations would require using DataJoint to
 execeute MySQL commands.
 
 Shared schema prefixes are those defined in the Spyglass package (e.g.,
 `common`, `lfp`, etc.). A 'user schema' is any schema with the username as
 prefix. User types differ in the privileges they are granted on these prifixes.
+Declaring a table with the SpyglassMixin on a schema other than a shared module
+or the user's own prefix will raise a warning.
 
-### Users types
+### Users roles
 
-- `collab_user`: `ALL` on user schema, `SELECT` on all other schemas.
+When a database is first initialized, the team should run `add_roles` to create
+the following roles:
+
 - `dj_guest`: `SELECT` on all schemas.
+- `dj_collab`: `ALL` on user schema, `SELECT` on all other schemas.
 - `dj_user`: `ALL` on shared and user schema, `SELECT` on all other schemas.
+- `dj_admin`: `ALL` on all schemas.
+
+If new shared modules are introduced, the `add_module` method should be used to
+expand the privileges of the `dj_user` role.
 
 ### Setting Passwords
 
@@ -224,9 +233,19 @@ To remove orphaned files, we run the following commands in our cron jobs:
 ```python
 from spyglass.common import AnalysisNwbfile
 from spyglass.spikesorting import SpikeSorting
+from spyglass.common.common_nwbfile import schema as nwbfile_schema
+from spyglass.decoding.v1.sorted_spikes import schema as spikes_schema
+from spyglass.decoding.v1.clusterless import schema as clusterless_schema
 
 
 def main():
     AnalysisNwbfile().nightly_cleanup()
     SpikeSorting().nightly_cleanup()
+    nwbfile_schema.external['analysis'].delete(delete_external_files=True))
+    nwbfile_schema.external['raw'].delete(delete_external_files=True))
+    spikes_schema.external['analysis'].delete(delete_external_files=True))
+    clusterless_schema.external['analysis'].delete(delete_external_files=True))
 ```
+
+The `delete` calls above use DataJoint's `ExternalTable.delete` method, which
+will remove files from disk that are no longer referenced in the database.

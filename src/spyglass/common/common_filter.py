@@ -212,7 +212,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             start = all[0]
 
         if stop > all[-1]:
-            warnings.warn(
+            logger.warning(
                 timestamp_warn
                 + "stop time larger than last timestamp, "
                 + f"substituting last: {stop} < {all[-1]}"
@@ -500,9 +500,9 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         for ii, (start, stop) in enumerate(indices):
             extracted_ts = timestamps[start:stop:decimation]
 
-            new_timestamps[
-                ts_offset : ts_offset + len(extracted_ts)
-            ] = extracted_ts
+            new_timestamps[ts_offset : ts_offset + len(extracted_ts)] = (
+                extracted_ts
+            )
             ts_offset += len(extracted_ts)
 
             # finally ready to filter data!

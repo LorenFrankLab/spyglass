@@ -1,4 +1,3 @@
-import inspect
 from itertools import chain
 from pathlib import Path
 
@@ -85,64 +84,67 @@ class DecodingOutput(_Merge, SpyglassMixin):
                         logger.warning(f"Unable to remove {path}, skipping")
 
     @classmethod
-    def _get_source_class(cls, key):
-        if cls._source_class_dict is None:
-            cls._source_class_dict = {}
-            module = inspect.getmodule(cls)
-            for part_name in cls.parts():
-                part_name = to_camel_case(part_name.split("__")[-1].strip("`"))
-                part = getattr(module, part_name)
-                cls._source_class_dict[part_name] = part
-
-        source = (cls & key).fetch1("source")
-        return cls._source_class_dict[source]
+    def fetch_results(cls, key):
+        return cls().merge_get_parent_class(key).fetch_results()
 
     @classmethod
-    def load_results(cls, key):
-        decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return (source_class & decoding_selection_key).load_results()
+    def fetch_model(cls, key):
+        return cls().merge_get_parent_class(key).fetch_model()
 
     @classmethod
-    def load_model(cls, key):
+    def fetch_environments(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return (source_class & decoding_selection_key).load_model()
+        return (
+            cls()
+            .merge_get_parent_class(key)
+            .fetch_environments(decoding_selection_key)
+        )
 
     @classmethod
-    def load_environments(cls, key):
+    def fetch_position_info(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return source_class.load_environments(decoding_selection_key)
+        return (
+            cls()
+            .merge_get_parent_class(key)
+            .fetch_position_info(decoding_selection_key)
+        )
 
     @classmethod
-    def load_position_info(cls, key):
+    def fetch_linear_position_info(cls, key):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return source_class.load_position_info(decoding_selection_key)
+        return (
+            cls()
+            .merge_get_parent_class(key)
+            .fetch_linear_position_info(decoding_selection_key)
+        )
 
     @classmethod
-    def load_linear_position_info(cls, key):
+    def fetch_spike_data(cls, key, filter_by_interval=True):
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return source_class.load_linear_position_info(decoding_selection_key)
-
-    @classmethod
-    def load_spike_data(cls, key, filter_by_interval=True):
-        decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        source_class = cls._get_source_class(key)
-        return source_class.load_linear_position_info(
-            decoding_selection_key, filter_by_interval=filter_by_interval
+        return (
+            cls()
+            .merge_get_parent_class(key)
+            .fetch_linear_position_info(
+                decoding_selection_key, filter_by_interval=filter_by_interval
+            )
         )
 
     @classmethod
     def create_decoding_view(cls, key, head_direction_name="head_orientation"):
-        results = cls.load_results(key)
-        posterior = results.acausal_posterior.unstack("state_bins").sum("state")
-        env = cls.load_environments(key)[0]
+        results = cls.fetch_results(key)
+        posterior = (
+            results.squeeze()
+            .acausal_posterior.unstack("state_bins")
+            .drop_sel(state=["Local", "No-Spike"], errors="ignore")
+            .sum("state")
+        )
+        posterior /= posterior.sum("position")
+        env = cls.fetch_environments(key)[0]
 
         if "x_position" in results.coords:
-            position_info, position_variable_names = cls.load_position_info(key)
+            position_info, position_variable_names = cls.fetch_position_info(
+                key
+            )
             # Not 1D
             bin_size = (
                 np.nanmedian(np.diff(np.unique(results.x_position.values))),
@@ -162,9 +164,8 @@ class DecodingOutput(_Merge, SpyglassMixin):
             (
                 position_info,
                 position_variable_names,
-            ) = cls.load_linear_position_info(key)
+            ) = cls.fetch_linear_position_info(key)
             return create_1D_decode_view(
                 posterior=posterior,
                 linear_position=position_info["linear_position"],
-                ref_time_sec=position_info.index[0],
             )

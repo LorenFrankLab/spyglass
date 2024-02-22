@@ -1,7 +1,6 @@
 """Converts decoder classes into dictionaries and dictionaries into classes
 so that datajoint can store them in tables."""
 
-
 import copy
 
 import datajoint as dj

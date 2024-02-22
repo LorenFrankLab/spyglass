@@ -13,10 +13,12 @@ import uuid
 from pathlib import Path
 
 import datajoint as dj
+import non_local_detector.analysis as analysis
 import numpy as np
 import pandas as pd
 import xarray as xr
 from non_local_detector.models.base import ClusterlessDetector
+from ripple_detection import get_multiunit_population_firing_rate
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
@@ -105,14 +107,14 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         (
             position_info,
             position_variable_names,
-        ) = self.load_position_info(key)
+        ) = self.fetch_position_info(key)
 
         # Get the waveform features for the selected units
         # Don't need to filter by interval since the non_local_detector code will do that
         (
             spike_times,
             spike_waveform_features,
-        ) = self.load_spike_data(key, filter_by_interval=False)
+        ) = self.fetch_spike_data(key, filter_by_interval=False)
 
         # Get the encoding and decoding intervals
         encoding_interval = (
@@ -238,9 +240,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             vars(classifier).get("discrete_transition_coefficients_")
             is not None
         ):
-            results[
-                "discrete_transition_coefficients"
-            ] = classifier.discrete_transition_coefficients_
+            results["discrete_transition_coefficients"] = (
+                classifier.discrete_transition_coefficients_
+            )
 
         # Insert results
         # in future use https://github.com/rly/ndx-xarray and analysis nwb file?
@@ -272,14 +274,14 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         DecodingOutput.insert1(orig_key, skip_duplicates=True)
 
-    def load_results(self):
+    def fetch_results(self):
         return ClusterlessDetector.load_results(self.fetch1("results_path"))
 
-    def load_model(self):
+    def fetch_model(self):
         return ClusterlessDetector.load_model(self.fetch1("classifier_path"))
 
     @staticmethod
-    def load_environments(key):
+    def fetch_environments(key):
         model_params = (
             DecodingParameters
             & {"decoding_param_name": key["decoding_param_name"]}
@@ -289,10 +291,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             model_params["decoding_kwargs"],
         )
 
+        if decoding_kwargs is None:
+            decoding_kwargs = {}
+
         (
             position_info,
             position_variable_names,
-        ) = ClusterlessDecodingV1.load_position_info(key)
+        ) = ClusterlessDecodingV1.fetch_position_info(key)
         classifier = ClusterlessDetector(**decoding_params)
 
         classifier.initialize_environments(
@@ -332,7 +337,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def load_position_info(key):
+    def fetch_position_info(key):
         position_group_key = {
             "position_group_name": key["position_group_name"],
             "nwb_file_name": key["nwb_file_name"],
@@ -357,11 +362,14 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return position_info, position_variable_names
 
     @staticmethod
-    def load_linear_position_info(key):
-        environment = ClusterlessDecodingV1.load_environments(key)[0]
+    def fetch_linear_position_info(key):
+        environment = ClusterlessDecodingV1.fetch_environments(key)[0]
 
-        position_df = ClusterlessDecodingV1.load_position_info(key)[0]
-        position = np.asarray(position_df[["position_x", "position_y"]])
+        position_df = ClusterlessDecodingV1.fetch_position_info(key)[0]
+        position_variable_names = (PositionGroup & key).fetch1(
+            "position_variables"
+        )
+        position = np.asarray(position_df[position_variable_names])
 
         linear_position_df = get_linearized_position(
             position=position,
@@ -382,7 +390,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def load_spike_data(key, filter_by_interval=True):
+    def fetch_spike_data(key, filter_by_interval=True):
         waveform_keys = (
             (
                 UnitWaveformFeaturesGroup.UnitFeatures
@@ -415,3 +423,93 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             new_waveform_features.append(elec_waveform_features[is_in_interval])
 
         return new_spike_times, new_waveform_features
+
+    @classmethod
+    def get_spike_indicator(cls, key, time):
+        time = np.asarray(time)
+        min_time, max_time = time[[0, -1]]
+        spike_times = cls.fetch_spike_data(key)[0]
+        spike_indicator = np.zeros((len(time), len(spike_times)))
+
+        for ind, times in enumerate(spike_times):
+            times = times[np.logical_and(times >= min_time, times <= max_time)]
+            spike_indicator[:, ind] = np.bincount(
+                np.digitize(times, time[1:-1]),
+                minlength=time.shape[0],
+            )
+
+        return spike_indicator
+
+    @classmethod
+    def get_firing_rate(cls, key, time, multiunit=False):
+        spike_indicator = cls.get_spike_indicator(key, time)
+        if spike_indicator.ndim == 1:
+            spike_indicator = spike_indicator[:, np.newaxis]
+
+        sampling_frequency = 1 / np.median(np.diff(time))
+
+        if multiunit:
+            spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
+        return np.stack(
+            [
+                get_multiunit_population_firing_rate(
+                    indicator[:, np.newaxis], sampling_frequency
+                )
+                for indicator in spike_indicator.T
+            ],
+            axis=1,
+        )
+
+    def get_ahead_behind_distance(self):
+        # TODO: allow specification of specific time interval
+        # TODO: allow specification of track graph
+        # TODO: Handle decode intervals, store in table
+
+        classifier = self.fetch_model()
+        results = self.fetch_results()
+        posterior = results.acausal_posterior.unstack("state_bins").sum("state")
+
+        if getattr(classifier.environments[0], "track_graph") is not None:
+            linear_position_info = self.fetch_linear_position_info(
+                self.fetch1("KEY")
+            )
+
+            orientation_name = (
+                "orientation"
+                if "orientation" in linear_position_info.columns
+                else "head_orientation"
+            )
+
+            traj_data = analysis.get_trajectory_data(
+                posterior=posterior,
+                track_graph=classifier.environments[0].track_graph,
+                decoder=classifier,
+                actual_projected_position=linear_position_info[
+                    ["projected_x_position", "projected_y_position"]
+                ],
+                track_segment_id=linear_position_info["track_segment_id"],
+                actual_orientation=linear_position_info[orientation_name],
+            )
+
+            return analysis.get_ahead_behind_distance(
+                classifier.environments[0].track_graph, *traj_data
+            )
+        else:
+            position_info = self.fetch_position_info(self.fetch1("KEY"))
+            map_position = analysis.maximum_a_posteriori_estimate(posterior)
+
+            orientation_name = (
+                "orientation"
+                if "orientation" in position_info.columns
+                else "head_orientation"
+            )
+            position_variable_names = (
+                PositionGroup & self.fetch1("KEY")
+            ).fetch1("position_variables")
+
+            return analysis.get_ahead_behind_distance2D(
+                position_info[position_variable_names].to_numpy(),
+                position_info[orientation_name].to_numpy(),
+                map_position,
+                classifier.environments[0].track_graphDD,
+            )

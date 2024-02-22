@@ -1,16 +1,18 @@
 import re
 from contextlib import nullcontext
+from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
+from time import time
+from typing import Union
 
 import datajoint as dj
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
-from datajoint.utils import from_camel_case, get_master, to_camel_case
+from datajoint.utils import from_camel_case, to_camel_case
 from IPython.core.display import HTML
 
-from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.logging import logger
 
 RESERVED_PRIMARY_KEY = "merge_id"
@@ -51,21 +53,45 @@ class Merge(dj.Manual):
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
                     )
-        self._analysis_nwbfile = None
-
-    @property  # CB: This is a property to avoid circular import
-    def analysis_nwbfile(self):
-        if self._analysis_nwbfile is None:
-            from spyglass.common import AnalysisNwbfile  # noqa F401
-
-            self._analysis_nwbfile = AnalysisNwbfile
-        return self._analysis_nwbfile
+        self._source_class_dict = {}
 
     def _remove_comments(self, definition):
         """Use regular expressions to remove comments and blank lines"""
         return re.sub(  # First remove comments, then blank lines
             r"\n\s*\n", "\n", re.sub(r"#.*\n", "\n", definition)
         )
+
+    @staticmethod
+    def _part_name(part=None):
+        """Return the CamelCase name of a part table"""
+        if not isinstance(part, str):
+            part = part.table_name
+        return to_camel_case(part.split("__")[-1].strip("`"))
+
+    def get_source_from_key(self, key: dict) -> str:
+        """Return the source of a given key"""
+        return self._normalize_source(key)
+
+    def parts(self, camel_case=False, *args, **kwargs) -> list:
+        """Return a list of part tables, add option for CamelCase names.
+
+        See DataJoint `parts` for additional arguments. If camel_case is True,
+        forces return of strings rather than objects.
+        """
+        self._ensure_dependencies_loaded()
+
+        if camel_case and kwargs.get("as_objects"):
+            logger.warning(
+                "Overriding as_objects=True to return CamelCase part names."
+            )
+            kwargs["as_objects"] = False
+
+        parts = super().parts(*args, **kwargs)
+
+        if camel_case:
+            parts = [self._part_name(part) for part in parts]
+
+        return parts
 
     @classmethod
     def _merge_restrict_parts(
@@ -220,40 +246,40 @@ class Merge(dj.Manual):
             for p in cls._merge_restrict_parts(
                 restriction=restriction,
                 add_invalid_restrict=False,
-                return_empties=True,
+                return_empties=False,  # motivated by SpikeSortingOutput.Import
             )
         ]
+        if not parts:
+            logger.warning("No parts found. Try adjusting restriction.")
+            return
 
-        primary_attrs = list(
-            dict.fromkeys(  # get all columns from parts
-                iter_chain.from_iterable([p.heading.names for p in parts])
+        attr_dict = {  # NULL for non-numeric, 0 for numeric
+            attr.name: "0" if attr.numeric else "NULL"
+            for attr in iter_chain.from_iterable(
+                part.heading.attributes.values() for part in parts
             )
-        )
-        # primary_attrs.append(cls()._reserved_sk)
-        query = dj.U(*primary_attrs) * parts[0].proj(  # declare query
-            ...,  # include all attributes from part 0
-            **{
-                a: "NULL"  # add null value where part has no column
-                for a in primary_attrs
-                if a not in parts[0].heading.names
-            },
-        )
-        for part in parts[1:]:  # add to declared query for each part
-            query += dj.U(*primary_attrs) * part.proj(
-                ...,
+        }
+
+        def _proj_part(part):
+            """Project part, adding NULL/0 for missing attributes"""
+            return dj.U(*attr_dict.keys()) * part.proj(
+                ...,  # include all attributes from part
                 **{
-                    a: "NULL"
-                    for a in primary_attrs
-                    if a not in part.heading.names
+                    k: v
+                    for k, v in attr_dict.items()
+                    if k not in part.heading.names
                 },
             )
+
+        query = _proj_part(parts[0])  # start with first part
+        for part in parts[1:]:  # add remaining parts
+            query += _proj_part(part)
+
         return query
 
     @classmethod
-    def _merge_insert(
-        cls, rows: list, part_name: str = None, mutual_exclusvity=True, **kwargs
-    ) -> None:
-        """Insert rows into merge, ensuring db integrity and mutual exclusivity
+    def _merge_insert(cls, rows: list, part_name: str = None, **kwargs) -> None:
+        """Insert rows into merge, ensuring data exists in part parent(s).
 
         Parameters
         ---------
@@ -267,18 +293,17 @@ class Merge(dj.Manual):
         TypeError
             If rows is not a list of dicts
         ValueError
-            If entry already exists, mutual exclusivity errors
             If data doesn't exist in part parents, integrity error
         """
         cls._ensure_dependencies_loaded()
 
+        type_err_msg = "Input `rows` must be a list of dictionaries"
         try:
             for r in iter(rows):
-                assert isinstance(
-                    r, dict
-                ), 'Input "rows" must be a list of dictionaries'
+                if not isinstance(r, dict):
+                    raise TypeError(type_err_msg)
         except TypeError:
-            raise TypeError('Input "rows" must be a list of dictionaries')
+            raise TypeError(type_err_msg)
 
         parts = cls._merge_restrict_parts(as_objects=True)
         if part_name:
@@ -291,30 +316,24 @@ class Merge(dj.Manual):
         master_entries = []
         parts_entries = {p: [] for p in parts}
         for row in rows:
-            keys = []  # empty to-be-inserted key
+            keys = []  # empty to-be-inserted keys
             for part in parts:  # check each part
+                part_name = cls._part_name(part)
                 part_parent = part.parents(as_objects=True)[-1]
-                part_name = to_camel_case(part.table_name.split("__")[-1])
                 if part_parent & row:  # if row is in part parent
-                    if keys and mutual_exclusvity:  # if key from other part
-                        raise ValueError(
-                            "Mutual Exclusivity Error! Entry exists in more "
-                            + f"than one table - Entry: {row}"
-                        )
-
                     keys = (part_parent & row).fetch("KEY")  # get pk
                     if len(keys) > 1:
                         raise ValueError(
                             "Ambiguous entry. Data has mult rows in "
                             + f"{part_name}:\n\tData:{row}\n\t{keys}"
                         )
-                    master_pk = {  # make uuid
-                        cls()._reserved_pk: dj.hash.key_hash(keys[0]),
-                    }
-                    parts_entries[part].append({**master_pk, **keys[0]})
-                    master_entries.append(
-                        {**master_pk, cls()._reserved_sk: part_name}
-                    )
+                    key = keys[0]
+                    master_sk = {cls()._reserved_sk: part_name}
+                    uuid = dj.hash.key_hash(key | master_sk)
+                    master_pk = {cls()._reserved_pk: uuid}
+
+                    master_entries.append({**master_pk, **master_sk})
+                    parts_entries[part].append({**master_pk, **key})
 
             if not keys:
                 raise ValueError(
@@ -345,27 +364,22 @@ class Merge(dj.Manual):
         if not dj.conn.connection.dependencies._loaded:
             dj.conn.connection.dependencies.load()
 
-    def insert(self, rows: list, mutual_exclusvity=True, **kwargs):
-        """Merges table specific insert
-
-        Ensuring db integrity and mutual exclusivity
+    def insert(self, rows: list, **kwargs):
+        """Merges table specific insert, ensuring data exists in part parents.
 
         Parameters
         ---------
         rows: List[dict]
             An iterable where an element is a dictionary.
-        mutual_exclusvity: bool
-            Check for mutual exclusivity before insert. Default True.
 
         Raises
         ------
         TypeError
             If rows is not a list of dicts
         ValueError
-            If entry already exists, mutual exclusivity errors
             If data doesn't exist in part parents, integrity error
         """
-        self._merge_insert(rows, mutual_exclusvity=mutual_exclusvity, **kwargs)
+        self._merge_insert(rows, **kwargs)
 
     @classmethod
     def merge_view(cls, restriction: str = True):
@@ -475,16 +489,18 @@ class Merge(dj.Manual):
         for part_parent in part_parents:
             super().delete(part_parent, **kwargs)
 
-    @classmethod
     def fetch_nwb(
-        cls,
-        restriction: str = True,
+        self,
+        restriction: str = None,
         multi_source=False,
         disable_warning=False,
         *attrs,
         **kwargs,
     ):
-        """Return the AnalysisNwbfile file linked in the source.
+        """Return the (Analysis)Nwbfile file linked in the source.
+
+        Relies on SpyglassMixin._nwb_table_tuple to determine the table to
+        fetch from and the appropriate path attribute to return.
 
         Parameters
         ----------
@@ -493,32 +509,11 @@ class Merge(dj.Manual):
         multi_source: bool
             Return from multiple parents. Default False.
         """
-        if not disable_warning:
-            _warn_on_restriction(table=cls, restriction=restriction)
+        if isinstance(self, dict):
+            raise ValueError("Try replacing Merge.method with Merge().method")
+        restriction = restriction or self.restriction or True
 
-        part_parents = cls._merge_restrict_parents(
-            restriction=restriction,
-            return_empties=False,
-            add_invalid_restrict=False,
-        )
-
-        if not multi_source and len(part_parents) != 1:
-            raise ValueError(
-                f"{len(part_parents)} possible sources found in Merge Table:"
-                + " and ".join([p.full_table_name for p in part_parents])
-            )
-
-        nwbs = []
-        for part_parent in part_parents:
-            nwbs.extend(
-                fetch_nwb(
-                    part_parent,
-                    (cls().analysis_nwbfile, "analysis_file_abs_path"),
-                    *attrs,
-                    **kwargs,
-                )
-            )
-        return nwbs
+        return self.merge_restrict_class(restriction).fetch_nwb()
 
     @classmethod
     def merge_get_part(
@@ -527,6 +522,7 @@ class Merge(dj.Manual):
         join_master: bool = False,
         restrict_part=True,
         multi_source=False,
+        return_empties=False,
     ) -> dj.Table:
         """Retrieve part table from a restricted Merge table.
 
@@ -545,6 +541,8 @@ class Merge(dj.Manual):
             native part table.
         multi_source: bool
             Return multiple parts. Default False.
+        return_empties: bool
+            Default False. Return empty part tables.
 
         Returns
         ------
@@ -563,11 +561,11 @@ class Merge(dj.Manual):
             restricting
         """
         sources = [
-            to_camel_case(n.split("__")[-1].strip("`"))  # friendly part name
-            for n in cls._merge_restrict_parts(
+            cls._part_name(part)  # friendly part name
+            for part in cls._merge_restrict_parts(
                 restriction=restriction,
                 as_objects=False,
-                return_empties=False,
+                return_empties=return_empties,
                 add_invalid_restrict=False,
             )
         ]
@@ -578,11 +576,15 @@ class Merge(dj.Manual):
                 + "Try adding a restriction before invoking `get_part`.\n\t"
                 + "Or permitting multiple sources with `multi_source=True`."
             )
+        if len(sources) == 0:
+            return None
 
         parts = [
-            getattr(cls, source)().restrict(restriction)
-            if restrict_part  # Re-apply restriction or don't
-            else getattr(cls, source)()
+            (
+                getattr(cls, source)().restrict(restriction)
+                if restrict_part  # Re-apply restriction or don't
+                else getattr(cls, source)()
+            )
             for source in sources
         ]
         if join_master:
@@ -595,7 +597,9 @@ class Merge(dj.Manual):
         cls,
         restriction: str = True,
         join_master: bool = False,
-        multi_source=False,
+        multi_source: bool = False,
+        return_empties: bool = False,
+        add_invalid_restrict: bool = True,
     ) -> dj.FreeTable:
         """Returns a list of part parents with restrictions applied.
 
@@ -610,6 +614,12 @@ class Merge(dj.Manual):
             Default True.
         join_master: bool
             Default False. Join part with Merge master to show uuid and source
+        multi_source: bool
+            Return multiple parents. Default False.
+        return_empties: bool
+            Default False. Return empty parent tables.
+        add_invalid_restrict: bool
+            Default True. Include parent for which the restriction is invalid.
 
         Returns
         ------
@@ -620,11 +630,12 @@ class Merge(dj.Manual):
         part_parents = cls._merge_restrict_parents(
             restriction=restriction,
             as_objects=True,
-            return_empties=False,
-            add_invalid_restrict=False,
+            return_empties=return_empties,
+            add_invalid_restrict=add_invalid_restrict,
         )
 
         if not multi_source and len(part_parents) != 1:
+            __import__("pdb").set_trace()
             raise ValueError(
                 f"Found  {len(part_parents)} potential parents: {part_parents}"
                 + "\n\tTry adding a string restriction when invoking "
@@ -636,6 +647,73 @@ class Merge(dj.Manual):
             part_parents = [cls * part for part in part_parents]
 
         return part_parents if multi_source else part_parents[0]
+
+    @property
+    def source_class_dict(self) -> dict:
+        # NOTE: fails if table is aliased in dj.Part but not merge script
+        # i.e., must import aliased table as part name
+        if not self._source_class_dict:
+            module = getmodule(self)
+            self._source_class_dict = {
+                part_name: getattr(module, part_name)
+                for part_name in self.parts(camel_case=True)
+            }
+        return self._source_class_dict
+
+    def _normalize_source(
+        self, source: Union[str, dj.Table, dj.condition.AndList, dict]
+    ) -> str:
+        fetched_source = None
+        if isinstance(source, (Merge, dj.condition.AndList)):
+            try:
+                fetched_source = (self & source).fetch(self._reserved_sk)
+            except DataJointError:
+                raise ValueError(f"Unable to find source for {source}")
+            source = fetched_source[0]
+            if len(fetched_source) > 1:
+                logger.warn(f"Multiple sources. Selecting first: {source}.")
+        if isinstance(source, dj.Table):
+            source = self._part_name(source)
+        if isinstance(source, dict):
+            source = self._part_name(self.merge_get_parent(source))
+
+        return source
+
+    def merge_get_parent_class(self, source: str) -> dj.Table:
+        """Return the class of the parent table for a given CamelCase source.
+
+        Parameters
+        ----------
+        source: Union[str, dict, dj.Table]
+            Accepts a CamelCase name of the source, or key as a dict, or a part
+            table.
+
+        Returns
+        -------
+        dj.Table
+            Class instance of the parent table, including class methods.
+        """
+
+        ret = self.source_class_dict.get(self._normalize_source(source))
+        if not ret:
+            logger.error(
+                f"No source class found for {source}: \n\t"
+                + f"{self.parts(camel_case=True)}"
+            )
+        return ret
+
+    def merge_restrict_class(self, key: dict) -> dj.Table:
+        """Returns native parent class, restricted with key."""
+        parent_key = self.merge_get_parent(key).fetch("KEY", as_dict=True)
+
+        if len(parent_key) > 1:
+            raise ValueError(
+                f"Ambiguous entry. Data has mult rows in parent:\n\tData:{key}"
+                + f"\n\t{parent_key}"
+            )
+
+        parent_class = self.merge_get_parent_class(key)
+        return parent_class & parent_key
 
     @classmethod
     def merge_fetch(self, restriction: str = True, *attrs, **kwargs) -> list:
@@ -684,12 +762,33 @@ class Merge(dj.Manual):
             )
         return results[0] if len(results) == 1 else results
 
-    @classmethod
-    def merge_populate(source: str, key=None):
-        raise NotImplementedError(
-            "CBroz: In the future, this command will support executing "
-            + "part_parent `make` and then inserting all entries into Merge"
-        )
+    def merge_populate(self, source: str, keys=None):
+        """Populate the merge table with entries from the source table."""
+        logger.warning("CBroz: Not fully tested. Use with caution.")
+        parent_class = self.merge_get_parent_class(source)
+        if not keys:
+            keys = parent_class.key_source
+        parent_class.populate(keys)
+        successes = (parent_class & keys).fetch("KEY", as_dict=True)
+        self.insert(successes)
+
+    def delete(self, force_permission=False, *args, **kwargs):
+        """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
+        for part in self.merge_get_part(
+            restriction=self.restriction,
+            multi_source=True,
+            return_empties=False,
+        ):
+            part.delete(force_permission=force_permission, *args, **kwargs)
+
+    def super_delete(self, *args, **kwargs):
+        """Alias for datajoint.table.Table.delete.
+
+        Added to support MRO of SpyglassMixin"""
+        logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
+
+        self._log_use(start=time(), super_delete=True)
+        super().delete(*args, **kwargs)
 
 
 _Merge = Merge
@@ -718,8 +817,6 @@ def delete_downstream_merge(
     dry_run: bool
         Default True. If true, return list of tuples, merge/part tables
         downstream of table input. Otherwise, delete merge/part table entries.
-    recurse_level: int
-        Default 2. Depth to recurse into table descendants.
     disable_warning: bool
         Default False. If True, don't warn about restrictions on table object.
     kwargs: dict
@@ -730,148 +827,12 @@ def delete_downstream_merge(
     List[Tuple[dj.Table, dj.Table]]
         Entries in merge/part tables downstream of table input.
     """
-    if not disable_warning:
-        _warn_on_restriction(table, restriction)
+    from spyglass.utils.dj_mixin import SpyglassMixin
 
-    if not restriction:
-        restriction = True
+    if not isinstance(table, SpyglassMixin):
+        raise ValueError("Input must be a Spyglass Table.")
+    table = table if isinstance(table, dj.Table) else table()
 
-    descendants = _unique_descendants(table, recurse_level)
-    merge_table_pairs = _master_table_pairs(
-        table_list=descendants,
-        restricted_parent=(table & restriction),
+    return table.delete_downstream_merge(
+        restriction=restriction, dry_run=dry_run, **kwargs
     )
-
-    # restrict the merge table based on uuids in part
-    # don't need part for del, but show on dry_run
-    merge_pairs = [
-        (merge & part.fetch(RESERVED_PRIMARY_KEY, as_dict=True), part)
-        for merge, part in merge_table_pairs
-    ]
-
-    if dry_run:
-        return merge_pairs
-
-    for merge_table, _ in merge_pairs:
-        merge_table.delete(**kwargs)
-
-
-def _warn_on_restriction(table: dj.Table, restriction: str = None):
-    """Warn if restriction on table object differs from input restriction"""
-    if restriction is None and table.restriction:
-        logger.warn(
-            f"Warning: ignoring table restriction: {table().restriction}.\n\t"
-            + "Please pass restrictions as an arg"
-        )
-
-
-def _unique_descendants(
-    table: dj.Table,
-    recurse_level: int = 2,
-    return_names: bool = False,
-    attribute=None,
-) -> list:
-    """Recurisively find unique descendants of a given table
-
-    Parameters
-    ----------
-    table: dj.Table
-        The node in the tree from which to find descendants.
-    recurse_level: int
-        The maximum level of descendants to find.
-    return_names: bool
-        If True, return names of descendants found. Else return Table objects.
-    attribute: str, optional
-        If provided, only return descendants that have this attribute.
-
-    Returns
-    -------
-    List[dj.Table, str]
-        List descendants found when recurisively called to recurse_level
-    """
-
-    if recurse_level == 0:
-        return []
-
-    if attribute is None:
-        skip_attr_check = True
-    else:
-        skip_attr_check = False
-
-    descendants = {}
-
-    def recurse_descendants(sub_table, level):
-        for descendant in sub_table.descendants(as_objects=True):
-            if descendant.full_table_name not in descendants and (
-                skip_attr_check or attribute in descendant.heading.attributes
-            ):
-                descendants[descendant.full_table_name] = descendant
-                if level > 1:
-                    recurse_descendants(descendant, level - 1)
-
-    recurse_descendants(table, recurse_level)
-
-    return (
-        list(descendants.keys()) if return_names else list(descendants.values())
-    )
-
-
-def _master_table_pairs(
-    table_list: list,
-    restricted_parent: dj.expression.QueryExpression = True,
-    connection: dj.connection.Connection = None,
-) -> list:
-    """
-    Given list of tables, return a list of master table pairs.
-
-    Returns a list of tuples, with master and part. Part will have restriction
-    applied. If restriction yield empty list, skip.
-
-    Parameters
-    ----------
-    table_list : List[dj.Table]
-        A list of datajoint tables.
-    restricted_parent : dj.expression.QueryExpression
-        Parent table restricted, to be joined with master and part. Default
-        True, no restriction.
-    connection : datajoint.connection.Connection
-        A database connection. Default None, use connection from first table.
-
-    Returns
-    -------
-    List[Tuple[dj.Table, dj.Table]]
-        A list of master table pairs.
-    """
-    conn = connection or table_list[0].connection
-
-    master_table_pairs = []
-    unique_parts = []
-
-    # Adapted from Spyglass PR 535
-    for table in table_list:
-        table_name = table.full_table_name
-        if table_name in unique_parts:  # then repeat in list
-            continue
-
-        master_name = get_master(table_name)
-        if not master_name:  # then it's not a part table
-            continue
-
-        master = dj.FreeTable(conn, master_name)
-        if RESERVED_PRIMARY_KEY not in master.heading.attributes.keys():
-            continue  # then it's not a merge table
-
-        restricted_join = restricted_parent * table
-        if not restricted_join:  # No entries relevant to restriction in part
-            continue
-
-        unique_parts.append(table_name)
-        master_table_pairs.append(
-            (
-                master,
-                table
-                & restricted_join.fetch(RESERVED_PRIMARY_KEY, as_dict=True),
-            )
-        )
-
-    return master_table_pairs

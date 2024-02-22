@@ -40,7 +40,9 @@ jobs:
 
       - name: Deploy
         run: |
-          echo "OWNER: ${REPO_OWNER}"
+          FULL_VERSION=${{ github.ref }}
+          export MAJOR_VERSION=${FULL_VERSION:0:3}
+          echo "OWNER: ${REPO_OWNER}. BUILD: ${MAJOR_VERSION}"
           bash ./docs/build-docs.sh push $REPO_OWNER
         env:
           USERNAME: github-actions[bot]

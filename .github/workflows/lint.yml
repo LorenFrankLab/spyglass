@@ -1,13 +1,14 @@
----
-name: Codespell
+name: Lint
 
-on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
+on: [push, pull_request]
 
 jobs:
+  black:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: psf/black@stable
+
   codespell:
     name: Check for spelling errors
     runs-on: ubuntu-latest

@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
 
-import cv2
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,13 +8,13 @@ import pandas as pd
 import pynwb
 from IPython.display import display
 
-from ...common.common_behav import (  # noqa: F401
+from spyglass.common.common_behav import (  # noqa: F401
     RawPosition,
-    VideoFile,
     convert_epoch_interval_name_to_position_interval_name,
 )
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_mixin import SpyglassMixin
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .dlc_utils import OutputLogger, infer_output_dir
 from .position_dlc_model import DLCModel
 
@@ -49,6 +48,7 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         crop_ints : list
             list of 4 integers [x min, x max, y min, y max]
         """
+        import cv2
 
         cap = cv2.VideoCapture(video_path)
         _, frame = cap.read()
@@ -86,10 +86,11 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         Parameters
         ----------
         key: DataJoint key specifying a pairing of VideoRecording and Model.
-        task_mode (bool): Default 'trigger' computation. Or 'load' existing results.
+        task_mode (bool): Default 'trigger' computation.
+        Or 'load' existing results.
         params (dict): Optional. Parameters passed to DLC's analyze_videos:
-            videotype, gputouse, save_as_csv, batchsize, cropping, TFGPUinference,
-            dynamic, robust_nframes, allow_growth, use_shelve
+            videotype, gputouse, save_as_csv, batchsize, cropping,
+            TFGPUinference, dynamic, robust_nframes, allow_growth, use_shelve
         """
         from .dlc_utils import check_videofile, get_video_path
 
@@ -260,7 +261,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             del key["meters_per_pixel"]
             body_parts = dlc_result.df.columns.levels[0]
             body_parts_df = {}
-            # Insert dlc pose estimation into analysis NWB file for each body part.
+            # Insert dlc pose estimation into analysis NWB file for
+            # each body part.
             for body_part in bodyparts:
                 if body_part in body_parts:
                     body_parts_df[body_part] = pd.DataFrame.from_dict(
@@ -309,17 +311,17 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     description="video_frame_ind",
                 )
                 nwb_analysis_file = AnalysisNwbfile()
-                key[
-                    "dlc_pose_estimation_position_object_id"
-                ] = nwb_analysis_file.add_nwb_object(
-                    analysis_file_name=key["analysis_file_name"],
-                    nwb_object=position,
+                key["dlc_pose_estimation_position_object_id"] = (
+                    nwb_analysis_file.add_nwb_object(
+                        analysis_file_name=key["analysis_file_name"],
+                        nwb_object=position,
+                    )
                 )
-                key[
-                    "dlc_pose_estimation_likelihood_object_id"
-                ] = nwb_analysis_file.add_nwb_object(
-                    analysis_file_name=key["analysis_file_name"],
-                    nwb_object=likelihood,
+                key["dlc_pose_estimation_likelihood_object_id"] = (
+                    nwb_analysis_file.add_nwb_object(
+                        analysis_file_name=key["analysis_file_name"],
+                        nwb_object=likelihood,
+                    )
                 )
                 nwb_analysis_file.add(
                     nwb_file_name=key["nwb_file_name"],

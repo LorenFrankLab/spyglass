@@ -27,14 +27,12 @@
 #   [this notebook](./00_Setup.ipynb)
 # - For a more detailed introduction to DataJoint with inserts, see
 #   [this notebook](./01_Insert_Data.ipynb)
-# - [The Spike Sorting notebook](./02_Spike_Sorting.ipynb) is a mandatory
+# - [The Spike Sorting notebook](./10_Spike_SortingV0.ipynb) is a mandatory
 #   prerequisite to Curation.
 #
 
 # ## Imports
 #
-
-# %env KACHERY_CLOUD_DIR="/home/cb/.kachery-cloud/"
 
 # +
 import os
@@ -49,7 +47,7 @@ if os.path.basename(os.getcwd()) == "notebooks":
     os.chdir("..")
 dj.config.load("dj_local_conf.json")  # load config for database connection info
 
-from spyglass.spikesorting import SpikeSorting
+from spyglass.spikesorting.v0 import SpikeSorting
 
 # -
 
@@ -111,3 +109,4 @@ print(
 # ## Up Next
 #
 # Next, we'll turn our attention to [LFP data](./12_LFP.ipynb) data.
+#

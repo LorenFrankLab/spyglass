@@ -2,7 +2,6 @@
 
 import os
 import os.path
-import warnings
 from itertools import groupby
 from pathlib import Path
 
@@ -127,7 +126,7 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
 
     Warns
     -----
-    UserWarning
+    LoggerWarning
         If multiple NWBDataInterface and DynamicTable objects with the matching
         name are found.
 
@@ -146,7 +145,7 @@ def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
                 continue
             ret.append(match)
     if len(ret) > 1:
-        warnings.warn(
+        logger.warning(
             f"Multiple data interfaces with name '{data_interface_name}' "
             f"found in NWBFile with identifier {nwbfile.identifier}. "
             + "Using the first one found. "
@@ -384,9 +383,11 @@ def get_electrode_indices(nwb_object, electrode_ids):
     # that if it's there and invalid_electrode_index if not.
 
     return [
-        selected_elect_ids.index(elect_id)
-        if elect_id in selected_elect_ids
-        else invalid_electrode_index
+        (
+            selected_elect_ids.index(elect_id)
+            if elect_id in selected_elect_ids
+            else invalid_electrode_index
+        )
         for elect_id in electrode_ids
     ]
 
