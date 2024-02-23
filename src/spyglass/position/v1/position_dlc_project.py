@@ -224,7 +224,6 @@ class DLCProject(SpyglassMixin, dj.Manual):
         groupname: str = None,
         project_directory: str = dlc_project_dir,
         output_path: str = dlc_video_dir,
-        set_permissions=False,
         **kwargs,
     ):
         """Insert a new project into DLCProject table.
@@ -251,9 +250,6 @@ class DLCProject(SpyglassMixin, dj.Manual):
         output_path : str
             target path to output converted videos
             (Default is '/nimbus/deeplabcut/videos/')
-        set_permissions : bool
-            if True, will set permissions for user and group to be read+write
-            (Default is False)
         """
         project_names_in_use = np.unique(cls.fetch("project_name"))
         if project_name in project_names_in_use:
@@ -338,24 +334,6 @@ class DLCProject(SpyglassMixin, dj.Manual):
             "config_path": config_path,
             "frames_per_video": frames_per_video,
         }
-        # TODO: make permissions setting more flexible.
-        if set_permissions:
-            permissions = (
-                stat.S_IRUSR
-                | stat.S_IWUSR
-                | stat.S_IRGRP
-                | stat.S_IWGRP
-                | stat.S_IROTH
-            )
-            username = getpass.getuser()
-            if not groupname:
-                groupname = username
-            _set_permissions(
-                directory=project_directory,
-                mode=permissions,
-                username=username,
-                groupname=groupname,
-            )
         cls.insert1(key, **kwargs)
         cls.BodyPart.insert(
             [
@@ -376,8 +354,74 @@ class DLCProject(SpyglassMixin, dj.Manual):
         return {"project_name": project_name, "config_path": config_path}
 
     @classmethod
+    def add_video_files(
+        cls,
+        video_list,
+        config_path=None,
+        key=None,
+        output_path: str = os.getenv("DLC_VIDEO_PATH"),
+        add_new=False,
+        add_to_files=True,
+        **kwargs,
+    ):
+        has_config_or_key = bool(config_path) or bool(key)
+
+        if add_new and not has_config_or_key:
+            raise ValueError("If add_new, must provide key or config_path")
+        config_path = config_path or (cls & key).fetch1("config_path")
+
+        if (
+            add_to_files
+            and not key
+            and len(cls & {"config_path": config_path}) != 1
+        ):
+            raise ValueError("Cannot set add_to_files=True without passing key")
+
+        if all(isinstance(n, Dict) for n in video_list):
+            videos_to_convert = [
+                get_video_path(video_key) for video_key in video_list
+            ]
+            videos = [
+                check_videofile(
+                    video_path=video[0],
+                    output_path=output_path,
+                    video_filename=video[1],
+                )[0].as_posix()
+                for video in videos_to_convert
+            ]
+        # If not dict, assume list of video file paths
+        # that may or may not need to be converted
+        else:
+            videos = []
+            if not all([Path(video).exists() for video in video_list]):
+                raise OSError("at least one file in video_list does not exist")
+            for video in video_list:
+                video_path = Path(video).parent
+                video_filename = video.rsplit(
+                    video_path.as_posix(), maxsplit=1
+                )[-1].split("/")[-1]
+                videos.append(
+                    check_videofile(
+                        video_path=video_path,
+                        output_path=output_path,
+                        video_filename=video_filename,
+                    )[0].as_posix()
+                )
+            if len(videos) < 1:
+                raise ValueError(f"no .mp4 videos found in{video_path}")
+        if add_new:
+            from deeplabcut import add_new_videos
+
+            add_new_videos(config=config_path, videos=videos, copy_videos=True)
+        if add_to_files:
+            # Add videos to training files
+            cls.add_training_files(key, **kwargs)
+        return videos
+
+    @classmethod
     def add_training_files(cls, key, **kwargs):
-        """Add training videos and labeled frames .h5 and .csv to DLCProject.File"""
+        """Add training videos and labeled frames .h5
+        and .csv to DLCProject.File"""
         config_path = (cls & {"project_name": key["project_name"]}).fetch1(
             "config_path"
         )
@@ -394,7 +438,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
             )[0]
             training_files.extend(
                 glob.glob(
-                    f"{cfg['project_path']}/labeled-data/{video_name}/*Collected*"
+                    f"{cfg['project_path']}/"
+                    f"labeled-data/{video_name}/*Collected*"
                 )
             )
         for video in video_names:
@@ -457,16 +502,19 @@ class DLCProject(SpyglassMixin, dj.Manual):
         video_filenames: Union[str, List],
         **kwargs,
     ):
-        """Function to import pre-labeled frames from an existing project into a new project
+        """Function to import pre-labeled frames from an existing project
+        into a new project
 
         Parameters
         ----------
         key : Dict
             key to specify entry in DLCProject table to add labeled frames to
         import_project_path : str
-            absolute path to project directory containing labeled frames to import
+            absolute path to project directory containing
+            labeled frames to import
         video_filenames : str or List
-            filename or list of filenames of video(s) from which to import frames.
+            filename or list of filenames of video(s)
+            from which to import frames.
             without file extension
         """
         project_entry = (cls & key).fetch1()
@@ -476,9 +524,10 @@ class DLCProject(SpyglassMixin, dj.Manual):
             f"{current_project_path.as_posix()}/labeled-data"
         )
         if isinstance(import_project_path, PosixPath):
-            assert (
-                import_project_path.exists()
-            ), f"import_project_path: {import_project_path.as_posix()} does not exist"
+            assert import_project_path.exists(), (
+                "import_project_path: "
+                f"{import_project_path.as_posix()} does not exist"
+            )
             import_labeled_data_path = Path(
                 f"{import_project_path.as_posix()}/labeled-data"
             )
@@ -504,7 +553,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
             dlc_df.columns = dlc_df.columns.set_levels([team_name], level=0)
             dlc_df.to_hdf(
                 Path(
-                    f"{current_labeled_data_path.as_posix()}/{video_file}/CollectedData_{team_name}.h5"
+                    f"{current_labeled_data_path.as_posix()}/"
+                    f"{video_file}/CollectedData_{team_name}.h5"
                 ).as_posix(),
                 "df_with_missing",
             )
