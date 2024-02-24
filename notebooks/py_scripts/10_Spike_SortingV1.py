@@ -109,8 +109,13 @@ sgs.ArtifactDetection()
 # For sorting with Kilosort, make sure to use a machine with GPU and put the whole probe not a sliced individual shank.
 #
 
+# Install mountainsort 4 if you haven't done it.
+
+# #!pip install pybind11
+# !pip install mountainsort4
+
 # +
-sorter = "kilosort2_5"
+sorter = "mountainsort4"
 
 common_key = {
     "recording_id": key["recording_id"],
