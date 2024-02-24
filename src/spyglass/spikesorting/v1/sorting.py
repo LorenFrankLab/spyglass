@@ -245,7 +245,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
             sorter_params["tempdir"] = sorter_temp_dir.name
             os.chmod(sorter_params["tempdir"], 0o774)
-            
+
             if sorter == "mountainsort5":
                 _ = sorter_params.pop("tempdir", None)
 
@@ -255,12 +255,11 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 recording = sip.whiten(recording, dtype=np.float64)
                 sorter_params["whiten"] = False
 
-
             common_sorter_items = {
-                'sorter_name': sorter,
-                'recording': recording, 
-                'output_folder':sorter_temp_dir.name,
-                'remove_existing_folder': True
+                "sorter_name": sorter,
+                "recording": recording, 
+                "output_folder":sorter_temp_dir.name,
+                "remove_existing_folder": True
             }
 
             if sorter.lower() in ["kilosort2_5", "kilosort3", "ironclust"]:
