@@ -258,8 +258,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             common_sorter_items = {
                 "sorter_name": sorter,
                 "recording": recording, 
-                "output_folder":sorter_temp_dir.name,
-                "remove_existing_folder": True
+                "output_folder": sorter_temp_dir.name,
+                "remove_existing_folder": True,
             }
 
             if sorter.lower() in ["kilosort2_5", "kilosort3", "ironclust"]:
