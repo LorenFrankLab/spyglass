@@ -1,9 +1,9 @@
 import datajoint as dj
 
-from spyglass.common.common_interval import IntervalList
-from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.common_session import Session
-from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
+from spyglass.common.common_interval import IntervalList  # noqa: F401
+from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
+from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.lfp.lfp_electrode import LFPElectrodeGroup  # noqa: F401
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("lfp_imported")

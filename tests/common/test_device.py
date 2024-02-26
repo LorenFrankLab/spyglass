@@ -9,6 +9,13 @@ def test_invalid_device(common, populate_exception):
         common.DataAcquisitionDevice._add_device(device_dict)
 
 
+def test_get_device(common, mini_content):
+    dev = common.DataAcquisitionDevice.get_all_device_names(
+        nwbf=mini_content, config=[]
+    )
+    assert len(dev) == 3, "Unexpected number of devices found"
+
+
 def test_spikegadets_system_alias(mini_insert, common):
     assert (
         common.DataAcquisitionDevice()._add_system("MCU") == "SpikeGadgets"

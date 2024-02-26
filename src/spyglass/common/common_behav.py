@@ -51,7 +51,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
         """
         if not isinstance(keys, list):
             keys = [keys]
-        if isinstance(keys[0], dj.Table):
+        if isinstance(keys[0], (dj.Table, dj.expression.QueryExpression)):
             keys = [k for tbl in keys for k in tbl.fetch("KEY", as_dict=True)]
         for key in keys:
             nwb_file_name = key.get("nwb_file_name")
@@ -60,10 +60,10 @@ class PositionSource(SpyglassMixin, dj.Manual):
                     "PositionSource.populate is an alias for a non-computed table "
                     + "and must be passed a key with nwb_file_name"
                 )
-            self.insert_from_nwbfile(nwb_file_name)
+            self.insert_from_nwbfile(nwb_file_name, skip_duplicates=True)
 
     @classmethod
-    def insert_from_nwbfile(cls, nwb_file_name):
+    def insert_from_nwbfile(cls, nwb_file_name, skip_duplicates=False) -> None:
         """Add intervals to ItervalList and PositionSource.
 
         Given an NWB file name, get the spatial series and interval lists from
@@ -111,9 +111,11 @@ class PositionSource(SpyglassMixin, dj.Manual):
                 )
 
         with cls.connection.transaction:
-            IntervalList.insert(intervals)
-            cls.insert(sources)
-            cls.SpatialSeries.insert(spat_series)
+            IntervalList.insert(intervals, skip_duplicates=skip_duplicates)
+            cls.insert(sources, skip_duplicates=skip_duplicates)
+            cls.SpatialSeries.insert(
+                spat_series, skip_duplicates=skip_duplicates
+            )
 
         # make map from epoch intervals to position intervals
         populate_position_interval_map_session(nwb_file_name)
@@ -305,7 +307,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
                 "Unable to import StateScriptFile: no processing module named "
                 + '"associated_files" found in {nwb_file_name}.'
             )
-            return
+            return  # See #849
 
         for associated_file_obj in associated_files.data_interfaces.values():
             if not isinstance(
@@ -545,7 +547,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
             # TODO: Now that populate_all accept errors, raise here?
-            logger.error(
+            logger.warning(
                 f"Found {len(matching_pos_intervals)} pos intervals for {key}; "
                 + f"{no_pop_msg}\n{matching_pos_intervals}"
             )
