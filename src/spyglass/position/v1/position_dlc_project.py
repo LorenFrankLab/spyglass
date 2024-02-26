@@ -1,9 +1,7 @@
 import copy
-import getpass
 import glob
 import os
 import shutil
-import stat
 from itertools import combinations
 from pathlib import Path, PosixPath
 from typing import Dict, List, Union
@@ -14,11 +12,7 @@ import pandas as pd
 import ruamel.yaml
 
 from spyglass.common.common_lab import LabTeam
-from spyglass.position.v1.dlc_utils import (
-    _set_permissions,
-    check_videofile,
-    get_video_path,
-)
+from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
 from spyglass.settings import dlc_project_dir, dlc_video_dir
 from spyglass.utils.dj_mixin import SpyglassMixin
 
