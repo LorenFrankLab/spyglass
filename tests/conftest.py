@@ -160,13 +160,18 @@ def server(request, teardown):
 
 
 @pytest.fixture(scope="session")
-def dj_conn(request, server, verbose, teardown):
+def server_creds(server):
+    yield server.creds
+
+
+@pytest.fixture(scope="session")
+def dj_conn(request, server_creds, verbose, teardown):
     """Fixture for datajoint connection."""
     config_file = "dj_local_conf.json_test"
     if Path(config_file).exists():
         os.remove(config_file)
 
-    dj.config.update(server.creds)
+    dj.config.update(server_creds)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
     dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)

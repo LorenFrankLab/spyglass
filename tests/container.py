@@ -191,7 +191,7 @@ class DockerMySQLManager:
             "database.password": self.password,
             "database.user": self.user,
             "database.port": int(self.port),
-            "safmode": "false",
+            "safemode": "false",
             "custom": {"test_mode": True},
         }
 
