@@ -244,7 +244,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             # Specify tempdir (expected by some sorters like mountainsort4)
             sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
             sorter_params["tempdir"] = sorter_temp_dir.name
-            os.chmod(sorter_params["tempdir"], 0o774)
+            os.chmod(sorter_params["tempdir"], 0o777)
 
             if sorter == "mountainsort5":
                 _ = sorter_params.pop("tempdir", None)
