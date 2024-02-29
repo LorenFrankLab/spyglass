@@ -96,7 +96,11 @@ class SpyglassConfig:
         }
 
     def load_config(
-        self, base_dir=None, force_reload=False, on_startup: bool = False
+        self,
+        base_dir=None,
+        force_reload=False,
+        on_startup: bool = False,
+        **kwargs,
     ):
         """
         Loads the configuration settings for the object.
@@ -134,7 +138,9 @@ class SpyglassConfig:
         dj_dlc = dj_custom.get("dlc_dirs", {})
 
         self._debug_mode = dj_custom.get("debug_mode", False)
-        self._test_mode = dj_custom.get("test_mode", False)
+        self._test_mode = kwargs.get("test_mode") or dj_custom.get(
+            "test_mode", False
+        )
 
         resolved_base = (
             base_dir

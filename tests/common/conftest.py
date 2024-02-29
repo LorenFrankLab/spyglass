@@ -27,7 +27,7 @@ def mini_beh_events(mini_behavior):
 
 
 @pytest.fixture(scope="session")
-def mini_pos_interval_dict(common):
+def mini_pos_interval_dict(mini_insert, common):
     yield {"interval_list_name": common.PositionSource.get_pos_interval_name(0)}
 
 

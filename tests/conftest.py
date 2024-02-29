@@ -246,8 +246,17 @@ def mini_closed(mini_path):
     yield nwbfile
 
 
+@pytest.fixture(scope="session")
+def load_config(dj_conn, base_dir):
+    from spyglass.settings import SpyglassConfig
+
+    yield SpyglassConfig().load_config(
+        base_dir=base_dir, test_mode=True, force_reload=True
+    )
+
+
 @pytest.fixture(autouse=True, scope="session")
-def mini_insert(mini_path, teardown, server, dj_conn):
+def mini_insert(mini_path, teardown, server, load_config):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
     from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
@@ -318,6 +327,119 @@ def populate_exception():
     from spyglass.common.errors import PopulateException
 
     yield PopulateException
+
+
+@pytest.fixture(scope="session")
+def sgp(common):
+    from spyglass import position
+
+    yield position
+
+
+@pytest.fixture(scope="session")
+def trodes_params_table(sgp):
+    yield sgp.v1.TrodesPosParams()
+
+
+@pytest.fixture(scope="session")
+def trodes_sel_table(sgp):
+    yield sgp.v1.TrodesPosSelection()
+
+
+@pytest.fixture(scope="session")
+def trodes_params(trodes_params_table, teardown):
+    params = {
+        "max_separation": 10000.0,
+        "max_speed": 300.0,
+        "position_smoothing_duration": 0.125,
+        "speed_smoothing_std_dev": 0.1,
+        "orient_smoothing_std_dev": 0.001,
+        "led1_is_front": 1,
+        "is_upsampled": 0,
+        "upsampling_sampling_rate": None,
+        "upsampling_interpolation_method": "linear",
+    }
+    paramsets = {
+        "single_led": {
+            "trodes_pos_params_name": "single_led",
+            "params": params,
+        },
+        "single_led_upsampled": {
+            "trodes_pos_params_name": "single_led_upsampled",
+            "params": {
+                **params,
+                "is_upsampled": 1,
+                "upsampling_sampling_rate": 500,
+            },
+        },
+    }
+    trodes_params_table.get_default()
+    trodes_params_table.insert(
+        [v for k, v in paramsets.items()], skip_duplicates=True
+    )
+    yield paramsets
+    if teardown:
+        trodes_params_table.delete(safemode=False)
+
+
+@pytest.fixture(scope="session")
+def pos_interval(sgp):
+    yield "pos 0 valid times"
+
+
+@pytest.fixture(scope="session")
+def pos_interval_key(sgp, mini_copy_name, pos_interval):
+    yield {"nwb_file_name": mini_copy_name, "interval_list_name": pos_interval}
+
+
+@pytest.fixture(scope="session")
+def trodes_sel_keys(
+    teardown, trodes_sel_table, pos_interval_key, trodes_params
+):
+    keys = [
+        {**pos_interval_key, "trodes_pos_params_name": k} for k in trodes_params
+    ]
+    trodes_sel_table.insert(keys, skip_duplicates=True)
+    yield keys
+    if teardown:
+        trodes_sel_table.delete(safemode=False)
+
+
+@pytest.fixture(scope="session")
+def trodes_pos_v1(teardown, sgp, trodes_sel_keys):
+    v1 = sgp.v1.TrodesPosV1()
+    v1.populate(trodes_sel_keys)
+    yield v1
+    if teardown:
+        v1.delete(safemode=False)
+
+
+@pytest.fixture(scope="session")
+def pos_merge_tables(dj_conn):
+    """Return the merge tables as activated."""
+    from spyglass.common.common_position import TrackGraph
+    from spyglass.linearization.merge import LinearizedPositionOutput
+    from spyglass.position.position_merge import PositionOutput
+
+    # must import common_position before LinOutput to avoid circular import
+
+    _ = TrackGraph()
+    return [PositionOutput(), LinearizedPositionOutput()]
+
+
+@pytest.fixture(scope="session")
+def pos_merge(pos_merge_tables):
+    yield pos_merge_tables[0]
+
+
+@pytest.fixture(scope="session")
+def lin_merge(pos_merge_tables):
+    yield pos_merge_tables[1]
+
+
+@pytest.fixture(scope="session")
+def pos_merge_key(pos_merge, trodes_pos_v1, trodes_sel_keys):
+    yield pos_merge.merge_get_part(trodes_sel_keys[-1]).fetch1("KEY")
 
 
 # ------------------ GENERAL FUNCTION ------------------

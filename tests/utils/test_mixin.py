@@ -1,25 +1,31 @@
 import datajoint as dj
 import pytest
 
-from spyglass.utils import SpyglassMixin
 from tests.conftest import VERBOSE
 
 
-class Mixin(SpyglassMixin, dj.Manual):
-    definition = """
-    id : int
-    """
+@pytest.fixture(scope="module")
+def Mixin():
+    from spyglass.utils import SpyglassMixin
+
+    class Mixin(SpyglassMixin, dj.Manual):
+        definition = """
+        id : int
+        """
+
+    yield Mixin
+
+    Mixin().drop_quick()
 
 
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_bad_prefix(caplog, dj_conn):
-
+def test_bad_prefix(caplog, dj_conn, Mixin):
     schema_bad = dj.Schema("badprefix", {}, connection=dj_conn)
     schema_bad(Mixin)
     assert "Schema prefix not in SHARED_MODULES" in caplog.text
 
 
-def test_nwb_table_missing(schema_test):
+def test_nwb_table_missing(schema_test, Mixin):
     schema_test(Mixin)
     with pytest.raises(NotImplementedError):
         Mixin().fetch_nwb()
@@ -41,6 +47,7 @@ def test_get_chain(Nwbfile, pos_merge_tables):
     assert lin_parts == lin_output.parts(), "Chain not found."
 
 
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_ddm_warning(Nwbfile, caplog):
     """Test that the mixin warns on empty delete_downstream_merge."""
     (Nwbfile & "nwb_file_name LIKE 'BadName'").delete_downstream_merge(

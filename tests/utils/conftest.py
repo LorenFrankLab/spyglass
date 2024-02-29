@@ -1,15 +1,5 @@
 import datajoint as dj
 import pytest
-from datajoint.errors import DataJointError
-
-
-@pytest.fixture(scope="module")
-def pos_merge_tables(dj_conn):
-    """Return the merge tables as activated."""
-    from spyglass.linearization.merge import LinearizedPositionOutput
-    from spyglass.position.position_merge import PositionOutput
-
-    return [PositionOutput(), LinearizedPositionOutput()]
 
 
 @pytest.fixture(scope="module")
@@ -36,10 +26,6 @@ def schema_test(teardown, dj_conn):
     # schema_any(TTest) # Declare table using schema_any as func
     yield schema_test
     if teardown:
-        try:
-            schema_test.jobs.delete(safemode=False)
-        except DataJointError:
-            pass
         schema_test.drop(force=True)
 
 

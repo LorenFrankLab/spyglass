@@ -1,6 +1,11 @@
 import pytest
 
-from spyglass.utils.dj_chains import TableChain
+
+@pytest.fixture(scope="session")
+def TableChain():
+    from spyglass.utils.dj_chains import TableChain
+
+    return TableChain
 
 
 def test_chains_repr(chains):
@@ -17,7 +22,7 @@ def test_str_getitem(chains):
     assert by_int == by_str, "Getitem by int and str not equal."
 
 
-def test_invalid_chain(Nwbfile, pos_merge_tables):
+def test_invalid_chain(Nwbfile, pos_merge_tables, TableChain):
     """Test that an invalid chain raises an error."""
     with pytest.raises(TypeError):
         TableChain(Nwbfile, pos_merge_tables[0])

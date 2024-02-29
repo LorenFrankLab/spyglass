@@ -513,6 +513,7 @@ def get_nwb_copy_filename(nwb_file_name):
 def change_group_permissions(
     subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
 ):
+    """CB NOTE: Unused. Remove?"""
     # Change to directory with analysis nwb files
     os.chdir(analysis_dir)
     # Get nwb file directories with specified subject ids

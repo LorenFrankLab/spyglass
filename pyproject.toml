@@ -121,11 +121,11 @@ ignore-words-list = 'nevers'
 minversion = "7.0"
 addopts = [
     "-sv",
-    "--sw", # stepwise: resume with next test after failure
-    "--pdb", # drop into debugger on failure
+    # "--sw", # stepwise: resume with next test after failure
+    # "--pdb", # drop into debugger on failure
     "-p no:warnings",
-    "--no-teardown", # don't teardown the database after tests
-    "--quiet-spy",                  # don't show logging from spyglass
+    # "--no-teardown", # don't teardown the database after tests
+    # "--quiet-spy",                  # don't show logging from spyglass
     "--show-capture=no",
     "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
     "--cov=spyglass",
@@ -141,19 +141,19 @@ omit = [ # which submodules have no tests
     "*/__init__.py",
     "*/_version.py",
     "*/cli/*",
-    "*/common/*",
+    # "*/common/*",
     "*/data_import/*",
     "*/decoding/*",
     "*/figurl_views/*",
     # "*/lfp/*",
-    "*/linearization/*",
+    # "*/linearization/*",
     "*/lock/*",
     "*/mua/*",
-    "*/position/*",
+    # "*/position/*",
     "*/ripple/*",
     "*/sharing/*",
     "*/spikesorting/*",
-    "*/utils/*",
+    # "*/utils/*",
     "settings.py",
 ]
 
