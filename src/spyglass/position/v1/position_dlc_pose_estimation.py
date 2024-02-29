@@ -10,6 +10,7 @@ from IPython.display import display
 
 from spyglass.common.common_behav import (  # noqa: F401
     RawPosition,
+    VideoFile,
     convert_epoch_interval_name_to_position_interval_name,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
