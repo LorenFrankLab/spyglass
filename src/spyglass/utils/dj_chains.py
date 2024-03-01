@@ -163,8 +163,8 @@ class TableChain:
 
     def __init__(self, parent: Table, child: Table, connection=None):
         self._connection = connection or parent.connection
-        if not self._connection.dependencies._loaded:
-            self._connection.dependencies.load()
+        self.graph = self._connection.dependencies
+        self.graph.load()
 
         if (  # if child is a merge table
             get_master(child.full_table_name) == ""
@@ -175,9 +175,14 @@ class TableChain:
         self._link_symbol = " -> "
         self.parent = parent
         self.child = child
-        self.graph = self._connection.dependencies
         self._has_link = True
         self._has_directed_link = None
+
+        if child.full_table_name not in self.graph.nodes:
+            logger.warning(
+                "Can't find item in graph. Try importing: "
+                + f"{child.full_table_name}"
+            )
 
     def __str__(self):
         """Return string representation of chain: parent -> child."""
