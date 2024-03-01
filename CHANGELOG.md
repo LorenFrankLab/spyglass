@@ -5,6 +5,7 @@
 ### Infrastructure
 
 - Add user roles to `database_settings.py`. #832
+- Fix redundancy in `waveforms_dir` #857
 
 ### Pipelines
 
