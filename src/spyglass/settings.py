@@ -504,10 +504,6 @@ class SpyglassConfig:
         return self.config.get(self.dir_to_var("temp"))
 
     @property
-    def waveform_dir(self) -> str:
-        return self.config.get(self.dir_to_var("waveform"))
-
-    @property
     def video_dir(self) -> str:
         return self.config.get(self.dir_to_var("video"))
 
@@ -553,7 +549,7 @@ if sg_config.load_failed:  # Failed to load
     temp_dir = None
     analysis_dir = None
     sorting_dir = None
-    waveform_dir = None
+    waveforms_dir = None
     video_dir = None
     dlc_project_dir = None
     dlc_video_dir = None
@@ -566,7 +562,7 @@ else:
     temp_dir = sg_config.temp_dir
     analysis_dir = sg_config.analysis_dir
     sorting_dir = sg_config.sorting_dir
-    waveform_dir = sg_config.waveform_dir
+    waveforms_dir = sg_config.waveforms_dir
     video_dir = sg_config.video_dir
     debug_mode = sg_config.debug_mode
     test_mode = sg_config.test_mode
