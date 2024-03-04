@@ -5,6 +5,8 @@
 ### Infrastructure
 
 - Add user roles to `database_settings.py`. #832
+- Revise `dj_chains` to permit undirected paths for paths with multiple Merge
+    Tables. #846
 
 ### Pipelines
 
