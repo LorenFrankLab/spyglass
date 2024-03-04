@@ -89,13 +89,6 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
             "lfp_sampling_rate"
         )
         decimation = lfp_sampling_rate // lfp_band_sampling_rate
-        if lfp_sampling_rate // decimation != lfp_band_sampling_rate:
-            # CBroz: Unnecessary check? We just got decimation from this
-            # division. Can remove?
-            raise ValueError(
-                f"lfp_band_sampling rate {lfp_band_sampling_rate} is not an "
-                + f"integer divisor of lfp samping rate {lfp_sampling_rate}"
-            )
         # filter
         filter_query = FirFilterParameters() & {
             "filter_name": filter_name,
@@ -274,14 +267,6 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             & {"filter_name": filter_name}
             & {"filter_sampling_rate": filter_sampling_rate}
         ).fetch(as_dict=True)
-        if len(filter) == 0:
-            # CBroz: This error is impossible to trigger because of the filter
-            # is a foreign key. It will always exist.
-            raise ValueError(
-                f"Filter {filter_name} and sampling_rate "
-                + f"{lfp_band_sampling_rate} does not exit in the "
-                + "FirFilterParameters table"
-            )
 
         filter_coeff = filter[0]["filter_coeff"]
         if len(filter_coeff) == 0:
@@ -388,7 +373,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         )
 
     def compute_analytic_signal(self, electrode_list: list[int], **kwargs):
-        """Compute scipy.signal.hilbert transform of a given LFPBand signal
+        """Computes the hilbert transform of a given LFPBand signal
+
+        Uses scipy.signal.hilbert to compute the hilbert transform of the signal
 
         Parameters
         ----------

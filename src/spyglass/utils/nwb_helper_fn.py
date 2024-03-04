@@ -505,7 +505,7 @@ def get_nwb_copy_filename(nwb_file_name):
     filename, file_extension = os.path.splitext(nwb_file_name)
 
     if filename.endswith("_"):
-        logger.warn(f"File may already be a copy: {nwb_file_name}")
+        logger.warning(f"File may already be a copy: {nwb_file_name}")
 
     return f"{filename}_{file_extension}"
 
@@ -513,7 +513,7 @@ def get_nwb_copy_filename(nwb_file_name):
 def change_group_permissions(
     subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
 ):
-    """CB NOTE: Unused. Remove?"""
+    logger.warning("This function is deprecated and will be removed soon.")
     # Change to directory with analysis nwb files
     os.chdir(analysis_dir)
     # Get nwb file directories with specified subject ids
