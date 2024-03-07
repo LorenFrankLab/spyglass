@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from functools import cached_property
 from time import time
 from typing import Dict, List, Union
@@ -130,17 +131,23 @@ class SpyglassMixin:
         Cache of items in parents of self.descendants(as_objects=True). Both
         descendant and parent must have the reserved primary key 'merge_id'.
         """
-
         self.connection.dependencies.load()
         merge_tables = {}
-        for desc in self.descendants(as_objects=True):
-            if MERGE_PK not in desc.heading.names or not (
-                master_name := get_master(desc.full_table_name)
-            ):
-                continue
-            master = dj.FreeTable(self.connection, master_name)
-            if MERGE_PK in master.heading.names:
-                merge_tables[master_name] = master
+
+        def search_descendants(parent):
+            for desc in parent.descendants(as_objects=True):
+                if (
+                    MERGE_PK not in desc.heading.names
+                    or not (master_name := get_master(desc.full_table_name))
+                    or master_name in merge_tables
+                ):
+                    continue
+                master = dj.FreeTable(self.connection, master_name)
+                if MERGE_PK in master.heading.names:
+                    merge_tables[master_name] = master
+                    search_descendants(master)
+
+        _ = search_descendants(self)
 
         logger.info(
             f"Building merge cache for {self.table_name}.\n\t"
@@ -150,7 +157,7 @@ class SpyglassMixin:
         return merge_tables
 
     @cached_property
-    def _merge_chains(self) -> Dict[str, List[dj.FreeTable]]:
+    def _merge_chains(self) -> OrderedDict[str, List[dj.FreeTable]]:
         """Dict of chains to merges downstream of self
 
         Format: {full_table_name: TableChains}.
@@ -158,14 +165,24 @@ class SpyglassMixin:
         For each merge table found in _merge_tables, find the path from self to
         merge via merge parts. If the path is valid, add it to the dict. Cache
         prevents need to recompute whenever delete_downstream_merge is called
-        with a new restriction. To recompute, add `reload_cache=True` to call.
+        with a new restriction. To recompute, add `reload_cache=True` to
+        delete_downstream_merge call.
         """
         merge_chains = {}
         for name, merge_table in self._merge_tables.items():
             chains = TableChains(self, merge_table, connection=self.connection)
             if len(chains):
                 merge_chains[name] = chains
-        return merge_chains
+
+        # This is ordered by max_len of chain from self to merge, which assumes
+        # that the merge table with the longest chain is the most downstream.
+        # A more sophisticated approach would order by length from self to
+        # each merge part independently, but this is a good first approximation.
+        return OrderedDict(
+            sorted(
+                merge_chains.items(), key=lambda x: x[1].max_len, reverse=True
+            )
+        )
 
     def _get_chain(self, substring) -> TableChains:
         """Return chain from self to merge table with substring in name."""
