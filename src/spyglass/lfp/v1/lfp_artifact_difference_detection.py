@@ -24,7 +24,7 @@ def difference_artifact_detector(
     removal_window_ms: float = 1.0,
     local_window_ms: float = 1.0,
     sampling_frequency: float = 1000.0,
-    referencing: int = 0,
+    referencing: bool = False,
 ):
     """Detects times during which artifacts do and do not occur.
 
@@ -52,6 +52,8 @@ def difference_artifact_detector(
     removal_window_ms : float, optional
         Width of the window in milliseconds to mask out per artifact (window/2
         removed on each side of threshold crossing), defaults to 1 ms
+    referencing : bool, optional
+        Whether or not the data passed to this function is referenced, defaults to False
 
     Returns
     -------
@@ -66,7 +68,7 @@ def difference_artifact_detector(
     # NOTE: 7-17-23 updated to remove recording.data, since it will converted to
     # numpy array before referencing check for referencing flag
 
-    if referencing == 1:
+    if referencing:
         logger.info("referencing activated. may be set to -1")
 
     # valid_timestamps = recording.timestamps
