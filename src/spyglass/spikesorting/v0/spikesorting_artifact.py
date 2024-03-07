@@ -278,7 +278,8 @@ def _get_artifact_times(
             valid_timestamps[interval[1]] + half_removal_window_s,
         ]
     # make the artifact intervals disjoint
-    artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
+    if len(artifact_intervals_s) > 1:
+        artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
 
     # convert seconds back to indices
     artifact_intervals_new = []
