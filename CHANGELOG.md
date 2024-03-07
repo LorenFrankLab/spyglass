@@ -5,6 +5,8 @@
 ### Infrastructure
 
 - Add user roles to `database_settings.py`. #832
+- Revise `dj_chains` to permit undirected paths for paths with multiple Merge
+    Tables. #846
 
 ### Pipelines
 
@@ -13,6 +15,9 @@
     - Video restriction for multicamera epochs #834
     - Fixes to `_convert_mp4` #834
     - Replace deprecated calls to `yaml.safe_load()` #834
+
+- Spikesorting:
+    - Bug fix in single artifact interval edge case #859
 
 ## [0.5.0] (February 9, 2024)
 

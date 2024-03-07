@@ -39,7 +39,7 @@ class DIOEvents(SpyglassMixin, dj.Imported):
                 "No conforming behavioral events data interface found in "
                 + f"{nwb_file_name}\n"
             )
-            return
+            return  # See #849
 
         # Times for these events correspond to the valid times for the raw data
         key["interval_list_name"] = (
