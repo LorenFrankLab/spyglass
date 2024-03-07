@@ -1,6 +1,6 @@
 # Change Log
 
-## Unreleased
+## [0.5.1] (March 7, 2024)
 
 ### Infrastructure
 
@@ -16,11 +16,9 @@
     - Video restriction for multicamera epochs #834
     - Fixes to `_convert_mp4` #834
     - Replace deprecated calls to `yaml.safe_load()` #834
-
 - Spikesorting:
-    - Increase the required `spikeinterface` version to >=0.99.1 for `get_sorting` method associated with `SpikeSorting` and `CurationV1` tables in spike sorting V1 pipeline. Limit version to <0.100 in case there are other issues with it. #852
+    - Increase`spikeinterface` version to >=0.99.1, <0.100 #852
     - Bug fix in single artifact interval edge case #859
-
 - LFP
     - In LFPArtifactDetection, only apply referencing if explicitly selected #863
 
