@@ -22,7 +22,7 @@
       
       
       <link rel="icon" href="../../images/Spyglass.svg">
-      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.9">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.13">
     
     
       
@@ -30,7 +30,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.f2e4d321.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.7e359304.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
@@ -80,6 +80,11 @@
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
+      
+        
+        <a href="#spike-sorting-pipeline-version-1" class="md-skip">
+          Skip to content
+        </a>
       
     </div>
     <div data-md-component="announce">
@@ -575,6 +580,8 @@
       <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
       
       
+        
+      
       
       <a href="./" class="md-nav__link md-nav__link--active">
         
@@ -966,7 +973,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../51_MUA_Detection.ipynb" class="md-nav__link">
+      <a href="../50_MUA_Detection/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -4537,6 +4544,8 @@
   
   
   
+    
+  
   
 </nav>
                   </div>
@@ -4553,8 +4562,6 @@
   
   
 
-
-  <h1>Spike Sorting V1</h1>
 
 <script>
 (function (global, factory) {
@@ -4991,13 +4998,41 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
 </style>
 <!-- End of mermaid configuration --><div class="jupyter-wrapper">
 <div class="jp-Notebook" data-jp-theme-light="true" data-jp-theme-name="JupyterLab Light">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=0cb86657">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<h1 id="spike-sorting-pipeline-version-1">Spike Sorting: pipeline version 1<a class="anchor-link" href="#spike-sorting-pipeline-version-1">¶</a></h1>
+</div>
+</div>
+</div>
+</div>
 <div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=5fce5c22-caab-473b-a103-5009a2798d12">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>Connect to db. See instructions in <a href="./00_Setup.ipynb">Setup</a>.</p>
+<p>This is a tutorial for Spyglass spike sorting pipeline version 1 (V1). This pipeline coexists with <a href="./10_Spike_SortingV0.ipynb">version 0</a> but differs in that:</p>
+<ul>
+<li>it stores more of the intermediate results (e.g. filtered and referenced recording) in the NWB format</li>
+<li>it has more streamlined curation pipelines</li>
+<li>it uses UUIDs as the primary key for important tables (e.g. <code>SpikeSorting</code>) to reduce the number of keys that make up the composite primary key</li>
+</ul>
+<p>The output of both versions of the pipeline are saved in a <a href="./03_Merge_Tables.ipynb">merge table</a> called <code>SpikeSortingOutput</code>.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=71c80e78">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>To start, connect to the database. See instructions in <a href="./00_Setup.ipynb">Setup</a>.</p>
 </div>
 </div>
 </div>
@@ -5057,7 +5092,7 @@ dj.config.load("dj_local_conf.json")  # load config for database connection info
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>import</p>
+<p>First, import the pipeline and other necessary modules.</p>
 </div>
 </div>
 </div>
@@ -5099,7 +5134,7 @@ import spyglass.data_import as sgi</div>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>insert LabMember and Session</p>
+<p>We will be using <code>mediumnwb20230802.nwb</code> as our example. As usual, first insert the NWB file into <code>Session</code> (can skip if you have already done so).</p>
 </div>
 </div>
 </div>
@@ -5122,18 +5157,18 @@ import spyglass.data_import as sgi</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">nwb_file_name</span> <span class="o">=</span> <span class="s2">"wilbur20210326.nwb"</span>
-<span class="n">nwb_file_name2</span> <span class="o">=</span> <span class="s2">"wilbur20210326_.nwb"</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">nwb_file_name</span> <span class="o">=</span> <span class="s2">"mediumnwb20230802.nwb"</span>
+<span class="n">nwb_file_name2</span> <span class="o">=</span> <span class="s2">"mediumnwb20230802_.nwb"</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-3">nwb_file_name = "wilbur20210326.nwb"
-nwb_file_name2 = "wilbur20210326_.nwb"</div>
+<div class="clipboard-copy-txt" id="cell-3">nwb_file_name = "mediumnwb20230802.nwb"
+nwb_file_name2 = "mediumnwb20230802_.nwb"</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=69e258e0-2c55-434a-afb5-00cf635bac84">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=dfa1b73e-da6e-470f-aff6-0d45c3ddff5c">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5151,16 +5186,16 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgc</span><span class="o">.</span><span class="n">LabMember</span><span class="o">.</span><span class="n">insert_from_nwbfile</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgi</span><span class="o">.</span><span class="n">insert_sessions</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-4">sgc.LabMember.insert_from_nwbfile(nwb_file_name)</div>
+<div class="clipboard-copy-txt" id="cell-4">sgi.insert_sessions(nwb_file_name)</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=dfa1b73e-da6e-470f-aff6-0d45c3ddff5c">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=e11b5f5d-e9e0-4949-9fc1-4a34cc975fb1">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5178,16 +5213,27 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgi</span><span class="o">.</span><span class="n">insert_sessions</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgc</span><span class="o">.</span><span class="n">Session</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-5">sgi.insert_sessions(nwb_file_name)</div>
+<div class="clipboard-copy-txt" id="cell-5">sgc.Session()</div>
 </div>
 </div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=5f3dfe2d-4645-44f9-b169-479292215afe">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>Next, we will define the groups of electrodes to sort together. These are stored in <code>SortGroup</code> table.</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=e11b5f5d-e9e0-4949-9fc1-4a34cc975fb1">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=a269f6af-eb16-4551-b511-a264368c9490">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5205,27 +5251,27 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgc</span><span class="o">.</span><span class="n">Session</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SortGroup</span><span class="o">.</span><span class="n">set_group_by_shank</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="o">=</span><span class="n">nwb_file_name2</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-6">sgc.Session()</div>
+<div class="clipboard-copy-txt" id="cell-6">sgs.SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name2)</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=5f3dfe2d-4645-44f9-b169-479292215afe">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=1c55792e-f9ba-4e0d-a4d2-8c60bf0e8f34">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>insert SortGroup</p>
+<p>The next step is to filter and reference the recording so that we isolate the spike band data. This is done by combining the data with the parameters in <code>SpikeSortingRecordingSelection</code>. For inserting into this table, use <code>insert_selection</code> method. This automatically generates a UUID for a recording.</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=a269f6af-eb16-4551-b511-a264368c9490">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=5b307631-3cc5-4859-9e95-aeedf6a3de56">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5243,27 +5289,24 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SortGroup</span><span class="o">.</span><span class="n">set_group_by_shank</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="o">=</span><span class="n">nwb_file_name2</span><span class="p">)</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">key</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"nwb_file_name"</span><span class="p">:</span> <span class="n">nwb_file_name2</span><span class="p">,</span>
+    <span class="s2">"sort_group_id"</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="s2">"preproc_param_name"</span><span class="p">:</span> <span class="s2">"default"</span><span class="p">,</span>
+<span class="p">}</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-7">sgs.SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name2)</div>
+<div class="clipboard-copy-txt" id="cell-7">key = {
+    "nwb_file_name": nwb_file_name2,
+    "sort_group_id": 0,
+    "preproc_param_name": "default",
+}</div>
 </div>
 </div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=1c55792e-f9ba-4e0d-a4d2-8c60bf0e8f34">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>insert SpikeSortingRecordingSelection. use <code>insert_selection</code> method. this automatically generates a unique recording id</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=5b307631-3cc5-4859-9e95-aeedf6a3de56">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=e6d0dcb0-acfe-4adb-8da6-a5570b97f48a">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5281,28 +5324,27 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">key</span> <span class="o">=</span> <span class="p">{</span>
-    <span class="s2">"nwb_file_name"</span><span class="p">:</span> <span class="n">nwb_file_name2</span><span class="p">,</span>
-    <span class="s2">"sort_group_id"</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
-    <span class="s2">"interval_list_name"</span><span class="p">:</span> <span class="s2">"03_r1"</span><span class="p">,</span>
-    <span class="s2">"preproc_param_name"</span><span class="p">:</span> <span class="s2">"default"</span><span class="p">,</span>
-    <span class="s2">"team_name"</span><span class="p">:</span> <span class="s2">"Alison Comrie"</span><span class="p">,</span>
-<span class="p">}</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecordingSelection</span><span class="o">.</span><span class="n">insert_selection</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-8">key = {
-    "nwb_file_name": nwb_file_name2,
-    "sort_group_id": 0,
-    "interval_list_name": "03_r1",
-    "preproc_param_name": "default",
-    "team_name": "Alison Comrie",
-}</div>
+<div class="clipboard-copy-txt" id="cell-8">sgs.SpikeSortingRecordingSelection.insert_selection(key)</div>
 </div>
 </div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=01948666">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>Next we will call <code>populate</code> method of <code>SpikeSortingRecording</code>.</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=e6d0dcb0-acfe-4adb-8da6-a5570b97f48a">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=3840f86a-8769-423e-8aeb-4d9ab694f1ef">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5320,16 +5362,22 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecordingSelection</span><span class="o">.</span><span class="n">insert_selection</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="c1"># Assuming 'key' is a dictionary with fields that you want to include in 'ssr_key'</span>
+<span class="n">ssr_key</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"recording_id"</span><span class="p">:</span> <span class="p">(</span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecordingSelection</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s1">'recording_id'</span><span class="p">),</span>
+<span class="p">}</span> <span class="o">|</span> <span class="n">key</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-9">sgs.SpikeSortingRecordingSelection.insert_selection(key)</div>
+<div class="clipboard-copy-txt" id="cell-9"># Assuming 'key' is a dictionary with fields that you want to include in 'ssr_key'
+ssr_key = {
+    "recording_id": (sgs.SpikeSortingRecordingSelection() &amp; key).fetch1('recording_id'),
+} | key</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=3e61248f-1f55-4782-9018-ff1891acfc16">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=1bd48e28-d40e-4cf3-a89e-58d4c3cb08e8">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5347,27 +5395,24 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecordingSelection</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="c1">#sgs.SpikeSortingRecording.populate()</span>
+<span class="n">ssr_pk</span> <span class="o">=</span> <span class="p">(</span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecordingSelection</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">proj</span><span class="p">()</span>
+
+
+<span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecording</span><span class="o">.</span><span class="n">populate</span><span class="p">(</span><span class="n">ssr_pk</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-10">sgs.SpikeSortingRecordingSelection()</div>
+<div class="clipboard-copy-txt" id="cell-10">#sgs.SpikeSortingRecording.populate()
+ssr_pk = (sgs.SpikeSortingRecordingSelection &amp; key).proj()
+
+
+sgs.SpikeSortingRecording.populate(ssr_pk)</div>
 </div>
 </div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=2fc85684-71a2-4e37-9ad7-a3a923749c8f">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>preprocess recording (filtering and referencing)</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=1bd48e28-d40e-4cf3-a89e-58d4c3cb08e8">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=9a9bf343-5b5e-457c-8bf4-f12b194a5489">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5385,16 +5430,16 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecording</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecording</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">ssr_key</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-11">sgs.SpikeSortingRecording.populate()</div>
+<div class="clipboard-copy-txt" id="cell-11">sgs.SpikeSortingRecording() &amp; ssr_key</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=9a9bf343-5b5e-457c-8bf4-f12b194a5489">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=1c6c7ea3-9538-4fa9-890b-ee16cc18af31">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5412,16 +5457,31 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecording</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">key</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecordingSelection</span> <span class="o">&amp;</span> <span class="n">key</span>
+<span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-12">sgs.SpikeSortingRecording()</div>
+<div class="clipboard-copy-txt" id="cell-12">key = (
+    sgs.SpikeSortingRecordingSelection &amp; key
+).fetch1()</div>
 </div>
 </div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=1955ed06-d754-470a-b5b3-94df6c3e03eb">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>Sometimes the recording may contain artifacts that can confound spike sorting. For example, we often have artifacts when the animal licks the reward well for milk during behavior. These appear as sharp transients across all channels, and sometimes they are not adequately removed by filtering and referencing. We will identify the periods during which this type of artifact appears and set them to zero so that they won't interfere with spike sorting.</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=1c6c7ea3-9538-4fa9-890b-ee16cc18af31">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=74415172-f2da-4fd3-ab43-01857d682b0d">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5439,31 +5499,20 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">key</span> <span class="o">=</span> <span class="p">(</span>
-    <span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecordingSelection</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s2">"nwb_file_name"</span><span class="p">:</span> <span class="n">nwb_file_name2</span><span class="p">}</span>
-<span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">ArtifactDetectionSelection</span><span class="o">.</span><span class="n">insert_selection</span><span class="p">(</span>
+    <span class="p">{</span><span class="s2">"recording_id"</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">"recording_id"</span><span class="p">],</span> <span class="s2">"artifact_param_name"</span><span class="p">:</span> <span class="s2">"default"</span><span class="p">}</span>
+<span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-13">key = (
-    sgs.SpikeSortingRecordingSelection &amp; {"nwb_file_name": nwb_file_name2}
-).fetch1()</div>
+<div class="clipboard-copy-txt" id="cell-13">sgs.ArtifactDetectionSelection.insert_selection(
+    {"recording_id": key["recording_id"], "artifact_param_name": "default"}
+)</div>
 </div>
 </div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=1955ed06-d754-470a-b5b3-94df6c3e03eb">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>insert ArtifactDetectionSelection</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=74415172-f2da-4fd3-ab43-01857d682b0d">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=bd89c36c-c05b-4b4a-85d9-7679fed173d1">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5481,31 +5530,16 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">ArtifactDetectionSelection</span><span class="o">.</span><span class="n">insert_selection</span><span class="p">(</span>
-    <span class="p">{</span><span class="s2">"recording_id"</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">"recording_id"</span><span class="p">],</span> <span class="s2">"artifact_param_name"</span><span class="p">:</span> <span class="s2">"default"</span><span class="p">}</span>
-<span class="p">)</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">ArtifactDetection</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-14">sgs.ArtifactDetectionSelection.insert_selection(
-    {"recording_id": key["recording_id"], "artifact_param_name": "default"}
-)</div>
+<div class="clipboard-copy-txt" id="cell-14">sgs.ArtifactDetection.populate()</div>
 </div>
 </div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=a1fe3cf8-07c2-4743-90f6-8a8025bec696">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>detect artifact; note the output is stored in IntervalList</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=bd89c36c-c05b-4b4a-85d9-7679fed173d1">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=ca9a9f64-0afc-4c83-b22c-0ed120cb87f6">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5523,16 +5557,50 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">ArtifactDetection</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">ArtifactDetection</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-15">sgs.ArtifactDetection.populate()</div>
+<div class="clipboard-copy-txt" id="cell-15">sgs.ArtifactDetection()</div>
 </div>
 </div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=da2ac6b4">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>The output of <code>ArtifactDetection</code> is actually stored in <code>IntervalList</code> because it is another type of interval. The UUID however can be found in both.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=65ae0f70-2d8d-40d4-86c9-2ab206b28ca9">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>Now that we have prepared the recording, we will pair this with a spike sorting algorithm and associated parameters. This will be inserted to <code>SpikeSortingSelection</code>, again via <code>insert_selection</code> method.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=50fdadbb">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>The spike sorting pipeline is powered by <code>spikeinterface</code>, a community-developed Python package that enables one to easily apply multiple spike sorters to a single recording. Some spike sorters have special requirements, such as GPU. Others need to be installed separately from spyglass. In the Frank lab, we have been using <code>mountainsort4</code>, though the pipeline have been tested with <code>mountainsort5</code>, <code>kilosort2_5</code>, <code>kilosort3</code>, and <code>ironclust</code> as well.</p>
+<p>When using <code>mountainsort5</code>, make sure to run <code>pip install mountainsort5</code>. <code>kilosort2_5</code>, <code>kilosort3</code>, and <code>ironclust</code> are MATLAB-based, but we can run these without having to install MATLAB thanks to <code>spikeinterface</code>. It does require downloading additional files (as singularity containers) so make sure to do <code>pip install spython</code>. These sorters also require GPU access, so also do <code> pip install cuda-python</code> (and make sure your computer does have a GPU).</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=ca9a9f64-0afc-4c83-b22c-0ed120cb87f6">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=34246883-9dc4-43c5-a438-009215a3a35e">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5550,27 +5618,62 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">ArtifactDetection</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sorter</span> <span class="o">=</span> <span class="s1">'mountainsort4'</span>
+
+<span class="n">common_key</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"recording_id"</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">"recording_id"</span><span class="p">],</span>
+    <span class="s2">"sorter"</span><span class="p">:</span> <span class="n">sorter</span><span class="p">,</span>
+    <span class="s2">"nwb_file_name"</span><span class="p">:</span> <span class="n">nwb_file_name2</span><span class="p">,</span>
+    <span class="s2">"interval_list_name"</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span>
+        <span class="p">(</span>
+            <span class="n">sgs</span><span class="o">.</span><span class="n">ArtifactDetectionSelection</span>
+            <span class="o">&amp;</span> <span class="p">{</span><span class="s2">"recording_id"</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">"recording_id"</span><span class="p">]}</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s2">"artifact_id"</span><span class="p">)</span>
+    <span class="p">),</span>
+<span class="p">}</span>
+
+<span class="k">if</span> <span class="n">sorter</span> <span class="o">==</span> <span class="s1">'mountainsort4'</span><span class="p">:</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="o">**</span><span class="n">common_key</span><span class="p">,</span>
+        <span class="s2">"sorter_param_name"</span><span class="p">:</span> <span class="s2">"franklab_tetrode_hippocampus_30KHz"</span><span class="p">,</span>
+    <span class="p">}</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="o">**</span><span class="n">common_key</span><span class="p">,</span>
+        <span class="s2">"sorter_param_name"</span><span class="p">:</span> <span class="s2">"default"</span><span class="p">,</span>
+    <span class="p">}</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-16">sgs.ArtifactDetection()</div>
+<div class="clipboard-copy-txt" id="cell-16">sorter = 'mountainsort4'
+
+common_key = {
+    "recording_id": key["recording_id"],
+    "sorter": sorter,
+    "nwb_file_name": nwb_file_name2,
+    "interval_list_name": str(
+        (
+            sgs.ArtifactDetectionSelection
+            &amp; {"recording_id": key["recording_id"]}
+        ).fetch1("artifact_id")
+    ),
+}
+
+if sorter == 'mountainsort4':
+    key = {
+        **common_key,
+        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
+    }
+else:
+    key = {
+        **common_key,
+        "sorter_param_name": "default",
+    }</div>
 </div>
 </div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=65ae0f70-2d8d-40d4-86c9-2ab206b28ca9">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>insert SpikeSortingSelection. again use <code>insert_selection</code> method</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=34246883-9dc4-43c5-a438-009215a3a35e">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=68856fb6-b5c2-4ee4-b300-43a117e453a1">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5588,38 +5691,16 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">key</span> <span class="o">=</span> <span class="p">{</span>
-    <span class="s2">"recording_id"</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">"recording_id"</span><span class="p">],</span>
-    <span class="s2">"sorter"</span><span class="p">:</span> <span class="s2">"mountainsort4"</span><span class="p">,</span>
-    <span class="s2">"sorter_param_name"</span><span class="p">:</span> <span class="s2">"franklab_tetrode_hippocampus_30KHz"</span><span class="p">,</span>
-    <span class="s2">"nwb_file_name"</span><span class="p">:</span> <span class="n">nwb_file_name2</span><span class="p">,</span>
-    <span class="s2">"interval_list_name"</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span>
-        <span class="p">(</span>
-            <span class="n">sgs</span><span class="o">.</span><span class="n">ArtifactDetectionSelection</span>
-            <span class="o">&amp;</span> <span class="p">{</span><span class="s2">"recording_id"</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">"recording_id"</span><span class="p">]}</span>
-        <span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s2">"artifact_id"</span><span class="p">)</span>
-    <span class="p">),</span>
-<span class="p">}</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingSelection</span><span class="o">.</span><span class="n">insert_selection</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-17">key = {
-    "recording_id": key["recording_id"],
-    "sorter": "mountainsort4",
-    "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
-    "nwb_file_name": nwb_file_name2,
-    "interval_list_name": str(
-        (
-            sgs.ArtifactDetectionSelection
-            &amp; {"recording_id": key["recording_id"]}
-        ).fetch1("artifact_id")
-    ),
-}</div>
+<div class="clipboard-copy-txt" id="cell-17">sgs.SpikeSortingSelection.insert_selection(key)</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=1f431dc4-57d6-4a6d-82e0-9b313ac0ce3f">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=2caed63b-6094-4a59-b8d9-6a0f186b2d3f">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5637,16 +5718,27 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingSelection</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingSelection</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">key</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-18">sgs.SpikeSortingSelection()</div>
+<div class="clipboard-copy-txt" id="cell-18">sgs.SpikeSortingSelection() &amp; key</div>
 </div>
 </div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=bb343fb7-04d6-48fc-bf67-9919769a7a52">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>Once <code>SpikeSortingSelection</code> is populated, let's run <code>SpikeSorting.populate</code>.</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=68856fb6-b5c2-4ee4-b300-43a117e453a1">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=54ccf059-b1ae-42e8-aede-4af30a61fd2b">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5664,16 +5756,31 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingSelection</span><span class="o">.</span><span class="n">insert_selection</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sss_pk</span> <span class="o">=</span> <span class="p">(</span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingSelection</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">proj</span><span class="p">()</span>
+
+<span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSorting</span><span class="o">.</span><span class="n">populate</span><span class="p">(</span><span class="n">sss_pk</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-19">sgs.SpikeSortingSelection.insert_selection(key)</div>
+<div class="clipboard-copy-txt" id="cell-19">sss_pk = (sgs.SpikeSortingSelection &amp; key).proj()
+
+sgs.SpikeSorting.populate(sss_pk)</div>
 </div>
 </div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=f3d1e621">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>The spike sorting results (spike times of detected units) are saved in an NWB file. We can access this in two ways. First, we can access it via the <code>fetch_nwb</code> method, which allows us to directly access the spike times saved in the <code>units</code> table of the NWB file. Second, we can access it as a <code>spikeinterface.NWBSorting</code> object. Ths allows us to take advantage of the rich APIs of <code>spikeinterface</code> to further analyze the sorting.</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=2caed63b-6094-4a59-b8d9-6a0f186b2d3f">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=3d41d3ab">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5691,27 +5798,40 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingSelection</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sorting_nwb</span> <span class="o">=</span> <span class="p">(</span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSorting</span> <span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">fetch_nwb</span><span class="p">()</span>
+<span class="n">sorting_si</span> <span class="o">=</span> <span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSorting</span><span class="o">.</span><span class="n">get_sorting</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-20">sgs.SpikeSortingSelection()</div>
+<div class="clipboard-copy-txt" id="cell-20">sorting_nwb = (sgs.SpikeSorting &amp; key).fetch_nwb()
+sorting_si = sgs.SpikeSorting.get_sorting(key)</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=bb343fb7-04d6-48fc-bf67-9919769a7a52">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=db328eb1">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>run spike sorting</p>
+<p>Note that the spike times of <code>fetch_nwb</code> is in units of seconds aligned with the timestamps of the recording. The spike times of the <code>spikeinterface.NWBSorting</code> object is in units of samples (as is generally true for sorting objects in <code>spikeinterface</code>).</p>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=ea8fcaa0-9dd7-4870-9f5b-be039e3579cc">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<p>Next step is to curate the results of spike sorting. This is often necessary because spike sorting algorithms are not perfect; they often return clusters that are clearly not biological in origin, and sometimes oversplit clusters that should have been merged. We have two main ways of curating spike sorting: by computing quality metrics followed by thresholding, and manually applying curation labels. To do either, we first insert the spike sorting to <code>CurationV1</code> using <code>insert_curation</code> method.</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=4cdc09d9-af18-420c-9707-7a439d5686a8">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=6245eec9-3fba-4071-b58b-eec6d9345532">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5729,16 +5849,16 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSorting</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingRecording</span> <span class="o">&amp;</span> <span class="n">key</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-21">sgs.SpikeSorting.populate()</div>
+<div class="clipboard-copy-txt" id="cell-21">sgs.SpikeSortingRecording &amp; key</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=54ccf059-b1ae-42e8-aede-4af30a61fd2b">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=0589a3f2-4977-407f-b49d-4ae3f882ae21">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5756,44 +5876,6 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSorting</span><span class="p">()</span>
-</pre></div>
-<div class="clipboard-copy-txt" id="cell-22">sgs.SpikeSorting()</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=ea8fcaa0-9dd7-4870-9f5b-be039e3579cc">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>we have two main ways of curating spike sorting: by computing quality metrics and applying threshold; and manually applying curation labels. to do so, we first insert CurationV1. use <code>insert_curation</code> method.</p>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=0589a3f2-4977-407f-b49d-4ae3f882ae21">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="CodeMirror cm-s-jupyter">
-<div class="zeroclipboard-container">
-<clipboard-copy for="cell-23">
-<div>
-<span class="notice" hidden="">Copied!</span>
-<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
-<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-</svg>
-</div>
-</clipboard-copy>
-</div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">CurationV1</span><span class="o">.</span><span class="n">insert_curation</span><span class="p">(</span>
     <span class="n">sorting_id</span><span class="o">=</span><span class="p">(</span>
         <span class="n">sgs</span><span class="o">.</span><span class="n">SpikeSortingSelection</span> <span class="o">&amp;</span> <span class="p">{</span><span class="s2">"recording_id"</span><span class="p">:</span> <span class="n">key</span><span class="p">[</span><span class="s2">"recording_id"</span><span class="p">]}</span>
@@ -5801,7 +5883,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
     <span class="n">description</span><span class="o">=</span><span class="s2">"testing sort"</span><span class="p">,</span>
 <span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-23">sgs.CurationV1.insert_curation(
+<div class="clipboard-copy-txt" id="cell-22">sgs.CurationV1.insert_curation(
     sorting_id=(
         sgs.SpikeSortingSelection &amp; {"recording_id": key["recording_id"]}
     ).fetch1("sorting_id"),
@@ -5821,7 +5903,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-24">
+<clipboard-copy for="cell-23">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -5833,7 +5915,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">CurationV1</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-24">sgs.CurationV1()</div>
+<div class="clipboard-copy-txt" id="cell-23">sgs.CurationV1()</div>
 </div>
 </div>
 </div>
@@ -5846,7 +5928,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>we will first do an automatic curation based on quality metrics</p>
+<p>We will first do an automatic curation based on quality metrics. Under the hood, this part again makes use of <code>spikeinterface</code>. Some of the quality metrics that we often compute are the nearest neighbor isolation and noise overlap metrics, as well as SNR and ISI violation rate. For computing some of these metrics, the waveforms must be extracted and projected onto a feature space. Thus here we set the parameters for waveform extraction as well as how to curate the units based on these metrics (e.g. if <code>nn_noise_overlap</code> is greater than 0.1, mark as <code>noise</code>).</p>
 </div>
 </div>
 </div>
@@ -5859,7 +5941,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-25">
+<clipboard-copy for="cell-24">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -5879,7 +5961,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
     <span class="s2">"metric_curation_param_name"</span><span class="p">:</span> <span class="s2">"default"</span><span class="p">,</span>
 <span class="p">}</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-25">key = {
+<div class="clipboard-copy-txt" id="cell-24">key = {
     "sorting_id": (
         sgs.SpikeSortingSelection &amp; {"recording_id": key["recording_id"]}
     ).fetch1("sorting_id"),
@@ -5902,7 +5984,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-26">
+<clipboard-copy for="cell-25">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -5914,7 +5996,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">MetricCurationSelection</span><span class="o">.</span><span class="n">insert_selection</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-26">sgs.MetricCurationSelection.insert_selection(key)</div>
+<div class="clipboard-copy-txt" id="cell-25">sgs.MetricCurationSelection.insert_selection(key)</div>
 </div>
 </div>
 </div>
@@ -5922,6 +6004,33 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
 <div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=d73244b3-f754-4701-be52-ea261eb4185c">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="CodeMirror cm-s-jupyter">
+<div class="zeroclipboard-container">
+<clipboard-copy for="cell-26">
+<div>
+<span class="notice" hidden="">Copied!</span>
+<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
+<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+</svg>
+</div>
+</clipboard-copy>
+</div>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">MetricCurationSelection</span><span class="p">()</span>
+</pre></div>
+<div class="clipboard-copy-txt" id="cell-26">sgs.MetricCurationSelection()</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=d22f5725-4fd1-42ea-a1d4-590bd1353d46">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5939,16 +6048,16 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">MetricCurationSelection</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">MetricCuration</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-27">sgs.MetricCurationSelection()</div>
+<div class="clipboard-copy-txt" id="cell-27">sgs.MetricCuration.populate()</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=d22f5725-4fd1-42ea-a1d4-590bd1353d46">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=eda6577c-3ed2-480a-b6ed-107d7c479084">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -5966,36 +6075,9 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">MetricCuration</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
-</pre></div>
-<div class="clipboard-copy-txt" id="cell-28">sgs.MetricCuration.populate()</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=eda6577c-3ed2-480a-b6ed-107d7c479084">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="CodeMirror cm-s-jupyter">
-<div class="zeroclipboard-container">
-<clipboard-copy for="cell-29">
-<div>
-<span class="notice" hidden="">Copied!</span>
-<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
-<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-</svg>
-</div>
-</clipboard-copy>
-</div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">MetricCuration</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-29">sgs.MetricCuration()</div>
+<div class="clipboard-copy-txt" id="cell-28">sgs.MetricCuration()</div>
 </div>
 </div>
 </div>
@@ -6021,7 +6103,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-30">
+<clipboard-copy for="cell-29">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6037,7 +6119,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
     <span class="p">)</span><span class="o">.</span><span class="n">fetch1</span><span class="p">(</span><span class="s2">"metric_curation_id"</span><span class="p">)</span>
 <span class="p">}</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-30">key = {
+<div class="clipboard-copy-txt" id="cell-29">key = {
     "metric_curation_id": (
         sgs.MetricCurationSelection &amp; {"sorting_id": key["sorting_id"]}
     ).fetch1("metric_curation_id")
@@ -6056,7 +6138,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-31">
+<clipboard-copy for="cell-30">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6068,7 +6150,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">labels</span> <span class="o">=</span> <span class="n">sgs</span><span class="o">.</span><span class="n">MetricCuration</span><span class="o">.</span><span class="n">get_labels</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-31">labels = sgs.MetricCuration.get_labels(key)</div>
+<div class="clipboard-copy-txt" id="cell-30">labels = sgs.MetricCuration.get_labels(key)</div>
 </div>
 </div>
 </div>
@@ -6076,6 +6158,33 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
 <div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=df84263f-db5a-44b7-8309-4d63d10fd883">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="CodeMirror cm-s-jupyter">
+<div class="zeroclipboard-container">
+<clipboard-copy for="cell-31">
+<div>
+<span class="notice" hidden="">Copied!</span>
+<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
+<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+</svg>
+</div>
+</clipboard-copy>
+</div>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">merge_groups</span> <span class="o">=</span> <span class="n">sgs</span><span class="o">.</span><span class="n">MetricCuration</span><span class="o">.</span><span class="n">get_merge_groups</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+</pre></div>
+<div class="clipboard-copy-txt" id="cell-31">merge_groups = sgs.MetricCuration.get_merge_groups(key)</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=895c85a5-5b4f-44de-a003-c942ba231c22">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6093,36 +6202,9 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">merge_groups</span> <span class="o">=</span> <span class="n">sgs</span><span class="o">.</span><span class="n">MetricCuration</span><span class="o">.</span><span class="n">get_merge_groups</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
-</pre></div>
-<div class="clipboard-copy-txt" id="cell-32">merge_groups = sgs.MetricCuration.get_merge_groups(key)</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=895c85a5-5b4f-44de-a003-c942ba231c22">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="CodeMirror cm-s-jupyter">
-<div class="zeroclipboard-container">
-<clipboard-copy for="cell-33">
-<div>
-<span class="notice" hidden="">Copied!</span>
-<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
-<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-</svg>
-</div>
-</clipboard-copy>
-</div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">metrics</span> <span class="o">=</span> <span class="n">sgs</span><span class="o">.</span><span class="n">MetricCuration</span><span class="o">.</span><span class="n">get_metrics</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-33">metrics = sgs.MetricCuration.get_metrics(key)</div>
+<div class="clipboard-copy-txt" id="cell-32">metrics = sgs.MetricCuration.get_metrics(key)</div>
 </div>
 </div>
 </div>
@@ -6137,7 +6219,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-34">
+<clipboard-copy for="cell-33">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6159,7 +6241,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
     <span class="n">description</span><span class="o">=</span><span class="s2">"after metric curation"</span><span class="p">,</span>
 <span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-34">sgs.CurationV1.insert_curation(
+<div class="clipboard-copy-txt" id="cell-33">sgs.CurationV1.insert_curation(
     sorting_id=(
         sgs.MetricCurationSelection
         &amp; {"metric_curation_id": key["metric_curation_id"]}
@@ -6184,7 +6266,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-35">
+<clipboard-copy for="cell-34">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6196,7 +6278,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">CurationV1</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-35">sgs.CurationV1()</div>
+<div class="clipboard-copy-txt" id="cell-34">sgs.CurationV1()</div>
 </div>
 </div>
 </div>
@@ -6222,7 +6304,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-36">
+<clipboard-copy for="cell-35">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6242,7 +6324,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
     <span class="p">}</span>
 <span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-36">curation_uri = sgs.FigURLCurationSelection.generate_curation_uri(
+<div class="clipboard-copy-txt" id="cell-35">curation_uri = sgs.FigURLCurationSelection.generate_curation_uri(
     {
         "sorting_id": (
             sgs.MetricCurationSelection
@@ -6265,7 +6347,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-37">
+<clipboard-copy for="cell-36">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6285,7 +6367,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
     <span class="s2">"metrics_figurl"</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">metrics</span><span class="o">.</span><span class="n">keys</span><span class="p">()),</span>
 <span class="p">}</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-37">key = {
+<div class="clipboard-copy-txt" id="cell-36">key = {
     "sorting_id": (
         sgs.MetricCurationSelection
         &amp; {"metric_curation_id": key["metric_curation_id"]}
@@ -6308,7 +6390,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-38">
+<clipboard-copy for="cell-37">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6320,7 +6402,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCurationSelection</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-38">sgs.FigURLCurationSelection()</div>
+<div class="clipboard-copy-txt" id="cell-37">sgs.FigURLCurationSelection()</div>
 </div>
 </div>
 </div>
@@ -6328,6 +6410,33 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
 <div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=ecb9106b-8f92-4725-a68c-d5233453b3a4">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="CodeMirror cm-s-jupyter">
+<div class="zeroclipboard-container">
+<clipboard-copy for="cell-38">
+<div>
+<span class="notice" hidden="">Copied!</span>
+<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
+<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+</svg>
+</div>
+</clipboard-copy>
+</div>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCurationSelection</span><span class="o">.</span><span class="n">insert_selection</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+</pre></div>
+<div class="clipboard-copy-txt" id="cell-38">sgs.FigURLCurationSelection.insert_selection(key)</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=cd9667da-794f-4196-9e3d-527d8932d1e9">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6345,16 +6454,16 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCurationSelection</span><span class="o">.</span><span class="n">insert_selection</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCurationSelection</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-39">sgs.FigURLCurationSelection.insert_selection(key)</div>
+<div class="clipboard-copy-txt" id="cell-39">sgs.FigURLCurationSelection()</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=cd9667da-794f-4196-9e3d-527d8932d1e9">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=c3b029c6-8dc8-4af3-ad42-8a9443e70023">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6372,16 +6481,16 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCurationSelection</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCuration</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-40">sgs.FigURLCurationSelection()</div>
+<div class="clipboard-copy-txt" id="cell-40">sgs.FigURLCuration.populate()</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=c3b029c6-8dc8-4af3-ad42-8a9443e70023">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=7bf6eb76-4883-4436-a320-7ade5c3af910">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6399,36 +6508,9 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCuration</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
-</pre></div>
-<div class="clipboard-copy-txt" id="cell-41">sgs.FigURLCuration.populate()</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=7bf6eb76-4883-4436-a320-7ade5c3af910">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="CodeMirror cm-s-jupyter">
-<div class="zeroclipboard-container">
-<clipboard-copy for="cell-42">
-<div>
-<span class="notice" hidden="">Copied!</span>
-<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
-<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-</svg>
-</div>
-</clipboard-copy>
-</div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCuration</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-42">sgs.FigURLCuration()</div>
+<div class="clipboard-copy-txt" id="cell-41">sgs.FigURLCuration()</div>
 </div>
 </div>
 </div>
@@ -6454,7 +6536,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-43">
+<clipboard-copy for="cell-42">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6475,7 +6557,7 @@ nwb_file_name2 = "wilbur20210326_.nwb"</div>
     <span class="s2">"metrics_figurl"</span><span class="p">:</span> <span class="p">[],</span>
 <span class="p">}</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-43">gh_curation_uri = (
+<div class="clipboard-copy-txt" id="cell-42">gh_curation_uri = (
     "gh://LorenFrankLab/sorting-curations/main/khl02007/test/curation.json"
 )
 
@@ -6499,7 +6581,7 @@ key = {
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-44">
+<clipboard-copy for="cell-43">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6511,7 +6593,7 @@ key = {
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCurationSelection</span><span class="o">.</span><span class="n">insert_selection</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-44">sgs.FigURLCurationSelection.insert_selection(key)</div>
+<div class="clipboard-copy-txt" id="cell-43">sgs.FigURLCurationSelection.insert_selection(key)</div>
 </div>
 </div>
 </div>
@@ -6519,6 +6601,33 @@ key = {
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
 <div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=ad86c81e-1424-4fa2-a022-7cc0a3425fc0">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="CodeMirror cm-s-jupyter">
+<div class="zeroclipboard-container">
+<clipboard-copy for="cell-44">
+<div>
+<span class="notice" hidden="">Copied!</span>
+<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
+<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+</svg>
+</div>
+</clipboard-copy>
+</div>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCuration</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
+</pre></div>
+<div class="clipboard-copy-txt" id="cell-44">sgs.FigURLCuration.populate()</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=37847473-1c46-4991-93a0-e315568e675a">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6536,36 +6645,9 @@ key = {
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCuration</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
-</pre></div>
-<div class="clipboard-copy-txt" id="cell-45">sgs.FigURLCuration.populate()</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=37847473-1c46-4991-93a0-e315568e675a">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="CodeMirror cm-s-jupyter">
-<div class="zeroclipboard-container">
-<clipboard-copy for="cell-46">
-<div>
-<span class="notice" hidden="">Copied!</span>
-<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
-<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-</svg>
-</div>
-</clipboard-copy>
-</div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCuration</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-46">sgs.FigURLCuration()</div>
+<div class="clipboard-copy-txt" id="cell-45">sgs.FigURLCuration()</div>
 </div>
 </div>
 </div>
@@ -6591,7 +6673,7 @@ key = {
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-47">
+<clipboard-copy for="cell-46">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6603,7 +6685,7 @@ key = {
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">labels</span> <span class="o">=</span> <span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCuration</span><span class="o">.</span><span class="n">get_labels</span><span class="p">(</span><span class="n">gh_curation_uri</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-47">labels = sgs.FigURLCuration.get_labels(gh_curation_uri)</div>
+<div class="clipboard-copy-txt" id="cell-46">labels = sgs.FigURLCuration.get_labels(gh_curation_uri)</div>
 </div>
 </div>
 </div>
@@ -6618,7 +6700,7 @@ key = {
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-48">
+<clipboard-copy for="cell-47">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6630,7 +6712,7 @@ key = {
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">merge_groups</span> <span class="o">=</span> <span class="n">sgs</span><span class="o">.</span><span class="n">FigURLCuration</span><span class="o">.</span><span class="n">get_merge_groups</span><span class="p">(</span><span class="n">gh_curation_uri</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-48">merge_groups = sgs.FigURLCuration.get_merge_groups(gh_curation_uri)</div>
+<div class="clipboard-copy-txt" id="cell-47">merge_groups = sgs.FigURLCuration.get_merge_groups(gh_curation_uri)</div>
 </div>
 </div>
 </div>
@@ -6645,7 +6727,7 @@ key = {
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-49">
+<clipboard-copy for="cell-48">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6664,7 +6746,7 @@ key = {
     <span class="n">description</span><span class="o">=</span><span class="s2">"after figurl curation"</span><span class="p">,</span>
 <span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-49">sgs.CurationV1.insert_curation(
+<div class="clipboard-copy-txt" id="cell-48">sgs.CurationV1.insert_curation(
     sorting_id=key["sorting_id"],
     parent_curation_id=1,
     labels=labels,
@@ -6686,7 +6768,7 @@ key = {
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-50">
+<clipboard-copy for="cell-49">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6698,7 +6780,7 @@ key = {
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgs</span><span class="o">.</span><span class="n">CurationV1</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-50">sgs.CurationV1()</div>
+<div class="clipboard-copy-txt" id="cell-49">sgs.CurationV1()</div>
 </div>
 </div>
 </div>
@@ -6724,7 +6806,7 @@ key = {
 <div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="CodeMirror cm-s-jupyter">
 <div class="zeroclipboard-container">
-<clipboard-copy for="cell-51">
+<clipboard-copy for="cell-50">
 <div>
 <span class="notice" hidden="">Copied!</span>
 <svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
@@ -6736,7 +6818,7 @@ key = {
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="kn">from</span> <span class="nn">spyglass.spikesorting.spikesorting_merge</span> <span class="kn">import</span> <span class="n">SpikeSortingOutput</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-51">from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput</div>
+<div class="clipboard-copy-txt" id="cell-50">from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput</div>
 </div>
 </div>
 </div>
@@ -6744,6 +6826,33 @@ key = {
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
 <div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=5047f866-7435-4dea-9ed8-a9b2d8365682">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="CodeMirror cm-s-jupyter">
+<div class="zeroclipboard-container">
+<clipboard-copy for="cell-51">
+<div>
+<span class="notice" hidden="">Copied!</span>
+<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
+<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
+</svg>
+</div>
+</clipboard-copy>
+</div>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">SpikeSortingOutput</span><span class="p">()</span>
+</pre></div>
+<div class="clipboard-copy-txt" id="cell-51">SpikeSortingOutput()</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=d2702410-01e1-4af0-a987-891c42c6c099">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6761,16 +6870,16 @@ key = {
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">SpikeSortingOutput</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">key</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-52">SpikeSortingOutput()</div>
+<div class="clipboard-copy-txt" id="cell-52">key</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=d2702410-01e1-4af0-a987-891c42c6c099">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=b20c2c9e-0c97-4669-b45d-4b1c50fd2fcc">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6788,16 +6897,16 @@ key = {
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">key</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">SpikeSortingOutput</span><span class="o">.</span><span class="n">insert</span><span class="p">([</span><span class="n">key</span><span class="p">],</span> <span class="n">part_name</span><span class="o">=</span><span class="s2">"CurationV1"</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-53">key</div>
+<div class="clipboard-copy-txt" id="cell-53">SpikeSortingOutput.insert([key], part_name="CurationV1")</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=b20c2c9e-0c97-4669-b45d-4b1c50fd2fcc">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=184c3401-8df3-46f0-9dd0-c9fa98395c34">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6815,16 +6924,16 @@ key = {
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">SpikeSortingOutput</span><span class="o">.</span><span class="n">insert</span><span class="p">([</span><span class="n">key</span><span class="p">],</span> <span class="n">part_name</span><span class="o">=</span><span class="s2">"CurationV1"</span><span class="p">)</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">SpikeSortingOutput</span><span class="o">.</span><span class="n">merge_view</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-54">SpikeSortingOutput.insert([key], part_name="CurationV1")</div>
+<div class="clipboard-copy-txt" id="cell-54">SpikeSortingOutput.merge_view()</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=184c3401-8df3-46f0-9dd0-c9fa98395c34">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=e2b083a5-b700-438a-8a06-2e2eb041072d">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6842,16 +6951,16 @@ key = {
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">SpikeSortingOutput</span><span class="o">.</span><span class="n">merge_view</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">SpikeSortingOutput</span><span class="o">.</span><span class="n">CurationV1</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-55">SpikeSortingOutput.merge_view()</div>
+<div class="clipboard-copy-txt" id="cell-55">SpikeSortingOutput.CurationV1()</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=e2b083a5-b700-438a-8a06-2e2eb041072d">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=10b8afa1-d4a6-4ac1-959b-f4e84e582f2e">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6869,16 +6978,16 @@ key = {
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">SpikeSortingOutput</span><span class="o">.</span><span class="n">CurationV1</span><span class="p">()</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">SpikeSortingOutput</span><span class="o">.</span><span class="n">CuratedSpikeSorting</span><span class="p">()</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-56">SpikeSortingOutput.CurationV1()</div>
+<div class="clipboard-copy-txt" id="cell-56">SpikeSortingOutput.CuratedSpikeSorting()</div>
 </div>
 </div>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=10b8afa1-d4a6-4ac1-959b-f4e84e582f2e">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=e9eebf75-6fef-43c4-80b8-12e59e5d743c">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -6896,36 +7005,9 @@ key = {
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">SpikeSortingOutput</span><span class="o">.</span><span class="n">CuratedSpikeSorting</span><span class="p">()</span>
-</pre></div>
-<div class="clipboard-copy-txt" id="cell-57">SpikeSortingOutput.CuratedSpikeSorting()</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=e9eebf75-6fef-43c4-80b8-12e59e5d743c">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div><div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="CodeMirror cm-s-jupyter">
-<div class="zeroclipboard-container">
-<clipboard-copy for="cell-58">
-<div>
-<span class="notice" hidden="">Copied!</span>
-<svg aria-hidden="true" class="clipboard-copy-icon" data-view-component="true" height="20" version="1.1" viewbox="0 0 16 16" width="20">
-<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" fill="currentColor" fill-rule="evenodd"></path>
-</svg>
-</div>
-</clipboard-copy>
-</div>
 <div class="highlight-ipynb hl-python"><pre><span></span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-58"></div>
+<div class="clipboard-copy-txt" id="cell-57"></div>
 </div>
 </div>
 </div>
@@ -7059,7 +7141,7 @@ key = {
     <script id="__config" type="application/json">{"base": "../..", "features": ["toc.follow", "navigation.top", "navigation.instant", "navigation.tracking", "navigation.top", "search.suggest", "search.share", "navigation.footer", "content.code.copy"], "search": "../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.8fd75fb4.min.js"></script>
+      <script src="../../assets/javascripts/bundle.c8d2eff1.min.js"></script>
       
     
   </body>

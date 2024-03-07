@@ -22,7 +22,7 @@
       
       
       <link rel="icon" href="../../images/Spyglass.svg">
-      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.9">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.13">
     
     
       
@@ -30,7 +30,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.f2e4d321.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.7e359304.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
@@ -959,7 +959,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebooks/51_MUA_Detection.ipynb" class="md-nav__link">
+      <a href="../../notebooks/50_MUA_Detection/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1203,9 +1203,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#users-types" class="md-nav__link">
+  <a href="#users-roles" class="md-nav__link">
     <span class="md-ellipsis">
-      Users types
+      Users roles
     </span>
   </a>
   
@@ -4730,9 +4730,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#users-types" class="md-nav__link">
+  <a href="#users-roles" class="md-nav__link">
     <span class="md-ellipsis">
-      Users types
+      Users roles
     </span>
   </a>
   
@@ -4867,18 +4867,25 @@ schema/database prefix.</p>
 <li><code>ALL</code> privileges allow users to create, alter, or drop tables and schemas in
     addition to operations above.</li>
 </ul>
-<p>In practice, DataJoint only permits alerations of secondary keys on existing
+<p>In practice, DataJoint only permits alterations of secondary keys on existing
 tables, and more derstructive operations would require using DataJoint to
 execeute MySQL commands.</p>
 <p>Shared schema prefixes are those defined in the Spyglass package (e.g.,
 <code>common</code>, <code>lfp</code>, etc.). A 'user schema' is any schema with the username as
-prefix. User types differ in the privileges they are granted on these prifixes.</p>
-<h3 id="users-types">Users types<a class="headerlink" href="#users-types" title="Permanent link">&para;</a></h3>
+prefix. User types differ in the privileges they are granted on these prifixes.
+Declaring a table with the SpyglassMixin on a schema other than a shared module
+or the user's own prefix will raise a warning.</p>
+<h3 id="users-roles">Users roles<a class="headerlink" href="#users-roles" title="Permanent link">&para;</a></h3>
+<p>When a database is first initialized, the team should run <code>add_roles</code> to create
+the following roles:</p>
 <ul>
-<li><code>collab_user</code>: <code>ALL</code> on user schema, <code>SELECT</code> on all other schemas.</li>
 <li><code>dj_guest</code>: <code>SELECT</code> on all schemas.</li>
+<li><code>dj_collab</code>: <code>ALL</code> on user schema, <code>SELECT</code> on all other schemas.</li>
 <li><code>dj_user</code>: <code>ALL</code> on shared and user schema, <code>SELECT</code> on all other schemas.</li>
+<li><code>dj_admin</code>: <code>ALL</code> on all schemas.</li>
 </ul>
+<p>If new shared modules are introduced, the <code>add_module</code> method should be used to
+expand the privileges of the <code>dj_user</code> role.</p>
 <h3 id="setting-passwords">Setting Passwords<a class="headerlink" href="#setting-passwords" title="Permanent link">&para;</a></h3>
 <p>New users are generated with the password <code>temppass</code>. In order to change this,
 we recommend downloading DataJoint <code>0.14.2</code> (currently pre-release).</p>
@@ -5028,12 +5035,21 @@ be on disk.</p>
 <p>To remove orphaned files, we run the following commands in our cron jobs:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span> <span class="nn">spyglass.common</span> <span class="kn">import</span> <span class="n">AnalysisNwbfile</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span> <span class="nn">spyglass.spikesorting</span> <span class="kn">import</span> <span class="n">SpikeSorting</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">nightly_cleanup</span><span class="p">()</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">SpikeSorting</span><span class="p">()</span><span class="o">.</span><span class="n">nightly_cleanup</span><span class="p">()</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kn">from</span> <span class="nn">spyglass.common.common_nwbfile</span> <span class="kn">import</span> <span class="n">schema</span> <span class="k">as</span> <span class="n">nwbfile_schema</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="kn">from</span> <span class="nn">spyglass.decoding.v1.sorted_spikes</span> <span class="kn">import</span> <span class="n">schema</span> <span class="k">as</span> <span class="n">spikes_schema</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="kn">from</span> <span class="nn">spyglass.decoding.v1.clusterless</span> <span class="kn">import</span> <span class="n">schema</span> <span class="k">as</span> <span class="n">clusterless_schema</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="n">AnalysisNwbfile</span><span class="p">()</span><span class="o">.</span><span class="n">nightly_cleanup</span><span class="p">()</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="n">SpikeSorting</span><span class="p">()</span><span class="o">.</span><span class="n">nightly_cleanup</span><span class="p">()</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="n">nwbfile_schema</span><span class="o">.</span><span class="n">external</span><span class="p">[</span><span class="s1">&#39;analysis&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">delete_external_files</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="n">nwbfile_schema</span><span class="o">.</span><span class="n">external</span><span class="p">[</span><span class="s1">&#39;raw&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">delete_external_files</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="n">spikes_schema</span><span class="o">.</span><span class="n">external</span><span class="p">[</span><span class="s1">&#39;analysis&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">delete_external_files</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>    <span class="n">clusterless_schema</span><span class="o">.</span><span class="n">external</span><span class="p">[</span><span class="s1">&#39;analysis&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">delete_external_files</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
 </span></code></pre></div>
+<p>The <code>delete</code> calls above use DataJoint's <code>ExternalTable.delete</code> method, which
+will remove files from disk that are no longer referenced in the database.</p>
 
 
 
@@ -5154,7 +5170,7 @@ be on disk.</p>
     <script id="__config" type="application/json">{"base": "../..", "features": ["toc.follow", "navigation.top", "navigation.instant", "navigation.tracking", "navigation.top", "search.suggest", "search.share", "navigation.footer", "content.code.copy"], "search": "../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.8fd75fb4.min.js"></script>
+      <script src="../../assets/javascripts/bundle.c8d2eff1.min.js"></script>
       
     
   </body>
