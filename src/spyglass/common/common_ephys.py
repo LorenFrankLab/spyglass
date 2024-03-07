@@ -179,7 +179,7 @@ class Electrode(SpyglassMixin, dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath)
         if "Electrode" not in config:
-            return
+            return  # See #849
 
         # map electrode id to dictof electrode information from config YAML
         electrode_dicts = {
@@ -341,7 +341,7 @@ class SampleCount(SpyglassMixin, dj.Imported):
                 "Unable to import SampleCount: no data interface named "
                 + f'"sample_count" found in {nwb_file_name}.'
             )
-            return
+            return  # see #849
         key["sample_count_object_id"] = sample_count.object_id
         self.insert1(key)
 
