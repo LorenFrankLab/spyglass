@@ -14,7 +14,6 @@
     - Fixes to `_convert_mp4` #834
     - Replace deprecated calls to `yaml.safe_load()` #834
 
-## [0.5.1] (February 27, 2024)
 - Increase the required `spikeinterface` version to >=0.99.1 for `get_sorting` method associated with `SpikeSorting` and `CurationV1` tables in spike sorting V1 pipeline. Limit version to <0.100 in case there are other issues with it. #852
 
 ## [0.5.0] (February 9, 2024)
