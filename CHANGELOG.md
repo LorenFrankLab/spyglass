@@ -21,6 +21,9 @@
     - Increase the required `spikeinterface` version to >=0.99.1 for `get_sorting` method associated with `SpikeSorting` and `CurationV1` tables in spike sorting V1 pipeline. Limit version to <0.100 in case there are other issues with it. #852
     - Bug fix in single artifact interval edge case #859
 
+- LFP
+    - In LFPArtifactDetection, only apply referencing if explicitly selected #863
+
 ## [0.5.0] (February 9, 2024)
 
 ### Infrastructure
