@@ -295,7 +295,8 @@ def _get_artifact_times(
         ]
 
     # make the artifact intervals disjoint
-    artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
+    if len(artifact_intervals_s) > 1:
+        artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
 
     # find non-artifact intervals in timestamps
     artifact_removed_valid_times = interval_list_complement(

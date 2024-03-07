@@ -278,7 +278,7 @@ def spikesorting_pipeline_populator(
         curation_keys = (Curation() & sort_dict).fetch("KEY")
         for curation_key in curation_keys:
             CuratedSpikeSortingSelection.insert1(
-                curation_auto_key, skip_duplicates=True
+                curation_key, skip_duplicates=True
             )
 
     # Populate curated spike sorting
