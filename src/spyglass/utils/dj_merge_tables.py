@@ -228,13 +228,17 @@ class Merge(dj.Manual):
         return part_parents
 
     @classmethod
-    def _merge_repr(cls, restriction: str = True) -> dj.expression.Union:
+    def _merge_repr(
+        cls, restriction: str = True, include_empties=False
+    ) -> dj.expression.Union:
         """Merged view, including null entries for columns unique to one part.
 
         Parameters
         ---------
         restriction: str, optional
             Restriction to apply to the merged view
+        include_empties: bool, optional
+            Default False. Add columns for empty parts.
 
         Returns
         ------
@@ -246,7 +250,7 @@ class Merge(dj.Manual):
             for p in cls._merge_restrict_parts(
                 restriction=restriction,
                 add_invalid_restrict=False,
-                return_empties=False,  # motivated by SpikeSortingOutput.Import
+                return_empties=include_empties,
             )
         ]
         if not parts:

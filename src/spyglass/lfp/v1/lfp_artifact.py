@@ -24,10 +24,12 @@ ARTIFACT_DETECTION_ALGORITHMS = {
 class LFPArtifactDetectionParameters(SpyglassMixin, dj.Manual):
     definition = """
     # Parameters for detecting LFP artifact times within a LFP group.
-    artifact_params_name: varchar(200)
+    artifact_params_name: varchar(64)
     ---
     artifact_params: blob  # dictionary of parameters
     """
+
+    # See #630, #664. Excessive key length.
 
     def insert_default(self):
         """Insert the default artifact parameters."""

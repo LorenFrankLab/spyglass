@@ -7,6 +7,14 @@ def dio_events(common):
     yield common.common_dio.DIOEvents
 
 
+def test_pop_dioevents(dio_events, mini_beh_events):
+    """Populate DIOEvents table."""
+    dio_events.populate()
+    events_raw = [e for e in mini_beh_events.fields["time_series"].keys()]
+    events_fetch = [e for e in dio_events.fetch("dio_event_name")]
+    assert set(events_fetch) == set(events_raw), "Mismatch in events populated."
+
+
 @pytest.fixture(scope="session")
 def dio_fig(mini_insert, dio_events, mini_restr):
     yield (dio_events & mini_restr).plot_all_dio_events(return_fig=True)
