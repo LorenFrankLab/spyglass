@@ -55,7 +55,7 @@ dependencies = [
     "ripple_detection",
     "seaborn",
     "sortingview>=0.11",
-    "spikeinterface>=0.98.2,<0.99",
+    "spikeinterface>=0.99.1,<0.100",
     "track_linearization>=2.3",
 ]
 dynamic = ["version"]

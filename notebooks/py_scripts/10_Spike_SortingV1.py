@@ -5,11 +5,11 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.16.1
 #   kernelspec:
-#     display_name: Python 3 (ipykernel)
+#     display_name: spyglass-2024-02-07
 #     language: python
-#     name: python3
+#     name: spyglass-ds
 # ---
 
 # Connect to db. See instructions in [Setup](./00_Setup.ipynb).
@@ -40,10 +40,8 @@ import spyglass.data_import as sgi
 # insert LabMember and Session
 #
 
-nwb_file_name = "wilbur20210326.nwb"
-nwb_file_name2 = "wilbur20210326_.nwb"
-
-sgc.LabMember.insert_from_nwbfile(nwb_file_name)
+nwb_file_name = "mediumnwb20230802.nwb"
+nwb_file_name2 = "mediumnwb20230802_.nwb"
 
 sgi.insert_sessions(nwb_file_name)
 
@@ -60,25 +58,34 @@ sgs.SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name2)
 key = {
     "nwb_file_name": nwb_file_name2,
     "sort_group_id": 0,
-    "interval_list_name": "03_r1",
     "preproc_param_name": "default",
-    "team_name": "Alison Comrie",
 }
+
+sgs.SpikeSortingRecordingSelection() & key
 
 sgs.SpikeSortingRecordingSelection.insert_selection(key)
 
-sgs.SpikeSortingRecordingSelection()
+# Assuming 'key' is a dictionary with fields that you want to include in 'ssr_key'
+ssr_key = {
+    "recording_id": (sgs.SpikeSortingRecordingSelection() & key).fetch1(
+        "recording_id"
+    ),
+} | key
 
 # preprocess recording (filtering and referencing)
 #
 
-sgs.SpikeSortingRecording.populate()
+# +
+# sgs.SpikeSortingRecording.populate()
+ssr_pk = (sgs.SpikeSortingRecordingSelection & key).proj()
 
-sgs.SpikeSortingRecording()
 
-key = (
-    sgs.SpikeSortingRecordingSelection & {"nwb_file_name": nwb_file_name2}
-).fetch1()
+sgs.SpikeSortingRecording.populate(ssr_pk)
+# -
+
+sgs.SpikeSortingRecording() & ssr_key
+
+key = (sgs.SpikeSortingRecordingSelection & key).fetch1()
 
 # insert ArtifactDetectionSelection
 #
@@ -94,13 +101,25 @@ sgs.ArtifactDetection.populate()
 
 sgs.ArtifactDetection()
 
-# insert SpikeSortingSelection. again use `insert_selection` method
+# insert SpikeSortingSelection. again use `insert_selection` method.
+#
+# We tested mountainsort4, mountainsort5, kilosort2_5, kilosort3, and ironclust.
+# when using mountainsort5, pip install 'mountainsort5'
+# when using Kilosorts and ironclust -- make sure to pip install 'cuda-python' and 'spython'
+# For sorting with Kilosort, make sure to use a machine with GPU and put the whole probe not a sliced individual shank.
 #
 
-key = {
+# Install mountainsort 4 if you haven't done it.
+
+# #!pip install pybind11
+# !pip install mountainsort4
+
+# +
+sorter = "mountainsort4"
+
+common_key = {
     "recording_id": key["recording_id"],
-    "sorter": "mountainsort4",
-    "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
+    "sorter": sorter,
     "nwb_file_name": nwb_file_name2,
     "interval_list_name": str(
         (
@@ -110,21 +129,37 @@ key = {
     ),
 }
 
-sgs.SpikeSortingSelection()
+
+if sorter == "mountainsort4":
+    key = {
+        **common_key,
+        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
+    }
+
+else:
+    key = {
+        **common_key,
+        "sorter_param_name": "default",
+    }
+# -
 
 sgs.SpikeSortingSelection.insert_selection(key)
 
-sgs.SpikeSortingSelection()
+sgs.SpikeSortingSelection() & key
 
 # run spike sorting
 #
 
-sgs.SpikeSorting.populate()
+# +
+sss_pk = (sgs.SpikeSortingSelection & key).proj()
 
-sgs.SpikeSorting()
+sgs.SpikeSorting.populate(sss_pk)
+# -
 
 # we have two main ways of curating spike sorting: by computing quality metrics and applying threshold; and manually applying curation labels. to do so, we first insert CurationV1. use `insert_curation` method.
 #
+
+sgs.SpikeSortingRecording & key
 
 sgs.CurationV1.insert_curation(
     sorting_id=(

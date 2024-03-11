@@ -1,10 +1,11 @@
 # Change Log
 
-## Unreleased
+## [0.5.1] (March 7, 2024)
 
 ### Infrastructure
 
 - Add user roles to `database_settings.py`. #832
+- Fix redundancy in `waveforms_dir` #857
 - Revise `dj_chains` to permit undirected paths for paths with multiple Merge
     Tables. #846
 
@@ -15,9 +16,11 @@
     - Video restriction for multicamera epochs #834
     - Fixes to `_convert_mp4` #834
     - Replace deprecated calls to `yaml.safe_load()` #834
-
 - Spikesorting:
+    - Increase`spikeinterface` version to >=0.99.1, <0.100 #852
     - Bug fix in single artifact interval edge case #859
+- LFP
+    - In LFPArtifactDetection, only apply referencing if explicitly selected #863
 
 ## [0.5.0] (February 9, 2024)
 

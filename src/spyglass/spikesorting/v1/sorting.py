@@ -22,6 +22,7 @@ from spyglass.spikesorting.v1.recording import (  # noqa: F401
     _consolidate_intervals,
 )
 from spyglass.utils import SpyglassMixin, logger
+import os
 
 schema = dj.schema("spikesorting_v1_sorting")
 
@@ -151,6 +152,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         # - information about the recording
         # - artifact free intervals
         # - spike sorter and sorter params
+
         recording_key = (
             SpikeSortingRecording * SpikeSortingSelection & key
         ).fetch1()
@@ -242,18 +244,41 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             # Specify tempdir (expected by some sorters like mountainsort4)
             sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
             sorter_params["tempdir"] = sorter_temp_dir.name
+            os.chmod(sorter_params["tempdir"], 0o777)
+
+            if sorter == "mountainsort5":
+                _ = sorter_params.pop("tempdir", None)
+
             # if whitening is specified in sorter params, apply whitening separately
             # prior to sorting and turn off "sorter whitening"
-            if sorter_params["whiten"]:
+            if sorter_params.get("whiten", False):
                 recording = sip.whiten(recording, dtype=np.float64)
                 sorter_params["whiten"] = False
-            sorting = sis.run_sorter(
-                sorter,
-                recording,
-                output_folder=sorter_temp_dir.name,
-                remove_existing_folder=True,
-                **sorter_params,
-            )
+
+            common_sorter_items = {
+                "sorter_name": sorter,
+                "recording": recording,
+                "output_folder": sorter_temp_dir.name,
+                "remove_existing_folder": True,
+            }
+
+            if sorter.lower() in ["kilosort2_5", "kilosort3", "ironclust"]:
+                sorter_params = {
+                    k: v
+                    for k, v in sorter_params.items()
+                    if k
+                    not in ["tempdir", "mp_context", "max_threads_per_process"]
+                }
+                sorting = sis.run_sorter(
+                    **common_sorter_items,
+                    singularity_image=True,
+                    **sorter_params,
+                )
+            else:
+                sorting = sis.run_sorter(
+                    **common_sorter_items,
+                    **sorter_params,
+                )
         key["time_of_sort"] = int(time.time())
         sorting = sic.remove_excess_spikes(sorting, recording)
         key["analysis_file_name"], key["object_id"] = _write_sorting_to_nwb(

@@ -213,7 +213,7 @@ class CurationV1(SpyglassMixin, dj.Manual):
             }
         ]
 
-        sorting = si.NumpySorting.from_dict(
+        sorting = si.NumpySorting.from_unit_dict(
             units_dict_list, sampling_frequency=sampling_frequency
         )
 
