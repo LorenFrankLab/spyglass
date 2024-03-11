@@ -1,5 +1,9 @@
 # Change Log
 
+## [0.5.2] (Unreleased)
+
+- Refactor `TableChain` to include `_searched` attribute. #867
+
 ## [0.5.1] (March 7, 2024)
 
 ### Infrastructure

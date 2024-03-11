@@ -123,12 +123,13 @@ class TableChain:
     _link_symbol : str
         Symbol used to represent the link between parent and child. Hardcoded
         to " -> ".
-    _has_link : bool
+    has_link : bool
         Cached attribute to store whether parent is linked to child. False if
         child is not in parent.descendants or nx.NetworkXNoPath is raised by
         nx.shortest_path.
-    _has_directed_link : bool
-        True if directed graph is used to find path. False if undirected graph.
+    link_type : str
+        'directed' or 'undirected' based on whether path is found with directed
+        or undirected graph. None if no path is found.
     graph : nx.DiGraph
         Directed graph of parent's dependencies from datajoint.connection.
     names : List[str]
@@ -223,9 +224,8 @@ class TableChain:
     def has_link(self) -> bool:
         """Return True if parent is linked to child.
 
-        Cached as hidden attribute _has_link to set False if nx.NodeNotFound
-        is raised by nx.shortest_path, or nolike is found in nither directed
-        or undirected graph.
+        If not searched, search for path. If searched and no link is found,
+        return False. If searched and link is found, return True.
         """
         if not self._searched:
             _ = self.path
@@ -249,7 +249,7 @@ class TableChain:
             If True, use directed graph. If False, use undirected graph.
             Defaults to True. Undirected permits paths to traverse from merge
             part-parent -> merge part -> merge table. Undirected excludes
-            PERIPHERAL_TABLES likne interval_list, nwbfile, etc.
+            PERIPHERAL_TABLES like interval_list, nwbfile, etc.
 
         Returns
         -------
