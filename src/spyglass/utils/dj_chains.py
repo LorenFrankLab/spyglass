@@ -175,18 +175,19 @@ class TableChain:
         self._link_symbol = " -> "
         self.parent = parent
         self.child = child
-        self._has_link = True
-        self._has_directed_link = None
+        self.link_type = None
+        self._searched = False
 
         if child.full_table_name not in self.graph.nodes:
             logger.warning(
                 "Can't find item in graph. Try importing: "
                 + f"{child.full_table_name}"
             )
+            self._searched = True
 
     def __str__(self):
         """Return string representation of chain: parent -> child."""
-        if not self._has_link:
+        if not self.has_link:
             return "No link"
         return (
             to_camel_case(self.parent.table_name)
@@ -196,19 +197,22 @@ class TableChain:
 
     def __repr__(self):
         """Return full representation of chain: parent -> {links} -> child."""
-        return (
-            "Chain: "
-            + self._link_symbol.join([t.table_name for t in self.objects])
-            if self.names
-            else "No link"
+        if not self.has_link:
+            return "No link"
+        return "Chain: " + self._link_symbol.join(
+            [t.table_name for t in self.objects]
         )
 
     def __len__(self):
         """Return number of tables in chain."""
+        if not self.has_link:
+            return 0
         return len(self.names)
 
     def __getitem__(self, index: Union[int, str]) -> dj.FreeTable:
         """Return FreeTable object at index."""
+        if not self.has_link:
+            return None
         if isinstance(index, str):
             for i, name in enumerate(self.names):
                 if index in name:
@@ -219,10 +223,13 @@ class TableChain:
     def has_link(self) -> bool:
         """Return True if parent is linked to child.
 
-        Cached as hidden attribute _has_link to set False if nx.NetworkXNoPath
-        is raised by nx.shortest_path.
+        Cached as hidden attribute _has_link to set False if nx.NodeNotFound
+        is raised by nx.shortest_path, or nolike is found in nither directed
+        or undirected graph.
         """
-        return self._has_link
+        if not self._searched:
+            _ = self.path
+        return self.link_type is not None
 
     def pk_link(self, src, trg, data) -> float:
         """Return 1 if data["primary"] else float("inf").
@@ -265,6 +272,9 @@ class TableChain:
             path = nx.shortest_path(self.graph, source, target)
         except nx.NetworkXNoPath:
             return None
+        except nx.NodeNotFound:
+            self._searched = True
+            return None
 
         ret = OrderedDict()
         prev_table = None
@@ -283,27 +293,24 @@ class TableChain:
     @cached_property
     def path(self) -> OrderedDict:
         """Return list of full table names in chain."""
-        if not self._has_link:
+        if self._searched and not self.has_link:
             return None
 
         link = None
         if link := self.find_path(directed=True):
-            self._has_directed_link = True
+            self.link_type = "directed"
         elif link := self.find_path(directed=False):
-            self._has_directed_link = False
+            self.link_type = "undirected"
+        self._searched = True
 
-        if link:
-            return link
-
-        self._has_link = False
-        return None
+        return link
 
     @cached_property
     def names(self) -> List[str]:
         """Return list of full table names in chain."""
-        if self._has_link:
-            return list(self.path.keys())
-        return None
+        if not self.has_link:
+            return None
+        return list(self.path.keys())
 
     @cached_property
     def objects(self) -> List[dj.FreeTable]:
@@ -311,9 +318,9 @@ class TableChain:
 
         Unused. Preserved for future debugging.
         """
-        if self._has_link:
-            return [v["free_table"] for v in self.path.values()]
-        return None
+        if not self.has_link:
+            return None
+        return [v["free_table"] for v in self.path.values()]
 
     @cached_property
     def attr_maps(self) -> List[dict]:
@@ -321,10 +328,9 @@ class TableChain:
 
         Unused. Preserved for future debugging.
         """
-        #
-        if self._has_link:
-            return [v["attr_map"] for v in self.path.values()]
-        return None
+        if not self.has_link:
+            return None
+        return [v["attr_map"] for v in self.path.values()]
 
     def join(
         self, restriction: str = None, reverse_order: bool = False
@@ -339,7 +345,7 @@ class TableChain:
         reverse_order : bool, optional
             If True, join tables in reverse order. Defaults to False.
         """
-        if not self._has_link:
+        if not self.has_link:
             return None
 
         restriction = restriction or self.parent.restriction or True
