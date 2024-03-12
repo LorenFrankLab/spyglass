@@ -7,7 +7,7 @@ from position_tools.core import gaussian_smooth
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.v1.dlc_utils import get_span_start_stop
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 from .position_dlc_cohort import DLCSmoothInterpCohort
 
@@ -61,8 +61,6 @@ class DLCOrientationParams(SpyglassMixin, dj.Manual):
 
 @schema
 class DLCOrientationSelection(SpyglassMixin, dj.Manual):
-    """ """
-
     definition = """
     -> DLCSmoothInterpCohort
     -> DLCOrientationParams
@@ -164,9 +162,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             ),
             name="time",
         )
-        COLUMNS = [
-            "orientation",
-        ]
+        COLUMNS = ["orientation"]
         return pd.DataFrame(
             np.asarray(nwb_data["dlc_orientation"].get_spatial_series().data)[
                 :, np.newaxis
@@ -237,34 +233,31 @@ _key_to_func_dict = {
 }
 
 
-def interp_orientation(orientation, spans_to_interp, **kwargs):
+def interp_orientation(df, spans_to_interp, **kwargs):
     idx = pd.IndexSlice
+    no_x_msg = "Index {ind} has no {x}point with which to interpolate"
+    df_orient = df["orientation"]
     # TODO: add parameters to refine interpolation
+
     for ind, (span_start, span_stop) in enumerate(spans_to_interp):
-        if (span_stop + 1) >= len(orientation):
-            orientation.loc[idx[span_start:span_stop], idx["orientation"]] = (
-                np.nan
-            )
-            print(f"ind: {ind} has no endpoint with which to interpolate")
+        idx_span = idx[span_start:span_stop]
+        if (span_stop + 1) >= len(df):
+            df.loc[idx_span, idx["orientation"]] = np.nan
+            logger.info(no_x_msg.format(ind=ind, x="stop"))
             continue
         if span_start < 1:
-            orientation.loc[idx[span_start:span_stop], idx["orientation"]] = (
-                np.nan
-            )
-            print(f"ind: {ind} has no startpoint with which to interpolate")
+            df.loc[idx_span, idx["orientation"]] = np.nan
+            logger.info(no_x_msg.format(ind=ind, x="start"))
             continue
-        orient = [
-            orientation["orientation"].iloc[span_start - 1],
-            orientation["orientation"].iloc[span_stop + 1],
-        ]
-        start_time = orientation.index[span_start]
-        stop_time = orientation.index[span_stop]
+
+        orient = [df_orient.iloc[span_start - 1], df_orient.iloc[span_stop + 1]]
+
+        start_time = df.index[span_start]
+        stop_time = df.index[span_stop]
         orientnew = np.interp(
-            x=orientation.index[span_start : span_stop + 1],
+            x=df.index[span_start : span_stop + 1],
             xp=[start_time, stop_time],
             fp=[orient[0], orient[-1]],
         )
-        orientation.loc[idx[start_time:stop_time], idx["orientation"]] = (
-            orientnew
-        )
-    return orientation
+        df.loc[idx[start_time:stop_time], idx["orientation"]] = orientnew
+    return df

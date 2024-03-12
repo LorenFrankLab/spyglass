@@ -1,4 +1,7 @@
-## dlc_decorators
+# dlc_decorators
+
+# CBroz: This seems to just be validating inputs to a function. Why centralize
+# this as a decorator when only used once?
 
 
 def accepts(*vals, **kwargs):

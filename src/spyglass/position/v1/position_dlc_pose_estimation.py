@@ -14,7 +14,7 @@ from spyglass.common.common_behav import (  # noqa: F401
     convert_epoch_interval_name_to_position_interval_name,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin
 
 from .dlc_utils import OutputLogger, infer_output_dir
 from .position_dlc_model import DLCModel
@@ -62,7 +62,8 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         ax.grid(visible=True, color="white", lw=0.5, alpha=0.5)
         display(fig)
         crop_input = input(
-            "Please enter the crop parameters for your video in format xmin, xmax, ymin, ymax, or 'none'\n"
+            "Please enter the crop parameters for your video in format "
+            + "xmin, xmax, ymin, ymax, or 'none'\n"
         )
         plt.close()
         if crop_input.lower() == "none":
@@ -247,8 +248,10 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             ).fetch_nwb()[0]["raw_position"]
             _, _, _, video_time = get_video_path(key)
             pos_time = spatial_series.timestamps
-            # TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,
-            # which also has timestamps
+
+            # TODO: should get timestamps from VideoFile, but need the
+            # video_frame_ind from RawPosition, which also has timestamps
+
             key["meters_per_pixel"] = spatial_series.conversion
 
             # Insert entry into DLCPoseEstimation
@@ -258,8 +261,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 key["epoch"],
             )
             self.insert1({**key, "pose_estimation_time": creation_time})
-            meters_per_pixel = key["meters_per_pixel"]
-            del key["meters_per_pixel"]
+
+            meters_per_pixel = key.pop("meters_per_pixel")
             body_parts = dlc_result.df.columns.levels[0]
             body_parts_df = {}
             # Insert dlc pose estimation into analysis NWB file for
@@ -346,12 +349,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             ),
             name="time",
         )
-        COLUMNS = [
-            "video_frame_ind",
-            "x",
-            "y",
-            "likelihood",
-        ]
+        COLUMNS = ["video_frame_ind", "x", "y", "likelihood"]
         return pd.concat(
             {
                 entry["bodypart"]: pd.DataFrame(

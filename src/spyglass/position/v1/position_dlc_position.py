@@ -31,11 +31,12 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         whether to smooth the dataset
     smoothing_params : dict
         smoothing_duration : float, default 0.05
-            number of frames to smooth over: sampling_rate*smoothing_duration = num_frames
+            number of frames to smooth over:
+            sampling_rate*smoothing_duration = num_frames
     interp_params : dict
         max_cm_to_interp : int, default 20
-            maximum distance between high likelihood points on either side of a NaN span
-            to interpolate over
+            maximum distance between high likelihood points on either side of a
+            NaN span to interpolate over
     likelihood_thresh : float, default 0.95
         likelihood below which to NaN and interpolate over
     """
@@ -124,7 +125,7 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         validate_option(
             params.get("likelihood_thresh"),
             name="likelihood_thresh",
-            types=(float),
+            types=float,
             val_range=(0, 1),
         )
 
@@ -136,8 +137,6 @@ class DLCSmoothInterpSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> DLCPoseEstimation.BodyPart
     -> DLCSmoothInterpParams
-    ---
-
     """
 
 
@@ -175,7 +174,6 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             logger.logger.info("fetching Pose Estimation Dataframe")
             dlc_df = (DLCPoseEstimation.BodyPart() & key).fetch1_dataframe()
             dt = np.median(np.diff(dlc_df.index.to_numpy()))
-            sampling_rate = 1 / dt
             logger.logger.info("Identifying indices to NaN")
             df_w_nans, bad_inds = nan_inds(
                 dlc_df.copy(),
@@ -185,38 +183,33 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             )
 
             nan_spans = get_span_start_stop(np.where(bad_inds)[0])
-            if params["interpolate"]:
+
+            if interp_params := params.get("interpolate"):
                 logger.logger.info("interpolating across low likelihood times")
                 interp_df = interp_pos(
-                    df_w_nans.copy(), nan_spans, **params["interp_params"]
+                    df_w_nans.copy(), nan_spans, **interp_params
                 )
             else:
                 interp_df = df_w_nans.copy()
                 logger.logger.info("skipping interpolation")
-            if params["smooth"]:
-                if "smoothing_duration" in params["smoothing_params"]:
-                    smoothing_duration = params["smoothing_params"].pop(
-                        "smoothing_duration"
-                    )
+
+            if params.get("smooth"):
+                smooth_params = params.get("smoothing_params")
+                smooth_method = smooth_params.get("smooth_method")
+                smooth_func = _key_to_smooth_func_dict[smooth_method]
+
                 dt = np.median(np.diff(dlc_df.index.to_numpy()))
-                sampling_rate = 1 / dt
-                logger.logger.info("smoothing position")
-                smooth_func = _key_to_smooth_func_dict[
-                    params["smoothing_params"]["smooth_method"]
-                ]
-                logger.logger.info(
-                    "Smoothing using method: %s",
-                    str(params["smoothing_params"]["smooth_method"]),
-                )
+                logger.logger.info(f"Smoothing using method: {smooth_method}")
                 smooth_df = smooth_func(
                     interp_df,
-                    smoothing_duration=smoothing_duration,
-                    sampling_rate=sampling_rate,
+                    smoothing_duration=smooth_params.get("smoothing_duration"),
+                    sampling_rate=1 / dt,
                     **params["smoothing_params"],
                 )
             else:
                 smooth_df = interp_df.copy()
                 logger.logger.info("skipping smoothing")
+
             final_df = smooth_df.drop(["likelihood"], axis=1)
             final_df = final_df.rename_axis("time").reset_index()
             position_nwb_data = (
@@ -227,6 +220,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             key["analysis_file_name"] = AnalysisNwbfile().create(
                 key["nwb_file_name"]
             )
+
             # Add dataframe to AnalysisNwbfile
             nwb_analysis_file = AnalysisNwbfile()
             position = pynwb.behavior.Position()
@@ -341,6 +335,7 @@ def nan_inds(
             start_point = good_start[int(len(good_start) // 2)]
         else:
             start_point = span[0] + int(span_length(span) // 2)
+
         for ind in range(start_point, span[0], -1):
             if subthresh_inds_mask[ind]:
                 continue
@@ -351,10 +346,11 @@ def nan_inds(
                     ~subthresh_inds_mask[ind + 1 : start_point],
                 )
             )[0]
-            if len(previous_good_inds) >= 1:
-                last_good_ind = ind + 1 + np.min(previous_good_inds)
-            else:
-                last_good_ind = start_point
+            last_good_ind = (
+                ind + 1 + np.min(previous_good_inds)
+                if len(previous_good_inds) > 0
+                else start_point
+            )
             good_x, good_y = dlc_df.loc[
                 idx[dlc_df.index[last_good_ind]], ["x", "y"]
             ]
@@ -422,36 +418,32 @@ def get_good_spans(bad_inds_mask, inds_to_span: int = 50):
     modified_spans : list
         spans that are amended to bridge up to inds_to_span consecutive bad indices
     """
-    good_spans = get_span_start_stop(
-        np.arange(len(bad_inds_mask))[~bad_inds_mask]
-    )
-    if len(good_spans) > 1:
-        modified_spans = []
-        for (start1, stop1), (start2, stop2) in zip(
-            good_spans[:-1], good_spans[1:]
-        ):
-            check_existing = [
-                entry
-                for entry in modified_spans
-                if start1
-                in range(entry[0] - inds_to_span, entry[1] + inds_to_span)
-            ]
-            if len(check_existing) > 0:
-                modify_ind = modified_spans.index(check_existing[0])
-                if (start2 - stop1) <= inds_to_span:
-                    modified_spans[modify_ind] = (check_existing[0][0], stop2)
-                else:
-                    modified_spans[modify_ind] = (check_existing[0][0], stop1)
-                    modified_spans.append((start2, stop2))
-                continue
+    good = get_span_start_stop(np.arange(len(bad_inds_mask))[~bad_inds_mask])
+
+    if len(good) < 1:
+        return None, good
+
+    modified_spans = []
+    for (start1, stop1), (start2, stop2) in zip(good[:-1], good[1:]):
+        check_existing = [
+            entry
+            for entry in modified_spans
+            if start1 in range(entry[0] - inds_to_span, entry[1] + inds_to_span)
+        ]
+        if len(check_existing) > 0:
+            modify_ind = modified_spans.index(check_existing[0])
             if (start2 - stop1) <= inds_to_span:
-                modified_spans.append((start1, stop2))
+                modified_spans[modify_ind] = (check_existing[0][0], stop2)
             else:
-                modified_spans.append((start1, stop1))
+                modified_spans[modify_ind] = (check_existing[0][0], stop1)
                 modified_spans.append((start2, stop2))
-        return good_spans, modified_spans
-    else:
-        return None, good_spans
+            continue
+        if (start2 - stop1) <= inds_to_span:
+            modified_spans.append((start1, stop2))
+        else:
+            modified_spans.append((start1, stop1))
+            modified_spans.append((start2, stop2))
+    return good, modified_spans
 
 
 def span_length(x):

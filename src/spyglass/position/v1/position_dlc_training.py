@@ -6,7 +6,7 @@ import datajoint as dj
 
 from spyglass.position.v1.dlc_utils import OutputLogger
 from spyglass.position.v1.position_dlc_project import DLCProject
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_dlc_training")
 
@@ -21,13 +21,13 @@ class DLCModelTrainingParams(SpyglassMixin, dj.Lookup):
     params                        : longblob    # dictionary of all applicable parameters
     """
 
-    required_parameters = (
+    required_params = (
         "shuffle",
         "trainingsetindex",
         "net_type",
         "gputouse",
     )
-    skipped_parameters = ("project_path", "video_sets")
+    skipped_params = ("project_path", "video_sets")
 
     @classmethod
     def insert_new_params(cls, paramset_name: str, params: dict, **kwargs):
@@ -44,76 +44,52 @@ class DLCModelTrainingParams(SpyglassMixin, dj.Lookup):
             project_path and video_sets will be overwritten by config.yaml.
             Note that trainingsetindex is 0-indexed
         """
-
-        for required_param in cls.required_parameters:
-            assert required_param in params, (
-                "Missing required parameter: " + required_param
-            )
-        for skipped_param in cls.skipped_parameters:
-            if skipped_param in params:
-                params.pop(skipped_param)
-
-        param_dict = {
-            "dlc_training_params_name": paramset_name,
-            "params": params,
+        if not set(cls.required_params).issubset(params):
+            raise ValueError(f"Missing required params: {cls.required_params}")
+        params = {
+            k: v for k, v in params.items() if k not in cls.skipped_params
         }
-        param_query = cls & {
-            "dlc_training_params_name": param_dict["dlc_training_params_name"]
-        }
-        # If the specified param-set already exists
-        # Not sure we need this part, as much just a check if the name is the same
+
+        param_pk = {"dlc_training_params_name": paramset_name}
+        param_query = cls & param_pk
+
         if param_query:
-            existing_paramset_name = param_query.fetch1(
-                "dlc_training_params_name"
+            logger.info(
+                f"New param set not added\n"
+                f"A param set with name: {paramset_name} already exists"
             )
-            if (
-                existing_paramset_name == paramset_name
-            ):  # If existing name same:
-                return print(
-                    f"New param set not added\n"
-                    f"A param set with name: {paramset_name} already exists"
-                )
-        else:
-            cls.insert1(
-                param_dict, **kwargs
-            )  # if duplicate, will raise duplicate error
-            # if this will raise duplicate error, why is above check needed? @datajoint
+            return
+        cls.insert1({**param_pk, "params": params}, **kwargs)
 
     @classmethod
     def get_accepted_params(cls):
         from deeplabcut import create_training_dataset, train_network
 
-        return list(
-            set(
-                [
-                    *list(inspect.signature(train_network).parameters),
-                    *list(
-                        inspect.signature(create_training_dataset).parameters
-                    ),
-                ]
-            )
+        return set(
+            [
+                *get_param_names(train_network),
+                *get_param_names(create_training_dataset),
+            ]
         )
 
 
 @schema
 class DLCModelTrainingSelection(SpyglassMixin, dj.Manual):
-    definition = """      # Specification for a DLC model training instance
+    definition = """ # Specification for a DLC model training instance
     -> DLCProject
     -> DLCModelTrainingParams
-    training_id     : int # unique integer,
+    training_id     : int # unique integer
     # allows for multiple training runs for a specific parameter set and project
     ---
     model_prefix='' : varchar(32)
     """
 
-    def insert1(self, key, **kwargs):
-        training_id = key["training_id"]
-        if training_id is None:
+    def insert1(self, key, **kwargs):  # Auto-increment training_id
+        if not (training_id := key.get("training_id")):
             training_id = (
                 dj.U().aggr(self & key, n="max(training_id)").fetch1("n") or 0
             ) + 1
-        key["training_id"] = training_id
-        super().insert1(key, **kwargs)
+        super().insert1({**key, "training_id": training_id}, **kwargs)
 
 
 @schema
@@ -126,16 +102,19 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
     config_template: longblob     # stored full config file
     """
 
-    # To continue from previous training snapshot, devs suggest editing pose_cfg.yml
+    # To continue from previous training snapshot,
+    # devs suggest editing pose_cfg.yml
     # https://github.com/DeepLabCut/DeepLabCut/issues/70
 
     def make(self, key):
-        """Launch training for each entry in DLCModelTrainingSelection via `.populate()`."""
-        model_prefix = (DLCModelTrainingSelection & key).fetch1("model_prefix")
+        """Launch training for each entry in DLCModelTrainingSelection."""
+
         from deeplabcut import create_training_dataset, train_network
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
         from . import dlc_reader
+
+        model_prefix = (DLCModelTrainingSelection & key).fetch1("model_prefix")
 
         try:
             from deeplabcut.utils.auxiliaryfunctions import get_model_folder
@@ -143,9 +122,11 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             from deeplabcut.utils.auxiliaryfunctions import (
                 GetModelFolder as get_model_folder,
             )
+
         config_path, project_name = (DLCProject() & key).fetch1(
             "config_path", "project_name"
         )
+
         with OutputLogger(
             name="DLC_project_{project_name}_training",
             path=f"{os.path.dirname(config_path)}/log.log",
@@ -154,13 +135,14 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             dlc_config = read_config(config_path)
             project_path = dlc_config["project_path"]
             key["project_path"] = project_path
+
             # ---- Build and save DLC configuration (yaml) file ----
-            _, dlc_config = dlc_reader.read_yaml(project_path)
-            if not dlc_config:
-                dlc_config = read_config(config_path)
-            dlc_config.update((DLCModelTrainingParams & key).fetch1("params"))
+            dlc_config = dlc_reader.read_yaml(project_path)[1] or read_config(
+                config_path
+            )
             dlc_config.update(
                 {
+                    **(DLCModelTrainingParams & key).fetch1("params"),
                     "project_path": Path(project_path).as_posix(),
                     "modelprefix": model_prefix,
                     "train_fraction": dlc_config["TrainingFraction"][
@@ -172,8 +154,8 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
                     ],
                 }
             )
+
             # Write dlc config file to base project folder
-            # TODO: need to make sure this will work
             dlc_cfg_filepath = dlc_reader.save_yaml(project_path, dlc_config)
             # ---- create training dataset ----
             training_dataset_input_args = list(
@@ -187,41 +169,36 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             logger.logger.info("creating training dataset")
             create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
             # ---- Trigger DLC model training job ----
-            train_network_input_args = list(
-                inspect.signature(train_network).parameters
-            )
             train_network_kwargs = {
                 k: v
                 for k, v in dlc_config.items()
-                if k in train_network_input_args
+                if k in get_param_names(train_network)
             }
             for k in ["shuffle", "trainingsetindex", "maxiters"]:
-                if k in train_network_kwargs:
-                    train_network_kwargs[k] = int(train_network_kwargs[k])
+                if value := train_network_kwargs.get(k):
+                    train_network_kwargs[k] = int(value)
+
             try:
                 train_network(dlc_cfg_filepath, **train_network_kwargs)
-            except (
-                KeyboardInterrupt
-            ):  # Instructions indicate to train until interrupt
+            except KeyboardInterrupt:
                 logger.logger.info(
                     "DLC training stopped via Keyboard Interrupt"
                 )
 
-            snapshots = list(
-                (
-                    project_path
-                    / get_model_folder(
-                        trainFraction=dlc_config["train_fraction"],
-                        shuffle=dlc_config["shuffle"],
-                        cfg=dlc_config,
-                        modelprefix=dlc_config["modelprefix"],
-                    )
-                    / "train"
-                ).glob("*index*")
-            )
+            snapshots = (
+                project_path
+                / get_model_folder(
+                    trainFraction=dlc_config["train_fraction"],
+                    shuffle=dlc_config["shuffle"],
+                    cfg=dlc_config,
+                    modelprefix=dlc_config["modelprefix"],
+                )
+                / "train"
+            ).glob("*index*")
+
+            # DLC goes by snapshot magnitude when judging 'latest' for
+            # evaluation. Here, we mean most recently generated
             max_modified_time = 0
-            # DLC goes by snapshot magnitude when judging 'latest' for evaluation
-            # Here, we mean most recently generated
             for snapshot in snapshots:
                 modified_time = os.path.getmtime(snapshot)
                 if modified_time > max_modified_time:
@@ -237,7 +214,10 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             )
             from .position_dlc_model import DLCModelSource
 
-            dlc_model_name = f"{key['project_name']}_{key['dlc_training_params_name']}_{key['training_id']:02d}"
+            dlc_model_name = (
+                f"{key['project_name']}_"
+                + f"{key['dlc_training_params_name']}_{key['training_id']:02d}"
+            )
             DLCModelSource.insert_entry(
                 dlc_model_name=dlc_model_name,
                 project_name=key["project_name"],
@@ -245,6 +225,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
                 key=key,
                 skip_duplicates=True,
             )
-        print(
-            f"Inserted {dlc_model_name} from {key['project_name']} into DLCModelSource"
-        )
+
+
+def get_param_names(func):
+    return list(inspect.signature(func).parameters)

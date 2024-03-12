@@ -113,7 +113,6 @@ class DLCCentroidSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> DLCSmoothInterpCohort
     -> DLCCentroidParams
-    ---
     """
 
 
@@ -361,8 +360,11 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
 
 def four_led_centroid(pos_df: pd.DataFrame, **params):
     """Determines the centroid of 4 LEDS on an implant LED ring.
-    Assumed to be the Green LED, and 3 red LEDs called: redLED_C, redLED_L, redLED_R
+
+    Assumed to be the Green LED, and 3 red LEDs: redLED_C, redLED_L, redLED_R
+
     By default, uses (greenled + redLED_C) / 2 to calculate centroid
+
     If Green LED is NaN, but red center LED is not,
         then the red center LED is called the centroid
     If green and red center LEDs are NaN, but red left and red right LEDs are not,
@@ -394,17 +396,20 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
     """
     centroid = np.zeros(shape=(len(pos_df), 2))
     idx = pd.IndexSlice
-    # TODO: this feels messy, clean-up
+
     green_led = params["points"].pop("greenLED", None)
     red_led_C = params["points"].pop("redLED_C", None)
     red_led_L = params["points"].pop("redLED_L", None)
     red_led_R = params["points"].pop("redLED_R", None)
+
     green_nans = pos_df.loc[:, idx[green_led, ("x", "y")]].isna().any(axis=1)
     red_C_nans = pos_df.loc[:, idx[red_led_C, ("x", "y")]].isna().any(axis=1)
     red_L_nans = pos_df.loc[:, idx[red_led_L, ("x", "y")]].isna().any(axis=1)
     red_R_nans = pos_df.loc[:, idx[red_led_R, ("x", "y")]].isna().any(axis=1)
-    # TODO: implement checks to make sure not rewriting previously set index in centroid
-    # If all given LEDs are not NaN
+
+    # TODO: implement checks to make sure not rewriting previously set index in
+    # centroid If all given LEDs are not NaN
+
     dist_between_green_red = get_distance(
         pos_df.loc[:, idx[red_led_C, ("x", "y")]].to_numpy(),
         pos_df.loc[:, idx[green_led, ("x", "y")]].to_numpy(),
@@ -460,6 +465,7 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         np.logical_and, (green_nans, red_C_nans, red_L_nans, red_R_nans)
     )
     centroid[all_bad_mask, :] = np.nan
+
     # If green LED is NaN, but red center LED is not
     no_green_red_C = np.logical_and(green_nans, ~red_C_nans)
     if np.sum(no_green_red_C) > 0:
@@ -720,10 +726,13 @@ def two_pt_centroid(pos_df: pd.DataFrame, **params):
 
     idx = pd.IndexSlice
     centroid = np.zeros(shape=(len(pos_df), 2))
+
     PT1 = params["points"].pop("point1", None)
     PT2 = params["points"].pop("point2", None)
+
     pt1_nans = pos_df.loc[:, idx[PT1, ("x", "y")]].isna().any(axis=1)
     pt2_nans = pos_df.loc[:, idx[PT2, ("x", "y")]].isna().any(axis=1)
+
     dist_between_points = get_distance(
         pos_df.loc[:, idx[PT1, ("x", "y")]].to_numpy(),
         pos_df.loc[:, idx[PT2, ("x", "y")]].to_numpy(),

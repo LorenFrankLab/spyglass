@@ -20,7 +20,7 @@ from spyglass.position.v1.position_dlc_pose_estimation import (
     DLCPoseEstimationSelection,
 )
 from spyglass.position.v1.position_dlc_position import DLCSmoothInterpParams
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_dlc_selection")
 
@@ -180,23 +180,24 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
     @classmethod
     def evaluate_pose_estimation(cls, key):
         likelihood_thresh = []
-        valid_fields = (
-            DLCSmoothInterpCohort.BodyPart().fetch().dtype.fields.keys()
-        )
+
+        valid_fields = DLCSmoothInterpCohort.BodyPart().heading.names
         centroid_key = {k: val for k, val in key.items() if k in valid_fields}
         centroid_key["dlc_si_cohort_selection_name"] = key[
             "dlc_si_cohort_centroid"
         ]
+        centroid_bodyparts, centroid_si_params = (
+            DLCSmoothInterpCohort.BodyPart & centroid_key
+        ).fetch("bodypart", "dlc_si_params_name")
+
         orientation_key = centroid_key.copy()
         orientation_key["dlc_si_cohort_selection_name"] = key[
             "dlc_si_cohort_orientation"
         ]
-        centroid_bodyparts, centroid_si_params = (
-            DLCSmoothInterpCohort.BodyPart & centroid_key
-        ).fetch("bodypart", "dlc_si_params_name")
         orientation_bodyparts, orientation_si_params = (
             DLCSmoothInterpCohort.BodyPart & orientation_key
         ).fetch("bodypart", "dlc_si_params_name")
+
         for param in np.unique(
             np.concatenate((centroid_si_params, orientation_si_params))
         ):
@@ -208,9 +209,10 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
         if len(np.unique(likelihood_thresh)) > 1:
             raise ValueError("more than one likelihood threshold used")
+
         like_thresh = likelihood_thresh[0]
         bodyparts = np.unique([*centroid_bodyparts, *orientation_bodyparts])
-        fields = list(DLCPoseEstimation.BodyPart.fetch().dtype.fields.keys())
+        fields = DLCPoseEstimation.BodyPart.heading.names
         pose_estimation_key = {k: v for k, v in key.items() if k in fields}
         pose_estimation_df = pd.concat(
             {
@@ -273,7 +275,7 @@ class DLCPosVideoParams(SpyglassMixin, dj.Manual):
     def get_default(cls):
         query = cls & {"dlc_pos_video_params_name": "default"}
         if not len(query) > 0:
-            cls().insert_default(skip_duplicates=True)
+            cls().insert_default()
             default = (cls & {"dlc_pos_video_params_name": "default"}).fetch1()
         else:
             default = query.fetch1()
@@ -302,13 +304,11 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        from tqdm import tqdm as tqdm
 
         params = (DLCPosVideoParams & key).fetch1("params")
-        if "video_params" not in params:
-            params["video_params"] = {}
+
         M_TO_CM = 100
-        interval_list_name = (
+        key["interval_list_name"] = (
             convert_epoch_interval_name_to_position_interval_name(
                 {
                     "nwb_file_name": key["nwb_file_name"],
@@ -317,7 +317,6 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
                 populate_missing=False,
             )
         )
-        key["interval_list_name"] = interval_list_name
         epoch = (
             int(
                 key["interval_list_name"]
@@ -332,31 +331,23 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             "dlc_model_name": key["dlc_model_name"],
             "dlc_model_params_name": key["dlc_model_params_name"],
         }
-        pose_estimation_params, video_filename, output_dir = (
-            DLCPoseEstimationSelection() & pose_estimation_key
+
+        pose_estimation_params, video_filename, output_dir, meters_per_pixel = (
+            DLCPoseEstimationSelection * DLCPoseEstimation & pose_estimation_key
         ).fetch1(
-            "pose_estimation_params", "video_path", "pose_estimation_output_dir"
+            "pose_estimation_params",
+            "video_path",
+            "pose_estimation_output_dir",
+            "meters_per_pixel",
         )
-        print(f"video filename: {video_filename}")
-        meters_per_pixel = (DLCPoseEstimation() & pose_estimation_key).fetch1(
-            "meters_per_pixel"
-        )
-        crop = None
-        if "cropping" in pose_estimation_params:
-            crop = pose_estimation_params["cropping"]
-        print("Loading position data...")
+
+        logger.info(f"video filename: {video_filename}")
+        crop = pose_estimation_params.get("cropping")
+
+        logger.info("Loading position data...")
+        v1_key = {k: v for k, v in key.items() if k in DLCPosV1.primary_key}
         position_info_df = (
-            DLCPosV1()
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "epoch": epoch,
-                "dlc_si_cohort_centroid": key["dlc_si_cohort_centroid"],
-                "dlc_centroid_params_name": key["dlc_centroid_params_name"],
-                "dlc_si_cohort_orientation": key["dlc_si_cohort_orientation"],
-                "dlc_orientation_params_name": key[
-                    "dlc_orientation_params_name"
-                ],
-            }
+            DLCPosV1() & {"epoch": epoch, **v1_key}
         ).fetch1_dataframe()
         pose_estimation_df = pd.concat(
             {
@@ -372,27 +363,25 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             },
             axis=1,
         )
-        assert len(pose_estimation_df) == len(position_info_df), (
-            f"length of pose_estimation_df: {len(pose_estimation_df)} "
-            f"does not match the length of position_info_df: {len(position_info_df)}."
-        )
+        if not len(pose_estimation_df) == len(position_info_df):
+            raise ValueError(
+                "Dataframes are not the same length\n"
+                + f"\tPose estim   :  {len(pose_estimation_df)}\n"
+                + f"\tPosition info: {len(position_info_df)}"
+            )
 
-        nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
+        output_video_filename = (
+            key["nwb_file_name"].replace(".nwb", "")
+            + f"_{epoch:02d}_"
+            + f'{key["dlc_si_cohort_centroid"]}_'
+            + f'{key["dlc_centroid_params_name"]}'
+            + f'{key["dlc_orientation_params_name"]}.mp4'
+        )
         if Path(output_dir).exists():
             output_video_filename = (
-                f"{Path(output_dir).as_posix()}/"
-                f"{nwb_base_filename}_{epoch:02d}_"
-                f'{key["dlc_si_cohort_centroid"]}_'
-                f'{key["dlc_centroid_params_name"]}'
-                f'{key["dlc_orientation_params_name"]}.mp4'
+                f"{Path(output_dir).as_posix()}/" + output_video_filename
             )
-        else:
-            output_video_filename = (
-                f"{nwb_base_filename}_{epoch:02d}_"
-                f'{key["dlc_si_cohort_centroid"]}_'
-                f'{key["dlc_centroid_params_name"]}'
-                f'{key["dlc_orientation_params_name"]}.mp4'
-            )
+
         idx = pd.IndexSlice
         video_frame_inds = (
             position_info_df["video_frame_ind"].astype(int).to_numpy()
@@ -403,31 +392,25 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             ].to_numpy()
             for bodypart in pose_estimation_df.columns.levels[0]
         }
-        if params.get("incl_likelihood", None):
-            likelihoods = {
+        likelihoods = (
+            {
                 bodypart: pose_estimation_df.loc[
                     :, idx[bodypart, ("likelihood")]
                 ].to_numpy()
                 for bodypart in pose_estimation_df.columns.levels[0]
             }
-        else:
-            likelihoods = None
+            if params.get("incl_likelihood")
+            else None
+        )
         position_mean = {
             "DLC": np.asarray(position_info_df[["position_x", "position_y"]])
         }
         orientation_mean = {
             "DLC": np.asarray(position_info_df[["orientation"]])
         }
-        position_time = np.asarray(position_info_df.index)
-        cm_per_pixel = meters_per_pixel * M_TO_CM
-        percent_frames = params.get("percent_frames", None)
         frames = params.get("frames", None)
-        if frames is not None:
-            frames_arr = np.arange(frames[0], frames[1])
-        else:
-            frames_arr = frames
 
-        print("Making video...")
+        logger.info("Making video...")
         make_video(
             video_filename=video_filename,
             video_frame_inds=video_frame_inds,
@@ -435,14 +418,14 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             orientation_mean=orientation_mean,
             centroids=centroids,
             likelihoods=likelihoods,
-            position_time=position_time,
+            position_time=np.asarray(position_info_df.index),
             video_time=None,
             processor=params.get("processor", "matplotlib"),
-            frames=frames_arr,
-            percent_frames=percent_frames,
+            frames=np.arange(frames[0], frames[1]) if frames else frames,
+            percent_frames=params.get("percent_frames", None),
             output_video_filename=output_video_filename,
-            cm_to_pixels=cm_per_pixel,
+            cm_to_pixels=meters_per_pixel * M_TO_CM,
             disable_progressbar=False,
             crop=crop,
-            **params["video_params"],
+            **params.get("video_params", {}),
         )

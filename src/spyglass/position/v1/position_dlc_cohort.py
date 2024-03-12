@@ -97,21 +97,23 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
         ) as logger:
             logger.logger.info("-----------------------")
             logger.logger.info("Bodypart Cohort")
+
             # from Jen Guidera
             self.insert1(key)
+
             cohort_selection = (DLCSmoothInterpCohortSelection & key).fetch1()
             table_entries = []
-            bodyparts_params_dict = cohort_selection.pop(
-                "bodyparts_params_dict"
-            )
+            bp_params_dict = cohort_selection.pop("bodyparts_params_dict")
             temp_key = cohort_selection.copy()
-            for bodypart, params in bodyparts_params_dict.items():
+            for bodypart, params in bp_params_dict.items():
                 temp_key["bodypart"] = bodypart
                 temp_key["dlc_si_params_name"] = params
                 table_entries.append((DLCSmoothInterp & temp_key).fetch())
-            assert len(table_entries) == len(
-                bodyparts_params_dict
-            ), "more entries found in DLCSmoothInterp than specified in bodyparts_params_dict"
+            if not len(table_entries) == len(bp_params_dict):
+                raise ValueError(
+                    "More entries in DLCSmoothInterp than bodyparts_params_dict"
+                )
+
             table_column_names = list(table_entries[0].dtype.fields.keys())
             for table_entry in table_entries:
                 entry_key = {

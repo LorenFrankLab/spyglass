@@ -10,7 +10,12 @@ from tqdm import tqdm as tqdm
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
+from spyglass.position.v1.dlc_utils import (
+    check_videofile,
+    convert_to_pixels,
+    fill_nan,
+    get_video_path,
+)
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_trodes_position")
@@ -253,7 +258,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
                 "interval_list_name": key["interval_list_name"],
             }
         ).fetch1_dataframe()
-        position_info_df = (TrodesPosV1() & key).fetch1_dataframe()
+        position_df = (TrodesPosV1() & key).fetch1_dataframe()
 
         logger.info("Loading video data...")
         epoch = (
@@ -278,69 +283,32 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             self.insert1(dict(**key, has_video=False))
             return
 
-        video_dir = os.path.dirname(video_path) + "/"
         video_path = check_videofile(
-            video_path=video_dir, video_filename=video_filename
+            video_path=os.path.dirname(video_path) + "/",
+            video_filename=video_filename,
         )[0].as_posix()
-        nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
-        current_dir = Path(os.getcwd())
+
         output_video_filename = (
-            f"{current_dir.as_posix()}/{nwb_base_filename}_"
-            f"{epoch:02d}_{key['trodes_pos_params_name']}.mp4"
+            Path(os.getcwd()) / key["nwb_file_name"].replace(".nwb", "")
+            + f"_{epoch:02d}_{key['trodes_pos_params_name']}.mp4"
         )
-        centroids = {
-            "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
-            "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
-        }
-        position_mean = np.asarray(
-            position_info_df[["position_x", "position_y"]]
-        )
-        orientation_mean = np.asarray(position_info_df[["orientation"]])
-        position_time = np.asarray(position_info_df.index)
-        cm_per_pixel = meters_per_pixel * M_TO_CM
 
         logger.info("Making video...")
         self.make_video(
-            video_path,
-            centroids,
-            position_mean,
-            orientation_mean,
-            video_time,
-            position_time,
+            video_filename=video_path,
+            centroids={
+                "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
+                "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
+            },
+            position_mean=np.asarray(position_df[["position_x", "position_y"]]),
+            orientation_mean=np.asarray(position_df[["orientation"]]),
+            video_time=video_time,
+            position_time=np.asarray(position_df.index),
             output_video_filename=output_video_filename,
-            cm_to_pixels=cm_per_pixel,
+            cm_to_pixels=meters_per_pixel * M_TO_CM,
             disable_progressbar=False,
         )
         self.insert1(dict(**key, has_video=True))
-
-    @staticmethod
-    def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
-        """Converts from cm to pixels and flips the y-axis.
-        Parameters
-        ----------
-        data : ndarray, shape (n_time, 2)
-        frame_size : array_like, shape (2,)
-        cm_to_pixels : float
-
-        Returns
-        -------
-        converted_data : ndarray, shape (n_time, 2)
-        """
-        return data / cm_to_pixels
-
-    @staticmethod
-    def fill_nan(variable, video_time, variable_time):
-        video_ind = np.digitize(variable_time, video_time[1:])
-
-        n_video_time = len(video_time)
-        try:
-            n_variable_dims = variable.shape[1]
-            filled_variable = np.full((n_video_time, n_variable_dims), np.nan)
-        except IndexError:
-            filled_variable = np.full((n_video_time,), np.nan)
-        filled_variable[video_ind] = variable
-
-        return filled_variable
 
     def make_video(
         self,
@@ -373,13 +341,11 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         )
 
         centroids = {
-            color: self.fill_nan(data, video_time, position_time)
+            color: fill_nan(data, video_time, position_time)
             for color, data in centroids.items()
         }
-        position_mean = self.fill_nan(position_mean, video_time, position_time)
-        orientation_mean = self.fill_nan(
-            orientation_mean, video_time, position_time
-        )
+        position_mean = fill_nan(position_mean, video_time, position_time)
+        orientation_mean = fill_nan(orientation_mean, video_time, position_time)
 
         for time_ind in tqdm(
             range(n_frames - 1), desc="frames", disable=disable_progressbar
@@ -392,9 +358,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
                 green_centroid = centroids["green"][time_ind]
 
                 position = position_mean[time_ind]
-                position = self.convert_to_pixels(
-                    position, frame_size, cm_to_pixels
-                )
+                position = convert_to_pixels(position, frame_size, cm_to_pixels)
                 orientation = orientation_mean[time_ind]
 
                 if np.all(~np.isnan(red_centroid)):
