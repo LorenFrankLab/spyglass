@@ -125,9 +125,9 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
             sorting_fname,
             object_id,
             recording_label,
-            sorting_label,
+            metrics_figurl,
         ) = query.fetch1(
-            "analysis_file_name", "object_id", "recording_id", "sorting_id"
+            "analysis_file_name", "object_id", "recording_id", "metrics_figurl"
         )
 
         # DO
