@@ -11,13 +11,17 @@
 
 ### Pipelines
 
+- Common:
+    - Add ActivityLog to `common_usage` to track unreferenced utilities. #870
 - Position:
     - Fixes to `environment-dlc.yml` restricting tensortflow #834
     - Video restriction for multicamera epochs #834
     - Fixes to `_convert_mp4` #834
     - Replace deprecated calls to `yaml.safe_load()` #834
+    - Refactoring to reduce redundancy #870
+    - Migrate `OutputLogger` behavior to decorator #870
 - Spikesorting:
-    - Increase`spikeinterface` version to >=0.99.1, <0.100 #852
+    - Increase`spikeinterface` version to >=0.99.1, \<0.100 #852
     - Bug fix in single artifact interval edge case #859
 - LFP
     - In LFPArtifactDetection, only apply referencing if explicitly selected #863
@@ -193,3 +197,4 @@
 [0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
 [0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
 [0.5.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.0
+[0.5.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1

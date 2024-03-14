@@ -16,6 +16,7 @@ from spyglass.position.v1.dlc_utils import (
     fill_nan,
     get_video_path,
 )
+from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_trodes_position")
@@ -251,14 +252,14 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         M_TO_CM = 100
 
         logger.info("Loading position data...")
-        raw_position_df = (
+        raw_df = (
             RawPosition.PosObject
             & {
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
             }
         ).fetch1_dataframe()
-        position_df = (TrodesPosV1() & key).fetch1_dataframe()
+        pos_df = (TrodesPosV1() & key).fetch1_dataframe()
 
         logger.info("Loading video data...")
         epoch = (
@@ -293,125 +294,19 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             + f"_{epoch:02d}_{key['trodes_pos_params_name']}.mp4"
         )
 
-        logger.info("Making video...")
-        self.make_video(
+        make_video(
+            processor="opencv-trodes",
             video_filename=video_path,
             centroids={
-                "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
-                "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
+                "red": np.asarray(raw_df[["xloc", "yloc"]]),
+                "green": np.asarray(raw_df[["xloc2", "yloc2"]]),
             },
-            position_mean=np.asarray(position_df[["position_x", "position_y"]]),
-            orientation_mean=np.asarray(position_df[["orientation"]]),
+            position_mean=np.asarray(pos_df[["position_x", "position_y"]]),
+            orientation_mean=np.asarray(pos_df[["orientation"]]),
             video_time=video_time,
-            position_time=np.asarray(position_df.index),
+            position_time=np.asarray(pos_df.index),
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
             disable_progressbar=False,
         )
         self.insert1(dict(**key, has_video=True))
-
-    def make_video(
-        self,
-        video_filename,
-        centroids,
-        position_mean,
-        orientation_mean,
-        video_time,
-        position_time,
-        output_video_filename="output.mp4",
-        cm_to_pixels=1.0,
-        disable_progressbar=False,
-        arrow_radius=15,
-        circle_radius=8,
-    ):
-        import cv2
-
-        RGB_PINK = (234, 82, 111)
-        RGB_YELLOW = (253, 231, 76)
-        RGB_WHITE = (255, 255, 255)
-
-        video = cv2.VideoCapture(video_filename)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        frame_size = (int(video.get(3)), int(video.get(4)))
-        frame_rate = video.get(5)
-        n_frames = int(orientation_mean.shape[0])
-        logger.info(f"video filepath: {output_video_filename}")
-        out = cv2.VideoWriter(
-            output_video_filename, fourcc, frame_rate, frame_size, True
-        )
-
-        centroids = {
-            color: fill_nan(data, video_time, position_time)
-            for color, data in centroids.items()
-        }
-        position_mean = fill_nan(position_mean, video_time, position_time)
-        orientation_mean = fill_nan(orientation_mean, video_time, position_time)
-
-        for time_ind in tqdm(
-            range(n_frames - 1), desc="frames", disable=disable_progressbar
-        ):
-            is_grabbed, frame = video.read()
-            if is_grabbed:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                red_centroid = centroids["red"][time_ind]
-                green_centroid = centroids["green"][time_ind]
-
-                position = position_mean[time_ind]
-                position = convert_to_pixels(position, frame_size, cm_to_pixels)
-                orientation = orientation_mean[time_ind]
-
-                if np.all(~np.isnan(red_centroid)):
-                    cv2.circle(
-                        img=frame,
-                        center=tuple(red_centroid.astype(int)),
-                        radius=circle_radius,
-                        color=RGB_YELLOW,
-                        thickness=-1,
-                        shift=cv2.CV_8U,
-                    )
-
-                if np.all(~np.isnan(green_centroid)):
-                    cv2.circle(
-                        img=frame,
-                        center=tuple(green_centroid.astype(int)),
-                        radius=circle_radius,
-                        color=RGB_PINK,
-                        thickness=-1,
-                        shift=cv2.CV_8U,
-                    )
-
-                if np.all(~np.isnan(position)) & np.all(~np.isnan(orientation)):
-                    arrow_tip = (
-                        int(position[0] + arrow_radius * np.cos(orientation)),
-                        int(position[1] + arrow_radius * np.sin(orientation)),
-                    )
-                    cv2.arrowedLine(
-                        img=frame,
-                        pt1=tuple(position.astype(int)),
-                        pt2=arrow_tip,
-                        color=RGB_WHITE,
-                        thickness=4,
-                        line_type=8,
-                        shift=cv2.CV_8U,
-                        tipLength=0.25,
-                    )
-
-                if np.all(~np.isnan(position)):
-                    cv2.circle(
-                        img=frame,
-                        center=tuple(position.astype(int)),
-                        radius=circle_radius,
-                        color=RGB_WHITE,
-                        thickness=-1,
-                        shift=cv2.CV_8U,
-                    )
-
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                out.write(frame)
-            else:
-                break
-
-        video.release()
-        out.release()
-        cv2.destroyAllWindows()

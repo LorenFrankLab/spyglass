@@ -367,7 +367,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
     def make(self, key):
         self._no_transaction_make(key)
 
-    def _no_transaction_make(self, key, verbose=True):
+    def _no_transaction_make(self, key, verbose=True, skip_duplicates=False):
         if not self.connection.in_transaction:
             self.populate(key)
             return
@@ -394,6 +394,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 "interval_list_name": interval_list_name,
             }
         ).fetch1("valid_times")
+
         cam_device_str = r"camera_device (\d+)"
         is_found = False
         for ind, video in enumerate(videos.values()):
@@ -403,26 +404,31 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 # check to see if the times for this video_object are largely
                 # overlapping with the task epoch times
 
-                if len(
+                if not len(
                     interval_list_contains(valid_times, video_obj.timestamps)
                     > 0.9 * len(video_obj.timestamps)
                 ):
-                    nwb_cam_device = video_obj.device.name
-                    # returns whatever was captured in the first group (within the parentheses) of the regular expression -- in this case, 0
-                    key["video_file_num"] = int(
-                        re.match(cam_device_str, nwb_cam_device)[1]
+                    continue
+
+                nwb_cam_device = video_obj.device.name
+
+                # returns whatever was captured in the first group (within the
+                # parentheses) of the regular expression - in this case, 0
+
+                key["video_file_num"] = int(
+                    re.match(cam_device_str, nwb_cam_device)[1]
+                )
+                camera_name = video_obj.device.camera_name
+                if CameraDevice & {"camera_name": camera_name}:
+                    key["camera_name"] = video_obj.device.camera_name
+                else:
+                    raise KeyError(
+                        f"No camera with camera_name: {camera_name} found "
+                        + "in CameraDevice table."
                     )
-                    camera_name = video_obj.device.camera_name
-                    if CameraDevice & {"camera_name": camera_name}:
-                        key["camera_name"] = video_obj.device.camera_name
-                    else:
-                        raise KeyError(
-                            f"No camera with camera_name: {camera_name} found "
-                            + "in CameraDevice table."
-                        )
-                    key["video_file_object_id"] = video_obj.object_id
-                    self.insert1(key)
-                    is_found = True
+                key["video_file_object_id"] = video_obj.object_id
+                self.insert1(key, skip_duplicates=skip_duplicates)
+                is_found = True
 
         if not is_found and verbose:
             logger.info(
@@ -431,7 +437,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             )
 
     @classmethod
-    def update_entries(cls, restrict={}):
+    def update_entries(cls, restrict=True):
         existing_entries = (cls & restrict).fetch("KEY")
         for row in existing_entries:
             if (cls & row).fetch1("camera_name"):

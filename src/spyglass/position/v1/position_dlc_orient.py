@@ -6,12 +6,25 @@ from position_tools.core import gaussian_smooth
 
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.v1.dlc_utils import get_span_start_stop
+from spyglass.position.v1.dlc_utils import (
+    get_span_start_stop,
+    interp_orientation,
+    no_orientation,
+    red_led_bisector_orientation,
+    two_pt_head_orientation,
+)
 from spyglass.utils import SpyglassMixin, logger
 
 from .position_dlc_cohort import DLCSmoothInterpCohort
 
 schema = dj.schema("position_v1_dlc_orient")
+
+# Add new functions for orientation calculation here
+_key_to_func_dict = {
+    "none": no_orientation,
+    "red_green_orientation": two_pt_head_orientation,
+    "red_led_bisector": red_led_bisector_orientation,
+}
 
 
 @schema
@@ -170,94 +183,3 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             columns=COLUMNS,
             index=index,
         )
-
-
-def two_pt_head_orientation(pos_df: pd.DataFrame, **params):
-    """Determines orientation based on vector between two points"""
-    BP1 = params.pop("bodypart1", None)
-    BP2 = params.pop("bodypart2", None)
-    orientation = np.arctan2(
-        (pos_df[BP1]["y"] - pos_df[BP2]["y"]),
-        (pos_df[BP1]["x"] - pos_df[BP2]["x"]),
-    )
-    return orientation
-
-
-def no_orientation(pos_df: pd.DataFrame, **params):
-    fill_value = params.pop("fill_with", np.nan)
-    n_frames = len(pos_df)
-    orientation = np.full(
-        shape=(n_frames), fill_value=fill_value, dtype=np.float16
-    )
-    return orientation
-
-
-def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
-    """Determines orientation based on 2 equally-spaced identifiers
-    that are assumed to be perpendicular to the orientation direction.
-    A third object is needed to determine forward/backward
-    """
-    LED1 = params.pop("led1", None)
-    LED2 = params.pop("led2", None)
-    LED3 = params.pop("led3", None)
-    orientation = []
-    for index, row in pos_df.iterrows():
-        x_vec = row[LED1]["x"] - row[LED2]["x"]
-        y_vec = row[LED1]["y"] - row[LED2]["y"]
-        if y_vec == 0:
-            if (row[LED3]["y"] > row[LED1]["y"]) & (
-                row[LED3]["y"] > row[LED2]["y"]
-            ):
-                orientation.append(np.pi / 2)
-            elif (row[LED3]["y"] < row[LED1]["y"]) & (
-                row[LED3]["y"] < row[LED2]["y"]
-            ):
-                orientation.append(-(np.pi / 2))
-            else:
-                raise Exception("Cannot determine head direction from bisector")
-        else:
-            length = np.sqrt(y_vec * y_vec + x_vec * x_vec)
-            norm = np.array([-y_vec / length, x_vec / length])
-            orientation.append(np.arctan2(norm[1], norm[0]))
-        if index + 1 == len(pos_df):
-            break
-    return np.array(orientation)
-
-
-# Add new functions for orientation calculation here
-
-_key_to_func_dict = {
-    "none": no_orientation,
-    "red_green_orientation": two_pt_head_orientation,
-    "red_led_bisector": red_led_bisector_orientation,
-}
-
-
-def interp_orientation(df, spans_to_interp, **kwargs):
-    idx = pd.IndexSlice
-    no_x_msg = "Index {ind} has no {x}point with which to interpolate"
-    df_orient = df["orientation"]
-    # TODO: add parameters to refine interpolation
-
-    for ind, (span_start, span_stop) in enumerate(spans_to_interp):
-        idx_span = idx[span_start:span_stop]
-        if (span_stop + 1) >= len(df):
-            df.loc[idx_span, idx["orientation"]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, x="stop"))
-            continue
-        if span_start < 1:
-            df.loc[idx_span, idx["orientation"]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, x="start"))
-            continue
-
-        orient = [df_orient.iloc[span_start - 1], df_orient.iloc[span_stop + 1]]
-
-        start_time = df.index[span_start]
-        stop_time = df.index[span_stop]
-        orientnew = np.interp(
-            x=df.index[span_start : span_stop + 1],
-            xp=[start_time, stop_time],
-            fp=[orient[0], orient[-1]],
-        )
-        df.loc[idx[start_time:stop_time], idx["orientation"]] = orientnew
-    return df

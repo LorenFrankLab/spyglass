@@ -7,7 +7,6 @@ import pwd
 import subprocess
 import sys
 from collections import abc
-from contextlib import redirect_stdout
 from itertools import groupby
 from operator import itemgetter
 from pathlib import Path, PosixPath
@@ -17,11 +16,13 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from datajoint.utils import from_camel_case
 from tqdm import tqdm as tqdm
 
 from spyglass.common.common_behav import VideoFile
+from spyglass.common.common_usage import ActivityLog
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
-from spyglass.utils import logger
+from spyglass.utils.logging import logger, stream_handler
 
 
 def validate_option(
@@ -159,135 +160,52 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
             os.chmod(os.path.join(dirpath, filename), mode)
 
 
-class OutputLogger:  # TODO: migrate to spyglass.utils.logger
-    """
-    A class to wrap a logging.Logger object in order to provide context manager capabilities.
+def file_log(logger, console=False):
+    """Decorator to add a file handler to a logger.
 
-    This class uses contextlib.redirect_stdout to temporarily redirect sys.stdout and thus
-    print statements to the log file instead of, or as well as the console.
-
-    Attributes
+    Parameters
     ----------
     logger : logging.Logger
-        logger object
-    name : str
-        name of logger
-    level : int
-        level of logging that the logger is set to handle
+        Logger to add file handler to.
+    console : bool, optional
+        If True, logged info will also be printed to console. Default False.
 
-    Methods
+    Example
     -------
-    setup_logger(name_logfile, path_logfile, print_console=False)
-        initialize or get logger object with name_logfile
-        that writes to path_logfile
-
-    Examples
-    --------
-    >>> with OutputLogger(name, path, print_console=True) as logger:
-    ...    logger.info("this will print to logfile")
-    ...    logger.logger.info("this will log to the logfile")
-    ... logger.info("this will print to the console")
-    ... logger.logger.info("this will log to the logfile")
-
+    @file_log(logger, console=True)
+    def func(self, *args, **kwargs):
+        pass
     """
 
-    def __init__(self, name, path, level="INFO", **kwargs):
-        self.logger = self.setup_logger(name, path, **kwargs)
-        self.name = self.logger.name
-        self.level = getattr(logging, level)
-
-    def setup_logger(
-        self, name_logfile, path_logfile, print_console=False
-    ) -> logging.Logger:
-        """
-        Sets up a logger for that outputs to a file, and optionally, the console
-
-        Parameters
-        ----------
-        name_logfile : str
-            name of the logfile to use
-        path_logfile : str
-            path to the file that should be used as the file handler
-        print_console : bool, default-False
-            if True, prints to console as well as log file.
-
-        Returns
-        -------
-        logger : logging.Logger
-            the logger object with specified handlers
-        """
-
-        logger = logging.getLogger(name_logfile)
-        # check to see if handlers already exist for this logger
-        if logger.handlers:
-            for handler in logger.handlers:
-                # if it's a file handler
-                # type is used instead of isinstance,
-                # which doesn't work properly with logging.StreamHandler
-                if type(handler) == logging.FileHandler:
-                    # if paths don't match, change file handler path
-                    if not os.path.samefile(handler.baseFilename, path_logfile):
-                        handler.close()
-                        logger.removeHandler(handler)
-                        file_handler = self._get_file_handler(path_logfile)
-                        logger.addHandler(file_handler)
-                # if a stream handler exists and
-                # if print_console is False remove streamHandler
-                if type(handler) == logging.StreamHandler:
-                    if not print_console:
-                        handler.close()
-                        logger.removeHandler(handler)
-            if print_console and not any(
-                type(handler) == logging.StreamHandler
-                for handler in logger.handlers
-            ):
-                logger.addHandler(self._get_stream_handler())
-
-        else:
-            file_handler = self._get_file_handler(path_logfile)
+    def decorator(func):
+        def wrapper(self, *args, **kwargs):
+            if not (log_path := getattr(self, "log_path", None)):
+                self.log_path = f"temp_{self.__class__.__name__}.log"
+            file_handler = logging.FileHandler(log_path, mode="a")
+            file_fmt = logging.Formatter(
+                "[%(asctime)s][%(levelname)s] Spyglass "
+                + "%(filename)s:%(lineno)d: %(message)s",
+                datefmt="%y-%m-%d %H:%M:%S",
+            )
+            file_handler.setFormatter(file_fmt)
             logger.addHandler(file_handler)
-            if print_console:
-                logger.addHandler(self._get_stream_handler())
-        logger.setLevel(logging.INFO)
-        return logger
+            if not console:
+                logger.removeHandler(logger.handlers[0])
+            try:
+                return func(self, *args, **kwargs)
+            finally:
+                if not console:
+                    logger.addHandler(stream_handler)
+                logger.removeHandler(file_handler)
+                file_handler.close()
 
-    def _get_file_handler(self, path):
-        output_dir = Path(os.path.dirname(path))
-        if not os.path.exists(output_dir):
-            output_dir.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(path, mode="a")
-        file_handler.setFormatter(self._get_formatter())
-        return file_handler
+        return wrapper
 
-    def _get_stream_handler(self):
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(self._get_formatter())
-        return stream_handler
-
-    def _get_formatter(self):
-        return logging.Formatter(
-            "[%(asctime)s] in %(pathname)s, line %(lineno)d: %(message)s",
-            datefmt="%d-%b-%y %H:%M:%S",
-        )
-
-    def write(self, msg):
-        if msg and not msg.isspace():
-            self.logger.log(self.level, msg)
-
-    def flush(self):
-        pass
-
-    def __enter__(self):
-        self._redirector = redirect_stdout(self)
-        self._redirector.__enter__()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        # let contextlib do any exception handling here
-        self._redirector.__exit__(exc_type, exc_value, traceback)
+    return decorator
 
 
 def get_dlc_root_data_dir():
+    ActivityLog().log("dlc_utils: get_dlc_root_data_dir")
     if "custom" in dj.config:
         if "dlc_root_data_dir" in dj.config["custom"]:
             dlc_root_dirs = dj.config.get("custom", {}).get("dlc_root_data_dir")
@@ -305,10 +223,7 @@ def get_dlc_root_data_dir():
 
 def get_dlc_processed_data_dir() -> str:
     """Returns session_dir relative to custom 'dlc_output_dir' root"""
-    logger.warning(
-        "DEPRECATED use of get_dlc_processed_data_dir. "
-        + "Use spyglass.settings.dlc_output_dir"
-    )
+    ActivityLog().log("dlc_utils: get_dlc_processed_data_dir")
     if "custom" in dj.config:
         if "dlc_output_dir" in dj.config["custom"]:
             dlc_output_dir = dj.config.get("custom", {}).get("dlc_output_dir")
@@ -327,7 +242,7 @@ def find_full_path(root_directories, relative_path):
         :param relative_path: the relative path to find the valid root directory
         :return: full-path (Path object)
     """
-    logger.warning("DEPRECATED use of find_full_path")
+    ActivityLog().log("dlc_utils: find_full_path")
     relative_path = _to_Path(relative_path)
 
     if relative_path.exists():
@@ -356,7 +271,7 @@ def find_root_directory(root_directories, full_path):
         :param full_path: the full path to search the root directory
         :return: root_directory (Path object)
     """
-    logger.warning("DEPRECATED use of find_full_path")
+    ActivityLog().log("dlc_utils: find_full_path")
     full_path = _to_Path(full_path)
 
     if not full_path.exists():
@@ -699,6 +614,36 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
     return dlc_df
 
 
+def interp_orientation(df, spans_to_interp, **kwargs):
+    idx = pd.IndexSlice
+    no_x_msg = "Index {ind} has no {x}point with which to interpolate"
+    df_orient = df["orientation"]
+    # TODO: add parameters to refine interpolation
+
+    for ind, (span_start, span_stop) in enumerate(spans_to_interp):
+        idx_span = idx[span_start:span_stop]
+        if (span_stop + 1) >= len(df):
+            df.loc[idx_span, idx["orientation"]] = np.nan
+            logger.info(no_x_msg.format(ind=ind, x="stop"))
+            continue
+        if span_start < 1:
+            df.loc[idx_span, idx["orientation"]] = np.nan
+            logger.info(no_x_msg.format(ind=ind, x="start"))
+            continue
+
+        orient = [df_orient.iloc[span_start - 1], df_orient.iloc[span_stop + 1]]
+
+        start_time = df.index[span_start]
+        stop_time = df.index[span_stop]
+        orientnew = np.interp(
+            x=df.index[span_start : span_stop + 1],
+            xp=[start_time, stop_time],
+            fp=[orient[0], orient[-1]],
+        )
+        df.loc[idx[start_time:stop_time], idx["orientation"]] = orientnew
+    return df
+
+
 def smooth_moving_avg(
     interp_df, smoothing_duration: float, sampling_rate: int, **kwargs
 ):
@@ -722,6 +667,67 @@ _key_to_smooth_func_dict = {
 }
 
 
+def two_pt_head_orientation(pos_df: pd.DataFrame, **params):
+    """Determines orientation based on vector between two points"""
+    BP1 = params.pop("bodypart1", None)
+    BP2 = params.pop("bodypart2", None)
+    orientation = np.arctan2(
+        (pos_df[BP1]["y"] - pos_df[BP2]["y"]),
+        (pos_df[BP1]["x"] - pos_df[BP2]["x"]),
+    )
+    return orientation
+
+
+def no_orientation(pos_df: pd.DataFrame, **params):
+    fill_value = params.pop("fill_with", np.nan)
+    n_frames = len(pos_df)
+    orientation = np.full(
+        shape=(n_frames), fill_value=fill_value, dtype=np.float16
+    )
+    return orientation
+
+
+def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
+    """Determines orientation based on 2 equally-spaced identifiers
+    that are assumed to be perpendicular to the orientation direction.
+    A third object is needed to determine forward/backward
+    """
+    LED1 = params.pop("led1", None)
+    LED2 = params.pop("led2", None)
+    LED3 = params.pop("led3", None)
+    orientation = []
+    for index, row in pos_df.iterrows():
+        x_vec = row[LED1]["x"] - row[LED2]["x"]
+        y_vec = row[LED1]["y"] - row[LED2]["y"]
+        if y_vec == 0:
+            if (row[LED3]["y"] > row[LED1]["y"]) & (
+                row[LED3]["y"] > row[LED2]["y"]
+            ):
+                orientation.append(np.pi / 2)
+            elif (row[LED3]["y"] < row[LED1]["y"]) & (
+                row[LED3]["y"] < row[LED2]["y"]
+            ):
+                orientation.append(-(np.pi / 2))
+            else:
+                raise Exception("Cannot determine head direction from bisector")
+        else:
+            length = np.sqrt(y_vec * y_vec + x_vec * x_vec)
+            norm = np.array([-y_vec / length, x_vec / length])
+            orientation.append(np.arctan2(norm[1], norm[0]))
+        if index + 1 == len(pos_df):
+            break
+    return np.array(orientation)
+
+
+# Add new functions for orientation calculation here
+
+_key_to_func_dict = {
+    "none": no_orientation,
+    "red_green_orientation": two_pt_head_orientation,
+    "red_led_bisector": red_led_bisector_orientation,
+}
+
+
 def fill_nan(variable, video_time, variable_time):
     video_ind = np.digitize(variable_time, video_time[1:])
 
@@ -736,7 +742,7 @@ def fill_nan(variable, video_time, variable_time):
     return filled_variable
 
 
-def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
+def convert_to_pixels(data, frame_size=None, cm_to_pixels=1.0):
     """Converts from cm to pixels and flips the y-axis.
 
     Parameters
@@ -750,432 +756,3 @@ def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
     converted_data : ndarray, shape (n_time, 2)
     """
     return data / cm_to_pixels
-
-
-RGB_PINK = (234, 82, 111)
-RGB_YELLOW = (253, 231, 76)
-RGB_BLUE = (30, 144, 255)
-RGB_ORANGE = (255, 127, 80)
-
-
-def make_video(processor="opencv", **kwargs):
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().log("dlc_utils: make_video")
-    if processor == "opencv":
-        make_video_opencv(**kwargs)
-    if processor == "matplotlib":
-        make_video_matplotlib(**kwargs)
-
-
-def make_video_opencv(
-    video_filename,
-    video_frame_inds,
-    position_mean,
-    orientation_mean,
-    centroids,
-    likelihoods,
-    position_time,
-    video_time=None,
-    frames=None,
-    percent_frames=1,
-    output_video_filename="output.mp4",
-    cm_to_pixels=1.0,
-    disable_progressbar=False,
-    crop=None,
-    arrow_radius=15,
-    circle_radius=8,
-):
-    import cv2
-
-    video = cv2.VideoCapture(video_filename)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    frame_size = (int(video.get(3)), int(video.get(4)))
-    frame_rate = video.get(5)
-
-    if frames is not None:
-        n_frames = len(frames)
-    else:
-        n_frames = int(len(video_frame_inds) * percent_frames)
-        frames = np.arange(0, n_frames)
-
-    logger.info(f"Video save path has {n_frames}: {output_video_filename}")
-
-    if crop:
-        frame_size = (crop[1] - crop[0], crop[3] - crop[2])
-
-    out = cv2.VideoWriter(
-        output_video_filename, fourcc, frame_rate, frame_size, True
-    )
-    logger.info(f"video_output: {output_video_filename}")
-
-    if video_time:
-        position_mean = {
-            key: fill_nan(
-                position_mean[key]["position"], video_time, position_time
-            )
-            for key in position_mean.keys()
-        }
-        orientation_mean = {
-            key: fill_nan(
-                position_mean[key]["orientation"], video_time, position_time
-            )
-            for key in position_mean.keys()
-            # CBroz: Bug was here, using nonexistent orientation_mean dict
-        }
-    logger.info(
-        f"frames start: {frames[0]}\nvideo_frames start: "
-        + f"{video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
-    )
-
-    for time_ind in tqdm(frames, desc="frames", disable=disable_progressbar):
-        if time_ind == 0:
-            video.set(1, time_ind + 1)
-        elif int(video.get(1)) != time_ind - 1:
-            video.set(1, time_ind - 1)
-        is_grabbed, frame = video.read()
-
-        if not is_grabbed:
-            logger.info("not grabbed")
-            break
-
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        if crop:
-            frame = frame[crop[2] : crop[3], crop[0] : crop[1]].copy()
-
-        put_text_kwargs = {
-            "img": frame,
-            "text": f"time_ind: {int(time_ind)} video frame: {int(video.get(1))}",
-            "org": (10, 10),
-            "fontFace": cv2.FONT_HERSHEY_SIMPLEX,
-            "fontScale": 0.5,
-            "color": RGB_YELLOW,
-            "thickness": 1,
-        }
-        if time_ind < video_frame_inds[0] - 1:
-            cv2.putText(**put_text_kwargs)
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            out.write(frame)
-            continue
-
-        cv2.putText(**put_text_kwargs)
-        pos_ind = time_ind - video_frame_inds[0]
-        source_map = {
-            "DLC": RGB_BLUE,
-            "Trodes": RGB_ORANGE,
-            "Common": RGB_PINK,
-        }
-
-        for key in position_mean.keys():
-            position = position_mean[key][pos_ind]
-            position = convert_to_pixels(position, frame_size, cm_to_pixels)
-            orientation = orientation_mean[key][pos_ind]
-            cv_kwargs = {
-                "img": frame,
-                "color": source_map[key],
-                "shift": cv2.CV_8U,
-            }
-
-            if np.all(~np.isnan(position)) & np.all(~np.isnan(orientation)):
-                arrow_tip = (
-                    int(position[0] + arrow_radius * np.cos(orientation)),
-                    int(position[1] + arrow_radius * np.sin(orientation)),
-                )
-                cv2.arrowedLine(
-                    **cv_kwargs,
-                    pt1=tuple(position.astype(int)),
-                    pt2=arrow_tip,
-                    thickness=4,
-                    line_type=8,
-                    tipLength=0.25,
-                )
-
-            if np.all(~np.isnan(position)):
-                cv2.circle(
-                    **cv_kwargs,
-                    center=tuple(position.astype(int)),
-                    radius=circle_radius,
-                    thickness=-1,
-                )
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        out.write(frame)
-    video.release()
-    out.release()
-    cv2.destroyAllWindows()
-    logger.info("finished making video with opencv")
-    return
-
-
-def make_video_matplotlib(
-    video_filename,
-    video_frame_inds,
-    position_mean,
-    orientation_mean,
-    centroids,
-    likelihoods,
-    position_time,
-    video_time=None,
-    frames=None,
-    percent_frames=1,
-    output_video_filename="output.mp4",
-    cm_to_pixels=1.0,
-    disable_progressbar=False,
-    crop=None,
-    arrow_radius=15,
-    circle_radius=8,
-):
-    import cv2
-    import matplotlib.animation as animation
-    import matplotlib.font_manager as fm
-
-    if not Path(video_filename).exists():
-        raise FileNotFoundError(f"Video path not found: {video_filename}")
-
-    position_mean = position_mean["DLC"]
-    orientation_mean = orientation_mean["DLC"]
-    video_slowdown = 1
-
-    # Set up formatting for the movie files
-    window_size = 501
-    plot_likelihood = True if likelihoods else False
-    color_swatch = [
-        "#29ff3e",
-        "#ff0073",
-        "#ff291a",
-        "#1e2cff",
-        "#b045f3",
-        "#ffe91a",
-    ]
-
-    window_ind = np.arange(window_size) - window_size // 2
-    video = cv2.VideoCapture(video_filename)
-    _ = cv2.VideoWriter_fourcc(*"mp4v")
-    frame_size = (int(video.get(3)), int(video.get(4)))
-    frame_rate = video.get(5)
-    Writer = animation.writers["ffmpeg"]
-
-    if frames is not None:
-        n_frames = len(frames)
-    else:
-        n_frames = int(len(video_frame_inds) * percent_frames)
-        frames = np.arange(0, n_frames)
-
-    logger.info(f"Output {n_frames} frames to {output_video_filename}")
-
-    fps = int(np.round(frame_rate / video_slowdown))
-    writer = Writer(fps=fps, bitrate=-1)
-    ret, frame = video.read()
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    if crop:
-        frame = frame[crop[2] : crop[3], crop[0] : crop[1]].copy()
-        crop_offset_x = crop[0]
-        crop_offset_y = crop[2]
-
-    frame_ind = 0
-    with plt.style.context("dark_background"):
-        fig, axes = plt.subplots(
-            2,
-            1,
-            figsize=(8, 6),
-            gridspec_kw={"height_ratios": [8, 1]},
-            constrained_layout=False,
-        )
-
-        axes[0].tick_params(colors="white", which="both")
-        axes[0].spines["bottom"].set_color("white")
-        axes[0].spines["left"].set_color("white")
-        image = axes[0].imshow(frame, animated=True)
-        logger.info(f"frame after init plot: {video.get(1)}")
-
-        centroid_plot_objs = {
-            bodypart: axes[0].scatter(
-                [],
-                [],
-                s=2,
-                zorder=102,
-                color=color,
-                label=f"{bodypart} position",
-                animated=True,
-                alpha=0.6,
-            )
-            for color, bodypart in zip(color_swatch, centroids.keys())
-        }
-        centroid_position_dot = axes[0].scatter(
-            [],
-            [],
-            s=5,
-            zorder=102,
-            color="#b045f3",
-            label="centroid position",
-            animated=True,
-            alpha=0.6,
-        )
-        (orientation_line,) = axes[0].plot(
-            [],
-            [],
-            color="cyan",
-            linewidth=1,
-            animated=True,
-            label="Orientation",
-        )
-        axes[0].set_xlabel("")
-        axes[0].set_ylabel("")
-        ratio = (
-            (crop[3] - crop[2]) / (crop[1] - crop[0])
-            if crop
-            else frame_size[1] / frame_size[0]
-        )
-        x_left, x_right = axes[0].get_xlim()
-        y_low, y_high = axes[0].get_ylim()
-        axes[0].set_aspect(abs((x_right - x_left) / (y_low - y_high)) * ratio)
-        axes[0].spines["top"].set_color("black")
-        axes[0].spines["right"].set_color("black")
-
-        # CBroz: Isn't this always zero??
-        time_delta = pd.Timedelta(
-            position_time[0] - position_time[0]
-        ).total_seconds()
-
-        axes[0].legend(loc="lower right", fontsize=4)
-        title = axes[0].set_title(
-            f"time = {time_delta:3.4f}s\n frame = {frame_ind}",
-            fontsize=8,
-        )
-        _ = fm.FontProperties(size=12)
-        axes[0].axis("off")
-        if plot_likelihood:
-            likelihood_objs = {
-                bodypart: axes[1].plot(
-                    [],
-                    [],
-                    color=color,
-                    linewidth=1,
-                    animated=True,
-                    clip_on=False,
-                    label=bodypart,
-                )[0]
-                for color, bodypart in zip(color_swatch, likelihoods.keys())
-            }
-            axes[1].set_ylim((0.0, 1))
-            logger.info(f"frame_rate: {frame_rate}")
-            axes[1].set_xlim(
-                (
-                    window_ind[0] / frame_rate,
-                    window_ind[-1] / frame_rate,
-                )
-            )
-            axes[1].set_xlabel("Time [s]")
-            axes[1].set_ylabel("Likelihood")
-            axes[1].set_facecolor("black")
-            axes[1].spines["top"].set_color("black")
-            axes[1].spines["right"].set_color("black")
-            axes[1].legend(loc="upper right", fontsize=4)
-        progress_bar = tqdm(leave=True, position=0)
-        progress_bar.reset(total=n_frames)
-
-        def _update_plot(time_ind):
-            if time_ind == 0:
-                video.set(1, time_ind + 1)
-            else:
-                video.set(1, time_ind - 1)
-            ret, frame = video.read()
-            if ret:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                if crop:
-                    frame = frame[crop[2] : crop[3], crop[0] : crop[1]].copy()
-                image.set_array(frame)
-            pos_ind = np.where(video_frame_inds == time_ind)[0]
-            if len(pos_ind) == 0:
-                centroid_position_dot.set_offsets((np.NaN, np.NaN))
-                for bodypart in centroid_plot_objs.keys():
-                    centroid_plot_objs[bodypart].set_offsets((np.NaN, np.NaN))
-                orientation_line.set_data((np.NaN, np.NaN))
-                title.set_text(f"time = {0:3.4f}s\n frame = {time_ind}")
-            else:
-                pos_ind = pos_ind[0]
-                dlc_centroid_data = convert_to_pixels(
-                    position_mean[pos_ind], frame, cm_to_pixels
-                )
-                if crop:
-                    dlc_centroid_data = np.hstack(
-                        (
-                            convert_to_pixels(
-                                position_mean[pos_ind, 0, np.newaxis],
-                                frame,
-                                cm_to_pixels,
-                            )
-                            - crop_offset_x,
-                            convert_to_pixels(
-                                position_mean[pos_ind, 1, np.newaxis],
-                                frame,
-                                cm_to_pixels,
-                            )
-                            - crop_offset_y,
-                        )
-                    )
-                for bodypart in centroid_plot_objs.keys():
-                    centroid_plot_objs[bodypart].set_offsets(
-                        convert_to_pixels(
-                            centroids[bodypart][pos_ind],
-                            frame,
-                            cm_to_pixels,
-                        )
-                    )
-                centroid_position_dot.set_offsets(dlc_centroid_data)
-                r = 30
-                orientation_line.set_data(
-                    [
-                        dlc_centroid_data[0],
-                        dlc_centroid_data[0]
-                        + r * np.cos(orientation_mean[pos_ind]),
-                    ],
-                    [
-                        dlc_centroid_data[1],
-                        dlc_centroid_data[1]
-                        + r * np.sin(orientation_mean[pos_ind]),
-                    ],
-                )
-                # Need to convert times to datetime object probably.
-
-                time_delta = pd.Timedelta(
-                    pd.to_datetime(position_time[pos_ind] * 1e9, unit="ns")
-                    - pd.to_datetime(position_time[0] * 1e9, unit="ns")
-                ).total_seconds()
-                title.set_text(
-                    f"time = {time_delta:3.4f}s\n frame = {time_ind}"
-                )
-                likelihood_inds = pos_ind + window_ind
-                neg_inds = np.where(likelihood_inds < 0)[0]
-                over_inds = np.where(
-                    likelihood_inds
-                    > (len(likelihoods[list(likelihood_objs.keys())[0]])) - 1
-                )[0]
-                if len(neg_inds) > 0:
-                    likelihood_inds[neg_inds] = 0
-                if len(over_inds) > 0:
-                    likelihood_inds[neg_inds] = -1
-                for bodypart in likelihood_objs.keys():
-                    likelihood_objs[bodypart].set_data(
-                        window_ind / frame_rate,
-                        np.asarray(likelihoods[bodypart][likelihood_inds]),
-                    )
-            progress_bar.update()
-
-            return (
-                image,
-                centroid_position_dot,
-                orientation_line,
-                title,
-            )
-
-        movie = animation.FuncAnimation(
-            fig,
-            _update_plot,
-            frames=frames,
-            interval=1000 / fps,
-            blit=True,
-        )
-        movie.save(output_video_filename, writer=writer, dpi=400)
-        video.release()
-        logger.info("finished making video with matplotlib")
-        return

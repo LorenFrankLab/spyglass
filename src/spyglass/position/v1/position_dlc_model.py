@@ -7,7 +7,6 @@ import ruamel.yaml as yaml
 from spyglass.utils import SpyglassMixin, logger
 
 from . import dlc_reader
-from .dlc_decorators import accepts
 from .position_dlc_project import BodyPart, DLCProject  # noqa: F401
 from .position_dlc_training import DLCModelTraining  # noqa: F401
 
@@ -75,7 +74,6 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
         """
 
     @classmethod
-    @accepts(None, None, ("FromUpstream", "FromImport"), None)
     def insert_entry(
         cls,
         dlc_model_name: str,
@@ -84,6 +82,7 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
         key: dict = None,
         **kwargs,
     ):
+        # Note: accepts decorator redundantly validated inputs of an enum
         cls.insert1(
             {
                 "dlc_model_name": dlc_model_name,

@@ -11,7 +11,7 @@ from spyglass.common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.v1.dlc_utils import make_video
+from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.position.v1.position_dlc_centroid import DLCCentroid
 from spyglass.position.v1.position_dlc_cohort import DLCSmoothInterpCohort
 from spyglass.position.v1.position_dlc_orient import DLCOrientation
@@ -103,40 +103,45 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
         velocity.create_timeseries(
             name=vid_frame_obj.name,
-            unit=vid_frame_obj.unit,
             timestamps=np.asarray(vid_frame_obj.timestamps),
+            unit=vid_frame_obj.unit,
             data=np.asarray(vid_frame_obj.data),
             description=vid_frame_obj.description,
             comments=vid_frame_obj.comments,
         )
 
         # Add to Analysis NWB file
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
-        )
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         nwb_analysis_file = AnalysisNwbfile()
-        key["orientation_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], orientation
-        )
-        key["position_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], position
-        )
-        key["velocity_object_id"] = nwb_analysis_file.add_nwb_object(
-            key["analysis_file_name"], velocity
+
+        key.update(
+            {
+                "analysis_file_name": analysis_file_name,
+                "position_object_id": nwb_analysis_file.add_nwb_object(
+                    analysis_file_name, position
+                ),
+                "orientation_object_id": nwb_analysis_file.add_nwb_object(
+                    analysis_file_name, orientation
+                ),
+                "velocity_object_id": nwb_analysis_file.add_nwb_object(
+                    analysis_file_name, velocity
+                ),
+            }
         )
 
         nwb_analysis_file.add(
             nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=key["analysis_file_name"],
+            analysis_file_name=analysis_file_name,
         )
         self.insert1(key)
 
         from ..position_merge import PositionOutput
 
-        part_name = to_camel_case(self.table_name.split("__")[-1])
         # TODO: The next line belongs in a merge table function
         PositionOutput._merge_insert(
-            [orig_key], part_name=part_name, skip_duplicates=True
+            [orig_key],
+            part_name=to_camel_case(self.table_name.split("__")[-1]),
+            skip_duplicates=True,
         )
 
     def fetch1_dataframe(self):
@@ -304,10 +309,10 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        M_TO_CM = 100
 
         params = (DLCPosVideoParams & key).fetch1("params")
 
-        M_TO_CM = 100
         key["interval_list_name"] = (
             convert_epoch_interval_name_to_position_interval_name(
                 {
@@ -325,7 +330,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             )
             + 1
         )
-        pose_estimation_key = {
+        pose_est_key = {
             "nwb_file_name": key["nwb_file_name"],
             "epoch": epoch,
             "dlc_model_name": key["dlc_model_name"],
@@ -333,7 +338,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         }
 
         pose_estimation_params, video_filename, output_dir, meters_per_pixel = (
-            DLCPoseEstimationSelection * DLCPoseEstimation & pose_estimation_key
+            DLCPoseEstimationSelection * DLCPoseEstimation & pose_est_key
         ).fetch1(
             "pose_estimation_params",
             "video_path",
@@ -342,32 +347,29 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         )
 
         logger.info(f"video filename: {video_filename}")
-        crop = pose_estimation_params.get("cropping")
-
         logger.info("Loading position data...")
+
         v1_key = {k: v for k, v in key.items() if k in DLCPosV1.primary_key}
-        position_info_df = (
+        pos_info_df = (
             DLCPosV1() & {"epoch": epoch, **v1_key}
         ).fetch1_dataframe()
-        pose_estimation_df = pd.concat(
+        pos_est_df = pd.concat(
             {
                 bodypart: (
                     DLCPoseEstimation.BodyPart()
-                    & {**pose_estimation_key, **{"bodypart": bodypart}}
+                    & {**pose_est_key, **{"bodypart": bodypart}}
                 ).fetch1_dataframe()
-                for bodypart in (
-                    DLCSmoothInterpCohort.BodyPart & pose_estimation_key
-                )
+                for bodypart in (DLCSmoothInterpCohort.BodyPart & pose_est_key)
                 .fetch("bodypart")
                 .tolist()
             },
             axis=1,
         )
-        if not len(pose_estimation_df) == len(position_info_df):
+        if not len(pos_est_df) == len(pos_info_df):
             raise ValueError(
                 "Dataframes are not the same length\n"
-                + f"\tPose estim   :  {len(pose_estimation_df)}\n"
-                + f"\tPosition info: {len(position_info_df)}"
+                + f"\tPose estim   :  {len(pos_est_df)}\n"
+                + f"\tPosition info: {len(pos_info_df)}"
             )
 
         output_video_filename = (
@@ -378,54 +380,41 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             + f'{key["dlc_orientation_params_name"]}.mp4'
         )
         if Path(output_dir).exists():
-            output_video_filename = (
-                f"{Path(output_dir).as_posix()}/" + output_video_filename
-            )
+            output_video_filename = Path(output_dir) / output_video_filename
 
         idx = pd.IndexSlice
-        video_frame_inds = (
-            position_info_df["video_frame_ind"].astype(int).to_numpy()
-        )
+        video_frame_inds = pos_info_df["video_frame_ind"].astype(int).to_numpy()
         centroids = {
-            bodypart: pose_estimation_df.loc[
-                :, idx[bodypart, ("x", "y")]
-            ].to_numpy()
-            for bodypart in pose_estimation_df.columns.levels[0]
+            bodypart: pos_est_df.loc[:, idx[bodypart, ("x", "y")]].to_numpy()
+            for bodypart in pos_est_df.columns.levels[0]
         }
         likelihoods = (
             {
-                bodypart: pose_estimation_df.loc[
+                bodypart: pos_est_df.loc[
                     :, idx[bodypart, ("likelihood")]
                 ].to_numpy()
-                for bodypart in pose_estimation_df.columns.levels[0]
+                for bodypart in pos_est_df.columns.levels[0]
             }
             if params.get("incl_likelihood")
             else None
         )
-        position_mean = {
-            "DLC": np.asarray(position_info_df[["position_x", "position_y"]])
-        }
-        orientation_mean = {
-            "DLC": np.asarray(position_info_df[["orientation"]])
-        }
         frames = params.get("frames", None)
 
-        logger.info("Making video...")
         make_video(
             video_filename=video_filename,
             video_frame_inds=video_frame_inds,
-            position_mean=position_mean,
-            orientation_mean=orientation_mean,
+            position_mean={
+                "DLC": np.asarray(pos_info_df[["position_x", "position_y"]])
+            },
+            orientation_mean={"DLC": np.asarray(pos_info_df[["orientation"]])},
             centroids=centroids,
             likelihoods=likelihoods,
-            position_time=np.asarray(position_info_df.index),
-            video_time=None,
+            position_time=np.asarray(pos_info_df.index),
             processor=params.get("processor", "matplotlib"),
-            frames=np.arange(frames[0], frames[1]) if frames else frames,
+            frames=np.arange(frames[0], frames[1]) if frames else None,
             percent_frames=params.get("percent_frames", None),
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
-            disable_progressbar=False,
-            crop=crop,
+            crop=pose_estimation_params.get("cropping"),
             **params.get("video_params", {}),
         )
