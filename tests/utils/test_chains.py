@@ -1,4 +1,5 @@
 import pytest
+from datajoint.utils import to_camel_case
 
 
 @pytest.fixture(scope="session")
@@ -31,16 +32,13 @@ def test_invalid_chain(Nwbfile, pos_merge_tables, TableChain):
 def test_chain_str(chain):
     """Test that the str of a TableChain object is as expected."""
     chain = chain
+    parent = to_camel_case(chain.parent.table_name)
+    child = to_camel_case(chain.child.table_name)
+
     str_got = str(chain)
-    str_exp = (
-        chain.parent.table_name + chain._link_symbol + chain.child.table_name
-    )
+    str_exp = parent + chain._link_symbol + child
+
     assert str_got == str_exp, "Unexpected str of TableChain object."
-
-
-def test_chain_str_no_link(no_link_chain):
-    """Test that the str of a TableChain object with no link is as expected."""
-    assert str(no_link_chain) == "No link", "Unexpected str of no link chain."
 
 
 def test_chain_repr(chain):
@@ -66,3 +64,8 @@ def test_chain_getitem(chain):
 
 def test_nolink_join(no_link_chain):
     assert no_link_chain.join() is None, "Unexpected join of no link chain."
+
+
+def test_chain_str_no_link(no_link_chain):
+    """Test that the str of a TableChain object with no link is as expected."""
+    assert str(no_link_chain) == "No link", "Unexpected str of no link chain."
