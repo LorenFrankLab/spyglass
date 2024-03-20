@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -39,6 +39,7 @@
 import os
 import datajoint as dj
 import numpy as np
+import pandas as pd
 
 # change to the upper level folder to detect dj_local_conf.json
 if os.path.basename(os.getcwd()) == "notebooks":
@@ -46,11 +47,10 @@ if os.path.basename(os.getcwd()) == "notebooks":
 dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 import spyglass.common as sgc
-import spyglass.position as sgp
-import spyglass.lfp as lfp
+import spyglass.position.v1 as sgp
 import spyglass.lfp.analysis.v1 as lfp_analysis
 from spyglass.lfp import LFPOutput
-import spyglass.lfp.v1 as sglfp
+import spyglass.lfp as sglfp
 from spyglass.position import PositionOutput
 import spyglass.ripple.v1 as sgrip
 import spyglass.ripple.v1 as sgr
@@ -62,10 +62,126 @@ warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
 # -
 
-# ## Selecting Electrodes
+# ## Generate LFP Ripple Band
+
+# First, we need to generate a filter band from the LFP data at the ripple frequency.  This process is analogous to that in [30_LFP.ipynb](31_Theta.ipynb).
+
+# #### Make LFP
+
+# If you have already populated the LFP table for your data you may skip this step. Here, we will begin by creating a lfp group of just electrodes in the hippocampus region, and populate the lfp on a subsetted interval:
+
+# +
+nwb_file_name = "mediumnwb20230802_.nwb"
+lfp_electrode_group_name = "test_hippocampus"
+interval_list_name = "02_r1_ripple_demo"
+
+# select hippocampus electrodes
+electrodes_df = (
+    pd.DataFrame(
+        (
+            sgc.Electrode
+            & {
+                "nwb_file_name": nwb_file_name,
+            }
+        )
+        * (sgc.BrainRegion & {"region_name": "hippocampus"})
+    )
+    .loc[:, ["nwb_file_name", "electrode_id", "region_name"]]
+    .sort_values(by="electrode_id")
+)
+# create lfp_electrode_group
+lfp_eg_key = {
+    "nwb_file_name": nwb_file_name,
+    "lfp_electrode_group_name": lfp_electrode_group_name,
+}
+sglfp.lfp_electrode.LFPElectrodeGroup.create_lfp_electrode_group(
+    nwb_file_name=nwb_file_name,
+    group_name=lfp_electrode_group_name,
+    electrode_list=electrodes_df.electrode_id.tolist(),
+)
+
+# make a shorter interval to run this demo on
+interval_start = (
+    sgc.IntervalList
+    & {"nwb_file_name": nwb_file_name, "interval_list_name": "02_r1"}
+).fetch1("valid_times")[0][0]
+truncated_interval = np.array(
+    [[interval_start, interval_start + 120]]
+)  # first 2 minutes of epoch
+sgc.IntervalList.insert1(
+    {
+        "nwb_file_name": nwb_file_name,
+        "interval_list_name": "02_r1_ripple_demo",
+        "valid_times": truncated_interval,
+    },
+    skip_duplicates=True,
+)
+
+# make the lfp selection
+lfp_s_key = lfp_eg_key.copy()
+lfp_s_key.update(
+    {
+        "target_interval_list_name": interval_list_name,
+        "filter_name": "LFP 0-400 Hz",
+        "filter_sampling_rate": 30_000,  # sampling rate of the data (Hz)
+        "target_sampling_rate": 1_000,  # smpling rate of the lfp output (Hz)
+    }
+)
+sglfp.v1.LFPSelection.insert1(lfp_s_key, skip_duplicates=True)
+
+# populate the lfp
+sglfp.v1.LFPV1.populate(lfp_s_key, display_progress=True)
+sglfp.v1.LFPV1 & lfp_s_key
+# -
+
+# #### Populate Ripple Band
+# We now create a filter for this frequency band
+
+# +
+sgc.FirFilterParameters().add_filter(
+    filter_name="Ripple 150-250 Hz",
+    fs=1000.0,
+    filter_type="bandpass",
+    band_edges=[140, 150, 250, 260],
+    comments="ripple band filter for 1 kHz data",
+)
+
+sgc.FirFilterParameters() & "filter_name='Ripple 150-250 Hz'"
+# -
+
+# We can then populate the ripple band
+
+# +
+from spyglass.lfp.analysis.v1 import lfp_band
+
+filter_name = "Ripple 150-250 Hz"
+lfp_band_electrode_ids = (
+    electrodes_df.electrode_id.tolist()
+)  # assumes we've filtered these electrodes
+lfp_band_sampling_rate = 1000  # desired sampling rate
+
+lfp_merge_id = (LFPOutput.LFPV1() & lfp_s_key).fetch1("merge_id")
+lfp_band.LFPBandSelection().set_lfp_band_electrodes(
+    nwb_file_name=nwb_file_name,
+    lfp_merge_id=lfp_merge_id,
+    electrode_list=lfp_band_electrode_ids,
+    filter_name=filter_name,
+    interval_list_name=interval_list_name,
+    reference_electrode_list=[-1],  # -1 means no ref electrode for all channels
+    lfp_band_sampling_rate=lfp_band_sampling_rate,
+)
+
+lfp_band.LFPBandV1.populate(
+    {"lfp_merge_id": lfp_merge_id, "filter_name": filter_name},
+    display_progress=True,
+)
+lfp_band.LFPBandV1 & {"lfp_merge_id": lfp_merge_id, "filter_name": filter_name}
+# -
+
+# ## Selecting Ripple Analysis Electrodes
 #
 
-# First, we'll pick the electrodes on which we'll run ripple detection on, using
+# Next, we'll pick the electrodes on which we'll run ripple detection on, using
 # `RippleLFPSelection.set_lfp_electrodes`
 #
 
@@ -78,13 +194,6 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # - We use `nwb_file_name` to explore which electrodes are available for the
 #   `electrode_list`.
 #
-
-nwb_file_name = "tonks20211103_.nwb"
-interval_list_name = "test interval"
-filter_name = "Ripple 150-250 Hz"
-if not sgc.Session & {"nwb_file_name": nwb_file_name}:
-    # This error will be raised when notebooks auto-run with 'minirec'
-    raise ValueError(f"Session with nwb_file_name={nwb_file_name} not found")
 
 # Now we can look at `electrode_id` in the `Electrode` table:
 #
@@ -165,12 +274,12 @@ rip_sel_key = (sgrip.RippleLFPSelection & lfp_band_key).fetch1("KEY")
 # ## Setting Ripple Parameters
 #
 
-sgr.RippleParameters()
+sgr.RippleParameters().insert_default
 
 # Here are the default ripple parameters:
 #
 
-(sgrip.RippleParameters() & {"ripple_param_name": "default"}).fetch1()
+(sgrip.RippleParameters() & {"ripple_param_name": "default_trodes"}).fetch1()
 
 # - `filter_name`: which bandpass filter is used
 # - `speed_name`: the name of the speed parameters in `IntervalPositionInfo`
@@ -188,19 +297,26 @@ sgr.RippleParameters()
 # ## Check interval speed
 #
 # The speed for this interval should exist under the default position parameter
-# set and for a given interval.
+# set and for a given interval. We can quickly populate this here
 #
 
-pos_key = sgp.PositionOutput.merge_get_part(
-    {
-        "nwb_file_name": nwb_file_name,
-        "position_info_param_name": "default",
-        "interval_list_name": "pos 1 valid times",
-    }
-).fetch1("KEY")
-(sgp.PositionOutput & pos_key).fetch1_dataframe()
+pos_key = {
+    "nwb_file_name": nwb_file_name,
+    "trodes_pos_params_name": "single_led",
+    "interval_list_name": "pos 0 valid times",
+}
+sgp.TrodesPosSelection().insert1(pos_key, skip_duplicates=True)
+sgp.TrodesPosV1.populate(pos_key, display_progress=True)
+sgp.TrodesPosV1 & pos_key
 
-# We'll use the `head_speed` above as part of `RippleParameters`.
+# +
+from spyglass.position import PositionOutput
+
+pos_key = PositionOutput.merge_get_part(pos_key).fetch1("KEY")
+(PositionOutput & pos_key).fetch1_dataframe()
+# -
+
+# We'll use the `speed` above as part of `RippleParameters`. Ensure your selected ripple parameters value for `speed_name` matches for your data.
 #
 
 # ## Run Ripple Detection
@@ -210,7 +326,7 @@ pos_key = sgp.PositionOutput.merge_get_part(
 #
 
 key = {
-    "ripple_param_name": "default",
+    "ripple_param_name": "default_trodes",
     **rip_sel_key,
     "pos_merge_id": pos_key["merge_id"],
 }
@@ -221,6 +337,32 @@ sgrip.RippleTimesV1().populate(key)
 
 ripple_times = (sgrip.RippleTimesV1() & key).fetch1_dataframe()
 ripple_times
+
+# We can also inspect the lfp trace at these ripple times.
+#
+# * *Note: The ripple detection algorithm depends on estimates of the standard deviation of power in the ripple band. Running analysis on longer intervals will lead to better estimates of this value, and thereby better segmentation of ripple events*
+
+# +
+import matplotlib.pyplot as plt
+
+ripple_band_df = (lfp_band.LFPBandV1() & lfp_band_key).fetch1_dataframe()
+
+window = 0.1
+i = -1
+ripple_start = ripple_times.iloc[i].start_time
+ripple_end = ripple_times.iloc[i].end_time
+plt.plot(
+    ripple_band_df.loc[ripple_start - window : ripple_end + window].index,
+    ripple_band_df.loc[ripple_start - window : ripple_end + window].iloc[
+        :, ::15
+    ],
+)
+plt.axvline(ripple_start, color="r")
+plt.axvline(ripple_end, color="r")
+
+plt.xlabel("Time (s)")
+plt.ylabel("Voltage (uV)")
+# -
 
 # ## Up Next
 #
