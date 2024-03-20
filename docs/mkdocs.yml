@@ -54,7 +54,6 @@ nav:
       - Spikes:
           - Spike Sorting V0: notebooks/10_Spike_SortingV0.ipynb
           - Spike Sorting V1: notebooks/10_Spike_SortingV1.ipynb
-          - Curation: notebooks/11_CurationV0.ipynb
       - Position:
           - Position Trodes: notebooks/20_Position_Trodes.ipynb
           - DLC Models: notebooks/21_DLC.ipynb
