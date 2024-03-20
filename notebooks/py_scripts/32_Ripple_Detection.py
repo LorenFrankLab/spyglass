@@ -64,7 +64,7 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 
 # ## Generate LFP Ripple Band
 
-# First, we need to generate a filter band from the LFP data at the ripple frequency.  This process is analagous to that in [30_LFP.ipynb](31_Theta.ipynb).
+# First, we need to generate a filter band from the LFP data at the ripple frequency.  This process is analogous to that in [30_LFP.ipynb](31_Theta.ipynb).
 
 # #### Make LFP
 

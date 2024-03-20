@@ -537,7 +537,7 @@ sgs.Curation() & ss_key
 #
 # Now that we've performed auto-curation, we can insert the results of our chosen curation into
 # `CuratedSpikeSorting` (the final table of this pipeline), and the merge table `SpikeSortingOutput`.
-# Downstream analyses such as decoding will acces the spiking data from there
+# Downstream analyses such as decoding will access the spiking data from there
 
 # +
 # get the curation keys corresponding to the automatic curation
