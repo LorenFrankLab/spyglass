@@ -50,7 +50,7 @@ import spyglass.common as sgc
 import spyglass.position.v1 as sgp
 import spyglass.lfp.analysis.v1 as lfp_analysis
 from spyglass.lfp import LFPOutput
-import spyglass.lfp as lfp
+import spyglass.lfp as sglfp
 from spyglass.position import PositionOutput
 import spyglass.ripple.v1 as sgrip
 import spyglass.ripple.v1 as sgr
@@ -94,7 +94,7 @@ lfp_eg_key = {
     "nwb_file_name": nwb_file_name,
     "lfp_electrode_group_name": lfp_electrode_group_name,
 }
-lfp.lfp_electrode.LFPElectrodeGroup.create_lfp_electrode_group(
+sglfp.lfp_electrode.LFPElectrodeGroup.create_lfp_electrode_group(
     nwb_file_name=nwb_file_name,
     group_name=lfp_electrode_group_name,
     electrode_list=electrodes_df.electrode_id.tolist(),
@@ -127,11 +127,11 @@ lfp_s_key.update(
         "target_sampling_rate": 1_000,  # smpling rate of the lfp output (Hz)
     }
 )
-lfp.v1.LFPSelection.insert1(lfp_s_key, skip_duplicates=True)
+sglfp.v1.LFPSelection.insert1(lfp_s_key, skip_duplicates=True)
 
 # populate the lfp
-lfp.v1.LFPV1.populate(lfp_s_key, display_progress=True)
-lfp.v1.LFPV1 & lfp_s_key
+sglfp.v1.LFPV1.populate(lfp_s_key, display_progress=True)
+sglfp.v1.LFPV1 & lfp_s_key
 # -
 
 # #### Populate Ripple Band
