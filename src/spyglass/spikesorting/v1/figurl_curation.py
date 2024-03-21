@@ -118,34 +118,29 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
 
     def make(self, key: dict):
         # FETCH
-        sorting_analysis_file_name = (
-            FigURLCurationSelection * CurationV1 & key
-        ).fetch1("analysis_file_name")
-        object_id = (FigURLCurationSelection * CurationV1 & key).fetch1(
-            "object_id"
+        query = (
+            FigURLCurationSelection * CurationV1 * SpikeSortingSelection & key
         )
-        recording_label = (SpikeSortingSelection & key).fetch1("recording_id")
-        metrics_figurl = (FigURLCurationSelection & key).fetch1(
-            "metrics_figurl"
+        (
+            sorting_fname,
+            object_id,
+            recording_label,
+            metrics_figurl,
+        ) = query.fetch1(
+            "analysis_file_name", "object_id", "recording_id", "metrics_figurl"
         )
 
         # DO
-        sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-            sorting_analysis_file_name
-        )
-        recording = CurationV1.get_recording(
-            (FigURLCurationSelection & key).fetch1()
-        )
-        sorting = CurationV1.get_sorting(
-            (FigURLCurationSelection & key).fetch1()
-        )
-        sorting_label = (FigURLCurationSelection & key).fetch1("sorting_id")
-        curation_uri = (FigURLCurationSelection & key).fetch1("curation_uri")
+        sel_query = FigURLCurationSelection & key
+        sel_key = sel_query.fetch1()
+        sorting_fpath = AnalysisNwbfile.get_abs_path(sorting_fname)
+        recording = CurationV1.get_recording(sel_key)
+        sorting = CurationV1.get_sorting(sel_key)
+        sorting_label = sel_query.fetch1("sorting_id")
+        curation_uri = sel_query.fetch1("curation_uri")
 
         metric_dict = {}
-        with pynwb.NWBHDF5IO(
-            sorting_analysis_file_abs_path, "r", load_namespaces=True
-        ) as io:
+        with pynwb.NWBHDF5IO(sorting_fpath, "r", load_namespaces=True) as io:
             nwbf = io.read()
             nwb_sorting = nwbf.objects[object_id].to_dataframe()
             unit_ids = nwb_sorting.index
