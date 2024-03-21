@@ -1,4 +1,5 @@
 """Schema for institution, lab team/name/members. Session-independent."""
+
 import datajoint as dj
 
 from spyglass.utils import SpyglassMixin, logger
@@ -261,6 +262,7 @@ def decompose_name(full_name: str) -> tuple:
     """Return the full, first and last name parts of a full name.
 
     Names capitalized. Decomposes either comma- or space-separated.
+    If name includes spaces, must use exactly one comma.
 
     Parameters
     ----------
@@ -271,16 +273,33 @@ def decompose_name(full_name: str) -> tuple:
     -------
     tuple
         A tuple of the full, first, last name parts.
-    """
-    if full_name.count(", ") != 1 and full_name.count(" ") != 1:
-        raise ValueError(
-            f"Names should be stored as 'last, first'. Skipping {full_name}"
-        )
-    elif ", " in full_name:
-        last, first = full_name.title().split(", ")
-    else:
-        first, last = full_name.title().split(" ")
 
+    Raises
+    ------
+    ValueError
+        When full_name is in an unsupported format
+    """
+
+    full_trimmed = "" if not full_name else full_name.strip()
+
+    delim = (
+        ", "
+        if full_trimmed.count(", ") == 1
+        else " " if full_trimmed.count(" ") == 1 else None
+    )
+
+    parts = full_trimmed.split(delim)
+
+    if delim is None or len(parts) != 2:  # catch unsupported format
+        raise ValueError(
+            f"Name has unsupported format for {full_name}. \n\t"
+            + "Must use exactly one comma+space (i.e., ', ') or space.\n\t"
+            + "And provide exactly two name parts.\n\t"
+            + "For example, 'First Last' or 'Last1 Last2, First1 First2' "
+            + "if name(s) includes spaces."
+        )
+
+    first, last = parts if delim == " " else parts[::-1]
     full = f"{first} {last}"
 
     return full, first, last

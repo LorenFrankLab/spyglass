@@ -6,6 +6,7 @@ import os
 import pathlib
 import pwd
 import subprocess
+import sys
 from collections import abc
 from contextlib import redirect_stdout
 from itertools import groupby
@@ -18,6 +19,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
+from spyglass.common.common_behav import VideoFile
+from spyglass.utils import logger
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
 
 
@@ -418,10 +421,9 @@ def get_video_path(key):
     """
     import pynwb
 
-    from ...common.common_behav import VideoFile
-
-    vf_key = {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
-    VideoFile()._no_transaction_make(vf_key, verbose=False)
+    vf_key = {k: val for k, val in key.items() if k in VideoFile.heading.names}
+    if not VideoFile & vf_key:
+        VideoFile()._no_transaction_make(vf_key, verbose=False)
     video_query = VideoFile & vf_key
 
     if len(video_query) != 1:
@@ -434,9 +436,7 @@ def get_video_path(key):
     with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
         nwb_file = in_out.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        video_filepath = VideoFile.get_abs_path(
-            {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}
-        )
+        video_filepath = VideoFile.get_abs_path(vf_key)
         video_dir = os.path.dirname(video_filepath) + "/"
         video_filename = video_filepath.split(video_dir)[-1]
         meters_per_pixel = nwb_video.device.meters_per_pixel
@@ -540,18 +540,24 @@ def _convert_mp4(
         "copy",
         f"{dest_path.as_posix()}",
     ]
-    try:
-        convert_process = subprocess.Popen(
-            convert_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-        )
-    except subprocess.CalledProcessError as err:
-        raise RuntimeError(
-            f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
-        ) from err
-    out, _ = convert_process.communicate()
-    print(out.decode("utf-8"))
-    print(f"finished converting {filename}")
-    print(
+    if dest_path.exists():
+        logger.info(f"{dest_path} already exists, skipping conversion")
+    else:
+        try:
+            sys.stdout.flush()
+            convert_process = subprocess.Popen(
+                convert_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        except subprocess.CalledProcessError as err:
+            raise RuntimeError(
+                f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
+            ) from err
+        out, _ = convert_process.communicate()
+        logger.info(out.decode("utf-8"))
+        logger.info(f"finished converting {filename}")
+    logger.info(
         f"Checking that number of packets match between {orig_filename} and {dest_filename}"
     )
     num_packets = []

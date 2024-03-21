@@ -1,7 +1,14 @@
 from typing import Union
 
-import click
 import yaml
+
+try:
+    import click
+except ImportError:
+    raise ImportError(
+        "spyglass.cli.cli requires the 'click' package. "
+        "You can install it with 'pip install click'."
+    )
 
 
 @click.group(help="Spyglass command-line client")

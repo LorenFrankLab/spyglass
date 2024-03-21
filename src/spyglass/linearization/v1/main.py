@@ -117,7 +117,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
         orig_key = copy.deepcopy(key)
         logger.info(f"Computing linear position for: {key}")
 
-        position_nwb = PositionOutput.fetch_nwb(
+        position_nwb = PositionOutput().fetch_nwb(
             {"merge_id": key["pos_merge_id"]}
         )[0]
         key["analysis_file_name"] = AnalysisNwbfile().create(
@@ -173,7 +173,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
 
         self.insert1(key)
 
-        from ..merge import LinearizedPositionOutput
+        from spyglass.linearization.merge import LinearizedPositionOutput
 
         part_name = to_camel_case(self.table_name.split("__")[-1])
 

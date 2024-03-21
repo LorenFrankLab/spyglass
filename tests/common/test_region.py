@@ -1,6 +1,8 @@
 import pytest
 from datajoint import U as dj_U
 
+from ..conftest import TEARDOWN
+
 
 @pytest.fixture
 def region_dict():
@@ -15,6 +17,7 @@ def brain_region(common, region_dict):
     (brain_region & "region_id > 1").delete(safemode=False)
 
 
+@pytest.mark.skipif(not TEARDOWN, reason="No teardown: no test autoincrement")
 def test_region_add(brain_region, region_dict):
     next_id = (
         dj_U().aggr(brain_region, n="max(region_id)").fetch1("n") or 0

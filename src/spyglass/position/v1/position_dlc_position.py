@@ -3,15 +3,16 @@ import numpy as np
 import pandas as pd
 import pynwb
 
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_mixin import SpyglassMixin
-from .dlc_utils import (
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.position.v1.dlc_utils import (
     _key_to_smooth_func_dict,
     get_span_start_stop,
     interp_pos,
     validate_option,
     validate_smooth_params,
 )
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .position_dlc_pose_estimation import DLCPoseEstimation
 
 schema = dj.schema("position_v1_dlc_position")
@@ -248,17 +249,17 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
                 comments="no comments",
                 description="video_frame_ind",
             )
-            key[
-                "dlc_smooth_interp_position_object_id"
-            ] = nwb_analysis_file.add_nwb_object(
-                analysis_file_name=key["analysis_file_name"],
-                nwb_object=position,
+            key["dlc_smooth_interp_position_object_id"] = (
+                nwb_analysis_file.add_nwb_object(
+                    analysis_file_name=key["analysis_file_name"],
+                    nwb_object=position,
+                )
             )
-            key[
-                "dlc_smooth_interp_info_object_id"
-            ] = nwb_analysis_file.add_nwb_object(
-                analysis_file_name=key["analysis_file_name"],
-                nwb_object=video_frame_ind,
+            key["dlc_smooth_interp_info_object_id"] = (
+                nwb_analysis_file.add_nwb_object(
+                    analysis_file_name=key["analysis_file_name"],
+                    nwb_object=video_frame_ind,
+                )
             )
             nwb_analysis_file.add(
                 nwb_file_name=key["nwb_file_name"],

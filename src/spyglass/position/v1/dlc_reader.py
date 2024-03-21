@@ -114,7 +114,8 @@ class PoseEstimation:
     def yml(self):
         if self._yml is None:
             with open(self.yml_path, "rb") as f:
-                self._yml = yaml.safe_load(f)
+                safe_yaml = yaml.YAML(typ="safe", pure=True)
+                self._yml = safe_yaml.load(f)
         return self._yml
 
     @property

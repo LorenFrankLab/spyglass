@@ -14,7 +14,7 @@
   "display.show_tuple_count": true,
   "database.use_tls": null,
   "enable_python_native_blobs": true,
-  "filepath_checksum_size_limit": null,
+  "filepath_checksum_size_limit": 1073741824,
   "stores": {
     "raw": {
       "protocol": "file",
@@ -28,14 +28,28 @@
     }
   },
   "custom": {
+    "debug_mode": "false",
+    "test_mode": "false",
     "spyglass_dirs": {
-      "base": "/your/path/like/stelmo/nwb/"
+      "base": "/your/base/path",
+      "raw": "/your/base/path/raw",
+      "analysis": "/your/base/path/analysis",
+      "recording": "/your/base/path/recording",
+      "sorting": "/your/base/path/spikesorting",
+      "waveforms": "/your/base/path/waveforms",
+      "temp": "/your/base/path/tmp",
+      "video": "/your/base/path/video"
     },
     "kachery_dirs": {
-      "cloud": "/your/path/.kachery-cloud"
+      "cloud": "/your/base/path/kachery_storage",
+      "storage": "/your/base/path/kachery_storage",
+      "temp": "/your/base/path/tmp"
     },
     "dlc_dirs": {
-      "base": "/your/path/like/nimbus/deeplabcut/"
+      "base": "/your/base/path/deeplabcut",
+      "project": "/your/base/path/deeplabcut/projects",
+      "video": "/your/base/path/deeplabcut/video",
+      "output": "/your/base/path/deeplabcut/output"
     },
     "kachery_zone": "franklab.default"
   }

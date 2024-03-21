@@ -6,6 +6,7 @@ References
 [1] Denovellis, E. L. et al. Hippocampal replay of experience at real-world
 speeds. eLife 10, e64505 (2021).
 """
+
 import os
 import shutil
 import uuid
@@ -20,7 +21,7 @@ import pynwb
 import spikeinterface as si
 import xarray as xr
 
-from spyglass.settings import waveform_dir
+from spyglass.settings import waveforms_dir
 from spyglass.utils import logger
 
 try:
@@ -37,7 +38,6 @@ try:
     )
 except ImportError as e:
     logger.warning(e)
-from ripple_detection import get_multiunit_population_firing_rate
 from tqdm.auto import tqdm
 
 from spyglass.common.common_behav import (
@@ -54,12 +54,12 @@ from spyglass.decoding.v0.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
 )
-from spyglass.spikesorting.spikesorting_curation import (
+from spyglass.spikesorting.v0.spikesorting_curation import (
     CuratedSpikeSorting,
     CuratedSpikeSortingSelection,
     Curation,
 )
-from spyglass.spikesorting.spikesorting_sorting import (
+from spyglass.spikesorting.v0.spikesorting_sorting import (
     SpikeSorting,
     SpikeSortingSelection,
 )
@@ -157,7 +157,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
             f'{key["curation_id"]}_clusterless_waveforms'
         )
         waveform_extractor_path = str(
-            Path(waveform_dir) / Path(waveform_extractor_name)
+            Path(waveforms_dir) / Path(waveform_extractor_name)
         )
         if os.path.exists(waveform_extractor_path):
             shutil.rmtree(waveform_extractor_path)
@@ -621,88 +621,6 @@ class ClusterlessClassifierParameters(SpyglassMixin, dj.Manual):
     def fetch1(self, *args, **kwargs) -> dict:
         """Custom fetch1 to convert dicts to classes"""
         return restore_classes(super().fetch1(*args, **kwargs))
-
-
-@schema
-class MultiunitFiringRate(SpyglassMixin, dj.Computed):
-    """Computes the population multiunit firing rate from the spikes in
-    MarksIndicator."""
-
-    definition = """
-    -> UnitMarksIndicator
-    ---
-    -> AnalysisNwbfile
-    multiunit_firing_rate_object_id: varchar(40)
-    """
-
-    def make(self, key):
-        marks = (UnitMarksIndicator & key).fetch_xarray()
-        multiunit_spikes = (np.any(~np.isnan(marks.values), axis=1)).astype(
-            float
-        )
-        multiunit_firing_rate = pd.DataFrame(
-            get_multiunit_population_firing_rate(
-                multiunit_spikes, key["sampling_rate"]
-            ),
-            index=marks.time,
-            columns=["firing_rate"],
-        )
-
-        # Insert into analysis nwb file
-        nwb_analysis_file = AnalysisNwbfile()
-        key["analysis_file_name"] = nwb_analysis_file.create(
-            key["nwb_file_name"]
-        )
-
-        key[
-            "multiunit_firing_rate_object_id"
-        ] = nwb_analysis_file.add_nwb_object(
-            analysis_file_name=key["analysis_file_name"],
-            nwb_object=multiunit_firing_rate.reset_index(),
-        )
-
-        nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=key["analysis_file_name"],
-        )
-
-        self.insert1(key)
-
-    def fetch1_dataframe(self) -> pd.DataFrame:
-        """Convenience function for returning the first dataframe"""
-        return self.fetch_dataframe()[0]
-
-    def fetch_dataframe(self) -> list[pd.DataFrame]:
-        """Fetches the multiunit firing rate as a list of pandas dataframes"""
-        return [
-            data["multiunit_firing_rate"].set_index("time")
-            for data in self.fetch_nwb()
-        ]
-
-
-@schema
-class MultiunitHighSynchronyEventsParameters(SpyglassMixin, dj.Manual):
-    """Params to extract times of high mulitunit activity during immobility."""
-
-    definition = """
-    param_name : varchar(80) # a name for this set of parameters
-    ---
-    minimum_duration = 0.015 :  float # minimum duration of event (in seconds)
-    zscore_threshold = 2.0 : float    # threshold event must cross to be considered (in std. dev.)
-    close_event_threshold = 0.0 :  float # events closer than this will be excluded (in seconds)
-    """
-
-    def insert_default(self):
-        """Insert the default parameter set"""
-        self.insert1(
-            {
-                "param_name": "default",
-                "minimum_duration": 0.015,
-                "zscore_threshold": 2.0,
-                "close_event_threshold": 0.0,
-            },
-            skip_duplicates=True,
-        )
 
 
 def get_decoding_data_for_epoch(

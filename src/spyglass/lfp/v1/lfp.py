@@ -14,8 +14,6 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
-
-# from spyglass.utils.dj_helper_fn import fetch_nwb  # dj_replace
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("lfp_v1")
@@ -74,8 +72,8 @@ class LFPV1(SpyglassMixin, dj.Computed):
             "target_sampling_rate"
         )
 
-        # to get the list of valid times, we need to combine those from the user with those from the
-        # raw data
+        # to get the list of valid times, we need to combine those from the
+        # user with those from the raw data
         orig_key = copy.deepcopy(key)
         orig_key["interval_list_name"] = key["target_interval_list_name"]
         user_valid_times = (IntervalList() & orig_key).fetch1("valid_times")
@@ -122,7 +120,8 @@ class LFPV1(SpyglassMixin, dj.Computed):
                 "LFP: no filter found with data sampling rate of "
                 + f"{sampling_rate}"
             )
-            return None
+            return None  # See #849
+
         # get the list of selected LFP Channels from LFPElectrode
         electrode_keys = (LFPElectrodeGroup.LFPElectrode & key).fetch("KEY")
         electrode_id_list = list(k["electrode_id"] for k in electrode_keys)

@@ -2,7 +2,7 @@ import uuid
 
 import numpy as np
 
-from spyglass.spikesorting.merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v1.artifact import ArtifactDetectionSelection
 from spyglass.spikesorting.v1.curation import CurationV1
 from spyglass.spikesorting.v1.recording import SpikeSortingRecordingSelection

@@ -78,7 +78,7 @@ def add_electrode_group(
     electrodegroup_table.create_lfp_electrode_group(
         nwb_file_name=mini_copy_name,
         group_name=group_name,
-        electrode_list=lfp_constants.get("lfp_electrode_ids"),
+        electrode_list=np.array(lfp_constants.get("lfp_electrode_ids")),
     )
     assert len(
         electrodegroup_table & {"lfp_electrode_group_name": group_name}
@@ -128,6 +128,11 @@ def populate_lfp(lfp, add_selection, lfp_s_key):
 @pytest.fixture(scope="session")
 def lfp_merge_key(populate_lfp):
     yield populate_lfp
+
+
+@pytest.fixture(scope="session")
+def lfp_v1_key(lfp, lfp_s_key):
+    yield (lfp.v1.LFPV1 & lfp_s_key).fetch1("KEY")
 
 
 @pytest.fixture(scope="module")
@@ -196,13 +201,6 @@ def populate_lfp_band(lfp_band, add_band_selection):
     yield
 
 
-# @pytest.fixture(scope="session")
-# def mini_eseries(common, mini_copy_name):
-#     yield (common.Raw() & {"nwb_file_name": mini_copy_name}).fetch_nwb()[0][
-#         "raw"
-#     ]
-
-
 @pytest.fixture(scope="module")
 def lfp_band_analysis_raw(common, lfp_band, populate_lfp_band, mini_dict):
     abs_path = (common.AnalysisNwbfile * lfp_band.LFPBandV1 & mini_dict).fetch(
@@ -213,3 +211,32 @@ def lfp_band_analysis_raw(common, lfp_band, populate_lfp_band, mini_dict):
         nwbfile = io.read()
         assert nwbfile is not None, "NWBFile empty."
         yield nwbfile
+
+
+@pytest.fixture(scope="session")
+def art_params(lfp):
+    art_params = lfp.v1.LFPArtifactDetectionParameters()
+    _ = art_params.insert_default()
+    yield art_params
+
+
+@pytest.fixture(scope="session")
+def art_param_defaults():
+    yield [
+        "default_difference",
+        "default_difference_ref",
+        "default_mad",
+        "none",
+    ]
+
+
+@pytest.fixture(scope="session")
+def pop_art_detection(lfp, lfp_v1_key, art_param_defaults):
+    lfp.v1.LFPArtifactDetectionSelection().insert(
+        [
+            dict(**lfp_v1_key, artifact_params_name=param)
+            for param in art_param_defaults
+        ]
+    )
+    lfp.v1.LFPArtifactDetection().populate()
+    yield lfp.v1.LFPArtifactDetection().fetch("KEY", as_dict=True)

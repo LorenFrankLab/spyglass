@@ -9,4 +9,4 @@ if __name__ == "__main__":
         "This script is deprecated. "
         + "Use spyglass.utils.database_settings.DatabaseSettings instead."
     )
-    DatabaseSettings(user_name=sys.argv[1]).add_dj_user()
+    DatabaseSettings(user_name=sys.argv[1]).add_user(check_exists=True)

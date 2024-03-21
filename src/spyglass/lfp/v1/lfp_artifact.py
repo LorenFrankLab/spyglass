@@ -24,10 +24,12 @@ ARTIFACT_DETECTION_ALGORITHMS = {
 class LFPArtifactDetectionParameters(SpyglassMixin, dj.Manual):
     definition = """
     # Parameters for detecting LFP artifact times within a LFP group.
-    artifact_params_name: varchar(200)
+    artifact_params_name: varchar(64)
     ---
     artifact_params: blob  # dictionary of parameters
     """
+
+    # See #630, #664. Excessive key length.
 
     def insert_default(self):
         """Insert the default artifact parameters."""
@@ -130,36 +132,41 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
 
         algorithm = artifact_params["artifact_detection_algorithm"]
         params = artifact_params["artifact_detection_algorithm_params"]
-        lfp_band_ref_id = artifact_params["referencing"]["reference_list"]
 
         # get LFP data
         lfp_eseries = (LFPV1 & key).fetch_nwb()[0]["lfp"]
         sampling_frequency = (LFPV1 & key).fetch("lfp_sampling_rate")[0]
-
-        # do referencing at this step
         lfp_data = np.asarray(
             lfp_eseries.data[:, :],
             dtype=type(lfp_eseries.data[0][0]),
         )
 
-        lfp_band_ref_index = get_electrode_indices(lfp_eseries, lfp_band_ref_id)
-        lfp_band_elect_index = get_electrode_indices(
-            lfp_eseries, artifact_params["referencing"]["electrode_list"]
-        )
-
-        # maybe this lfp_elec_list is supposed to be a list on indices
-
-        for index, elect_index in enumerate(lfp_band_elect_index):
-            if lfp_band_ref_id[index] == -1:
-                continue
-            lfp_data[:, elect_index] = (
-                lfp_data[:, elect_index]
-                - lfp_data[:, lfp_band_ref_index[index]]
-            )
-
         is_diff = algorithm == "difference"
+        # do referencing at this step
+        if "referencing" in artifact_params:
+            ref = artifact_params["referencing"]["ref_on"] if is_diff else None
+            lfp_band_ref_id = artifact_params["referencing"]["reference_list"]
+            if artifact_params["referencing"]["ref_on"]:
+                lfp_band_ref_index = get_electrode_indices(
+                    lfp_eseries, lfp_band_ref_id
+                )
+                lfp_band_elect_index = get_electrode_indices(
+                    lfp_eseries,
+                    artifact_params["referencing"]["electrode_list"],
+                )
+
+                # maybe this lfp_elec_list is supposed to be a list on indices
+                for index, elect_index in enumerate(lfp_band_elect_index):
+                    if lfp_band_ref_id[index] == -1:
+                        continue
+                    lfp_data[:, elect_index] = (
+                        lfp_data[:, elect_index]
+                        - lfp_data[:, lfp_band_ref_index[index]]
+                    )
+        else:
+            ref = False if is_diff else None
+
         data = lfp_data if is_diff else lfp_eseries
-        ref = artifact_params["referencing"]["ref_on"] if is_diff else None
 
         (
             artifact_removed_valid_times,

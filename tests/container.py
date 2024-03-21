@@ -115,7 +115,7 @@ class DockerMySQLManager:
 
         return self.container.name
 
-    def wait(self, timeout=120, wait=5) -> None:
+    def wait(self, timeout=120, wait=3) -> None:
         """Wait for healthy container.
 
         Parameters
@@ -131,6 +131,7 @@ class DockerMySQLManager:
         if not self.container_status or self.container_status == "exited":
             self.start()
 
+        print("")
         for i in range(timeout // wait):
             if self.container.health == "healthy":
                 break
@@ -191,7 +192,7 @@ class DockerMySQLManager:
             "database.password": self.password,
             "database.user": self.user,
             "database.port": int(self.port),
-            "safmode": "false",
+            "safemode": "false",
             "custom": {"test_mode": True},
         }
 

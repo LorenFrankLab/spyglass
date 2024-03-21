@@ -1,3 +1,5 @@
+import datajoint as dj
+
 from spyglass.common.common_behav import (
     PositionSource,
     RawPosition,
@@ -14,50 +16,58 @@ from spyglass.common.common_ephys import (
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
-from spyglass.spikesorting.imported import ImportedSpikeSorting
+from spyglass.common.common_usage import InsertError
 from spyglass.utils import logger
 
 
 def populate_all_common(nwb_file_name):
-    # Insert session one by one
-    fp = [(Nwbfile & {"nwb_file_name": nwb_file_name}).proj()]
-    logger.info("Populate Session...")
-    Session.populate(fp)
+    """Insert all common tables for a given NWB file."""
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
 
-    # If we use Kachery for data sharing we can uncomment the following two lines. TBD
-    # logger.info('Populate NwbfileKachery...')
-    # NwbfileKachery.populate()
+    key = [(Nwbfile & f"nwb_file_name LIKE '{nwb_file_name}'").proj()]
+    tables = [
+        Session,
+        # NwbfileKachery, # Not used by default
+        ElectrodeGroup,
+        Electrode,
+        Raw,
+        SampleCount,
+        DIOEvents,
+        # SensorData, # Not used by default. Generates large files
+        RawPosition,
+        TaskEpoch,
+        StateScriptFile,
+        VideoFile,
+        PositionSource,
+        RawPosition,
+        ImportedSpikeSorting,
+    ]
+    error_constants = dict(
+        dj_user=dj.config["database.user"],
+        connection_id=dj.conn().connection_id,
+        nwb_file_name=nwb_file_name,
+    )
 
-    logger.info("Populate ElectrodeGroup...")
-    ElectrodeGroup.populate(fp)
-
-    logger.info("Populate Electrode...")
-    Electrode.populate(fp)
-
-    logger.info("Populate Raw...")
-    Raw.populate(fp)
-
-    logger.info("Populate SampleCount...")
-    SampleCount.populate(fp)
-
-    logger.info("Populate DIOEvents...")
-    DIOEvents.populate(fp)
-
-    # sensor data (from analog ProcessingModule) is temporarily removed from NWBFile
-    # to reduce file size while it is not being used. add it back in by commenting out
-    # the removal code in spyglass/data_import/insert_sessions.py when ready
-    # logger.info('Populate SensorData')
-    # SensorData.populate(fp)
-
-    logger.info("Populate TaskEpochs")
-    TaskEpoch.populate(fp)
-    logger.info("Populate StateScriptFile")
-    StateScriptFile.populate(fp)
-    logger.info("Populate VideoFile")
-    VideoFile.populate(fp)
-    logger.info("RawPosition...")
-    PositionSource.insert_from_nwbfile(nwb_file_name)
-    RawPosition.populate(fp)
-
-    logger.info("Populate ImportedSpikeSorting...")
-    ImportedSpikeSorting.populate(fp)
+    for table in tables:
+        logger.info(f"Populating {table.__name__}...")
+        try:
+            table.populate(key)
+        except Exception as e:
+            InsertError.insert1(
+                dict(
+                    **error_constants,
+                    table=table.__name__,
+                    error_type=type(e).__name__,
+                    error_message=str(e),
+                    error_raw=str(e),
+                )
+            )
+    query = InsertError & error_constants
+    if query:
+        err_tables = query.fetch("table")
+        logger.error(
+            f"Errors occurred during population for {nwb_file_name}:\n\t"
+            + f"Failed tables {err_tables}\n\t"
+            + "See common_usage.InsertError for more details"
+        )
+        return query.fetch("KEY")

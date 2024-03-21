@@ -1,8 +1,8 @@
 import datajoint as dj
 
-from spyglass.linearization.v0.main import (
-    IntervalLinearizedPosition,
-)  # noqa F401
+from spyglass.linearization.v0.main import (  # noqa F401
+    IntervalLinearizedPosition as LinearizedPositionV0,
+)
 from spyglass.linearization.v1.main import LinearizedPositionV1  # noqa F401
 from spyglass.utils import SpyglassMixin, _Merge
 
@@ -21,7 +21,7 @@ class LinearizedPositionOutput(_Merge, SpyglassMixin):
         definition = """
         -> LinearizedPositionOutput
         ---
-        -> IntervalLinearizedPosition
+        -> LinearizedPositionV0
         """
 
     class LinearizedPositionV1(SpyglassMixin, dj.Part):  # noqa: F811

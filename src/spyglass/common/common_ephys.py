@@ -17,6 +17,7 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
@@ -178,7 +179,7 @@ class Electrode(SpyglassMixin, dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath)
         if "Electrode" not in config:
-            return
+            return  # See #849
 
         # map electrode id to dictof electrode information from config YAML
         electrode_dicts = {
@@ -340,7 +341,7 @@ class SampleCount(SpyglassMixin, dj.Imported):
                 "Unable to import SampleCount: no data interface named "
                 + f'"sample_count" found in {nwb_file_name}.'
             )
-            return
+            return  # see #849
         key["sample_count_object_id"] = sample_count.object_id
         self.insert1(key)
 
@@ -369,7 +370,9 @@ class LFPSelection(SpyglassMixin, dj.Manual):
 
         """
         # remove the session and then recreate the session and Electrode list
-        (LFPSelection() & {"nwb_file_name": nwb_file_name}).delete()
+        (LFPSelection() & {"nwb_file_name": nwb_file_name}).delete(
+            safemode=not test_mode
+        )
         # check to see if the user allowed the deletion
         if (
             len((LFPSelection() & {"nwb_file_name": nwb_file_name}).fetch())

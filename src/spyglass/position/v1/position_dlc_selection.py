@@ -7,20 +7,20 @@ import pandas as pd
 import pynwb
 from datajoint.utils import to_camel_case
 
-from ...common.common_behav import (
+from spyglass.common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
 )
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_mixin import SpyglassMixin
-from .dlc_utils import get_video_path, make_video
-from .position_dlc_centroid import DLCCentroid
-from .position_dlc_cohort import DLCSmoothInterpCohort
-from .position_dlc_orient import DLCOrientation
-from .position_dlc_pose_estimation import (
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.position.v1.dlc_utils import make_video
+from spyglass.position.v1.position_dlc_centroid import DLCCentroid
+from spyglass.position.v1.position_dlc_cohort import DLCSmoothInterpCohort
+from spyglass.position.v1.position_dlc_orient import DLCOrientation
+from spyglass.position.v1.position_dlc_pose_estimation import (
     DLCPoseEstimation,
     DLCPoseEstimationSelection,
 )
-from .position_dlc_position import DLCSmoothInterpParams
+from spyglass.position.v1.position_dlc_position import DLCSmoothInterpParams
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("position_v1_dlc_selection")
 

@@ -26,7 +26,6 @@
 # This time, instead of extracting waveform features, we can proceed directly from the SpikeSortingOutput table to specify which units we want to decode. The rest of the decoding process is the same as before.
 #
 #
-# ## SortedSpikesGroup
 
 # +
 from pathlib import Path
@@ -35,28 +34,49 @@ import datajoint as dj
 dj.config.load(
     Path("../dj_local_conf.json").absolute()
 )  # load config for database connection info
+# -
+
+# ## SortedSpikesGroup
+#
+# `SortedSpikesGroup` is a child table of `SpikeSortingOutput` in the spikesorting pipeline. It allows us to group the spikesorting results from multiple
+# sources (e.g. multiple terode groups or intervals) into a single entry. Here we will group together the spiking of multiple tetrode groups to use for decoding.
+#
+#
+# This table allows us filter units by their annotation labels from curation (e.g only include units labeled "good", exclude units labeled "noise") by defining parameters from `UnitSelectionParams`. When accessing data through `SortedSpikesGroup` the table will include only units with at least one label in `include_labels` and no labels in `exclude_labels`. We can look at those here:
+#
 
 # +
-from spyglass.spikesorting.merge import SpikeSortingOutput
-import spyglass.spikesorting.v1 as sgs
+from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
 
+UnitSelectionParams().insert_default()
+
+# look at the filter set we'll use here
+unit_filter_params_name = "default_exclusion"
+print(
+    (
+        UnitSelectionParams()
+        & {"unit_filter_params_name": unit_filter_params_name}
+    ).fetch1()
+)
+# look at full table
+UnitSelectionParams()
+# -
+
+# Now we can make our sorted spikes group with this unit selection parameter
+
+# +
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+import spyglass.spikesorting.v1 as sgs
 
 nwb_copy_file_name = "mediumnwb20230802_.nwb"
 
 sorter_keys = {
     "nwb_file_name": nwb_copy_file_name,
-    "sorter": "clusterless_thresholder",
-    "sorter_param_name": "default_clusterless",
+    "sorter": "mountainsort4",
+    "curation_id": 1,
 }
-
+# check the set of sorting we'll use
 (sgs.SpikeSortingSelection & sorter_keys) * SpikeSortingOutput.CurationV1
-
-# +
-spikesorting_merge_ids = (
-    (sgs.SpikeSortingSelection & sorter_keys) * SpikeSortingOutput.CurationV1
-).fetch("merge_id")
-
-spikesorting_merge_ids
 
 # +
 from spyglass.decoding.v1.sorted_spikes import SortedSpikesGroup
@@ -64,6 +84,13 @@ from spyglass.decoding.v1.sorted_spikes import SortedSpikesGroup
 SortedSpikesGroup()
 
 # +
+# get the merge_ids for the selected sorting
+spikesorting_merge_ids = (
+    (sgs.SpikeSortingSelection & sorter_keys) * SpikeSortingOutput.CurationV1
+).fetch("merge_id")
+
+# create a new sorted spikes group
+unit_filter_params_name = "default_exclusion"
 SortedSpikesGroup().create_group(
     group_name="test_group",
     nwb_file_name=nwb_copy_file_name,
@@ -71,17 +98,20 @@ SortedSpikesGroup().create_group(
         {"spikesorting_merge_id": merge_id}
         for merge_id in spikesorting_merge_ids
     ],
+    unit_filter_params_name=unit_filter_params_name,
 )
-
+# check the new group
 SortedSpikesGroup & {
     "nwb_file_name": nwb_copy_file_name,
     "sorted_spikes_group_name": "test_group",
 }
 # -
 
-SortedSpikesGroup.SortGroup & {
+# look at the sorting within the group we just made
+SortedSpikesGroup.Units & {
     "nwb_file_name": nwb_copy_file_name,
     "sorted_spikes_group_name": "test_group",
+    "unit_filter_params_name": unit_filter_params_name,
 }
 
 # ## Model parameters
@@ -114,13 +144,9 @@ DecodingParameters()
 # Now we can decode the position using the sorted spikes using the `SortedSpikesDecodingSelection` table. Here we assume that `PositionGroup` has been specified as in the clusterless decoding tutorial.
 
 # +
-from spyglass.decoding.v1.sorted_spikes import SortedSpikesDecodingSelection
-
-SortedSpikesDecodingSelection()
-
-# +
 selection_key = {
     "sorted_spikes_group_name": "test_group",
+    "unit_filter_params_name": "default_exclusion",
     "position_group_name": "test_group",
     "decoding_param_name": "contfrag_sorted",
     "nwb_file_name": "mediumnwb20230802_.nwb",
@@ -128,6 +154,8 @@ selection_key = {
     "decoding_interval": "test decoding interval",
     "estimate_decoding_params": False,
 }
+
+from spyglass.decoding import SortedSpikesDecodingSelection
 
 SortedSpikesDecodingSelection.insert1(
     selection_key,
@@ -150,5 +178,8 @@ DecodingOutput.SortedSpikesDecodingV1 & selection_key
 
 # We can load the results as before:
 
-results = (SortedSpikesDecodingV1 & selection_key).load_results()
+# +
+
+results = (SortedSpikesDecodingV1 & selection_key).fetch_results()
 results
+# -

@@ -22,7 +22,12 @@ def mini_pos_series(mini_pos):
 
 
 @pytest.fixture(scope="session")
-def mini_pos_interval_dict(common):
+def mini_beh_events(mini_behavior):
+    yield mini_behavior.get_data_interface("behavioral_events")
+
+
+@pytest.fixture(scope="session")
+def mini_pos_interval_dict(mini_insert, common):
     yield {"interval_list_name": common.PositionSource.get_pos_interval_name(0)}
 
 

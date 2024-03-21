@@ -2,18 +2,16 @@ import copy
 import os
 from pathlib import Path
 
-import cv2
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
 from tqdm import tqdm as tqdm
 
-from ...common.common_behav import RawPosition
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...common.common_position import IntervalPositionInfo
-from ...utils import logger
-from ...utils.dj_mixin import SpyglassMixin
-from .dlc_utils import check_videofile, get_video_path
+from spyglass.common.common_behav import RawPosition
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_position import IntervalPositionInfo
+from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_trodes_position")
 
@@ -159,7 +157,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        print(f"Computing position for: {key}")
+        logger.info(f"Computing position for: {key}")
         orig_key = copy.deepcopy(key)
 
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
@@ -221,8 +219,9 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
                 TrodesPosParams & {"trodes_pos_params_name": pos_params}
             ).fetch1("params")["is_upsampled"]
         ):
-            logger.warn(
-                "Upsampled position data, frame indices are invalid. Setting add_frame_ind=False"
+            logger.warning(
+                "Upsampled position data, frame indices are invalid. "
+                + "Setting add_frame_ind=False"
             )
             add_frame_ind = False
         return IntervalPositionInfo._data_to_df(
@@ -246,7 +245,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
     def make(self, key):
         M_TO_CM = 100
 
-        print("Loading position data...")
+        logger.info("Loading position data...")
         raw_position_df = (
             RawPosition.PosObject
             & {
@@ -256,7 +255,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         ).fetch1_dataframe()
         position_info_df = (TrodesPosV1() & key).fetch1_dataframe()
 
-        print("Loading video data...")
+        logger.info("Loading video data...")
         epoch = (
             int(
                 key["interval_list_name"]
@@ -300,7 +299,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         position_time = np.asarray(position_info_df.index)
         cm_per_pixel = meters_per_pixel * M_TO_CM
 
-        print("Making video...")
+        logger.info("Making video...")
         self.make_video(
             video_path,
             centroids,
@@ -357,6 +356,8 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         arrow_radius=15,
         circle_radius=8,
     ):
+        import cv2
+
         RGB_PINK = (234, 82, 111)
         RGB_YELLOW = (253, 231, 76)
         RGB_WHITE = (255, 255, 255)
@@ -366,7 +367,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         frame_size = (int(video.get(3)), int(video.get(4)))
         frame_rate = video.get(5)
         n_frames = int(orientation_mean.shape[0])
-        print(f"video filepath: {output_video_filename}")
+        logger.info(f"video filepath: {output_video_filename}")
         out = cv2.VideoWriter(
             output_video_filename, fourcc, frame_rate, frame_size, True
         )

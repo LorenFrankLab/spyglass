@@ -4,10 +4,9 @@ from pathlib import Path
 
 import datajoint as dj
 
+from spyglass.position.v1.dlc_utils import OutputLogger
+from spyglass.position.v1.position_dlc_project import DLCProject
 from spyglass.utils.dj_mixin import SpyglassMixin
-
-from .dlc_utils import OutputLogger
-from .position_dlc_project import DLCProject
 
 schema = dj.schema("position_v1_dlc_training")
 

@@ -1,4 +1,5 @@
 import pathlib
+import re
 from functools import reduce
 from typing import Dict
 
@@ -42,8 +43,27 @@ class PositionSource(SpyglassMixin, dj.Manual):
         name=null: varchar(32)       # name of spatial series
         """
 
+    def populate(self, keys=None):
+        """Insert position source data from NWB file.
+
+        WARNING: populate method on Manual table is not protected by transaction
+                protections like other DataJoint tables.
+        """
+        if not isinstance(keys, list):
+            keys = [keys]
+        if isinstance(keys[0], (dj.Table, dj.expression.QueryExpression)):
+            keys = [k for tbl in keys for k in tbl.fetch("KEY", as_dict=True)]
+        for key in keys:
+            nwb_file_name = key.get("nwb_file_name")
+            if not nwb_file_name:
+                raise ValueError(
+                    "PositionSource.populate is an alias for a non-computed table "
+                    + "and must be passed a key with nwb_file_name"
+                )
+            self.insert_from_nwbfile(nwb_file_name, skip_duplicates=True)
+
     @classmethod
-    def insert_from_nwbfile(cls, nwb_file_name):
+    def insert_from_nwbfile(cls, nwb_file_name, skip_duplicates=False) -> None:
         """Add intervals to ItervalList and PositionSource.
 
         Given an NWB file name, get the spatial series and interval lists from
@@ -91,9 +111,11 @@ class PositionSource(SpyglassMixin, dj.Manual):
                 )
 
         with cls.connection.transaction:
-            IntervalList.insert(intervals)
-            cls.insert(sources)
-            cls.SpatialSeries.insert(spat_series)
+            IntervalList.insert(intervals, skip_duplicates=skip_duplicates)
+            cls.insert(sources, skip_duplicates=skip_duplicates)
+            cls.SpatialSeries.insert(
+                spat_series, skip_duplicates=skip_duplicates
+            )
 
         # make map from epoch intervals to position intervals
         populate_position_interval_map_session(nwb_file_name)
@@ -170,8 +192,6 @@ class RawPosition(SpyglassMixin, dj.Imported):
         _nwb_table = Nwbfile
 
         def fetch1_dataframe(self):
-            INDEX_ADJUST = 1  # adjust 0-index to 1-index (e.g., xloc0 -> xloc1)
-
             id_rp = [(n["id"], n["raw_position"]) for n in self.fetch_nwb()]
 
             if len(set(rp.interval for _, rp in id_rp)) > 1:
@@ -181,18 +201,30 @@ class RawPosition(SpyglassMixin, dj.Imported):
                 pd.DataFrame(
                     data=rp.data,
                     index=pd.Index(rp.timestamps, name="time"),
-                    columns=[
-                        col  # use existing columns if already numbered
-                        if "1" in rp.description or "2" in rp.description
-                        # else number them by id
-                        else col + str(id + INDEX_ADJUST)
-                        for col in rp.description.split(", ")
-                    ],
+                    columns=self._get_column_names(rp, pos_id),
                 )
-                for id, rp in id_rp
+                for pos_id, rp in id_rp
             ]
 
             return reduce(lambda x, y: pd.merge(x, y, on="time"), df_list)
+
+        @staticmethod
+        def _get_column_names(rp, pos_id):
+            INDEX_ADJUST = 1  # adjust 0-index to 1-index (e.g., xloc0 -> xloc1)
+            n_pos_dims = rp.data.shape[1]
+            column_names = [
+                (
+                    col  # use existing columns if already numbered
+                    if "1" in rp.description or "2" in rp.description
+                    # else number them by id
+                    else col + str(pos_id + INDEX_ADJUST)
+                )
+                for col in rp.description.split(", ")
+            ]
+            if len(column_names) != n_pos_dims:
+                # if the string split didn't work, use default names
+                column_names = ["x", "y", "z"][:n_pos_dims]
+            return column_names
 
     def make(self, key):
         nwb_file_name = key["nwb_file_name"]
@@ -275,7 +307,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
                 "Unable to import StateScriptFile: no processing module named "
                 + '"associated_files" found in {nwb_file_name}.'
             )
-            return
+            return  # See #849
 
         for associated_file_obj in associated_files.data_interfaces.values():
             if not isinstance(
@@ -362,7 +394,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 "interval_list_name": interval_list_name,
             }
         ).fetch1("valid_times")
-
+        cam_device_str = r"camera_device (\d+)"
         is_found = False
         for ind, video in enumerate(videos.values()):
             if isinstance(video, pynwb.image.ImageSeries):
@@ -375,7 +407,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
                     interval_list_contains(valid_times, video_obj.timestamps)
                     > 0.9 * len(video_obj.timestamps)
                 ):
-                    key["video_file_num"] = ind
+                    nwb_cam_device = video_obj.device.name
+                    # returns whatever was captured in the first group (within the parentheses) of the regular expression -- in this case, 0
+                    key["video_file_num"] = int(
+                        re.match(cam_device_str, nwb_cam_device)[1]
+                    )
                     camera_name = video_obj.device.camera_name
                     if CameraDevice & {"camera_name": camera_name}:
                         key["camera_name"] = video_obj.device.camera_name
@@ -472,6 +508,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Skip populating if no pos interval list names
         if len(pos_intervals) == 0:
+            # TODO: Now that populate_all accept errors, raise here?
             logger.error(f"NO POS INTERVALS FOR {key}; {no_pop_msg}")
             return
 
@@ -509,7 +546,8 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
-            logger.error(
+            # TODO: Now that populate_all accept errors, raise here?
+            logger.warning(
                 f"Found {len(matching_pos_intervals)} pos intervals for {key}; "
                 + f"{no_pop_msg}\n{matching_pos_intervals}"
             )

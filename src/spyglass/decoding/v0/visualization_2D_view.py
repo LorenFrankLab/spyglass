@@ -3,10 +3,6 @@ from typing import Callable, Dict, Tuple
 import numpy as np
 import sortingview.views.franklab as vvf
 import xarray as xr
-from replay_trajectory_classification.environments import (
-    get_grid,
-    get_track_interior,
-)
 
 
 def create_static_track_animation(
@@ -38,7 +34,7 @@ def create_static_track_animation(
         "xmin": np.min(ul_corners[0]),
         "xmax": np.max(ul_corners[0]) + track_rect_width,
         "ymin": np.min(ul_corners[1]),
-        "ymax": np.max(ul_corners[1]) + track_rect_height
+        "ymax": np.max(ul_corners[1]) + track_rect_height,
         # Speed: should this be displayed?
         # TODO: Better approach for accommodating further data streams
     }

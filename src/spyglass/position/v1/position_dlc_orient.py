@@ -4,10 +4,11 @@ import pandas as pd
 import pynwb
 from position_tools.core import gaussian_smooth
 
-from ...common.common_behav import RawPosition
-from ...common.common_nwbfile import AnalysisNwbfile
-from ...utils.dj_mixin import SpyglassMixin
-from .dlc_utils import get_span_start_stop
+from spyglass.common.common_behav import RawPosition
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.position.v1.dlc_utils import get_span_start_stop
+from spyglass.utils.dj_mixin import SpyglassMixin
+
 from .position_dlc_cohort import DLCSmoothInterpCohort
 
 schema = dj.schema("position_v1_dlc_orient")
@@ -241,15 +242,15 @@ def interp_orientation(orientation, spans_to_interp, **kwargs):
     # TODO: add parameters to refine interpolation
     for ind, (span_start, span_stop) in enumerate(spans_to_interp):
         if (span_stop + 1) >= len(orientation):
-            orientation.loc[
-                idx[span_start:span_stop], idx["orientation"]
-            ] = np.nan
+            orientation.loc[idx[span_start:span_stop], idx["orientation"]] = (
+                np.nan
+            )
             print(f"ind: {ind} has no endpoint with which to interpolate")
             continue
         if span_start < 1:
-            orientation.loc[
-                idx[span_start:span_stop], idx["orientation"]
-            ] = np.nan
+            orientation.loc[idx[span_start:span_stop], idx["orientation"]] = (
+                np.nan
+            )
             print(f"ind: {ind} has no startpoint with which to interpolate")
             continue
         orient = [
@@ -263,7 +264,7 @@ def interp_orientation(orientation, spans_to_interp, **kwargs):
             xp=[start_time, stop_time],
             fp=[orient[0], orient[-1]],
         )
-        orientation.loc[
-            idx[start_time:stop_time], idx["orientation"]
-        ] = orientnew
+        orientation.loc[idx[start_time:stop_time], idx["orientation"]] = (
+            orientnew
+        )
     return orientation
