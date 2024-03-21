@@ -586,11 +586,6 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/11_CurationV0/</loc>
-         <lastmod>2024-03-21</lastmod>
-         <changefreq>daily</changefreq>
-    </url>
-    <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/20_Position_Trodes/</loc>
          <lastmod>2024-03-21</lastmod>
          <changefreq>daily</changefreq>
@@ -636,32 +631,12 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/41_Extracting_Clusterless_Waveform_Features/</loc>
-         <lastmod>2024-03-21</lastmod>
-         <changefreq>daily</changefreq>
-    </url>
-    <url>
-         <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/42_Decoding_Clusterless/</loc>
-         <lastmod>2024-03-21</lastmod>
-         <changefreq>daily</changefreq>
-    </url>
-    <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/42_Decoding_SortedSpikes/</loc>
          <lastmod>2024-03-21</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/43_Decoding_SortedSpikes/</loc>
-         <lastmod>2024-03-21</lastmod>
-         <changefreq>daily</changefreq>
-    </url>
-    <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/50_MUA_Detection/</loc>
-         <lastmod>2024-03-21</lastmod>
-         <changefreq>daily</changefreq>
-    </url>
-    <url>
-         <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/51_MUA_Detection/</loc>
          <lastmod>2024-03-21</lastmod>
          <changefreq>daily</changefreq>
     </url>
