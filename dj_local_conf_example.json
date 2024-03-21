@@ -41,7 +41,7 @@
       "video": "/your/base/path/video"
     },
     "kachery_dirs": {
-      "cloud": "/your/base/path/kachery_storage",
+      "cloud": "/your/base/path/.kachery-cloud",
       "storage": "/your/base/path/kachery_storage",
       "temp": "/your/base/path/tmp"
     },

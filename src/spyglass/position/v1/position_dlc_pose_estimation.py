@@ -86,9 +86,10 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
 
         Parameters
         ----------
-        key: DataJoint key specifying a pairing of VideoRecording and Model.
-        task_mode (bool): Default 'trigger' computation.
-        Or 'load' existing results.
+        key: dict
+            DataJoint key specifying a pairing of VideoRecording and Model.
+        task_mode: bool, optional
+            Default 'trigger' computation. Or 'load' existing results.
         params (dict): Optional. Parameters passed to DLC's analyze_videos:
             videotype, gputouse, save_as_csv, batchsize, cropping,
             TFGPUinference, dynamic, robust_nframes, allow_growth, use_shelve

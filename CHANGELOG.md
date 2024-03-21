@@ -3,6 +3,7 @@
 ## [0.5.2] (Unreleased)
 
 - Refactor `TableChain` to include `_searched` attribute. #867
+- Fix errors in config import #882
 
 ## [0.5.1] (March 7, 2024)
 
@@ -23,6 +24,7 @@
 - Spikesorting:
     - Increase`spikeinterface` version to >=0.99.1, <0.100 #852
     - Bug fix in single artifact interval edge case #859
+    - Bug fix in FigURL #871
 - LFP
     - In LFPArtifactDetection, only apply referencing if explicitly selected #863
 

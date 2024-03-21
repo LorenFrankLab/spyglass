@@ -4,6 +4,7 @@ on:
   push:
     branches: 
       - '!test_branch'
+      - '!documentation'
   schedule:  # once a day at midnight UTC
     - cron: '0 0 * * *'
 
