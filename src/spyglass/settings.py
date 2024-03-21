@@ -70,7 +70,7 @@ class SpyglassConfig:
                 "video": "video",
             },
             "kachery": {
-                "cloud": "kachery_storage",
+                "cloud": ".kachery-cloud",
                 "storage": "kachery_storage",
                 "temp": "tmp",
             },
@@ -181,10 +181,13 @@ class SpyglassConfig:
                     else None
                 )
 
+                source_config = (
+                    dj_dlc
+                    if prefix == "dlc"
+                    else dj_kachery if prefix == "kachery" else dj_spyglass
+                )
                 dir_location = (
-                    dj_spyglass.get(dir)
-                    or dj_kachery.get(dir)
-                    or dj_dlc.get(dir)
+                    source_config.get(dir)
                     or env_loc
                     or str(Path(this_base) / dir_str)
                 ).replace('"', "")
