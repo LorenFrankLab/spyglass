@@ -3,7 +3,7 @@
 ## [0.5.2] (Unreleased)
 
 - Refactor `TableChain` to include `_searched` attribute. #867
-- Fix errors in config import #881
+- Fix errors in config import #882
 
 ## [0.5.1] (March 7, 2024)
 
