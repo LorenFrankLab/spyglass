@@ -4636,13 +4636,13 @@ pipeline and the output of spike sorting from the Spike Sorting pipeline.
 Decoding can be from sorted or from unsorted data using spike waveform features
 (so-called clusterless decoding).</p>
 <p>The first notebook
-(<a href="./41_Extracting_Clusterless_Waveform_Features.ipynb">Extracting Clusterless Waveform Features</a>)
+(<a href="40_Extracting_Clusterless_Waveform_Features/">Extracting Clusterless Waveform Features</a>)
 in this series shows how to retrieve the spike waveform features used for
 clusterless decoding.</p>
-<p>The second notebook (<a href="./42_Decoding_Clusterless.ipynb">Clusterless Decoding</a>)
+<p>The second notebook (<a href="41_Decoding_Clusterless/">Clusterless Decoding</a>)
 shows a detailed example of how to decode the position of the animal from the
 spike waveform features. The third notebook
-(<a href="./43_Decoding_SortedSpikes.ipynb">Decoding</a>) shows how to decode the position
+(<a href="42_Decoding_SortedSpikes/">Decoding</a>) shows how to decode the position
 of the animal from the sorted spikes.</p>
 <h2 id="developer-note">Developer note<a class="headerlink" href="#developer-note" title="Permanent link">&para;</a></h2>
 <p>The <code>py_scripts</code> directory contains the same notebook data in <code>.py</code> form to
@@ -4654,6 +4654,10 @@ Spyglass directory</p>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>black<span class="w"> </span>.
 </span></code></pre></div>
 <p>Unfortunately, jupytext-generated py script are not black-compliant by default.</p>
+<p>You can ensure black compliace with the <code>pre-commit</code> hook by running</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span>pre-commit
+</span></code></pre></div>
+<p>This will run black whenever you commit changes to the repository.</p>
 
 
 
