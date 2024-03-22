@@ -159,7 +159,7 @@ sss_pk = (sgs.SpikeSortingSelection & key).proj()
 sgs.SpikeSorting.populate(sss_pk)
 # -
 
-# The spike sorting results (spike times of detected units) are saved in an NWB file. We can access this in two ways. First, we can access it via the `fetch_nwb` method, which allows us to directly access the spike times saved in the `units` table of the NWB file. Second, we can access it as a `spikeinterface.NWBSorting` object. Ths allows us to take advantage of the rich APIs of `spikeinterface` to further analyze the sorting.
+# The spike sorting results (spike times of detected units) are saved in an NWB file. We can access this in two ways. First, we can access it via the `fetch_nwb` method, which allows us to directly access the spike times saved in the `units` table of the NWB file. Second, we can access it as a `spikeinterface.NWBSorting` object. This allows us to take advantage of the rich APIs of `spikeinterface` to further analyze the sorting.
 
 sorting_nwb = (sgs.SpikeSorting & key).fetch_nwb()
 sorting_si = sgs.SpikeSorting.get_sorting(key)
@@ -300,9 +300,11 @@ sgs.CurationV1()
 # We now insert the curated spike sorting to a `Merge` table for feeding into downstream processing pipelines.
 #
 
+# +
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
 SpikeSortingOutput()
+# -
 
 SpikeSortingOutput.insert([key], part_name="CurationV1")
 SpikeSortingOutput.merge_view()
