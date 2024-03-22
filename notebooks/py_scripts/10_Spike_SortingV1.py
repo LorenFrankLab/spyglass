@@ -5,15 +5,23 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.1
+#       jupytext_version: 1.15.2
 #   kernelspec:
-#     display_name: spyglass-2024-02-07
+#     display_name: spyglass
 #     language: python
-#     name: spyglass-ds
+#     name: python3
 # ---
 
-# Connect to db. See instructions in [Setup](./00_Setup.ipynb).
+# # Spike Sorting: pipeline version 1
+
+# This is a tutorial for Spyglass spike sorting pipeline version 1 (V1). This pipeline coexists with [version 0](./10_Spike_SortingV0.ipynb) but differs in that:
+# - it stores more of the intermediate results (e.g. filtered and referenced recording) in the NWB format
+# - it has more streamlined curation pipelines
+# - it uses UUIDs as the primary key for important tables (e.g. `SpikeSorting`) to reduce the number of keys that make up the composite primary key
 #
+# The output of both versions of the pipeline are saved in a [merge table](./03_Merge_Tables.ipynb) called `SpikeSortingOutput`.
+
+# To start, connect to the database. See instructions in [Setup](./00_Setup.ipynb).
 
 # +
 import os
@@ -25,46 +33,59 @@ if os.path.basename(os.getcwd()) == "notebooks":
     os.chdir("..")
 dj.config["enable_python_native_blobs"] = True
 dj.config.load("dj_local_conf.json")  # load config for database connection info
-
-# %load_ext autoreload
-# %autoreload 2
 # -
 
-# import
-#
+# ## Insert Data and populate pre-requisite tables
+
+# First, import the pipeline and other necessary modules.
 
 import spyglass.common as sgc
 import spyglass.spikesorting.v1 as sgs
 import spyglass.data_import as sgi
 
-# insert LabMember and Session
-#
+# We will be using `minirec20230622.nwb` as our example. As usual, first insert the NWB file into `Session` (can skip if you have already done so).
 
-nwb_file_name = "mediumnwb20230802.nwb"
-nwb_file_name2 = "mediumnwb20230802_.nwb"
-
+nwb_file_name = "minirec20230622.nwb"
+nwb_file_name2 = "minirec20230622_.nwb"
 sgi.insert_sessions(nwb_file_name)
+sgc.Session() & {"nwb_file_name": nwb_file_name2}
 
-sgc.Session()
+# All spikesorting results are linked to a team name from the `LabTeam` table. If you haven't already inserted a team for your project do so here.
 
-# insert SortGroup
-#
+# Make a lab team if doesn't already exist, otherwise insert yourself into team
+team_name = "My Team"
+if not sgc.LabTeam() & {"team_name": team_name}:
+    sgc.LabTeam().create_new_team(
+        team_name=team_name,  # Should be unique
+        team_members=[],
+        team_description="test",  # Optional
+    )
+
+# ## Define sort groups and extract recordings
+
+# Each NWB file will have multiple electrodes we can use for spike sorting. We
+# commonly use multiple electrodes in a `SortGroup` selected by what tetrode or
+# shank of a probe they were on. Electrodes in the same sort group will then be
+# sorted together.
 
 sgs.SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name2)
 
-# insert SpikeSortingRecordingSelection. use `insert_selection` method. this automatically generates a unique recording id
+# The next step is to filter and reference the recording so that we isolate the spike band data. This is done by combining the data with the parameters in `SpikeSortingRecordingSelection`. For inserting into this table, use `insert_selection` method. This automatically generates a UUID for a recording.
 #
 
+# define and insert a key for each sort group and interval you want to sort
 key = {
     "nwb_file_name": nwb_file_name2,
     "sort_group_id": 0,
     "preproc_param_name": "default",
+    "interval_list_name": "01_s1",
+    "team_name": "My Team",
 }
-
-sgs.SpikeSortingRecordingSelection() & key
-
 sgs.SpikeSortingRecordingSelection.insert_selection(key)
 
+# Next we will call `populate` method of `SpikeSortingRecording`.
+
+# +
 # Assuming 'key' is a dictionary with fields that you want to include in 'ssr_key'
 ssr_key = {
     "recording_id": (sgs.SpikeSortingRecordingSelection() & key).fetch1(
@@ -72,47 +93,33 @@ ssr_key = {
     ),
 } | key
 
-# preprocess recording (filtering and referencing)
-#
-
-# +
-# sgs.SpikeSortingRecording.populate()
 ssr_pk = (sgs.SpikeSortingRecordingSelection & key).proj()
-
-
 sgs.SpikeSortingRecording.populate(ssr_pk)
-# -
-
 sgs.SpikeSortingRecording() & ssr_key
+# -
 
 key = (sgs.SpikeSortingRecordingSelection & key).fetch1()
 
-# insert ArtifactDetectionSelection
-#
+# ## Artifact Detection
+
+# Sometimes the recording may contain artifacts that can confound spike sorting. For example, we often have artifacts when the animal licks the reward well for milk during behavior. These appear as sharp transients across all channels, and sometimes they are not adequately removed by filtering and referencing. We will identify the periods during which this type of artifact appears and set them to zero so that they won't interfere with spike sorting.
 
 sgs.ArtifactDetectionSelection.insert_selection(
     {"recording_id": key["recording_id"], "artifact_param_name": "default"}
 )
-
-# detect artifact; note the output is stored in IntervalList
-#
-
 sgs.ArtifactDetection.populate()
 
 sgs.ArtifactDetection()
 
-# insert SpikeSortingSelection. again use `insert_selection` method.
-#
-# We tested mountainsort4, mountainsort5, kilosort2_5, kilosort3, and ironclust.
-# when using mountainsort5, pip install 'mountainsort5'
-# when using Kilosorts and ironclust -- make sure to pip install 'cuda-python' and 'spython'
-# For sorting with Kilosort, make sure to use a machine with GPU and put the whole probe not a sliced individual shank.
-#
+# The output of `ArtifactDetection` is actually stored in `IntervalList` because it is another type of interval. The UUID however can be found in both.
 
-# Install mountainsort 4 if you haven't done it.
+# ## Run Spike Sorting
 
-# #!pip install pybind11
-# !pip install mountainsort4
+# Now that we have prepared the recording, we will pair this with a spike sorting algorithm and associated parameters. This will be inserted to `SpikeSortingSelection`, again via `insert_selection` method.
+
+# The spike sorting pipeline is powered by `spikeinterface`, a community-developed Python package that enables one to easily apply multiple spike sorters to a single recording. Some spike sorters have special requirements, such as GPU. Others need to be installed separately from spyglass. In the Frank lab, we have been using `mountainsort4`, though the pipeline have been tested with `mountainsort5`, `kilosort2_5`, `kilosort3`, and `ironclust` as well.
+#
+# When using `mountainsort5`, make sure to run `pip install mountainsort5`. `kilosort2_5`, `kilosort3`, and `ironclust` are MATLAB-based, but we can run these without having to install MATLAB thanks to `spikeinterface`. It does require downloading additional files (as singularity containers) so make sure to do `pip install spython`. These sorters also require GPU access, so also do ` pip install cuda-python` (and make sure your computer does have a GPU).
 
 # +
 sorter = "mountainsort4"
@@ -129,13 +136,11 @@ common_key = {
     ),
 }
 
-
 if sorter == "mountainsort4":
     key = {
         **common_key,
         "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
     }
-
 else:
     key = {
         **common_key,
@@ -144,11 +149,9 @@ else:
 # -
 
 sgs.SpikeSortingSelection.insert_selection(key)
-
 sgs.SpikeSortingSelection() & key
 
-# run spike sorting
-#
+# Once `SpikeSortingSelection` is populated, let's run `SpikeSorting.populate`.
 
 # +
 sss_pk = (sgs.SpikeSortingSelection & key).proj()
@@ -156,11 +159,22 @@ sss_pk = (sgs.SpikeSortingSelection & key).proj()
 sgs.SpikeSorting.populate(sss_pk)
 # -
 
-# we have two main ways of curating spike sorting: by computing quality metrics and applying threshold; and manually applying curation labels. to do so, we first insert CurationV1. use `insert_curation` method.
+# The spike sorting results (spike times of detected units) are saved in an NWB file. We can access this in two ways. First, we can access it via the `fetch_nwb` method, which allows us to directly access the spike times saved in the `units` table of the NWB file. Second, we can access it as a `spikeinterface.NWBSorting` object. This allows us to take advantage of the rich APIs of `spikeinterface` to further analyze the sorting.
+
+sorting_nwb = (sgs.SpikeSorting & key).fetch_nwb()
+sorting_si = sgs.SpikeSorting.get_sorting(key)
+
+# Note that the spike times of `fetch_nwb` is in units of seconds aligned with the timestamps of the recording. The spike times of the `spikeinterface.NWBSorting` object is in units of samples (as is generally true for sorting objects in `spikeinterface`).
+
+# ## Automatic Curation
+
+# Next step is to curate the results of spike sorting. This is often necessary because spike sorting algorithms are not perfect;
+# they often return clusters that are clearly not biological in origin, and sometimes oversplit clusters that should have been merged.
+# We have two main ways of curating spike sorting: by computing quality metrics followed by thresholding, and manually applying curation labels.
+# To do either, we first insert the spike sorting to `CurationV1` using `insert_curation` method.
 #
 
 sgs.SpikeSortingRecording & key
-
 sgs.CurationV1.insert_curation(
     sorting_id=(
         sgs.SpikeSortingSelection & {"recording_id": key["recording_id"]}
@@ -170,8 +184,7 @@ sgs.CurationV1.insert_curation(
 
 sgs.CurationV1()
 
-# we will first do an automatic curation based on quality metrics
-#
+# We will first do an automatic curation based on quality metrics. Under the hood, this part again makes use of `spikeinterface`. Some of the quality metrics that we often compute are the nearest neighbor isolation and noise overlap metrics, as well as SNR and ISI violation rate. For computing some of these metrics, the waveforms must be extracted and projected onto a feature space. Thus here we set the parameters for waveform extraction as well as how to curate the units based on these metrics (e.g. if `nn_noise_overlap` is greater than 0.1, mark as `noise`).
 
 key = {
     "sorting_id": (
@@ -184,12 +197,10 @@ key = {
 }
 
 sgs.MetricCurationSelection.insert_selection(key)
-
-sgs.MetricCurationSelection()
+sgs.MetricCurationSelection() & key
 
 sgs.MetricCuration.populate()
-
-sgs.MetricCuration()
+sgs.MetricCuration() & key
 
 # to do another round of curation, fetch the relevant info and insert back into CurationV1 using `insert_curation`
 #
@@ -199,13 +210,9 @@ key = {
         sgs.MetricCurationSelection & {"sorting_id": key["sorting_id"]}
     ).fetch1("metric_curation_id")
 }
-
 labels = sgs.MetricCuration.get_labels(key)
-
 merge_groups = sgs.MetricCuration.get_merge_groups(key)
-
 metrics = sgs.MetricCuration.get_metrics(key)
-
 sgs.CurationV1.insert_curation(
     sorting_id=(
         sgs.MetricCurationSelection
@@ -220,7 +227,12 @@ sgs.CurationV1.insert_curation(
 
 sgs.CurationV1()
 
-# next we will do manual curation. this is done with figurl. to incorporate info from other stages of processing (e.g. metrics) we have to store that with kachery cloud and get curation uri referring to it. it can be done with `generate_curation_uri`.
+# ## Manual Curation
+
+# Next we will do manual curation. this is done with figurl. to incorporate info from other stages of processing (e.g. metrics) we have to store that with kachery cloud and get curation uri referring to it. it can be done with `generate_curation_uri`.
+#
+# _Note_: This step is dependent on setting up a kachery sharing system as described in [02_Data_Sync.ipynb](02_Data_Sync.ipynb)
+# and will likely not work correctly on the spyglass-demo server.
 #
 
 curation_uri = sgs.FigURLCurationSelection.generate_curation_uri(
@@ -232,7 +244,6 @@ curation_uri = sgs.FigURLCurationSelection.generate_curation_uri(
         "curation_id": 1,
     }
 )
-
 key = {
     "sorting_id": (
         sgs.MetricCurationSelection
@@ -242,15 +253,12 @@ key = {
     "curation_uri": curation_uri,
     "metrics_figurl": list(metrics.keys()),
 }
-
 sgs.FigURLCurationSelection()
 
 sgs.FigURLCurationSelection.insert_selection(key)
-
 sgs.FigURLCurationSelection()
 
 sgs.FigURLCuration.populate()
-
 sgs.FigURLCuration()
 
 # or you can manually specify it if you already have a `curation.json`
@@ -267,21 +275,17 @@ key = {
     "curation_uri": gh_curation_uri,
     "metrics_figurl": [],
 }
+sgs.FigURLCurationSelection.insert_selection(key)
 # -
 
-sgs.FigURLCurationSelection.insert_selection(key)
-
 sgs.FigURLCuration.populate()
-
 sgs.FigURLCuration()
 
 # once you apply manual curation (curation labels and merge groups) you can store them as nwb by inserting another row in CurationV1. And then you can do more rounds of curation if you want.
 #
 
 labels = sgs.FigURLCuration.get_labels(gh_curation_uri)
-
 merge_groups = sgs.FigURLCuration.get_merge_groups(gh_curation_uri)
-
 sgs.CurationV1.insert_curation(
     sorting_id=key["sorting_id"],
     parent_curation_id=1,
@@ -296,16 +300,13 @@ sgs.CurationV1()
 # We now insert the curated spike sorting to a `Merge` table for feeding into downstream processing pipelines.
 #
 
+# +
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
 SpikeSortingOutput()
-
-key
+# -
 
 SpikeSortingOutput.insert([key], part_name="CurationV1")
-
 SpikeSortingOutput.merge_view()
 
 SpikeSortingOutput.CurationV1()
-
-SpikeSortingOutput.CuratedSpikeSorting()

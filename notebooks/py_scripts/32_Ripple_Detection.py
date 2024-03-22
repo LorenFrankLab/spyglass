@@ -80,15 +80,29 @@ electrodes_df = (
     pd.DataFrame(
         (
             sgc.Electrode
-            & {
-                "nwb_file_name": nwb_file_name,
-            }
+            & {"nwb_file_name": nwb_file_name, "bad_channel": "False"}
         )
         * (sgc.BrainRegion & {"region_name": "hippocampus"})
     )
-    .loc[:, ["nwb_file_name", "electrode_id", "region_name"]]
+    .loc[
+        :,
+        [
+            "nwb_file_name",
+            "electrode_id",
+            "region_name",
+            "electrode_group_name",
+        ],
+    ]
     .sort_values(by="electrode_id")
 )
+# for the purpose of the demo, we will only use one electrode per electrode group
+electrodes_df = pd.DataFrame(
+    [
+        electrodes_df[electrodes_df.electrode_group_name == str(i)].iloc[0]
+        for i in np.unique(electrodes_df.electrode_group_name.values)
+    ]
+)
+
 # create lfp_electrode_group
 lfp_eg_key = {
     "nwb_file_name": nwb_file_name,
@@ -274,7 +288,25 @@ rip_sel_key = (sgrip.RippleLFPSelection & lfp_band_key).fetch1("KEY")
 # ## Setting Ripple Parameters
 #
 
-sgr.RippleParameters().insert_default
+sgr.RippleParameters().insert_default()
+sgr.RippleParameters.insert1(
+    {
+        "ripple_param_name": "default_trodes",
+        "ripple_param_dict": {
+            "speed_name": "speed",  # name of the speed field in the position data
+            "ripple_detection_algorithm": "Kay_ripple_detector",
+            "ripple_detection_params": {
+                "speed_threshold": 4.0,
+                "minimum_duration": 0.015,
+                "zscore_threshold": 2.0,
+                "smoothing_sigma": 0.004,
+                "close_ripple_threshold": 0.0,
+            },
+        },
+    },
+    skip_duplicates=True,
+)
+sgr.RippleParameters()
 
 # Here are the default ripple parameters:
 #
@@ -300,6 +332,25 @@ sgr.RippleParameters().insert_default
 # set and for a given interval. We can quickly populate this here
 #
 
+# insert the position parameter set
+sgp.TrodesPosParams().insert1(
+    {
+        "trodes_pos_params_name": "single_led",
+        "params": {
+            "max_separation": 10000.0,
+            "max_speed": 300.0,
+            "position_smoothing_duration": 0.125,
+            "speed_smoothing_std_dev": 0.1,
+            "orient_smoothing_std_dev": 0.001,
+            "led1_is_front": 1,
+            "is_upsampled": 0,
+            "upsampling_sampling_rate": None,
+            "upsampling_interpolation_method": "linear",
+        },
+    },
+    skip_duplicates=True,
+)
+# populate the position if not done already
 pos_key = {
     "nwb_file_name": nwb_file_name,
     "trodes_pos_params_name": "single_led",
@@ -366,5 +417,5 @@ plt.ylabel("Voltage (uV)")
 
 # ## Up Next
 #
-# Next, we'll [extract mark indicator](./31_Extract_Mark_Indicators.ipynb).
+# We will learn how to [extract spike waveform features](./40_Extracting_Clusterless_Waveform_Features.ipynb) to decode neural data.
 #
