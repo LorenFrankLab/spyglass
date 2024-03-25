@@ -6,6 +6,7 @@ import uuid
 import warnings
 from pathlib import Path
 from typing import List
+from packaging import version
 
 import datajoint as dj
 import numpy as np
@@ -634,7 +635,7 @@ def _get_peak_channel(
     """Computes the electrode_id of the channel with the extremum peak for each unit."""
     if "peak_sign" in metric_params:
         del metric_params["peak_sign"]
-    if int(si.__version__.split(".")[1]) < 99:
+    if version.parse(si.__version__) < version.parse("0.99.0"):
         get_template_extremum_channel = (
             si.postprocessing.get_template_extremum_channel
         )
