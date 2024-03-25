@@ -10,7 +10,7 @@
 ### Pipelines
 
 -Spikesorting
-    - Update calls in v0 pipline for spikeinterface>=0.99 #893
+    - Update calls in v0 pipeline for spikeinterface>=0.99 #893
 
 ## [0.5.1] (March 7, 2024)
 
