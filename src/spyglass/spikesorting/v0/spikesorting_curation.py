@@ -634,7 +634,13 @@ def _get_peak_channel(
     """Computes the electrode_id of the channel with the extremum peak for each unit."""
     if "peak_sign" in metric_params:
         del metric_params["peak_sign"]
-    peak_channel_dict = si.postprocessing.get_template_extremum_channel(
+    if int(si.__version__.split(".")[1]) < 99:
+        get_template_extremum_channel = (
+            si.postprocessing.get_template_extremum_channel
+        )
+    else:
+        get_template_extremum_channel = si.core.get_template_extremum_channel
+    peak_channel_dict = get_template_extremum_channel(
         waveform_extractor=waveform_extractor,
         peak_sign=peak_sign,
         **metric_params,
