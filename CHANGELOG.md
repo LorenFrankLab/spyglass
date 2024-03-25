@@ -2,8 +2,15 @@
 
 ## [0.5.2] (Unreleased)
 
+### Infrastructure
+
 - Refactor `TableChain` to include `_searched` attribute. #867
 - Fix errors in config import #882
+
+### Pipelines
+
+-Spikesorting
+    - Update calls in v0 pipline for spikeinterface>=0.99 #893
 
 ## [0.5.1] (March 7, 2024)
 
