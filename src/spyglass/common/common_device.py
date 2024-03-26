@@ -703,6 +703,8 @@ def prompt_insert(
 
     if table_type:
         table_type += " "
+    else:
+        table_type = ""
 
     logger.info(
         f"{table}{table_type} '{name}' was not found in the"

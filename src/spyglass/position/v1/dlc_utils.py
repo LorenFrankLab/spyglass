@@ -3,25 +3,26 @@
 import grp
 import logging
 import os
-import pathlib
 import pwd
 import subprocess
 import sys
 from collections import abc
-from contextlib import redirect_stdout
 from itertools import groupby
 from operator import itemgetter
+from pathlib import Path, PosixPath
 from typing import Union
 
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from datajoint.utils import from_camel_case
 from tqdm import tqdm as tqdm
 
 from spyglass.common.common_behav import VideoFile
-from spyglass.utils import logger
+from spyglass.common.common_usage import ActivityLog
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
+from spyglass.utils.logging import logger, stream_handler
 
 
 def validate_option(
@@ -62,7 +63,7 @@ def validate_option(
             f"Unknown {name}: {option} " f"Available options: {options}"
         )
 
-    if types and not isinstance(option, tuple(types)):
+    if types and not isinstance(option, types):
         raise TypeError(f"{name} is {type(option)}. Available types {types}")
 
     if val_range and not (val_range[0] <= option <= val_range[1]):
@@ -108,7 +109,7 @@ def validate_smooth_params(params):
     if not params.get("smooth"):
         return
     smoothing_params = params.get("smoothing_params")
-    validate_option(smoother=smoothing_params, name="smoothing_params")
+    validate_option(option=smoothing_params, name="smoothing_params")
     validate_option(
         option=smoothing_params.get("smooth_method"),
         name="smooth_method",
@@ -144,7 +145,7 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
     None
     """
 
-    directory = pathlib.Path(directory)
+    directory = Path(directory)
     assert directory.exists(), f"Target directory: {directory} does not exist"
     uid = pwd.getpwnam(username).pw_uid
     if groupname:
@@ -159,135 +160,52 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
             os.chmod(os.path.join(dirpath, filename), mode)
 
 
-class OutputLogger:  # TODO: migrate to spyglass.utils.logger
-    """
-    A class to wrap a logging.Logger object in order to provide context manager capabilities.
+def file_log(logger, console=False):
+    """Decorator to add a file handler to a logger.
 
-    This class uses contextlib.redirect_stdout to temporarily redirect sys.stdout and thus
-    print statements to the log file instead of, or as well as the console.
-
-    Attributes
+    Parameters
     ----------
     logger : logging.Logger
-        logger object
-    name : str
-        name of logger
-    level : int
-        level of logging that the logger is set to handle
+        Logger to add file handler to.
+    console : bool, optional
+        If True, logged info will also be printed to console. Default False.
 
-    Methods
+    Example
     -------
-    setup_logger(name_logfile, path_logfile, print_console=False)
-        initialize or get logger object with name_logfile
-        that writes to path_logfile
-
-    Examples
-    --------
-    >>> with OutputLogger(name, path, print_console=True) as logger:
-    ...    print("this will print to logfile")
-    ...    logger.logger.info("this will log to the logfile")
-    ... print("this will print to the console")
-    ... logger.logger.info("this will log to the logfile")
-
+    @file_log(logger, console=True)
+    def func(self, *args, **kwargs):
+        pass
     """
 
-    def __init__(self, name, path, level="INFO", **kwargs):
-        self.logger = self.setup_logger(name, path, **kwargs)
-        self.name = self.logger.name
-        self.level = getattr(logging, level)
-
-    def setup_logger(
-        self, name_logfile, path_logfile, print_console=False
-    ) -> logging.Logger:
-        """
-        Sets up a logger for that outputs to a file, and optionally, the console
-
-        Parameters
-        ----------
-        name_logfile : str
-            name of the logfile to use
-        path_logfile : str
-            path to the file that should be used as the file handler
-        print_console : bool, default-False
-            if True, prints to console as well as log file.
-
-        Returns
-        -------
-        logger : logging.Logger
-            the logger object with specified handlers
-        """
-
-        logger = logging.getLogger(name_logfile)
-        # check to see if handlers already exist for this logger
-        if logger.handlers:
-            for handler in logger.handlers:
-                # if it's a file handler
-                # type is used instead of isinstance,
-                # which doesn't work properly with logging.StreamHandler
-                if type(handler) == logging.FileHandler:
-                    # if paths don't match, change file handler path
-                    if not os.path.samefile(handler.baseFilename, path_logfile):
-                        handler.close()
-                        logger.removeHandler(handler)
-                        file_handler = self._get_file_handler(path_logfile)
-                        logger.addHandler(file_handler)
-                # if a stream handler exists and
-                # if print_console is False remove streamHandler
-                if type(handler) == logging.StreamHandler:
-                    if not print_console:
-                        handler.close()
-                        logger.removeHandler(handler)
-            if print_console and not any(
-                type(handler) == logging.StreamHandler
-                for handler in logger.handlers
-            ):
-                logger.addHandler(self._get_stream_handler())
-
-        else:
-            file_handler = self._get_file_handler(path_logfile)
+    def decorator(func):
+        def wrapper(self, *args, **kwargs):
+            if not (log_path := getattr(self, "log_path", None)):
+                self.log_path = f"temp_{self.__class__.__name__}.log"
+            file_handler = logging.FileHandler(log_path, mode="a")
+            file_fmt = logging.Formatter(
+                "[%(asctime)s][%(levelname)s] Spyglass "
+                + "%(filename)s:%(lineno)d: %(message)s",
+                datefmt="%y-%m-%d %H:%M:%S",
+            )
+            file_handler.setFormatter(file_fmt)
             logger.addHandler(file_handler)
-            if print_console:
-                logger.addHandler(self._get_stream_handler())
-        logger.setLevel(logging.INFO)
-        return logger
+            if not console:
+                logger.removeHandler(logger.handlers[0])
+            try:
+                return func(self, *args, **kwargs)
+            finally:
+                if not console:
+                    logger.addHandler(stream_handler)
+                logger.removeHandler(file_handler)
+                file_handler.close()
 
-    def _get_file_handler(self, path):
-        output_dir = pathlib.Path(os.path.dirname(path))
-        if not os.path.exists(output_dir):
-            output_dir.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(path, mode="a")
-        file_handler.setFormatter(self._get_formatter())
-        return file_handler
+        return wrapper
 
-    def _get_stream_handler(self):
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(self._get_formatter())
-        return stream_handler
-
-    def _get_formatter(self):
-        return logging.Formatter(
-            "[%(asctime)s] in %(pathname)s, line %(lineno)d: %(message)s",
-            datefmt="%d-%b-%y %H:%M:%S",
-        )
-
-    def write(self, msg):
-        if msg and not msg.isspace():
-            self.logger.log(self.level, msg)
-
-    def flush(self):
-        pass
-
-    def __enter__(self):
-        self._redirector = redirect_stdout(self)
-        self._redirector.__enter__()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        # let contextlib do any exception handling here
-        self._redirector.__exit__(exc_type, exc_value, traceback)
+    return decorator
 
 
 def get_dlc_root_data_dir():
+    ActivityLog().log("dlc_utils: get_dlc_root_data_dir")
     if "custom" in dj.config:
         if "dlc_root_data_dir" in dj.config["custom"]:
             dlc_root_dirs = dj.config.get("custom", {}).get("dlc_root_data_dir")
@@ -305,13 +223,14 @@ def get_dlc_root_data_dir():
 
 def get_dlc_processed_data_dir() -> str:
     """Returns session_dir relative to custom 'dlc_output_dir' root"""
+    ActivityLog().log("dlc_utils: get_dlc_processed_data_dir")
     if "custom" in dj.config:
         if "dlc_output_dir" in dj.config["custom"]:
             dlc_output_dir = dj.config.get("custom", {}).get("dlc_output_dir")
     if dlc_output_dir:
-        return pathlib.Path(dlc_output_dir)
+        return Path(dlc_output_dir)
     else:
-        return pathlib.Path("/nimbus/deeplabcut/output/")
+        return Path("/nimbus/deeplabcut/output/")
 
 
 def find_full_path(root_directories, relative_path):
@@ -321,15 +240,16 @@ def find_full_path(root_directories, relative_path):
      from provided potential root directories (in the given order)
         :param root_directories: potential root directories
         :param relative_path: the relative path to find the valid root directory
-        :return: full-path (pathlib.Path object)
+        :return: full-path (Path object)
     """
+    ActivityLog().log("dlc_utils: find_full_path")
     relative_path = _to_Path(relative_path)
 
     if relative_path.exists():
         return relative_path
 
     # Turn to list if only a single root directory is provided
-    if isinstance(root_directories, (str, pathlib.Path)):
+    if isinstance(root_directories, (str, Path)):
         root_directories = [_to_Path(root_directories)]
 
     for root_dir in root_directories:
@@ -349,15 +269,16 @@ def find_root_directory(root_directories, full_path):
     search and return one directory that is the parent of the given path
         :param root_directories: potential root directories
         :param full_path: the full path to search the root directory
-        :return: root_directory (pathlib.Path object)
+        :return: root_directory (Path object)
     """
+    ActivityLog().log("dlc_utils: find_full_path")
     full_path = _to_Path(full_path)
 
     if not full_path.exists():
         raise FileNotFoundError(f"{full_path} does not exist!")
 
     # Turn to list if only a single root directory is provided
-    if isinstance(root_directories, (str, pathlib.Path)):
+    if isinstance(root_directories, (str, Path)):
         root_directories = [_to_Path(root_directories)]
 
     try:
@@ -384,22 +305,21 @@ def infer_output_dir(key, makedir=True):
     # TODO: add check to make sure interval_list_name refers to a single epoch
     # Or make key include epoch in and of itself instead of interval_list_name
     nwb_file_name = key["nwb_file_name"].split("_.")[0]
-    output_dir = pathlib.Path(dlc_output_dir) / pathlib.Path(
+    output_dir = Path(dlc_output_dir) / Path(
         f"{nwb_file_name}/{nwb_file_name}_{key['epoch']:02}"
         f"_model_" + key["dlc_model_name"].replace(" ", "-")
     )
-    if makedir is True:
-        if not os.path.exists(output_dir):
-            output_dir.mkdir(parents=True, exist_ok=True)
+    if makedir:
+        output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
 
 def _to_Path(path):
     """
-    Convert the input "path" into a pathlib.Path object
+    Convert the input "path" into a Path object
     Handles one odd Windows/Linux incompatibility of the "\\"
     """
-    return pathlib.Path(str(path).replace("\\", "/"))
+    return Path(str(path).replace("\\", "/"))
 
 
 def get_video_path(key):
@@ -421,13 +341,14 @@ def get_video_path(key):
     """
     import pynwb
 
-    vf_key = {k: val for k, val in key.items() if k in VideoFile.heading.names}
-    if not VideoFile & vf_key:
-        VideoFile()._no_transaction_make(vf_key, verbose=False)
+    vf_key = {k: val for k, val in key.items() if k in VideoFile.heading}
     video_query = VideoFile & vf_key
 
+    if not video_query:
+        VideoFile()._no_transaction_make(vf_key, verbose=False)
+
     if len(video_query) != 1:
-        print(f"Found {len(video_query)} videos for {vf_key}")
+        logger.warning(f"Found {len(video_query)} videos for {vf_key}")
         return None, None, None, None
 
     video_info = video_query.fetch1()
@@ -446,8 +367,8 @@ def get_video_path(key):
 
 
 def check_videofile(
-    video_path: Union[str, pathlib.PosixPath],
-    output_path: Union[str, pathlib.PosixPath] = dlc_video_dir,
+    video_path: Union[str, PosixPath],
+    output_path: Union[str, PosixPath] = dlc_video_dir,
     video_filename: str = None,
     video_filetype: str = "h264",
 ):
@@ -473,17 +394,18 @@ def check_videofile(
     output_files : List of PosixPath objects
         paths to converted video file(s)
     """
+    # TODO: This func is never called bare, only func()[0] and often with .as_posix()
+    video_files = (
+        [Path(video_path) / video_filename]
+        if video_filename
+        else Path(video_path).glob(f"*.{video_filetype}")
+    )
 
-    if not video_filename:
-        video_files = pathlib.Path(video_path).glob(f"*.{video_filetype}")
-    else:
-        video_files = [pathlib.Path(f"{video_path}/{video_filename}")]
     output_files = []
     for video_filepath in video_files:
-        if video_filepath.exists():
-            if video_filepath.suffix == ".mp4":
-                output_files.append(video_filepath)
-                continue
+        if video_filepath.exists() and video_filepath.suffix == ".mp4":
+            output_files.append(video_filepath)
+            continue
         video_file = (
             video_filepath.as_posix()
             .rsplit(video_filepath.parent.as_posix(), maxsplit=1)[-1]
@@ -499,7 +421,7 @@ def _convert_mp4(
     filename: str,
     video_path: str,
     dest_path: str,
-    videotype: str,
+    videotype: str = "mp4",
     count_frames=False,
     return_output=True,
 ):
@@ -519,105 +441,80 @@ def _convert_mp4(
     return_output: bool
         if True returns the destination filename
     """
+    if videotype not in ["mp4"]:
+        raise NotImplementedError(f"videotype {videotype} not implemented")
 
     orig_filename = filename
-    video_path = pathlib.PurePath(
-        pathlib.Path(video_path), pathlib.Path(filename)
-    )
-    if videotype not in ["mp4"]:
-        raise NotImplementedError
+    video_path = Path(video_path) / filename
+
     dest_filename = os.path.splitext(filename)[0]
     if ".1" in dest_filename:
         dest_filename = os.path.splitext(dest_filename)[0]
-    dest_path = pathlib.Path(f"{dest_path}/{dest_filename}.{videotype}")
-    convert_command = [
-        "ffmpeg",
-        "-vsync",
-        "passthrough",
-        "-i",
-        f"{video_path.as_posix()}",
-        "-codec",
-        "copy",
-        f"{dest_path.as_posix()}",
-    ]
+    dest_path = Path(f"{dest_path}/{dest_filename}.{videotype}")
     if dest_path.exists():
         logger.info(f"{dest_path} already exists, skipping conversion")
-    else:
-        try:
-            sys.stdout.flush()
-            convert_process = subprocess.Popen(
-                convert_command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
-        except subprocess.CalledProcessError as err:
-            raise RuntimeError(
-                f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
-            ) from err
-        out, _ = convert_process.communicate()
-        logger.info(out.decode("utf-8"))
-        logger.info(f"finished converting {filename}")
-    logger.info(
-        f"Checking that number of packets match between {orig_filename} and {dest_filename}"
-    )
-    num_packets = []
-    for file in [video_path, dest_path]:
-        packets_command = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-count_packets",
-            "-show_entries",
-            "stream=nb_read_packets",
-            "-of",
-            "csv=p=0",
-            file.as_posix(),
-        ]
-        frames_command = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-count_frames",
-            "-show_entries",
-            "stream=nb_read_frames",
-            "-of",
-            "csv=p=0",
-            file.as_posix(),
-        ]
-        if count_frames:
-            try:
-                check_process = subprocess.Popen(
-                    frames_command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                )
-            except subprocess.CalledProcessError as err:
-                raise RuntimeError(
-                    f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
-                ) from err
-        else:
-            try:
-                check_process = subprocess.Popen(
-                    packets_command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                )
-            except subprocess.CalledProcessError as err:
-                raise RuntimeError(
-                    f"command {err.cmd} return with error (code {err.returncode}): {err.output}"
-                ) from err
-        out, _ = check_process.communicate()
-        num_packets.append(int(out.decode("utf-8").split("\n")[0]))
-    print(
-        f"Number of packets in {orig_filename}: {num_packets[0]}, {dest_filename}: {num_packets[1]}"
-    )
-    assert num_packets[0] == num_packets[1]
+        return dest_path
+
+    try:
+        sys.stdout.flush()
+        convert_process = subprocess.Popen(
+            [
+                "ffmpeg",
+                "-vsync",
+                "passthrough",
+                "-i",
+                f"{video_path.as_posix()}",
+                "-codec",
+                "copy",
+                f"{dest_path.as_posix()}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+    except subprocess.CalledProcessError as err:
+        raise RuntimeError(
+            f"Video convert errored: Code {err.returncode}, {err.output}"
+        ) from err
+    out, _ = convert_process.communicate()
+    logger.info(f"Finished converting {filename}")
+
+    # check packets match orig file
+    logger.info(f"Checking packets match orig file: {dest_filename}")
+    orig_packets = _check_packets(video_path, count_frames=count_frames)
+    dest_packets = _check_packets(dest_path, count_frames=count_frames)
+    if orig_packets != dest_packets:
+        logger.warning(f"Conversion error: {orig_filename} -> {dest_filename}")
+
     if return_output:
         return dest_path
+
+
+def _check_packets(file, count_frames=False):
+    checked = "frames" if count_frames else "packets"
+    try:
+        check_process = subprocess.Popen(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                f"-count_{checked}",
+                "-show_entries",
+                f"stream=nb_read_{checked}",
+                "-of",
+                "csv=p=0",
+                file.as_posix(),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+    except subprocess.CalledProcessError as err:
+        raise RuntimeError(
+            f"Check packets error: Code {err.returncode}, {err.output}"
+        ) from err
+    out, _ = check_process.communicate()
+    return int(out.decode("utf-8").split("\n")[0])
 
 
 def get_gpu_memory():
@@ -646,8 +543,7 @@ def get_gpu_memory():
         )[1:]
     except subprocess.CalledProcessError as err:
         raise RuntimeError(
-            f"command {err.cmd} return with error (code {err.returncode}): "
-            + f"{err.output}"
+            f"Get GPU memory errored: Code {err.returncode}, {err.output}"
         ) from err
     memory_use_values = {
         i: int(x.split()[0]) for i, x in enumerate(memory_use_info)
@@ -656,18 +552,6 @@ def get_gpu_memory():
 
 
 def get_span_start_stop(indices):
-    """_summary_
-
-    Parameters
-    ----------
-    indices : _type_
-        _description_
-
-    Returns
-    -------
-    _type_
-        _description_
-    """
     span_inds = []
     # Get start and stop index of spans of consecutive indices
     for k, g in groupby(enumerate(indices), lambda x: x[1] - x[0]):
@@ -678,60 +562,86 @@ def get_span_start_stop(indices):
 
 def interp_pos(dlc_df, spans_to_interp, **kwargs):
     idx = pd.IndexSlice
+
+    no_x_msg = "Index {ind} has no {coord}point with which to interpolate"
+    no_interp_msg = "Index {start} to {stop} not interpolated"
+    max_pts_to_interp = kwargs.get("max_pts_to_interp", float("inf"))
+    max_cm_to_interp = kwargs.get("max_cm_to_interp", float("inf"))
+
+    def _get_new_dim(dim, span_start, span_stop, start_time, stop_time):
+        return np.interp(
+            x=dlc_df.index[span_start : span_stop + 1],
+            xp=[start_time, stop_time],
+            fp=[dim[0], dim[-1]],
+        )
+
     for ind, (span_start, span_stop) in enumerate(spans_to_interp):
+        idx_span = idx[span_start:span_stop]
+
         if (span_stop + 1) >= len(dlc_df):
-            dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
-            dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
-            print(f"ind: {ind} has no endpoint with which to interpolate")
+            dlc_df.loc[idx_span, idx["x"]] = np.nan
+            dlc_df.loc[idx_span, idx["y"]] = np.nan
+            logger.info(no_x_msg.format(ind=ind, coord="end"))
             continue
         if span_start < 1:
-            dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
-            dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
-            print(f"ind: {ind} has no startpoint with which to interpolate")
+            dlc_df.loc[idx_span, idx["x"]] = np.nan
+            dlc_df.loc[idx_span, idx["y"]] = np.nan
+            logger.info(no_x_msg.format(ind=ind, coord="start"))
             continue
+
         x = [dlc_df["x"].iloc[span_start - 1], dlc_df["x"].iloc[span_stop + 1]]
         y = [dlc_df["y"].iloc[span_start - 1], dlc_df["y"].iloc[span_stop + 1]]
+
         span_len = int(span_stop - span_start + 1)
         start_time = dlc_df.index[span_start]
         stop_time = dlc_df.index[span_stop]
-        if "max_pts_to_interp" in kwargs:
-            if span_len > kwargs["max_pts_to_interp"]:
-                dlc_df.loc[idx[span_start:span_stop], idx["x"]] = np.nan
-                dlc_df.loc[idx[span_start:span_stop], idx["y"]] = np.nan
-                print(
-                    f"inds {span_start} to {span_stop} "
-                    f"length: {span_len} not interpolated"
-                )
-        if "max_cm_to_interp" in kwargs:
-            if (
-                np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
-                > kwargs["max_cm_to_interp"]
-            ):
-                dlc_df.loc[idx[start_time:stop_time], idx["x"]] = np.nan
-                dlc_df.loc[idx[start_time:stop_time], idx["y"]] = np.nan
-                change = np.linalg.norm(
-                    np.array([x[0], y[0]]) - np.array([x[1], y[1]])
-                )
-                print(
-                    f"inds {span_start} to {span_stop + 1} "
-                    f"with change in position: {change:.2f} not interpolated"
-                )
+        change = np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
+
+        if span_len > max_pts_to_interp or change > max_cm_to_interp:
+            dlc_df.loc[idx_span, idx["x"]] = np.nan
+            dlc_df.loc[idx_span, idx["y"]] = np.nan
+            logger.info(no_interp_msg.format(start=span_start, stop=span_stop))
+            # Note: refactor removed condition specificity in logging
+            if change > max_cm_to_interp:
                 continue
 
-        xnew = np.interp(
-            x=dlc_df.index[span_start : span_stop + 1],
-            xp=[start_time, stop_time],
-            fp=[x[0], x[-1]],
-        )
-        ynew = np.interp(
-            x=dlc_df.index[span_start : span_stop + 1],
-            xp=[start_time, stop_time],
-            fp=[y[0], y[-1]],
-        )
+        xnew = _get_new_dim(x, span_start, span_stop, start_time, stop_time)
+        ynew = _get_new_dim(y, span_start, span_stop, start_time, stop_time)
+
         dlc_df.loc[idx[start_time:stop_time], idx["x"]] = xnew
         dlc_df.loc[idx[start_time:stop_time], idx["y"]] = ynew
 
     return dlc_df
+
+
+def interp_orientation(df, spans_to_interp, **kwargs):
+    idx = pd.IndexSlice
+    no_x_msg = "Index {ind} has no {x}point with which to interpolate"
+    df_orient = df["orientation"]
+    # TODO: add parameters to refine interpolation
+
+    for ind, (span_start, span_stop) in enumerate(spans_to_interp):
+        idx_span = idx[span_start:span_stop]
+        if (span_stop + 1) >= len(df):
+            df.loc[idx_span, idx["orientation"]] = np.nan
+            logger.info(no_x_msg.format(ind=ind, x="stop"))
+            continue
+        if span_start < 1:
+            df.loc[idx_span, idx["orientation"]] = np.nan
+            logger.info(no_x_msg.format(ind=ind, x="start"))
+            continue
+
+        orient = [df_orient.iloc[span_start - 1], df_orient.iloc[span_stop + 1]]
+
+        start_time = df.index[span_start]
+        stop_time = df.index[span_stop]
+        orientnew = np.interp(
+            x=df.index[span_start : span_stop + 1],
+            xp=[start_time, stop_time],
+            fp=[orient[0], orient[-1]],
+        )
+        df.loc[idx[start_time:stop_time], idx["orientation"]] = orientnew
+    return df
 
 
 def smooth_moving_avg(
@@ -741,6 +651,7 @@ def smooth_moving_avg(
 
     idx = pd.IndexSlice
     moving_avg_window = int(np.round(smoothing_duration * sampling_rate))
+
     xy_arr = interp_df.loc[:, idx[("x", "y")]].values
     smoothed_xy_arr = bn.move_mean(
         xy_arr, window=moving_avg_window, axis=0, min_count=1
@@ -753,6 +664,67 @@ def smooth_moving_avg(
 
 _key_to_smooth_func_dict = {
     "moving_avg": smooth_moving_avg,
+}
+
+
+def two_pt_head_orientation(pos_df: pd.DataFrame, **params):
+    """Determines orientation based on vector between two points"""
+    BP1 = params.pop("bodypart1", None)
+    BP2 = params.pop("bodypart2", None)
+    orientation = np.arctan2(
+        (pos_df[BP1]["y"] - pos_df[BP2]["y"]),
+        (pos_df[BP1]["x"] - pos_df[BP2]["x"]),
+    )
+    return orientation
+
+
+def no_orientation(pos_df: pd.DataFrame, **params):
+    fill_value = params.pop("fill_with", np.nan)
+    n_frames = len(pos_df)
+    orientation = np.full(
+        shape=(n_frames), fill_value=fill_value, dtype=np.float16
+    )
+    return orientation
+
+
+def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
+    """Determines orientation based on 2 equally-spaced identifiers
+    that are assumed to be perpendicular to the orientation direction.
+    A third object is needed to determine forward/backward
+    """
+    LED1 = params.pop("led1", None)
+    LED2 = params.pop("led2", None)
+    LED3 = params.pop("led3", None)
+    orientation = []
+    for index, row in pos_df.iterrows():
+        x_vec = row[LED1]["x"] - row[LED2]["x"]
+        y_vec = row[LED1]["y"] - row[LED2]["y"]
+        if y_vec == 0:
+            if (row[LED3]["y"] > row[LED1]["y"]) & (
+                row[LED3]["y"] > row[LED2]["y"]
+            ):
+                orientation.append(np.pi / 2)
+            elif (row[LED3]["y"] < row[LED1]["y"]) & (
+                row[LED3]["y"] < row[LED2]["y"]
+            ):
+                orientation.append(-(np.pi / 2))
+            else:
+                raise Exception("Cannot determine head direction from bisector")
+        else:
+            length = np.sqrt(y_vec * y_vec + x_vec * x_vec)
+            norm = np.array([-y_vec / length, x_vec / length])
+            orientation.append(np.arctan2(norm[1], norm[0]))
+        if index + 1 == len(pos_df):
+            break
+    return np.array(orientation)
+
+
+# Add new functions for orientation calculation here
+
+_key_to_func_dict = {
+    "none": no_orientation,
+    "red_green_orientation": two_pt_head_orientation,
+    "red_led_bisector": red_led_bisector_orientation,
 }
 
 
@@ -770,8 +742,9 @@ def fill_nan(variable, video_time, variable_time):
     return filled_variable
 
 
-def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
+def convert_to_pixels(data, frame_size=None, cm_to_pixels=1.0):
     """Converts from cm to pixels and flips the y-axis.
+
     Parameters
     ----------
     data : ndarray, shape (n_time, 2)
@@ -783,502 +756,3 @@ def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
     converted_data : ndarray, shape (n_time, 2)
     """
     return data / cm_to_pixels
-
-
-def make_video(
-    video_filename,
-    video_frame_inds,
-    position_mean,
-    orientation_mean,
-    centroids,
-    likelihoods,
-    position_time,
-    video_time=None,
-    processor="opencv",
-    frames=None,
-    percent_frames=1,
-    output_video_filename="output.mp4",
-    cm_to_pixels=1.0,
-    disable_progressbar=False,
-    crop=None,
-    arrow_radius=15,
-    circle_radius=8,
-):
-    import cv2
-
-    RGB_PINK = (234, 82, 111)
-    RGB_YELLOW = (253, 231, 76)
-    # RGB_WHITE = (255, 255, 255)
-    RGB_BLUE = (30, 144, 255)
-    RGB_ORANGE = (255, 127, 80)
-    #     "#29ff3e",
-    #     "#ff0073",
-    #     "#ff291a",
-    #     "#1e2cff",
-    #     "#b045f3",
-    #     "#ffe91a",
-    # ]
-    if processor == "opencv":
-        video = cv2.VideoCapture(video_filename)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        frame_size = (int(video.get(3)), int(video.get(4)))
-        frame_rate = video.get(5)
-        if frames is not None:
-            n_frames = len(frames)
-        else:
-            n_frames = int(len(video_frame_inds) * percent_frames)
-            frames = np.arange(0, n_frames)
-        print(
-            f"video save path: {output_video_filename}\n{n_frames} frames in total."
-        )
-        if crop:
-            crop_offset_x = crop[0]
-            crop_offset_y = crop[2]
-            frame_size = (crop[1] - crop[0], crop[3] - crop[2])
-        out = cv2.VideoWriter(
-            output_video_filename, fourcc, frame_rate, frame_size, True
-        )
-        print(f"video_output: {output_video_filename}")
-
-        # centroids = {
-        #     color: self.fill_nan(data, video_time, position_time)
-        #     for color, data in centroids.items()
-        # }
-        if video_time:
-            position_mean = {
-                key: fill_nan(
-                    position_mean[key]["position"], video_time, position_time
-                )
-                for key in position_mean.keys()
-            }
-            orientation_mean = {
-                key: fill_nan(
-                    position_mean[key]["orientation"], video_time, position_time
-                )
-                for key in position_mean.keys()
-                # CBroz: Bug was here, using nonexistent orientation_mean dict
-            }
-        print(
-            f"frames start: {frames[0]}\nvideo_frames start: "
-            + f"{video_frame_inds[0]}\ncv2 frame ind start: {int(video.get(1))}"
-        )
-        for time_ind in tqdm(
-            frames, desc="frames", disable=disable_progressbar
-        ):
-            if time_ind == 0:
-                video.set(1, time_ind + 1)
-            elif int(video.get(1)) != time_ind - 1:
-                video.set(1, time_ind - 1)
-            is_grabbed, frame = video.read()
-
-            if is_grabbed:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                if crop:
-                    frame = frame[crop[2] : crop[3], crop[0] : crop[1]].copy()
-                if time_ind < video_frame_inds[0] - 1:
-                    cv2.putText(
-                        img=frame,
-                        text=f"time_ind: {int(time_ind)} video frame: {int(video.get(1))}",
-                        org=(10, 10),
-                        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale=0.5,
-                        color=RGB_YELLOW,
-                        thickness=1,
-                    )
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                    out.write(frame)
-                    continue
-                cv2.putText(
-                    img=frame,
-                    text=f"time_ind: {int(time_ind)} video frame: {int(video.get(1))}",
-                    org=(10, 10),
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=0.5,
-                    color=RGB_YELLOW,
-                    thickness=1,
-                )
-                pos_ind = time_ind - video_frame_inds[0]
-                # red_centroid = centroids["red"][time_ind]
-                # green_centroid = centroids["green"][time_ind]
-                for key in position_mean.keys():
-                    position = position_mean[key][pos_ind]
-                    # if crop:
-                    #     position = np.hstack(
-                    #         (
-                    #             convert_to_pixels(
-                    #                 position[0, np.newaxis],
-                    #                 frame_size,
-                    #                 cm_to_pixels,
-                    #             )
-                    #             - crop_offset_x,
-                    #             convert_to_pixels(
-                    #                 position[1, np.newaxis],
-                    #                 frame_size,
-                    #                 cm_to_pixels,
-                    #             )
-                    #             - crop_offset_y,
-                    #         )
-                    #     )
-                    # else:
-                    #     position = convert_to_pixels(position, frame_size, cm_to_pixels)
-                    position = convert_to_pixels(
-                        position, frame_size, cm_to_pixels
-                    )
-                    orientation = orientation_mean[key][pos_ind]
-                    if key == "DLC":
-                        color = RGB_BLUE
-                    if key == "Trodes":
-                        color = RGB_ORANGE
-                    if key == "Common":
-                        color = RGB_PINK
-                    if np.all(~np.isnan(position)) & np.all(
-                        ~np.isnan(orientation)
-                    ):
-                        arrow_tip = (
-                            int(
-                                position[0] + arrow_radius * np.cos(orientation)
-                            ),
-                            int(
-                                position[1] + arrow_radius * np.sin(orientation)
-                            ),
-                        )
-                        cv2.arrowedLine(
-                            img=frame,
-                            pt1=tuple(position.astype(int)),
-                            pt2=arrow_tip,
-                            color=color,
-                            thickness=4,
-                            line_type=8,
-                            shift=cv2.CV_8U,
-                            tipLength=0.25,
-                        )
-
-                    if np.all(~np.isnan(position)):
-                        cv2.circle(
-                            img=frame,
-                            center=tuple(position.astype(int)),
-                            radius=circle_radius,
-                            color=color,
-                            thickness=-1,
-                            shift=cv2.CV_8U,
-                        )
-                # if np.all(~np.isnan(red_centroid)):
-                #     cv2.circle(
-                #         img=frame,
-                #         center=tuple(red_centroid.astype(int)),
-                #         radius=circle_radius,
-                #         color=RGB_YELLOW,
-                #         thickness=-1,
-                #         shift=cv2.CV_8U,
-                #     )
-
-                # if np.all(~np.isnan(green_centroid)):
-                #     cv2.circle(
-                #         img=frame,
-                #         center=tuple(green_centroid.astype(int)),
-                #         radius=circle_radius,
-                #         color=RGB_PINK,
-                #         thickness=-1,
-                #         shift=cv2.CV_8U,
-                #     )
-
-                # if np.all(~np.isnan(head_position)) & np.all(
-                #     ~np.isnan(head_orientation)
-                # ):
-                #     arrow_tip = (
-                #         int(head_position[0] + arrow_radius * np.cos(head_orientation)),
-                #         int(head_position[1] + arrow_radius * np.sin(head_orientation)),
-                #     )
-                #     cv2.arrowedLine(
-                #         img=frame,
-                #         pt1=tuple(head_position.astype(int)),
-                #         pt2=arrow_tip,
-                #         color=RGB_WHITE,
-                #         thickness=4,
-                #         line_type=8,
-                #         shift=cv2.CV_8U,
-                #         tipLength=0.25,
-                #     )
-
-                # if np.all(~np.isnan(head_position)):
-                #     cv2.circle(
-                #         img=frame,
-                #         center=tuple(head_position.astype(int)),
-                #         radius=circle_radius,
-                #         color=RGB_WHITE,
-                #         thickness=-1,
-                #         shift=cv2.CV_8U,
-                #     )
-
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                out.write(frame)
-            else:
-                print("not grabbed")
-                break
-        print("releasing video")
-        video.release()
-        out.release()
-        print("destroying cv2 windows")
-        cv2.destroyAllWindows()
-        print("finished making video with opencv")
-        return
-
-    elif processor == "matplotlib":
-        import matplotlib.animation as animation
-        import matplotlib.font_manager as fm
-
-        position_mean = position_mean["DLC"]
-        orientation_mean = orientation_mean["DLC"]
-        video_slowdown = 1
-
-        # Set up formatting for the movie files
-        window_size = 501
-        if likelihoods:
-            plot_likelihood = True
-        elif likelihoods is None:
-            plot_likelihood = False
-
-        window_ind = np.arange(window_size) - window_size // 2
-        # Get video frames
-        assert pathlib.Path(
-            video_filename
-        ).exists(), f"Path to video: {video_filename} does not exist"
-        color_swatch = [
-            "#29ff3e",
-            "#ff0073",
-            "#ff291a",
-            "#1e2cff",
-            "#b045f3",
-            "#ffe91a",
-        ]
-        video = cv2.VideoCapture(video_filename)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        frame_size = (int(video.get(3)), int(video.get(4)))
-        frame_rate = video.get(5)
-        Writer = animation.writers["ffmpeg"]
-        if frames is not None:
-            n_frames = len(frames)
-        else:
-            n_frames = int(len(video_frame_inds) * percent_frames)
-            frames = np.arange(0, n_frames)
-        print(
-            f"video save path: {output_video_filename}\n{n_frames} frames in total."
-        )
-        fps = int(np.round(frame_rate / video_slowdown))
-        writer = Writer(fps=fps, bitrate=-1)
-        ret, frame = video.read()
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        if crop:
-            frame = frame[crop[2] : crop[3], crop[0] : crop[1]].copy()
-            crop_offset_x = crop[0]
-            crop_offset_y = crop[2]
-        frame_ind = 0
-        with plt.style.context("dark_background"):
-            # Set up plots
-            fig, axes = plt.subplots(
-                2,
-                1,
-                figsize=(8, 6),
-                gridspec_kw={"height_ratios": [8, 1]},
-                constrained_layout=False,
-            )
-
-            axes[0].tick_params(colors="white", which="both")
-            axes[0].spines["bottom"].set_color("white")
-            axes[0].spines["left"].set_color("white")
-            image = axes[0].imshow(frame, animated=True)
-            print(f"frame after init plot: {video.get(1)}")
-            centroid_plot_objs = {
-                bodypart: axes[0].scatter(
-                    [],
-                    [],
-                    s=2,
-                    zorder=102,
-                    color=color,
-                    label=f"{bodypart} position",
-                    animated=True,
-                    alpha=0.6,
-                )
-                for color, bodypart in zip(color_swatch, centroids.keys())
-            }
-            centroid_position_dot = axes[0].scatter(
-                [],
-                [],
-                s=5,
-                zorder=102,
-                color="#b045f3",
-                label="centroid position",
-                animated=True,
-                alpha=0.6,
-            )
-            (orientation_line,) = axes[0].plot(
-                [],
-                [],
-                color="cyan",
-                linewidth=1,
-                animated=True,
-                label="Orientation",
-            )
-            axes[0].set_xlabel("")
-            axes[0].set_ylabel("")
-            ratio = frame_size[1] / frame_size[0]
-            if crop:
-                ratio = (crop[3] - crop[2]) / (crop[1] - crop[0])
-            x_left, x_right = axes[0].get_xlim()
-            y_low, y_high = axes[0].get_ylim()
-            axes[0].set_aspect(
-                abs((x_right - x_left) / (y_low - y_high)) * ratio
-            )
-            axes[0].spines["top"].set_color("black")
-            axes[0].spines["right"].set_color("black")
-            time_delta = pd.Timedelta(
-                position_time[0] - position_time[0]
-            ).total_seconds()
-            axes[0].legend(loc="lower right", fontsize=4)
-            title = axes[0].set_title(
-                f"time = {time_delta:3.4f}s\n frame = {frame_ind}",
-                fontsize=8,
-            )
-            _ = fm.FontProperties(size=12)
-            axes[0].axis("off")
-            if plot_likelihood:
-                likelihood_objs = {
-                    bodypart: axes[1].plot(
-                        [],
-                        [],
-                        color=color,
-                        linewidth=1,
-                        animated=True,
-                        clip_on=False,
-                        label=bodypart,
-                    )[0]
-                    for color, bodypart in zip(color_swatch, likelihoods.keys())
-                }
-                axes[1].set_ylim((0.0, 1))
-                print(f"frame_rate: {frame_rate}")
-                axes[1].set_xlim(
-                    (
-                        window_ind[0] / frame_rate,
-                        window_ind[-1] / frame_rate,
-                    )
-                )
-                axes[1].set_xlabel("Time [s]")
-                axes[1].set_ylabel("Likelihood")
-                axes[1].set_facecolor("black")
-                axes[1].spines["top"].set_color("black")
-                axes[1].spines["right"].set_color("black")
-                axes[1].legend(loc="upper right", fontsize=4)
-            progress_bar = tqdm(leave=True, position=0)
-            progress_bar.reset(total=n_frames)
-
-            def _update_plot(time_ind):
-                if time_ind == 0:
-                    video.set(1, time_ind + 1)
-                else:
-                    video.set(1, time_ind - 1)
-                ret, frame = video.read()
-                if ret:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    if crop:
-                        frame = frame[
-                            crop[2] : crop[3], crop[0] : crop[1]
-                        ].copy()
-                    image.set_array(frame)
-                pos_ind = np.where(video_frame_inds == time_ind)[0]
-                if len(pos_ind) == 0:
-                    centroid_position_dot.set_offsets((np.NaN, np.NaN))
-                    for bodypart in centroid_plot_objs.keys():
-                        centroid_plot_objs[bodypart].set_offsets(
-                            (np.NaN, np.NaN)
-                        )
-                    orientation_line.set_data((np.NaN, np.NaN))
-                    title.set_text(f"time = {0:3.4f}s\n frame = {time_ind}")
-                else:
-                    pos_ind = pos_ind[0]
-                    dlc_centroid_data = convert_to_pixels(
-                        position_mean[pos_ind], frame, cm_to_pixels
-                    )
-                    if crop:
-                        dlc_centroid_data = np.hstack(
-                            (
-                                convert_to_pixels(
-                                    position_mean[pos_ind, 0, np.newaxis],
-                                    frame,
-                                    cm_to_pixels,
-                                )
-                                - crop_offset_x,
-                                convert_to_pixels(
-                                    position_mean[pos_ind, 1, np.newaxis],
-                                    frame,
-                                    cm_to_pixels,
-                                )
-                                - crop_offset_y,
-                            )
-                        )
-                    for bodypart in centroid_plot_objs.keys():
-                        centroid_plot_objs[bodypart].set_offsets(
-                            convert_to_pixels(
-                                centroids[bodypart][pos_ind],
-                                frame,
-                                cm_to_pixels,
-                            )
-                        )
-                    centroid_position_dot.set_offsets(dlc_centroid_data)
-                    r = 30
-                    orientation_line.set_data(
-                        [
-                            dlc_centroid_data[0],
-                            dlc_centroid_data[0]
-                            + r * np.cos(orientation_mean[pos_ind]),
-                        ],
-                        [
-                            dlc_centroid_data[1],
-                            dlc_centroid_data[1]
-                            + r * np.sin(orientation_mean[pos_ind]),
-                        ],
-                    )
-                    # Need to convert times to datetime object probably.
-
-                    time_delta = pd.Timedelta(
-                        pd.to_datetime(position_time[pos_ind] * 1e9, unit="ns")
-                        - pd.to_datetime(position_time[0] * 1e9, unit="ns")
-                    ).total_seconds()
-                    title.set_text(
-                        f"time = {time_delta:3.4f}s\n frame = {time_ind}"
-                    )
-                    likelihood_inds = pos_ind + window_ind
-                    neg_inds = np.where(likelihood_inds < 0)[0]
-                    over_inds = np.where(
-                        likelihood_inds
-                        > (len(likelihoods[list(likelihood_objs.keys())[0]]))
-                        - 1
-                    )[0]
-                    if len(neg_inds) > 0:
-                        likelihood_inds[neg_inds] = 0
-                    if len(over_inds) > 0:
-                        likelihood_inds[neg_inds] = -1
-                    for bodypart in likelihood_objs.keys():
-                        likelihood_objs[bodypart].set_data(
-                            window_ind / frame_rate,
-                            np.asarray(likelihoods[bodypart][likelihood_inds]),
-                        )
-                progress_bar.update()
-
-                return (
-                    image,
-                    centroid_position_dot,
-                    orientation_line,
-                    title,
-                )
-
-            movie = animation.FuncAnimation(
-                fig,
-                _update_plot,
-                frames=frames,
-                interval=1000 / fps,
-                blit=True,
-            )
-            movie.save(output_video_filename, writer=writer, dpi=400)
-            video.release()
-            print("finished making video with matplotlib")
-            return

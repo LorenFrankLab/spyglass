@@ -8,11 +8,8 @@ import pandas as pd
 from datajoint.utils import to_camel_case
 
 from spyglass.common.common_position import IntervalPositionInfo as CommonPos
-from spyglass.position.v1.dlc_utils import (
-    check_videofile,
-    get_video_path,
-    make_video,
-)
+from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
+from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.position.v1.position_dlc_pose_estimation import (
     DLCPoseEstimationSelection,
 )
