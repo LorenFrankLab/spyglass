@@ -11,6 +11,12 @@ from packaging import version
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
+
+if version.parse(si.__version__) < version.parse("0.99.1"):
+    raise ImportError(
+        "SpikeInterface version must updated. "
+        + "Please run `pip install spikeinterface==0.99.1` to update."
+    )
 import spikeinterface.preprocessing as sip
 import spikeinterface.qualitymetrics as sq
 
@@ -633,13 +639,7 @@ def _get_peak_channel(
     """Computes the electrode_id of the channel with the extremum peak for each unit."""
     if "peak_sign" in metric_params:
         del metric_params["peak_sign"]
-    if version.parse(si.__version__) < version.parse("0.99.0"):
-        get_template_extremum_channel = (
-            si.postprocessing.get_template_extremum_channel
-        )
-    else:
-        get_template_extremum_channel = si.core.get_template_extremum_channel
-    peak_channel_dict = get_template_extremum_channel(
+    peak_channel_dict = si.core.get_template_extremum_channel(
         waveform_extractor=waveform_extractor,
         peak_sign=peak_sign,
         **metric_params,
