@@ -20,8 +20,8 @@ To export data with the current implementation, you must do the following:
 
 ## How
 
-The current implementation relies on two classes in the `spyglass` package:
-`SpyglassMixin` and `RestrGraph` and the `Export` tables.
+The current implementation relies on two classes in the Spyglass package
+(`SpyglassMixin` and `RestrGraph`) and the `Export` tables.
 
 - `SpyglassMixin`: See `spyglass/utils/dj_mixin.py`
 - `RestrGraph`: See `spyglass/utils/dj_graph.py`
@@ -29,8 +29,8 @@ The current implementation relies on two classes in the `spyglass` package:
 
 ### Mixin
 
-The `SpyglassMixin` class is a subclass of DataJoint's `Manual` class. A subset
-of methods are used to set an environment variable, `SPYGLASS_EXPORT_ID`, and,
+The `SpyglassMixin` class adds functionality to DataJoint tables. A subset of
+methods are used to set an environment variable, `SPYGLASS_EXPORT_ID`, and,
 while active, intercept all `fetch`/`fetch_nwb` calls to tables. When `fetch` is
 called, the mixin grabs the table name and the restriction applied to the table
 and stores them in the `ExportSelection` part tables.
@@ -90,17 +90,16 @@ from spyglass.common.common_usage import Export
 
 export_key = {paper_id: "my_paper_id", analysis_id: "my_analysis_id"}
 ExportSelection().start_export(**export_key)
-ExportSelection().restart_export(**export_key)  # to clear previous attempt
 analysis_data = (MyTable & my_restr).fetch()
 analysis_nwb = (MyTable & my_restr).fetch_nwb()
 ExportSelection().end_export()
 
 # Visual inspection
-touched_files = DS().list_file_paths(**export_key)
-restricted_leaves = DS().preview_tables(**export_key)
+touched_files = ExportSelection.list_file_paths(**export_key)
+restricted_leaves = ExportSelection.preview_tables(**export_key)
 
 # Export
-Export().populate()
+Export().populate_paper(**export_key)
 ```
 
 `Export` will invoke `RestrGraph.write_export` to collect cascaded restrictions
@@ -109,6 +108,12 @@ data using a series of `mysqldump` commands. The script is saved to Spyglass's
 directory, `base_dir/export/paper_id/`, using credentials from `dj_config`. To
 use alternative credentials, create a
 [mysql config file](https://dev.mysql.com/doc/refman/8.0/en/option-files.html).
+
+To retain the abilite to delete the logging from a particular analysis, the
+`export_id` is a combination of the `paper_id` and `analysis_id` in
+`ExportSelection`. When populated, the `Export` table, only the minimum
+`export_id` for a given `paper_id` is used, resulting in one shell script per
+paper. Each shell script one `mysqldump` command per table.
 
 ## External Implementation
 
