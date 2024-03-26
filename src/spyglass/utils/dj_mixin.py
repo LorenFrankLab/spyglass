@@ -1,9 +1,13 @@
+from atexit import register as exit_register
+from atexit import unregister as exit_unregister
 from collections import OrderedDict
 from functools import cached_property
+from os import environ
 from time import time
 from typing import Dict, List, Union
 
 import datajoint as dj
+from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.expression import QueryExpression
 from datajoint.logging import logger as dj_logger
@@ -16,6 +20,8 @@ from spyglass.utils.dj_chains import TableChain, TableChains
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.logging import logger
+
+EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
 
 
 class SpyglassMixin:
@@ -119,7 +125,27 @@ class SpyglassMixin:
         AnalysisNwbfile (i.e., "-> (Analysis)Nwbfile" in definition)
         or a _nwb_table attribute. If both are present, the attribute takes
         precedence.
+
+        Additional logic support Export table logging.
         """
+        table, tbl_attr = self._nwb_table_tuple
+        if self.export_id and "analysis" in tbl_attr:
+            logger.info(f"Export {self.export_id}: fetch_nwb {self.table_name}")
+            tbl_pk = "analysis_file_name"
+            fname = (self * table).fetch1(tbl_pk)
+            self._export_table.File.insert1(
+                {"export_id": self.export_id, tbl_pk: fname},
+                skip_duplicates=True,
+            )
+            self._export_table.Table.insert1(
+                dict(
+                    export_id=self.export_id,
+                    table_name=self.full_table_name,
+                    restriction=make_condition(self, self.restriction, set()),
+                ),
+                skip_duplicates=True,
+            )
+
         return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
 
     # ------------------------ delete_downstream_merge ------------------------
@@ -318,9 +344,7 @@ class SpyglassMixin:
         empty_pk = {self._member_pk: "NULL"}
 
         format = dj.U(self._session_pk, self._member_pk)
-        sess_link = self._session_connection.join(
-            self.restriction, reverse_order=True
-        )
+        sess_link = self._session_connection.join(self.restriction)
 
         exp_missing = format & (sess_link - SesExp).proj(**empty_pk)
         exp_present = format & (sess_link * SesExp - exp_missing).proj()
@@ -330,7 +354,9 @@ class SpyglassMixin:
     @cached_property
     def _session_connection(self) -> Union[TableChain, bool]:
         """Path from Session table to self. False if no connection found."""
-        connection = TableChain(parent=self._delete_deps[-1], child=self)
+        connection = TableChain(
+            parent=self._delete_deps[-1], child=self, reverse=True
+        )
         return connection if connection.has_link else False
 
     @cached_property
@@ -488,8 +514,133 @@ class SpyglassMixin:
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
         self.cautious_delete(force_permission=force_permission, *args, **kwargs)
 
-    def super_delete(self, *args, **kwargs):
+    def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete."""
-        logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
-        self._log_use(start=time(), super_delete=True)
+        if warn:
+            logger.warning("!! Bypassing cautious_delete !!")
+            self._log_use(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
+
+    # ------------------------------- Export Log -------------------------------
+
+    @cached_property
+    def _spyglass_version(self):
+        """Get Spyglass version from dj.config."""
+        from spyglass import __version__ as sg_version
+
+        return ".".join(sg_version.split(".")[:3])  # Major.Minor.Patch
+
+    @cached_property
+    def _export_table(self):
+        """Lazy load export selection table."""
+        from spyglass.common.common_usage import ExportSelection
+
+        return ExportSelection()
+
+    @property
+    def export_id(self):
+        """ID of export in progress.
+
+        NOTE: User of an env variable to store export_id may not be thread safe.
+        Exports must be run in sequence, not parallel.
+        """
+
+        return int(environ.get(EXPORT_ENV_VAR, 0))
+
+    @export_id.setter
+    def export_id(self, value):
+        """Set ID of export using `table.export_id = X` notation."""
+        if self.export_id != 0 and self.export_id != value:
+            raise RuntimeError("Export already in progress.")
+        environ[EXPORT_ENV_VAR] = str(value)
+        exit_register(self._export_id_cleanup)  # End export on exit
+
+    @export_id.deleter
+    def export_id(self):
+        """Delete ID of export using `del table.export_id` notation."""
+        self._export_id_cleanup()
+
+    def _export_id_cleanup(self):
+        """Cleanup export ID."""
+        if environ.get(EXPORT_ENV_VAR):
+            del environ[EXPORT_ENV_VAR]
+        exit_unregister(self._export_id_cleanup)  # Remove exit hook
+
+    def _start_export(self, paper_id, analysis_id):
+        """Start export process."""
+        if self.export_id:
+            logger.info(f"Export {self.export_id} in progress. Starting new.")
+            self._stop_export(warn=False)
+
+        self.export_id = self._export_table.insert1_return_pk(
+            dict(
+                paper_id=paper_id,
+                analysis_id=analysis_id,
+                spyglass_version=self._spyglass_version,
+            )
+        )
+
+    def _stop_export(self, warn=True):
+        """End export process."""
+        if not self.export_id and warn:
+            logger.warning("Export not in progress.")
+        del self.export_id
+
+    def _log_fetch(self):
+        """Log fetch for export."""
+        if (
+            not self.export_id
+            or self.full_table_name == self._export_table.full_table_name
+            or "dandi_export" in self.full_table_name  # for populated table
+        ):
+            return
+        logger.info(f"Export {self.export_id}: fetch()   {self.table_name}")
+        restr_str = make_condition(self, self.restriction, set())
+        if isinstance(restr_str, str) and len(restr_str) > 2048:
+            raise RuntimeError(
+                "DandiExport cannot handle restrictions > 2048.\n\t"
+                + "If required, please open an issue on GitHub.\n\t"
+                + f"Restriction: {restr_str}"
+            )
+        self._export_table.Table.insert1(
+            dict(
+                export_id=self.export_id,
+                table_name=self.full_table_name,
+                restriction=make_condition(self, restr_str, set()),
+            ),
+            skip_duplicates=True,
+        )
+
+    def fetch(self, *args, **kwargs):
+        """Log fetch for export."""
+        ret = super().fetch(*args, **kwargs)
+        self._log_fetch()
+        return ret
+
+    def fetch1(self, *args, **kwargs):
+        """Log fetch1 for export."""
+        ret = super().fetch1(*args, **kwargs)
+        self._log_fetch()
+        return ret
+
+    # ------------------------- Other helper methods -------------------------
+
+    def _auto_increment(self, key, pk, *args, **kwargs):
+        """Auto-increment primary key."""
+        if not key.get(pk):
+            key[pk] = (dj.U().aggr(self, n=f"max({pk})").fetch1("n") or 0) + 1
+        return key
+
+    def file_like(self, name=None, **kwargs):
+        """Convenience method for wildcard search on file name fields."""
+        if not name:
+            return self & True
+        attr = None
+        for field in self.heading.names:
+            if "file" in field:
+                attr = field
+                break
+        if not attr:
+            logger.error(f"No file-like field found in {self.full_table_name}")
+            return
+        return self & f"{attr} LIKE '%{name}%'"

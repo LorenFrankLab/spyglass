@@ -11,6 +11,11 @@ from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 
+def unique_dicts(list_of_dict):
+    """Remove duplicate dictionaries from a list."""
+    return [dict(t) for t in {tuple(d.items()) for d in list_of_dict}]
+
+
 def deprecated_factory(classes: list, old_module: str = "") -> list:
     """Creates a list of classes and logs a warning when instantiated
 
@@ -127,33 +132,30 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_objects : list
         List of dicts containing fetch results and NWB objects.
     """
-    kwargs["as_dict"] = True  # force return as dictionary
-    tbl, attr_name = nwb_master
-
-    if not attrs:
-        attrs = query_expression.heading.names
-
-    # get the list of analysis or nwb files
-    file_name_str = (
-        "analysis_file_name" if "analysis" in nwb_master[1] else "nwb_file_name"
-    )
     # TODO: avoid this import?
     from ..common.common_nwbfile import AnalysisNwbfile, Nwbfile
 
-    file_path_fn = (
-        AnalysisNwbfile.get_abs_path
-        if "analysis" in nwb_master[1]
-        else Nwbfile.get_abs_path
-    )
+    kwargs["as_dict"] = True  # force return as dictionary
+    attrs = attrs or query_expression.heading.names  # if none, all
+
+    tbl, attr_name = nwb_master
+
+    which = "analysis" if "analysis" in attr_name else "nwb"
+    tbl_map = {  # map to file_name_str and file_path_fn
+        "analysis": ["analysis_file_name", AnalysisNwbfile.get_abs_path],
+        "nwb": ["nwb_file_name", Nwbfile.get_abs_path],
+    }
+    file_name_str, file_path_fn = tbl_map[which]
 
     # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
         query_expression * tbl.proj(nwb2load_filepath=attr_name)
     ).fetch(file_name_str)
+
     for file_name in nwb_files:
         file_path = file_path_fn(file_name)
-        if not os.path.exists(file_path):
-            # retrieve the file from kachery. This also opens the file and stores the file object
+        if not os.path.exists(file_path):  # retrieve the file from kachery.
+            # This also opens the file and stores the file object
             get_nwb_file(file_path)
 
     rec_dicts = (

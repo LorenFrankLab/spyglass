@@ -784,13 +784,14 @@ class Merge(dj.Manual):
         ):
             part.delete(force_permission=force_permission, *args, **kwargs)
 
-    def super_delete(self, *args, **kwargs):
+    def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete.
 
-        Added to support MRO of SpyglassMixin"""
-        logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
-
-        self._log_use(start=time(), super_delete=True)
+        Added to support MRO of SpyglassMixin
+        """
+        if warn:
+            logger.warning("!! Bypassing cautious_delete !!")
+            self._log_use(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
 

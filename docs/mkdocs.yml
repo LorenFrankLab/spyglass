@@ -51,6 +51,7 @@ nav:
           - Data Sync: notebooks/02_Data_Sync.ipynb
           - Merge Tables: notebooks/03_Merge_Tables.ipynb
           - Config Populate: notebooks/04_PopulateConfigFile.ipynb
+          - Export: notebooks/05_Export.ipynb
       - Spikes:
           - Spike Sorting V0: notebooks/10_Spike_SortingV0.ipynb
           - Spike Sorting V1: notebooks/10_Spike_SortingV1.ipynb
@@ -75,6 +76,7 @@ nav:
       - Insert Data: misc/insert_data.md
       - Merge Tables: misc/merge_tables.md
       - Database Management: misc/database_management.md
+      - Export: misc/export.md
   - API Reference: api/ # defer to gen-files + literate-nav
   - How to Contribute: contribute.md
   - Change Log: CHANGELOG.md
