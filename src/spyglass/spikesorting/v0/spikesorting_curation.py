@@ -618,12 +618,10 @@ def _get_peak_offset(
     """Computes the shift of the waveform peak from center of window."""
     if "peak_sign" in metric_params:
         del metric_params["peak_sign"]
-    peak_offset_inds = (
-        si.postprocessing.get_template_extremum_channel_peak_shift(
-            waveform_extractor=waveform_extractor,
-            peak_sign=peak_sign,
-            **metric_params,
-        )
+    peak_offset_inds = si.core.get_template_extremum_channel_peak_shift(
+        waveform_extractor=waveform_extractor,
+        peak_sign=peak_sign,
+        **metric_params,
     )
     peak_offset = {key: int(abs(val)) for key, val in peak_offset_inds.items()}
     return peak_offset
