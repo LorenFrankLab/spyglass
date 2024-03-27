@@ -6,6 +6,7 @@
 
 - Refactor `TableChain` to include `_searched` attribute. #867
 - Fix errors in config import #882
+- Create class `SpyglassGroupPart` to aid delete propagations #899
 
 ### Pipelines
 
