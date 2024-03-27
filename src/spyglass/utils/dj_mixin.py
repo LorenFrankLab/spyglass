@@ -493,3 +493,14 @@ class SpyglassMixin:
         logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
         self._log_use(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
+
+
+class SpyglassGroupPart(SpyglassMixin, dj.Part):
+    """
+    A part table for Spyglass Group tables. Assists in propogating
+    delete calls from upstreeam tables to downstream tables.
+    """
+
+    def delete(self, key={}):
+        restriction = (self & key).fetch("KEY")
+        (self.master & restriction).delete(restriction)
