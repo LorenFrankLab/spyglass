@@ -17,6 +17,11 @@ from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.logging import logger
 
+try:
+    import pynapple  # noqa F401
+except ImportError:
+    pynapple = None
+
 
 class SpyglassMixin:
     """Mixin for Spyglass DataJoint tables.
@@ -120,6 +125,14 @@ class SpyglassMixin:
         or a _nwb_table attribute. If both are present, the attribute takes
         precedence.
         """
+        return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
+
+    def fetch_pynapple(self, *attrs, **kwargs):
+        """Fetch Pynapple object from relevant table."""
+        if pynapple is None:
+            raise ImportError("Pynapple not installed.")
+
+        pynapple.load_file("A2929-200711.nwb")
         return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
 
     # ------------------------ delete_downstream_merge ------------------------
