@@ -32,7 +32,7 @@ from spyglass.decoding.v1.waveform_features import (
 )  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassGroupPart, SpyglassMixin, logger
 
 schema = dj.schema("decoding_clusterless_v1")
 
@@ -44,7 +44,7 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
     waveform_features_group_name: varchar(80)
     """
 
-    class UnitFeatures(SpyglassMixin, dj.Part):
+    class UnitFeatures(SpyglassGroupPart):
         definition = """
         -> UnitWaveformFeaturesGroup
         -> UnitWaveformFeatures
