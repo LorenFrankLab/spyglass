@@ -11,6 +11,7 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
+from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
@@ -193,6 +194,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                     if isinstance(nwb_object, pynwb.core.LabelledDict):
                         for module in list(nwb_object.keys()):
                             nwb_object.pop(module)
+            # add the version of spyglass that created this file
+            nwbf.source_script = f"spyglass={sg_version}"
 
             analysis_file_name = self.__get_new_file_name(nwb_file_name)
             # write the new file
