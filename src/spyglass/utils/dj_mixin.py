@@ -497,7 +497,7 @@ class SpyglassMixin:
 
 class SpyglassGroupPart(SpyglassMixin, dj.Part):
     """
-    A part table for Spyglass Group tables. Assists in propogating
+    A part table for Spyglass Group tables. Assists in propagating
     delete calls from upstreeam tables to downstream tables.
     """
 
