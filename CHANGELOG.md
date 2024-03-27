@@ -6,6 +6,7 @@
 
 - Refactor `TableChain` to include `_searched` attribute. #867
 - Fix errors in config import #882
+- Save current spyglass version in analysis nwb files to aid diagnosis #897
 
 ### Pipelines
 
