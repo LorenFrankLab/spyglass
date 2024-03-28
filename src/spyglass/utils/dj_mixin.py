@@ -350,7 +350,9 @@ class SpyglassMixin:
         empty_pk = {self._member_pk: "NULL"}
 
         format = dj.U(self._session_pk, self._member_pk)
-        sess_link = self._session_connection.join(self.restriction)
+        sess_link = self._session_connection.join(
+            self.restriction, reverse_order=True
+        )
 
         exp_missing = format & (sess_link - SesExp).proj(**empty_pk)
         exp_present = format & (sess_link * SesExp - exp_missing).proj()
@@ -360,9 +362,7 @@ class SpyglassMixin:
     @cached_property
     def _session_connection(self) -> Union[TableChain, bool]:
         """Path from Session table to self. False if no connection found."""
-        connection = TableChain(
-            parent=self._delete_deps[-1], child=self, reverse=True
-        )
+        connection = TableChain(parent=self._delete_deps[-1], child=self)
         return connection if connection.has_link else False
 
     @cached_property
