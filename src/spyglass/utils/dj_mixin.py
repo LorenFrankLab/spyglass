@@ -128,12 +128,63 @@ class SpyglassMixin:
         return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
 
     def fetch_pynapple(self, *attrs, **kwargs):
-        """Fetch Pynapple object from relevant table."""
-        if pynapple is None:
-            raise ImportError("Pynapple not installed.")
+        """Get a pynapple object from the given DataJoint query.
 
-        pynapple.load_file("A2929-200711.nwb")
-        return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
+        Parameters
+        ----------
+        query_expression : query
+            A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.
+        nwb_master : tuple
+            Tuple (table, attr) to get the NWB filepath from.
+            i.e. absolute path to NWB file can be obtained by looking up attr column of table
+            table is usually Nwbfile or AnalysisNwbfile;
+            attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'
+        *attrs : list
+            Attributes from normal DataJoint fetch call.
+        **kwargs : dict
+            Keyword arguments from normal DataJoint fetch call.
+
+        Returns
+        -------
+        nwb_objects : list
+            List of dicts containing fetch results and NWB objects.
+        """
+        if pynapple is None:
+            raise ImportError("Pynapple is not installed.")
+
+        query_expression, nwb_master = self, self._nwb_table_tuple
+        tbl, attr_name = nwb_master
+        kwargs["as_dict"] = True  # force return as dictionary
+
+        if not attrs:
+            attrs = query_expression.heading.names
+
+        # get the list of analysis or nwb files
+        file_name_str = (
+            "analysis_file_name"
+            if "analysis" in nwb_master[1]
+            else "nwb_file_name"
+        )
+        # TODO: avoid this import?
+        from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+
+        file_path_fn = (
+            AnalysisNwbfile.get_abs_path
+            if "analysis" in nwb_master[1]
+            else Nwbfile.get_abs_path
+        )
+
+        # TODO: check that the query_expression restricts tbl - CBroz
+        nwb_files = (
+            query_expression * tbl.proj(nwb2load_filepath=attr_name)
+        ).fetch(file_name_str)
+
+        py_objs = []
+        for file_name in nwb_files:
+            file_path = file_path_fn(file_name)
+            py_objs.append(pynapple.load_file(file_path))
+
+        return py_objs
 
     # ------------------------ delete_downstream_merge ------------------------
 
