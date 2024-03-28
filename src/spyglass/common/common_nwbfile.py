@@ -8,6 +8,7 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
+import h5py
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
@@ -182,6 +183,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of the new NWB file.
         """
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        alter_source_script = False
         with pynwb.NWBHDF5IO(
             path=nwb_file_abspath, mode="r", load_namespaces=True
         ) as io:
@@ -195,7 +197,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                         for module in list(nwb_object.keys()):
                             nwb_object.pop(module)
             # add the version of spyglass that created this file
-            nwbf.source_script = f"spyglass={sg_version}"
+            if nwbf.source_script is None:
+                nwbf.source_script = f"spyglass={sg_version}"
+            else:
+                alter_source_script = True
 
             analysis_file_name = self.__get_new_file_name(nwb_file_name)
             # write the new file
@@ -208,12 +213,20 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 path=analysis_file_abs_path, mode="w", manager=io.manager
             ) as export_io:
                 export_io.export(io, nwbf)
+        if alter_source_script:
+            self._alter_spyglass_version(analysis_file_abs_path)
 
         # change the permissions to only allow owner to write
         permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
         os.chmod(analysis_file_abs_path, permissions)
 
         return analysis_file_name
+
+    @staticmethod
+    def _alter_spyglass_version(nwb_file_path):
+        """Change the source script to the current version of spyglass"""
+        with h5py.File(nwb_file_path, "a") as f:
+            f["/general/source_script"][()] = f"spyglass={sg_version}"
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
