@@ -2,9 +2,17 @@
 
 ## [0.5.2] (Unreleased)
 
+### Infrastructure
+
 - Refactor `TableChain` to include `_searched` attribute. #867
 - Fix errors in config import #882
+- Save current spyglass version in analysis nwb files to aid diagnosis #897
 - Add functionality to export vertical slice of database. #875
+
+### Pipelines
+
+-Spikesorting
+    - Update calls in v0 pipeline for spikeinterface>=0.99 #893
 
 ## [0.5.1] (March 7, 2024)
 
