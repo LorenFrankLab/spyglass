@@ -109,9 +109,9 @@ directory, `base_dir/export/paper_id/`, using credentials from `dj_config`. To
 use alternative credentials, create a
 [mysql config file](https://dev.mysql.com/doc/refman/8.0/en/option-files.html).
 
-To retain the abilite to delete the logging from a particular analysis, the
+To retain the ability to delete the logging from a particular analysis, the
 `export_id` is a combination of the `paper_id` and `analysis_id` in
-`ExportSelection`. When populated, the `Export` table, only the minimum
+`ExportSelection`. When populated, the `Export` table, only the maximum
 `export_id` for a given `paper_id` is used, resulting in one shell script per
 paper. Each shell script one `mysqldump` command per table.
 

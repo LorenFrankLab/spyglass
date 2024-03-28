@@ -1,6 +1,7 @@
 """DataJoint graph traversal and restriction application.
 
-Note: read `ft` as FreeTable and `restr` as restriction."""
+NOTE: read `ft` as FreeTable and `restr` as restriction.
+"""
 
 from pathlib import Path
 from typing import Dict, List
@@ -115,11 +116,14 @@ class RestrGraph:
             join = ft & [existing, restriction]
             if len(join) == len(ft & existing):
                 return  # restriction is a subset of existing
-            restriction = unique_dicts(join.fetch("KEY", as_dict=True))
+            restriction = make_condition(
+                ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
+            )
 
-        self._log_truncate(
-            f"Set Restr {table}: {type(restriction)} {restriction}"
-        )
+        if not isinstance(restriction, str):
+            self._log_truncate(
+                f"Set Restr {table}: {type(restriction)} {restriction}"
+            )
         self._set_node(table, "restr", restriction)
 
     def _log_truncate(self, log_str, max_len=80):
@@ -217,6 +221,8 @@ class RestrGraph:
 
     def cascade(self) -> None:
         """Cascade all restrictions up the graph."""
+        if self.cascaded:
+            return
         for table in self.leaves - self.visited:
             restr = self._get_restr(table)
             self._log_truncate(f"Start     {table}: {restr}")
@@ -278,13 +284,20 @@ class RestrGraph:
     @property
     def as_dict(self) -> List[Dict[str, str]]:
         """Return as a list of dictionaries of table_name: restriction"""
-        if not self.cascaded:
-            self.cascade()
+        self.cascade()
         return [
             {"table_name": table, "restriction": self._get_restr(table)}
             for table in self.ancestors
             if self._get_restr(table)
         ]
+
+    def _get_credentials(self):
+        """Get credentials for database connection."""
+        return {
+            "user": dj_config["database.user"],
+            "password": dj_config["database.password"],
+            "host": dj_config["database.host"],
+        }
 
     def _write_sql_cnf(self):
         """Write SQL cnf file to avoid password prompt."""
@@ -293,49 +306,123 @@ class RestrGraph:
         if cnf_path.exists():
             return
 
+        template = "[client]\nuser={user}\npassword={password}\nhost={host}\n"
+
         with open(str(cnf_path), "w") as file:
-            file.write(
-                "[client]\n"
-                + "user={}\n".format(dj_config["database.user"])
-                + "password={}\n".format(dj_config["database.password"])
-                + "host={}\n".format(dj_config["database.host"])
+            file.write(template.format(**self._get_credentials()))
+        cnf_path.chmod(0o600)
+
+    def _bash_escape(self, s):
+        """Escape restriction string for bash."""
+        s = s.strip()
+
+        replace_map = {
+            "WHERE ": "",  # Remove preceding WHERE of dj.where_clause
+            "  ": " ",  # Squash double spaces
+            "( (": "((",  # Squash double parens
+            ") )": ")",
+            '"': "'",  # Replace double quotes with single
+            "`": "",  # Remove backticks
+            " AND ": " \\\n\tAND ",  # Add newline and tab for readability
+            " OR ": " \\\n\tOR  ",  # OR extra space to align with AND
+            ")AND(": ") \\\n\tAND (",
+            ")OR(": ") \\\n\tOR  (",
+        }
+        for old, new in replace_map.items():
+            s = s.replace(old, new)
+        if s.startswith("(((") and s.endswith(")))"):
+            s = s[2:-2]  # Remove extra parens for readability
+        return s
+
+    def _cmd_prefix(self, docker_id=None):
+        """Get prefix for mysqldump command. Includes docker exec if needed."""
+        if not docker_id:
+            return "mysqldump "
+        return (
+            f"docker exec -i {docker_id} \\\n\tmysqldump "
+            + "-u {user} --password={password} \\\n\t".format(
+                **self._get_credentials()
             )
+        )
 
     def _write_mysqldump(
         self, paper_id: str, docker_id=None, spyglass_version=None
     ):
-        """Write mysqlmdump to a temporary file and return the file object"""
-        paper_dir = Path(export_dir) / paper_id
+        """Write mysqlmdump.sh script to export data.
+
+        Parameters
+        ----------
+        paper_id : str
+            Paper ID to use for export file names
+        docker_id : str, optional
+            Docker container ID to export from. Default None
+        spyglass_version : str, optional
+            Spyglass version to include in export. Default None
+        """
+        paper_dir = Path(export_dir) / paper_id if not docker_id else Path(".")
         paper_dir.mkdir(exist_ok=True)
 
         dump_script = paper_dir / f"_ExportSQL_{paper_id}.sh"
         dump_content = paper_dir / f"_Populate_{paper_id}.sql"
 
-        prefix = f"docker exec -i {docker_id}" if docker_id else ""
+        prefix = self._cmd_prefix(docker_id)
         version = (  # Include spyglass version as comment in dump
-            f"echo '-- SPYGLASS VERSION: {spyglass_version}' > {dump_content}\n"
+            "echo '--'\n"
+            + f"echo '-- SPYGLASS VERSION: {spyglass_version} --'\n"
+            + "echo '--'\n\n"
             if spyglass_version
             else ""
         )
+        create_cmd = (
+            "echo 'CREATE DATABASE IF NOT EXISTS {database}; "
+            + "USE {database};'\n\n"
+        )
+        dump_cmd = prefix + '{database} {table} --where="\\\n\t{where}"\n\n'
+
+        tables_by_db = sorted(self.all_ft, key=lambda x: x.full_table_name)
 
         with open(dump_script, "w") as file:
-            file.write(f"#!/bin/bash\n{version}")
+            file.write(
+                "#!/bin/bash\n\n"
+                + f"exec > {dump_content}\n\n"  # Redirect output to sql file
+                + f"{version}"  # Include spyglass version as comment
+            )
 
-            for table in self.all_ft:
+            prev_db = None
+            for table in tables_by_db:
                 if not (where := table.where_clause()):
                     continue
-                database, table_name = table.full_table_name.split(".")
+                where = self._bash_escape(where)
+                database, table_name = table.full_table_name.replace(
+                    "`", ""
+                ).split(".")
+                if database != prev_db:
+                    file.write(create_cmd.format(database=database))
+                    prev_db = database
                 file.write(
-                    f"{prefix}mysqldump {database} {table_name} "
-                    + f'--where="{where}" >> {dump_content}\n'
+                    dump_cmd.format(
+                        database=database, table=table_name, where=where
+                    )
                 )
         logger.info(f"Export script written to {dump_script}")
 
     def write_export(
         self, paper_id: str, docker_id=None, spyglass_version=None
     ):
-        if not self.cascaded:
-            self.cascade()
+        """Write export bash script for all tables in graph.
+
+        Also writes a user-specific .my.cnf file to avoid password prompt.
+
+        Parameters
+        ----------
+        paper_id : str
+            Paper ID to use for export file names
+        docker_id : str, optional
+            Docker container ID to export from. Default None
+        spyglass_version : str, optional
+            Spyglass version to include in export. Default None
+        """
+        self.cascade()
         self._write_sql_cnf()
         self._write_mysqldump(paper_id, docker_id, spyglass_version)
 

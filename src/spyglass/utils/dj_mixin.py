@@ -161,6 +161,10 @@ class SpyglassMixin:
         merge_tables = {}
 
         def search_descendants(parent):
+            # TODO: Add check that parents are in the graph. If not, raise error
+            #       asking user to import the table.
+            # TODO: Make a `is_merge_table` helper, and check for false
+            #       positives in the mixin init.
             for desc in parent.descendants(as_objects=True):
                 if (
                     MERGE_PK not in desc.heading.names

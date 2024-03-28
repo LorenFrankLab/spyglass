@@ -92,9 +92,11 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         return export_id
 
     def start_export(self, paper_id, analysis_id) -> None:
+        """Start logging a new export."""
         self._start_export(paper_id, analysis_id)
 
     def stop_export(self) -> None:
+        """Stop logging the current export."""
         self._stop_export()
 
     # NOTE: These helpers could be moved to table below, but I think
@@ -103,6 +105,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
     #       Selection
 
     def list_file_paths(self, key: dict) -> list[str]:
+        """Return a list of unique file paths for a given restriction/key."""
         file_table = self.File & key
         analysis_fp = [
             AnalysisNwbfile().get_abs_path(fname)
@@ -115,25 +118,36 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         return [{"file_path": p} for p in list({*analysis_fp, *nwbfile_fp})]
 
     def get_restr_graph(self, key: dict) -> RestrGraph:
+        """Return a RestrGraph for a restriction/key's tables/restrictions.
+
+        Ignores duplicate entries.
+        """
         leaves = unique_dicts(
             (self.Table & key).fetch("table_name", "restriction", as_dict=True)
         )
-        return RestrGraph(seed_table=self, leaves=leaves, verbose=True)
+        return RestrGraph(seed_table=self, leaves=leaves, verbose=False)
 
     def preview_tables(self, key: dict) -> list[dj.FreeTable]:
+        """Return a list of restricted FreeTables for a given restriction/key.
+
+        Useful for checking what will be exported.
+        """
         return self.get_restr_graph(key).leaf_ft
 
-    def _min_export_id(self, paper_id: str) -> int:
-        """Return all export_ids for a paper."""
+    def _max_export_id(self, paper_id: str, return_all=False) -> int:
+        """Return last export associated with a given paper id.
+
+        Used to populate Export table."""
         if isinstance(paper_id, dict):
             paper_id = paper_id.get("paper_id")
         if not (query := self & {"paper_id": paper_id}):
             return None
-        return min(query.fetch("export_id"))
+        all_export_ids = query.fetch("export_id")
+        return all_export_ids if return_all else max(all_export_ids)
 
     def paper_export_id(self, paper_id: str) -> dict:
-        """Return the minimum export_id for a paper, used to populate Export."""
-        return {"export_id": self._min_export_id(paper_id)}
+        """Return the maximum export_id for a paper, used to populate Export."""
+        return {"export_id": self._max_export_id(paper_id)}
 
 
 @schema
@@ -143,7 +157,8 @@ class Export(SpyglassMixin, dj.Computed):
     """
 
     # In order to get a many-to-one relationship btwn Selection and Export,
-    # we ignore all but the first export_id.
+    # we ignore all but the last export_id. If more exports are added above,
+    # generating a new output will overwrite the old ones.
 
     class Table(SpyglassMixin, dj.Part):
         definition = """
@@ -173,14 +188,26 @@ class Export(SpyglassMixin, dj.Computed):
         query = ExportSelection & key
         paper_key = query.fetch("paper_id", as_dict=True)[0]
 
-        # Null insertion if export_id is not the minimum for the paper
-        min_export_id = query._min_export_id(paper_key)
-        if key.get("export_id") != min_export_id:
+        # Null insertion if export_id is not the maximum for the paper
+        all_export_ids = query._max_export_id(paper_key, return_all=True)
+        max_export_id = max(all_export_ids)
+        if key.get("export_id") != max_export_id:
             logger.info(
-                f"Skipping export_id {key['export_id']}, use {min_export_id}"
+                f"Skipping export_id {key['export_id']}, use {max_export_id}"
             )
             self.insert1(key)
             return
+        # If lesser ids are present, delete parts yielding null entries
+        processed_ids = set(
+            list(self.Table.fetch("export_id"))
+            + list(self.File.fetch("export_id"))
+        )
+        if overlap := set(all_export_ids) - {max_export_id} & processed_ids:
+            logger.info(f"Overwriting export_ids {overlap}")
+            for export_id in overlap:
+                id_dict = {"export_id": export_id}
+                (self.Table & id_dict).delete_quick()
+                (self.Table & id_dict).delete_quick()
 
         restr_graph = query.get_restr_graph(paper_key)
         file_paths = query.list_file_paths(paper_key)
