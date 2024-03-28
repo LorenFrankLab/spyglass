@@ -47,7 +47,8 @@
 # ## Imports
 #
 
-# Let's start by importing the `spyglass` package, along with a few others.
+# Let's start by connecting to the database and importing some tables that might
+# be used in an analysis.
 #
 
 # +
@@ -59,32 +60,138 @@ if os.path.basename(os.getcwd()) == "notebooks":
     os.chdir("..")
 dj.config.load("dj_local_conf.json")  # load config for database connection info
 
-# ignore datajoint+jupyter async warnings
 from spyglass.common.common_usage import Export, ExportSelection
 from spyglass.lfp.analysis.v1 import LFPBandV1
 from spyglass.position.v1 import TrodesPosV1
 from spyglass.spikesorting.v1.curation import CurationV1
 
-# TODO: Add commentary, describe helpers on ExportSelection
+# -
 
+# ## Export Tables
+#
+# The `ExportSelection` table will populate while we conduct the analysis. For
+# each file opened and each `fetch` call, an entry will be logged in one of its
+# part tables.
+#
+
+ExportSelection()
+
+ExportSelection.Table()
+
+ExportSelection.File()
+
+# Exports are organized around paper and analysis IDs. A single export will be
+# generated for each paper, but we can delete/revise logs for each analysis before
+# running the export. When we're ready, we can run the `populate_paper` method
+# of the `Export` table. By default, export logs will ignore all tables in this
+# `common_usage` schema.
+#
+
+# ## Logging
+#
+# There are a few restrictions to keep in mind when export logging:
+#
+# - You can only run _ONE_ export at a time.
+# - All tables must inherit `SpyglassMixin`
+#
+# <details><summary>How to inherit <code>SpyglassMixin</code></summary>
+#
+# DataJoint tables all inherit from one of the built-in table types.
+#
+# ```python
+# class MyTable(dj.Manual):
+#     ...
+# ```
+#
+# To inherit the mixin, simply add it to the `()` of the class before the
+# DataJoint class. This can be done for existing tables without dropping them,
+# so long as the change has been made prior to export logging.
+#
+# ```python
+# from spyglass.utils import SpyglassMixin
+# class MyTable(SpyglassMixin, dj.Manual):
+#     ...
+# ```
+#
+# </details>
+#
+# Let's start logging for 'paper1'.
+#
+
+# +
 paper_key = {"paper_id": "paper1"}
-ExportSelection().start_export(**paper_key, analysis_id="test1")
-a = (
-    LFPBandV1 & "nwb_file_name LIKE 'med%'" & {"filter_name": "Theta 5-11 Hz"}
+
+ExportSelection().start_export(**paper_key, analysis_id="analysis1")
+my_lfp_data = (
+    LFPBandV1  # Logging this table
+    & "nwb_file_name LIKE 'med%'"  # using a string restriction
+    & {"filter_name": "Theta 5-11 Hz"}  # and a dictionary restriction
 ).fetch()
-b = (
+# -
+
+# We can check that it was logged. The syntax of the restriction will look
+# different from what we see in python, but the `preview_tables` will look
+# familiar.
+#
+
+ExportSelection.Table()
+
+# And log more under the same analysis ...
+#
+
+my_other_lfp_data = (
     LFPBandV1
     & {
         "nwb_file_name": "mediumnwb20230802_.nwb",
         "filter_name": "Theta 5-10 Hz",
     }
 ).fetch()
-ExportSelection().start_export(**paper_key, analysis_id="test2")
-c = (CurationV1 & "curation_id = 1").fetch_nwb()
-d = (TrodesPosV1 & 'trodes_pos_params_name = "single_led"').fetch()
+
+# Since these restrictions are mutually exclusive, we can check that the will
+# be combined appropriately by priviewing the logged tables...
+#
+
+ExportSelection().preview_tables(**paper_key)
+
+# Let's try adding a new analysis with a fetched nwb file. Starting a new export
+# will stop the previous one.
+#
+
+ExportSelection().start_export(**paper_key, analysis_id="analysis2")
+curation_nwb = (CurationV1 & "curation_id = 1").fetch_nwb()
+trodes_data = (TrodesPosV1 & 'trodes_pos_params_name = "single_led"').fetch()
+
+# We can check that the right files were logged with the following...
+#
+
+ExportSelection().list_file_paths(paper_key)
+
+# And stop the export with ...
+#
+
 ExportSelection().stop_export()
+
+# ## Populate
+#
+# The `Export` table has a `populate_paper` method that will generate an export
+# bash script for the tables required by your analysis, including all the upstream
+# tables you didn't directly need, like `Subject` and `Session`.
+#
+# **NOTE:** Populating the export for a given paper will overwrite any previous
+# runs. For example, if you ran an export, and then added a third analysis for the
+# same paper, generating another export will delete any existing bash script and
+# `Export` table entries for the previous run.
+#
+
 Export().populate_paper(**paper_key)
-# -
+
+# By default the export script will be located in an `export` folder within your
+# `SPYGLASS_BASE_DIR`. This default can be changed by adjusting your `dj.config`.
+#
+# Frank Lab members will need the help of a database admin (e.g., Chris) to
+# run the resulting bash script. The result will be a `.sql` file that anyone
+# can use to replicate the database entries you used in your analysis.
+#
 
 # ## Up Next
 #

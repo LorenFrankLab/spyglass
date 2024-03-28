@@ -3,15 +3,12 @@
 NOTE: read `ft` as FreeTable and `restr` as restriction.
 """
 
-from pathlib import Path
 from typing import Dict, List
 
 from datajoint import FreeTable
-from datajoint import config as dj_config
 from datajoint.condition import make_condition
 from datajoint.table import Table
 
-from spyglass.settings import export_dir
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import unique_dicts
 
@@ -66,6 +63,8 @@ class RestrGraph:
     @property
     def all_ft(self):
         """Get restricted FreeTables from all visited nodes."""
+        if not self.cascaded:
+            self.cascade()
         return [self._get_ft(table, with_restr=True) for table in self.visited]
 
     @property
@@ -290,140 +289,3 @@ class RestrGraph:
             for table in self.ancestors
             if self._get_restr(table)
         ]
-
-    def _get_credentials(self):
-        """Get credentials for database connection."""
-        return {
-            "user": dj_config["database.user"],
-            "password": dj_config["database.password"],
-            "host": dj_config["database.host"],
-        }
-
-    def _write_sql_cnf(self):
-        """Write SQL cnf file to avoid password prompt."""
-        cnf_path = Path("~/.my.cnf").expanduser()
-
-        if cnf_path.exists():
-            return
-
-        template = "[client]\nuser={user}\npassword={password}\nhost={host}\n"
-
-        with open(str(cnf_path), "w") as file:
-            file.write(template.format(**self._get_credentials()))
-        cnf_path.chmod(0o600)
-
-    def _bash_escape(self, s):
-        """Escape restriction string for bash."""
-        s = s.strip()
-
-        replace_map = {
-            "WHERE ": "",  # Remove preceding WHERE of dj.where_clause
-            "  ": " ",  # Squash double spaces
-            "( (": "((",  # Squash double parens
-            ") )": ")",
-            '"': "'",  # Replace double quotes with single
-            "`": "",  # Remove backticks
-            " AND ": " \\\n\tAND ",  # Add newline and tab for readability
-            " OR ": " \\\n\tOR  ",  # OR extra space to align with AND
-            ")AND(": ") \\\n\tAND (",
-            ")OR(": ") \\\n\tOR  (",
-        }
-        for old, new in replace_map.items():
-            s = s.replace(old, new)
-        if s.startswith("(((") and s.endswith(")))"):
-            s = s[2:-2]  # Remove extra parens for readability
-        return s
-
-    def _cmd_prefix(self, docker_id=None):
-        """Get prefix for mysqldump command. Includes docker exec if needed."""
-        if not docker_id:
-            return "mysqldump "
-        return (
-            f"docker exec -i {docker_id} \\\n\tmysqldump "
-            + "-u {user} --password={password} \\\n\t".format(
-                **self._get_credentials()
-            )
-        )
-
-    def _write_mysqldump(
-        self, paper_id: str, docker_id=None, spyglass_version=None
-    ):
-        """Write mysqlmdump.sh script to export data.
-
-        Parameters
-        ----------
-        paper_id : str
-            Paper ID to use for export file names
-        docker_id : str, optional
-            Docker container ID to export from. Default None
-        spyglass_version : str, optional
-            Spyglass version to include in export. Default None
-        """
-        paper_dir = Path(export_dir) / paper_id if not docker_id else Path(".")
-        paper_dir.mkdir(exist_ok=True)
-
-        dump_script = paper_dir / f"_ExportSQL_{paper_id}.sh"
-        dump_content = paper_dir / f"_Populate_{paper_id}.sql"
-
-        prefix = self._cmd_prefix(docker_id)
-        version = (  # Include spyglass version as comment in dump
-            "echo '--'\n"
-            + f"echo '-- SPYGLASS VERSION: {spyglass_version} --'\n"
-            + "echo '--'\n\n"
-            if spyglass_version
-            else ""
-        )
-        create_cmd = (
-            "echo 'CREATE DATABASE IF NOT EXISTS {database}; "
-            + "USE {database};'\n\n"
-        )
-        dump_cmd = prefix + '{database} {table} --where="\\\n\t{where}"\n\n'
-
-        tables_by_db = sorted(self.all_ft, key=lambda x: x.full_table_name)
-
-        with open(dump_script, "w") as file:
-            file.write(
-                "#!/bin/bash\n\n"
-                + f"exec > {dump_content}\n\n"  # Redirect output to sql file
-                + f"{version}"  # Include spyglass version as comment
-            )
-
-            prev_db = None
-            for table in tables_by_db:
-                if not (where := table.where_clause()):
-                    continue
-                where = self._bash_escape(where)
-                database, table_name = table.full_table_name.replace(
-                    "`", ""
-                ).split(".")
-                if database != prev_db:
-                    file.write(create_cmd.format(database=database))
-                    prev_db = database
-                file.write(
-                    dump_cmd.format(
-                        database=database, table=table_name, where=where
-                    )
-                )
-        logger.info(f"Export script written to {dump_script}")
-
-    def write_export(
-        self, paper_id: str, docker_id=None, spyglass_version=None
-    ):
-        """Write export bash script for all tables in graph.
-
-        Also writes a user-specific .my.cnf file to avoid password prompt.
-
-        Parameters
-        ----------
-        paper_id : str
-            Paper ID to use for export file names
-        docker_id : str, optional
-            Docker container ID to export from. Default None
-        spyglass_version : str, optional
-            Spyglass version to include in export. Default None
-        """
-        self.cascade()
-        self._write_sql_cnf()
-        self._write_mysqldump(paper_id, docker_id, spyglass_version)
-
-        # TODO: export conda env

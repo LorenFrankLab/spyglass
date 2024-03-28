@@ -130,7 +130,9 @@ class SpyglassMixin:
         """
         table, tbl_attr = self._nwb_table_tuple
         if self.export_id and "analysis" in tbl_attr:
-            logger.info(f"Export {self.export_id}: fetch_nwb {self.table_name}")
+            logger.debug(
+                f"Export {self.export_id}: fetch_nwb {self.table_name}"
+            )
             tbl_pk = "analysis_file_name"
             fname = (self * table).fetch1(tbl_pk)
             self._export_table.File.insert1(
@@ -592,13 +594,9 @@ class SpyglassMixin:
 
     def _log_fetch(self):
         """Log fetch for export."""
-        if (
-            not self.export_id
-            or self.full_table_name == self._export_table.full_table_name
-            or "dandi_export" in self.full_table_name  # for populated table
-        ):
+        if not self.export_id or self.database == "common_usage":
             return
-        logger.info(f"Export {self.export_id}: fetch()   {self.table_name}")
+        logger.debug(f"Export {self.export_id}: fetch()   {self.table_name}")
         restr_str = make_condition(self, self.restriction, set())
         if isinstance(restr_str, str) and len(restr_str) > 2048:
             raise RuntimeError(
