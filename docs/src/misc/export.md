@@ -65,8 +65,6 @@ restr_graph.add_leaves(
 restr_graph.cascade()
 restricted_leaves = restr_graph.leaf_ft
 all_restricted_tables = restr_graph.all_ft
-
-restr_graph.write_export(paper_id="my_paper_id")  # part of `populate` below
 ```
 
 By default, a `RestrGraph` object is created with a seed table to have access to
@@ -102,11 +100,11 @@ restricted_leaves = ExportSelection.preview_tables(**export_key)
 Export().populate_paper(**export_key)
 ```
 
-`Export` will invoke `RestrGraph.write_export` to collect cascaded restrictions
-and file paths in its part tables, and write out a bash script to export the
-data using a series of `mysqldump` commands. The script is saved to Spyglass's
-directory, `base_dir/export/paper_id/`, using credentials from `dj_config`. To
-use alternative credentials, create a
+`Export`'s populate will invoke the `write_export` method to collect cascaded
+restrictions and file paths in its part tables, and write out a bash script to
+export the data using a series of `mysqldump` commands. The script is saved to
+Spyglass's directory, `base_dir/export/paper_id/`, using credentials from
+`dj_config`. To use alternative credentials, create a
 [mysql config file](https://dev.mysql.com/doc/refman/8.0/en/option-files.html).
 
 To retain the ability to delete the logging from a particular analysis, the
@@ -128,4 +126,6 @@ To implement an export for a non-Spyglass database, you will need to ...
     `spyglass_version` to match the new database.
 
 Or, optionally, you can use the `RestrGraph` class to cascade hand-picked tables
-and restrictions without the background logging of `SpyglassMixin`.
+and restrictions without the background logging of `SpyglassMixin`. The
+assembled list of restricted free tables, `RestrGraph.all_ft`, can be passed to
+`Export.write_export` to generate a shell script for exporting the data.
