@@ -27,7 +27,7 @@ MERGE_DEFINITION = (
 def is_merge_table(table):
     """Return True if table definition matches the default Merge table."""
     this_def = re.sub(  # First remove comments, then blank lines
-        r"\n\s*\n", "\n", re.sub(r"#.*\n", "\n", table.definition)
+        r"\n\s*\n", "\n", re.sub(r"#.*\n", "\n", str(table.heading))
     )
     return this_def == MERGE_DEFINITION
 

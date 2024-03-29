@@ -9,6 +9,7 @@ from datajoint.expression import QueryExpression
 from datajoint.logging import logger as dj_logger
 from datajoint.table import Table
 from datajoint.utils import get_master, user_choice
+from networkx import NetworkXError
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
@@ -150,7 +151,11 @@ class SpyglassMixin:
                     merge_tables[master_name] = master_ft
                 search_descendants(master_ft)
 
-        _ = search_descendants(self)
+        try:
+            _ = search_descendants(self)
+        except NetworkXError as e:
+            table_name = "".join(e.args[0].split("`")[1:4])
+            raise ValueError(f"Please import {table_name} and try again.")
 
         logger.info(
             f"Building merge cache for {self.table_name}.\n\t"
