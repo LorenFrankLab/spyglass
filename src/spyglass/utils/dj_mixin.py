@@ -15,6 +15,7 @@ from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_chains import TableChain, TableChains
 from spyglass.utils.dj_helper_fn import fetch_nwb
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
+from spyglass.utils.dj_merge_tables import Merge, is_merge_table
 from spyglass.utils.logging import logger
 
 
@@ -62,19 +63,21 @@ class SpyglassMixin:
 
         Checks that schema prefix is in SHARED_MODULES.
         """
-        if (
-            self.database  # Connected to a database
-            and not self.is_declared  # New table
-            and self.database.split("_")[0]  # Prefix
-            not in [
-                *SHARED_MODULES,  # Shared modules
-                dj.config["database.user"],  # User schema
-                "temp",
-                "test",
-            ]
-        ):
+        if self.is_declared:
+            return
+        if self.database and self.database.split("_")[0] not in [
+            *SHARED_MODULES,
+            dj.config["database.user"],
+            "temp",
+            "test",
+        ]:
             logger.error(
                 f"Schema prefix not in SHARED_MODULES: {self.database}"
+            )
+        if is_merge_table(self) and not isinstance(self, Merge):
+            raise TypeError(
+                "Table definition matches Merge but does not inherit class: "
+                + self.full_table_name
             )
 
     # ------------------------------- fetch_nwb -------------------------------
@@ -142,10 +145,10 @@ class SpyglassMixin:
                     or master_name in merge_tables
                 ):
                     continue
-                master = dj.FreeTable(self.connection, master_name)
-                if MERGE_PK in master.heading.names:
-                    merge_tables[master_name] = master
-                    search_descendants(master)
+                master_ft = dj.FreeTable(self.connection, master_name)
+                if is_merge_table(master_ft):
+                    merge_tables[master_name] = master_ft
+                search_descendants(master_ft)
 
         _ = search_descendants(self)
 
