@@ -313,14 +313,19 @@ class SpyglassMixin:
         str
             Summary of experimenters for session(s).
         """
+
         Session = self._delete_deps[-1]
         SesExp = Session.Experimenter
-        empty_pk = {self._member_pk: "NULL"}
 
+        # Not called in delete permission check, only bare _get_exp_summary
+        if self._member_pk in self.heading.names:
+            return self * SesExp
+
+        empty_pk = {self._member_pk: "NULL"}
         format = dj.U(self._session_pk, self._member_pk)
-        sess_link = self._session_connection.join(
-            self.restriction, reverse_order=True
-        )
+
+        restr = self.restriction or True
+        sess_link = self._session_connection.join(restr, reverse_order=True)
 
         exp_missing = format & (sess_link - SesExp).proj(**empty_pk)
         exp_present = format & (sess_link * SesExp - exp_missing).proj()
@@ -362,7 +367,10 @@ class SpyglassMixin:
         if dj_user in LabMember().admin:  # bypass permission check for admin
             return
 
-        if not self._session_connection:
+        if (
+            not self._session_connection  # Table has no session
+            or self._member_pk in self.heading.names  # Table has experimenter
+        ):
             logger.warn(  # Permit delete if no session connection
                 "Could not find lab team associated with "
                 + f"{self.__class__.__name__}."
@@ -373,7 +381,6 @@ class SpyglassMixin:
         sess_summary = self._get_exp_summary()
         experimenters = sess_summary.fetch(self._member_pk)
         if None in experimenters:
-            # TODO: Check if allow delete of remainder?
             raise PermissionError(
                 "Please ensure all Sessions have an experimenter in "
                 + f"SessionExperimenter:\n{sess_summary}"
