@@ -106,6 +106,28 @@ def dj_replace(original_table, new_values, key_column, replace_column):
 
 
 def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
+    """Get the NWB file name and path from the given DataJoint query.
+
+    Parameters
+    ----------
+    query_expression : query
+        A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.
+    tbl : table
+        DataJoint table to fetch from.
+    attr_name : str
+        Attribute name to fetch from the table.
+    *attrs : list
+        Attributes from normal DataJoint fetch call.
+    **kwargs : dict
+        Keyword arguments from normal DataJoint fetch call.
+
+    Returns
+    -------
+    nwb_files : list
+        List of NWB file names.
+    file_path_fn : function
+        Function to get the absolute path to the NWB file.
+    """
     from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 
     kwargs["as_dict"] = True  # force return as dictionary

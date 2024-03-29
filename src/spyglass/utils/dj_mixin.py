@@ -132,13 +132,6 @@ class SpyglassMixin:
 
         Parameters
         ----------
-        query_expression : query
-            A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.
-        nwb_master : tuple
-            Tuple (table, attr) to get the NWB filepath from.
-            i.e. absolute path to NWB file can be obtained by looking up attr column of table
-            table is usually Nwbfile or AnalysisNwbfile;
-            attr is usually 'nwb_file_abs_path' or 'analysis_file_abs_path'
         *attrs : list
             Attributes from normal DataJoint fetch call.
         **kwargs : dict
@@ -146,8 +139,14 @@ class SpyglassMixin:
 
         Returns
         -------
-        nwb_objects : list
-            List of dicts containing fetch results and NWB objects.
+        pynapple_objects : list of pynapple objects
+            List of dicts containing pynapple objects.
+
+        Raises
+        ------
+        ImportError
+            If pynapple is not installed.
+
         """
         if pynapple is None:
             raise ImportError("Pynapple is not installed.")
