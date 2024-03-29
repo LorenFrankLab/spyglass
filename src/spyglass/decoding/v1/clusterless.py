@@ -466,7 +466,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # TODO: Handle decode intervals, store in table
 
         classifier = self.fetch_model()
-        results = self.fetch_results()
+        results = self.fetch_results().squeeze()
         posterior = results.acausal_posterior.unstack("state_bins").sum("state")
 
         if getattr(classifier.environments[0], "track_graph") is not None:
