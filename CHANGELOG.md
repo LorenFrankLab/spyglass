@@ -10,8 +10,11 @@
 
 ### Pipelines
 
--Spikesorting
+- Spikesorting
     - Update calls in v0 pipeline for spikeinterface>=0.99 #893
+    - Fix method type of `get_spike_times` #904
+- Decoding
+    - Handle dimensions of clusterless `get_ahead_behind_distance` #904
 
 ## [0.5.1] (March 7, 2024)
 
