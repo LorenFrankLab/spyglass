@@ -13,7 +13,7 @@ from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_chains import TableChain, TableChains
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.logging import logger
 
@@ -152,39 +152,18 @@ class SpyglassMixin:
         if pynapple is None:
             raise ImportError("Pynapple is not installed.")
 
-        query_expression, nwb_master = self, self._nwb_table_tuple
-        tbl, attr_name = nwb_master
-        kwargs["as_dict"] = True  # force return as dictionary
-
-        if not attrs:
-            attrs = query_expression.heading.names
-
-        # get the list of analysis or nwb files
-        file_name_str = (
-            "analysis_file_name"
-            if "analysis" in nwb_master[1]
-            else "nwb_file_name"
-        )
-        # TODO: avoid this import?
-        from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-
-        file_path_fn = (
-            AnalysisNwbfile.get_abs_path
-            if "analysis" in nwb_master[1]
-            else Nwbfile.get_abs_path
+        nwb_files, file_path_fn = get_nwb_table(
+            self,
+            self._nwb_table_tuple[0],
+            self._nwb_table_tuple[1],
+            *attrs,
+            **kwargs,
         )
 
-        # TODO: check that the query_expression restricts tbl - CBroz
-        nwb_files = (
-            query_expression * tbl.proj(nwb2load_filepath=attr_name)
-        ).fetch(file_name_str)
-
-        py_objs = []
-        for file_name in nwb_files:
-            file_path = file_path_fn(file_name)
-            py_objs.append(pynapple.load_file(file_path))
-
-        return py_objs
+        return [
+            pynapple.load_file(file_path_fn(file_name))
+            for file_name in nwb_files
+        ]
 
     # ------------------------ delete_downstream_merge ------------------------
 
