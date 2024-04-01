@@ -137,6 +137,7 @@ class SpyglassMixin:
         """
         self.connection.dependencies.load()
         merge_tables = {}
+        visited = set()
 
         def search_descendants(parent):
             for desc in parent.descendants(as_objects=True):
@@ -149,7 +150,9 @@ class SpyglassMixin:
                 master_ft = dj.FreeTable(self.connection, master_name)
                 if is_merge_table(master_ft):
                     merge_tables[master_name] = master_ft
-                search_descendants(master_ft)
+                if master_name not in visited:
+                    visited.add(master_name)
+                    search_descendants(master_ft)
 
         try:
             _ = search_descendants(self)
@@ -197,6 +200,7 @@ class SpyglassMixin:
         for name, chain in self._merge_chains.items():
             if substring.lower() in name:
                 return chain
+        raise ValueError(f"No chain found with '{substring}' in name.")
 
     def _commit_merge_deletes(
         self, merge_join_dict: Dict[str, List[QueryExpression]], **kwargs

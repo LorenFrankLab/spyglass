@@ -25,11 +25,23 @@ MERGE_DEFINITION = (
 
 
 def is_merge_table(table):
-    """Return True if table definition matches the default Merge table."""
-    this_def = re.sub(  # First remove comments, then blank lines
-        r"\n\s*\n", "\n", re.sub(r"#.*\n", "\n", str(table.heading))
+    """Return True if table definition matches the default Merge table.
+
+    Regex removes comments and blank lines before comparison.
+    """
+    if not isinstance(table, dj.Table):
+        return False
+    if isinstance(table, dj.FreeTable):
+        fields, pk = table.heading.names, table.primary_key
+        return fields == [
+            RESERVED_PRIMARY_KEY,
+            RESERVED_SECONDARY_KEY,
+        ] and pk == [RESERVED_PRIMARY_KEY]
+    return MERGE_DEFINITION == re.sub(
+        r"\n\s*\n",
+        "\n",
+        re.sub(r"#.*\n", "\n", getattr(table, "definition", "")),
     )
-    return this_def == MERGE_DEFINITION
 
 
 class Merge(dj.Manual):
