@@ -17,11 +17,16 @@ from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_chains import TableChain, TableChains
-from spyglass.utils.dj_helper_fn import fetch_nwb
+from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.logging import logger
 
 EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
+
+try:
+    import pynapple  # noqa F401
+except ImportError:
+    pynapple = None
 
 
 class SpyglassMixin:
@@ -152,6 +157,43 @@ class SpyglassMixin:
             )
 
         return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
+
+    def fetch_pynapple(self, *attrs, **kwargs):
+        """Get a pynapple object from the given DataJoint query.
+
+        Parameters
+        ----------
+        *attrs : list
+            Attributes from normal DataJoint fetch call.
+        **kwargs : dict
+            Keyword arguments from normal DataJoint fetch call.
+
+        Returns
+        -------
+        pynapple_objects : list of pynapple objects
+            List of dicts containing pynapple objects.
+
+        Raises
+        ------
+        ImportError
+            If pynapple is not installed.
+
+        """
+        if pynapple is None:
+            raise ImportError("Pynapple is not installed.")
+
+        nwb_files, file_path_fn = get_nwb_table(
+            self,
+            self._nwb_table_tuple[0],
+            self._nwb_table_tuple[1],
+            *attrs,
+            **kwargs,
+        )
+
+        return [
+            pynapple.load_file(file_path_fn(file_name))
+            for file_name in nwb_files
+        ]
 
     # ------------------------ delete_downstream_merge ------------------------
 
