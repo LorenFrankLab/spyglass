@@ -7,7 +7,13 @@ from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
 from spyglass.spikesorting.v0.spikesorting_curation import (  # noqa: F401
     CuratedSpikeSorting,
 )
-from spyglass.spikesorting.v1.curation import CurationV1  # noqa: F401
+from spyglass.spikesorting.v1 import (
+    CurationV1,
+    SpikeSortingRecordingSelection,
+    ArtifactDetectionSelection,
+    SpikeSortingSelection,
+    MetricCurationSelection,
+)  # noqa: F401
 from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
 
@@ -49,6 +55,60 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ---
         -> CuratedSpikeSorting
         """
+
+    def get_restricted_merge_ids(self, key: dict, sources: list = ["v0", "v1"]):
+        """Helper function to get merge ids for a given interpretable key
+
+        Parameters
+        ----------
+        key : dict
+            restriction for any stage of the spikesorting pipeline
+        sources : list, optional
+            list of sources to restrict to
+        """
+        merge_ids = []
+
+        if "v1" in sources:
+            key_v1 = key.copy()
+            # Recording restriction
+            table = SpikeSortingRecordingSelection() & key_v1
+            # Artifact restriction
+            table_artifact = ArtifactDetectionSelection * table & key_v1
+            artifact_restrict = table_artifact.proj(
+                interval_list_name="artifact_id"
+            ).fetch(as_dict=True)
+            # convert interval_list_name from artifact uuid to string
+            for key_i in artifact_restrict:
+                key_i["interval_list_name"] = str(key_i["interval_list_name"])
+            key_v1.pop(
+                "interval_list_name"
+            )  # pop the interval list since artifact intervals are now the restriction
+            # Spike sorting restriction
+            table = (
+                (SpikeSortingSelection() * table.proj())
+                & artifact_restrict
+                & key_v1
+            )
+            # Metric Curation restriction
+            table = (MetricCurationSelection() * table) & key_v1
+            # get curations
+            table = (CurationV1() * table) & key_v1
+            table = SpikeSortingOutput().CurationV1() & table
+            merge_ids.extend(table.fetch("merge_id"))
+
+        if "v0" in sources:
+            key_v0 = key.copy()
+            if "sort_interval" not in key_v0:
+                if "interval_list_name" in key_v0:
+                    key_v0["sort_interval"] = key_v0["interval_list_name"]
+                    key_v0.pop("interval_list_name")
+            merge_ids.extend(
+                (SpikeSortingOutput.CuratedSpikeSorting() & key_v0).fetch(
+                    "merge_id"
+                )
+            )
+
+        return merge_ids
 
     @classmethod
     def get_recording(cls, key):
