@@ -56,7 +56,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         -> CuratedSpikeSorting
         """
 
-    def get_restricted_merge_ids(self, key: dict, sources: list = ["v0", "v1"]):
+    def get_restricted_merge_ids(
+        self, key: dict, sources: list = ["v0", "v1"], v1_artifact: bool = True
+    ):
         """Helper function to get merge ids for a given interpretable key
 
         Parameters
@@ -65,6 +67,13 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             restriction for any stage of the spikesorting pipeline
         sources : list, optional
             list of sources to restrict to
+        v1_artifact : bool, optional
+            whether to restrict to v1 artifact intervals, by default True
+
+        Returns
+        -------
+        merge_ids : list
+            list of merge ids from the restricted sources
         """
         merge_ids = []
 
@@ -72,23 +81,29 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             key_v1 = key.copy()
             # Recording restriction
             table = SpikeSortingRecordingSelection() & key_v1
-            # Artifact restriction
-            table_artifact = ArtifactDetectionSelection * table & key_v1
-            artifact_restrict = table_artifact.proj(
-                interval_list_name="artifact_id"
-            ).fetch(as_dict=True)
-            # convert interval_list_name from artifact uuid to string
-            for key_i in artifact_restrict:
-                key_i["interval_list_name"] = str(key_i["interval_list_name"])
-            key_v1.pop(
-                "interval_list_name"
-            )  # pop the interval list since artifact intervals are now the restriction
-            # Spike sorting restriction
-            table = (
-                (SpikeSortingSelection() * table.proj())
-                & artifact_restrict
-                & key_v1
-            )
+            if v1_artifact:
+                # Artifact restriction
+                table_artifact = ArtifactDetectionSelection * table & key_v1
+                artifact_restrict = table_artifact.proj(
+                    interval_list_name="artifact_id"
+                ).fetch(as_dict=True)
+                # convert interval_list_name from artifact uuid to string
+                for key_i in artifact_restrict:
+                    key_i["interval_list_name"] = str(
+                        key_i["interval_list_name"]
+                    )
+                key_v1.pop(
+                    "interval_list_name"
+                )  # pop the interval list since artifact intervals are now the restriction
+                # Spike sorting restriction
+                table = (
+                    (SpikeSortingSelection() * table.proj())
+                    & artifact_restrict
+                    & key_v1
+                )
+            else:
+                # use the supplied interval to restrict
+                table = (SpikeSortingSelection() * table.proj()) & key_v1
             # Metric Curation restriction
             table = (MetricCurationSelection() * table) & key_v1
             # get curations
