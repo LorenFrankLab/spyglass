@@ -134,9 +134,12 @@ class SpyglassMixin:
                 f"Export {self.export_id}: fetch_nwb {self.table_name}"
             )
             tbl_pk = "analysis_file_name"
-            fname = (self * table).fetch1(tbl_pk)
-            self._export_table.File.insert1(
-                {"export_id": self.export_id, tbl_pk: fname},
+            fnames = (self * table).fetch(tbl_pk)
+            self._export_table.File.insert(
+                [
+                    {"export_id": self.export_id, tbl_pk: fname}
+                    for fname in fnames
+                ],
                 skip_duplicates=True,
             )
             self._export_table.Table.insert1(
@@ -592,15 +595,22 @@ class SpyglassMixin:
             logger.warning("Export not in progress.")
         del self.export_id
 
-    def _log_fetch(self):
+    def _log_fetch(self, *args, **kwargs):
         """Log fetch for export."""
         if not self.export_id or self.database == "common_usage":
             return
         logger.debug(f"Export {self.export_id}: fetch()   {self.table_name}")
-        restr_str = make_condition(self, self.restriction, set())
+
+        restr = self.restriction or True
+        if (limit := kwargs.get("limit")) or (offset := kwargs.get("offset")):
+            restr = super().fetch(  # Use result as restr if limit/offset
+                restr, as_dict=True, limit=limit, offset=offset
+            )
+        restr_str = make_condition(self, restr, set())
+
         if isinstance(restr_str, str) and len(restr_str) > 2048:
             raise RuntimeError(
-                "DandiExport cannot handle restrictions > 2048.\n\t"
+                "Export cannot handle restrictions > 2048.\n\t"
                 + "If required, please open an issue on GitHub.\n\t"
                 + f"Restriction: {restr_str}"
             )
@@ -616,13 +626,13 @@ class SpyglassMixin:
     def fetch(self, *args, **kwargs):
         """Log fetch for export."""
         ret = super().fetch(*args, **kwargs)
-        self._log_fetch()
+        self._log_fetch(*args, **kwargs)
         return ret
 
     def fetch1(self, *args, **kwargs):
         """Log fetch1 for export."""
         ret = super().fetch1(*args, **kwargs)
-        self._log_fetch()
+        self._log_fetch(*args, **kwargs)
         return ret
 
     # ------------------------- Other helper methods -------------------------

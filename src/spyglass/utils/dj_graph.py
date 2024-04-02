@@ -63,8 +63,7 @@ class RestrGraph:
     @property
     def all_ft(self):
         """Get restricted FreeTables from all visited nodes."""
-        if not self.cascaded:
-            self.cascade()
+        self.cascade()
         return [self._get_ft(table, with_restr=True) for table in self.visited]
 
     @property
@@ -74,8 +73,7 @@ class RestrGraph:
 
     def _get_node(self, table):
         """Get node from graph."""
-        node = self.graph.nodes.get(table)
-        if not node:
+        if not (node := self.graph.nodes.get(table)):
             raise ValueError(
                 f"Table {table} not found in graph."
                 + "\n\tPlease import this table and rerun"
@@ -185,7 +183,7 @@ class RestrGraph:
         ret = unique_dicts(join.fetch(*parent_ft.primary_key, as_dict=True))
 
         if len(ret) == len(parent_ft):
-            self._log_truncate(f"NULL rest {parent}")
+            self._log_truncate(f"NULL restr {parent}")
 
         return ret
 

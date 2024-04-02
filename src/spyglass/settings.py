@@ -60,6 +60,7 @@ class SpyglassConfig:
 
         self.relative_dirs = {
             # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
+            # NOTE: Adding new dir requires edit to HHMI hub
             "spyglass": {
                 "raw": "raw",
                 "analysis": "analysis",
