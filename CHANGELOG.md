@@ -11,6 +11,7 @@
 - Refactor `TableChain` to include `_searched` attribute. #867
 - Fix errors in config import #882
 - Save current spyglass version in analysis nwb files to aid diagnosis #897
+- Add pynapple support #898
 - Update PR template checklist to include db changes. #903
 - Avoid permission check on personnel tables. #903
 - Add documentation for `SpyglassMixin`. #903
@@ -20,6 +21,9 @@
 
 - Spikesorting
     - Update calls in v0 pipeline for spikeinterface>=0.99 #893
+    - Fix method type of `get_spike_times` #904
+- Decoding
+    - Handle dimensions of clusterless `get_ahead_behind_distance` #904
 
 ## [0.5.1] (March 7, 2024)
 
