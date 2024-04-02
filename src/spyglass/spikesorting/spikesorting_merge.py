@@ -57,7 +57,11 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         """
 
     def get_restricted_merge_ids(
-        self, key: dict, sources: list = ["v0", "v1"], v1_artifact: bool = True
+        self,
+        key: dict,
+        sources: list = ["v0", "v1"],
+        v1_artifact: bool = True,
+        as_dict: bool = False,
     ):
         """Helper function to get merge ids for a given interpretable key
 
@@ -69,6 +73,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             list of sources to restrict to
         v1_artifact : bool, optional
             whether to restrict to v1 artifact intervals, by default True
+        as_dict : bool, optional
+            whether to return merge_ids as a list of dictionaries, by default False
 
         Returns
         -------
@@ -92,9 +98,10 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                     key_i["interval_list_name"] = str(
                         key_i["interval_list_name"]
                     )
-                key_v1.pop(
-                    "interval_list_name"
-                )  # pop the interval list since artifact intervals are now the restriction
+                if "interval_list_name" in key_v1:
+                    key_v1.pop(
+                        "interval_list_name"
+                    )  # pop the interval list since artifact intervals are now the restriction
                 # Spike sorting restriction
                 table = (
                     (SpikeSortingSelection() * table.proj())
@@ -109,7 +116,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             # get curations
             table = (CurationV1() * table) & key_v1
             table = SpikeSortingOutput().CurationV1() & table
-            merge_ids.extend(table.fetch("merge_id"))
+            merge_ids.extend(table.fetch("merge_id", as_dict=as_dict))
 
         if "v0" in sources:
             key_v0 = key.copy()
@@ -119,7 +126,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                     key_v0.pop("interval_list_name")
             merge_ids.extend(
                 (SpikeSortingOutput.CuratedSpikeSorting() & key_v0).fetch(
-                    "merge_id"
+                    "merge_id", as_dict=as_dict
                 )
             )
 
