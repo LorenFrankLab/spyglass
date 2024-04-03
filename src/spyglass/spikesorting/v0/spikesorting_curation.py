@@ -6,11 +6,11 @@ import uuid
 import warnings
 from pathlib import Path
 from typing import List
-from packaging import version
 
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
+from packaging import version
 
 if version.parse(si.__version__) < version.parse("0.99.1"):
     raise ImportError(
@@ -20,6 +20,7 @@ if version.parse(si.__version__) < version.parse("0.99.1"):
 import spikeinterface.preprocessing as sip
 import spikeinterface.qualitymetrics as sq
 
+from spyglass.common import BrainRegion, Electrode
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import waveforms_dir
@@ -32,6 +33,7 @@ from spyglass.spikesorting.v0.spikesorting_recording import (
 )
 from spyglass.utils import SpyglassMixin, logger
 
+from .spikesorting_recording import SortGroup
 from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema("spikesorting_curation")
@@ -1033,6 +1035,37 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         # expand the key
         sorting_key = (cls & key).fetch1("KEY")
         return Curation.get_curated_sorting(sorting_key)
+
+    @classmethod
+    def get_sort_group_info(cls, key):
+        """Returns the sort group information for the curation
+        (e.g. brain region, electrode placement, etc.)
+
+        Parameters
+        ----------
+        key : dict
+            restriction on CuratedSpikeSorting table
+
+        Returns
+        -------
+        sort_group_info : Table
+            Table with information about the sort groups
+        """
+        electrode_restrict_list = []
+        for x in cls & key:
+            # Just take one electrode entry per sort group
+            electrode_restrict_list.extend(
+                ((SortGroup.SortGroupElectrode() & x) * Electrode).fetch(
+                    limit=1
+                )
+            )
+        # Run joins with the tables with info and return
+        sort_group_info = (
+            (Electrode & electrode_restrict_list)
+            * (cls & key)
+            * SortGroup.SortGroupElectrode()
+        ) * BrainRegion()
+        return sort_group_info
 
 
 @schema

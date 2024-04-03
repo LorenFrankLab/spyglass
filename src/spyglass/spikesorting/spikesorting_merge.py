@@ -7,13 +7,13 @@ from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
 from spyglass.spikesorting.v0.spikesorting_curation import (  # noqa: F401
     CuratedSpikeSorting,
 )
-from spyglass.spikesorting.v1 import (
-    CurationV1,
-    SpikeSortingRecordingSelection,
+from spyglass.spikesorting.v1 import (  # noqa: F401
     ArtifactDetectionSelection,
-    SpikeSortingSelection,
+    CurationV1,
     MetricCurationSelection,
-)  # noqa: F401
+    SpikeSortingRecordingSelection,
+    SpikeSortingSelection,
+)
 from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
 
@@ -149,6 +149,27 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ]
         query = source_table & cls.merge_get_part(key)
         return query.get_sorting(query.fetch("KEY"))
+
+    @classmethod
+    def get_sort_group_info(cls, key):
+        """get the sort group info associated with a spike sorting output
+        (e.g. electrode location, brain region, etc.)
+        Parameters:
+        -----------
+        key : dict
+            dictionary specifying the restriction (note: multi-source not currently supported)
+        Returns:
+        -------
+        sort_group_info : Table
+            Table linking a merge id to information about the electrode group.
+        """
+        source_table = source_class_dict[
+            to_camel_case(cls.merge_get_parent(key).table_name)
+        ]
+        part_table = cls.merge_get_part(key)
+        query = source_table & part_table
+        sort_group_info = source_table.get_sort_group_info(query.fetch("KEY"))
+        return part_table * sort_group_info  # join the info with merge id's
 
     def get_spike_times(self, key):
         spike_times = []

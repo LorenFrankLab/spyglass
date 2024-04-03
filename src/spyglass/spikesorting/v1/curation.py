@@ -7,9 +7,14 @@ import spikeinterface as si
 import spikeinterface.curation as sc
 import spikeinterface.extractors as se
 
+from spyglass.common import BrainRegion, Electrode
 from spyglass.common.common_ephys import Raw
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v1.recording import SpikeSortingRecording
+from spyglass.spikesorting.v1.recording import (
+    SortGroup,
+    SpikeSortingRecording,
+    SpikeSortingRecordingSelection,
+)
 from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
 from spyglass.utils.dj_mixin import SpyglassMixin
 
@@ -259,6 +264,42 @@ class CurationV1(SpyglassMixin, dj.Manual):
             )
         else:
             return si_sorting
+
+    @classmethod
+    def get_sort_group_info(cls, key: dict) -> dj.Table:
+        """Returns the sort group information for the curation
+        (e.g. brain region, electrode placement, etc.)
+
+        Parameters
+        ----------
+        key : dict
+            restriction on CuratedSpikeSorting table
+
+        Returns
+        -------
+        sort_group_info : Table
+            Table with information about the sort groups
+        """
+        table = (
+            (cls & key) * SpikeSortingSelection()
+        ) * SpikeSortingRecordingSelection().proj(
+            "recording_id", "sort_group_id"
+        )
+        electrode_restrict_list = []
+        for x in table:
+            # pull just one electrode from each sort group for info
+            electrode_restrict_list.extend(
+                ((SortGroup.SortGroupElectrode() & x) * Electrode).fetch(
+                    limit=1
+                )
+            )
+
+        sort_group_info = (
+            (Electrode & electrode_restrict_list)
+            * table
+            * SortGroup.SortGroupElectrode()
+        ) * BrainRegion()
+        return (cls & key).proj() * sort_group_info
 
 
 def _write_sorting_to_nwb_with_curation(
