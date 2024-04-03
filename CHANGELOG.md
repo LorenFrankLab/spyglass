@@ -14,6 +14,7 @@
 - Spikesorting
     - Update calls in v0 pipeline for spikeinterface>=0.99 #893
     - Fix method type of `get_spike_times` #904
+    - Add helper functions for restricting spikesorting results and linking to probe info #910
 - Decoding
     - Handle dimensions of clusterless `get_ahead_behind_distance` #904
 
