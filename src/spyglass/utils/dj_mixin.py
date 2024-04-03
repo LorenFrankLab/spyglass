@@ -644,7 +644,9 @@ class SpyglassMixin:
         logger.debug(f"Export {self.export_id}: fetch()   {self.table_name}")
 
         restr = self.restriction or True
-        if (limit := kwargs.get("limit")) or (offset := kwargs.get("offset")):
+        limit = kwargs.get("limit")
+        offset = kwargs.get("offset")
+        if limit or offset:
             restr = super().fetch(  # Use result as restr if limit/offset
                 restr, as_dict=True, limit=limit, offset=offset
             )
