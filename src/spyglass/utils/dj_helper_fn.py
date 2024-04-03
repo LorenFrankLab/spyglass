@@ -170,7 +170,13 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_objects : list
         List of dicts containing fetch results and NWB objects.
     """
+    kwargs["as_dict"] = True  # force return as dictionary
+
     tbl, attr_name = nwb_master
+
+    if not attrs:
+        attrs = query_expression.heading.names
+
     nwb_files, file_path_fn = get_nwb_table(
         query_expression, tbl, attr_name, *attrs, **kwargs
     )
