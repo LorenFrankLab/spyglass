@@ -326,15 +326,15 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The absolute path for the given file name.
         """
         # If an entry exists in the database get the stored datajoint filepath
-        file_key = {"analysis_file_name":analysis_nwb_file_name}
-        if (cls & file_key):
+        file_key = {"analysis_file_name": analysis_nwb_file_name}
+        if cls & file_key:
             try:
                 # runs if file exists locally
                 return (cls & file_key).fetch1("analysis_file_abs_path")
             except FileNotFoundError as e:
                 # file exists in database but not locally
                 # parse the intended path from the error message
-                return str(e).split(': ')[1].replace("'","")
+                return str(e).split(": ")[1].replace("'", "")
 
         # File not in database, define what it should be
         # see if the file exists and is stored in the base analysis dir
