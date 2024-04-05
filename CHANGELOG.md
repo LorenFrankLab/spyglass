@@ -8,6 +8,7 @@
 - Fix errors in config import #882
 - Save current spyglass version in analysis nwb files to aid diagnosis #897
 - Add pynapple support #898
+- Prioritize datajoint filepath entry for defining abs_path of analysis nwbfile #918
 
 ### Pipelines
 
