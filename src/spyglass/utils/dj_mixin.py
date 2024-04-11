@@ -2,6 +2,7 @@ from atexit import register as exit_register
 from atexit import unregister as exit_unregister
 from collections import OrderedDict
 from functools import cached_property
+from inspect import stack as inspect_stack
 from os import environ
 from time import time
 from typing import Dict, List, Union
@@ -21,12 +22,12 @@ from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.logging import logger
 
-EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
-
 try:
     import pynapple  # noqa F401
 except ImportError:
     pynapple = None
+
+EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
 
 
 class SpyglassMixin:
@@ -641,14 +642,20 @@ class SpyglassMixin:
         """Log fetch for export."""
         if not self.export_id or self.database == "common_usage":
             return
+
+        called = [i.function for i in inspect_stack()]
+        banned = ["head", "tail", "preview", "_repr_html_"]
+        if set(banned) & set(called):  # if called by any in banned, return
+            return
+
         logger.debug(f"Export {self.export_id}: fetch()   {self.table_name}")
 
         restr = self.restriction or True
         limit = kwargs.get("limit")
         offset = kwargs.get("offset")
-        if limit or offset:
-            restr = super().fetch(  # Use result as restr if limit/offset
-                restr, as_dict=True, limit=limit, offset=offset
+        if limit or offset:  # Use result as restr if limit/offset
+            restr = self.restrict(restr).fetch(
+                log_fetch=False, as_dict=True, limit=limit, offset=offset
             )
         restr_str = make_condition(self, restr, set())
 
@@ -667,16 +674,18 @@ class SpyglassMixin:
             skip_duplicates=True,
         )
 
-    def fetch(self, *args, **kwargs):
+    def fetch(self, log_fetch=True, *args, **kwargs):
         """Log fetch for export."""
         ret = super().fetch(*args, **kwargs)
-        self._log_fetch(*args, **kwargs)
+        if log_fetch:
+            self._log_fetch(*args, **kwargs)
         return ret
 
-    def fetch1(self, *args, **kwargs):
+    def fetch1(self, log_fetch=True, *args, **kwargs):
         """Log fetch1 for export."""
         ret = super().fetch1(*args, **kwargs)
-        self._log_fetch(*args, **kwargs)
+        if log_fetch:
+            self._log_fetch(*args, **kwargs)
         return ret
 
     # ------------------------- Other helper methods -------------------------
