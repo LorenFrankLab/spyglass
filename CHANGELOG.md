@@ -8,6 +8,7 @@
 - Fix errors in config import #882
 - Save current spyglass version in analysis nwb files to aid diagnosis #897
 - Add pynapple support #898
+- Fix potential duplicate entries in Merge part tables #922
 
 ### Pipelines
 
