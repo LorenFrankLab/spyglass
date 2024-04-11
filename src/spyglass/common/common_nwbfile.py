@@ -309,8 +309,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         )
         self.insert1(key)
 
-    @staticmethod
-    def get_abs_path(analysis_nwb_file_name):
+    @classmethod
+    def get_abs_path(cls, analysis_nwb_file_name):
         """Return the absolute path for a stored analysis NWB file given just the file name.
 
         The spyglass config from settings.py must be set.
@@ -325,6 +325,18 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
+        # If an entry exists in the database get the stored datajoint filepath
+        file_key = {"analysis_file_name": analysis_nwb_file_name}
+        if cls & file_key:
+            try:
+                # runs if file exists locally
+                return (cls & file_key).fetch1("analysis_file_abs_path")
+            except FileNotFoundError as e:
+                # file exists in database but not locally
+                # parse the intended path from the error message
+                return str(e).split(": ")[1].replace("'", "")
+
+        # File not in database, define what it should be
         # see if the file exists and is stored in the base analysis dir
         test_path = f"{analysis_dir}/{analysis_nwb_file_name}"
 
@@ -656,41 +668,3 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         AnalysisNwbfile.cleanup(True)
 
         # also check to see whether there are directories in the spikesorting folder with this
-
-
-@schema
-class NwbfileKachery(SpyglassMixin, dj.Computed):
-    definition = """
-    -> Nwbfile
-    ---
-    nwb_file_uri: varchar(200)  # the uri the NWB file for kachery
-    """
-
-    def make(self, key):
-        import kachery_client as kc
-
-        logger.info(f'Linking {key["nwb_file_name"]} and storing in kachery...')
-        key["nwb_file_uri"] = kc.link_file(
-            Nwbfile().get_abs_path(key["nwb_file_name"])
-        )
-        self.insert1(key)
-
-
-@schema
-class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
-    definition = """
-    -> AnalysisNwbfile
-    ---
-    analysis_file_uri: varchar(200)  # the uri of the file
-    """
-
-    def make(self, key):
-        import kachery_client as kc
-
-        logger.info(
-            f'Linking {key["analysis_file_name"]} and storing in kachery...'
-        )
-        key["analysis_file_uri"] = kc.link_file(
-            AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
-        )
-        self.insert1(key)
