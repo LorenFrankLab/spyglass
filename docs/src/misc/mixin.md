@@ -24,6 +24,9 @@ class MyNewTable(SpyglassMixin, dj.Manual):)
     pass
 ```
 
+**NOTE**: The mixin must be the first class inherited from in order to override
+default DataJoint functions.
+
 ## Fetching NWB Files
 
 Many tables in Spyglass inheris from central tables that store records of NWB
