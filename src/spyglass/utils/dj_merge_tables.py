@@ -332,6 +332,9 @@ class Merge(dj.Manual):
                             + f"{part_name}:\n\tData:{row}\n\t{keys}"
                         )
                     key = keys[0]
+                    if part & key:
+                        print(f"Key already in part {part_name}: {key}")
+                        continue
                     master_sk = {cls()._reserved_sk: part_name}
                     uuid = dj.hash.key_hash(key | master_sk)
                     master_pk = {cls()._reserved_pk: uuid}
