@@ -18,6 +18,7 @@
     - Fix method type of `get_spike_times` #904
 - Decoding
     - Handle dimensions of clusterless `get_ahead_behind_distance` #904
+    - Fix improper handling of nwb file names with .strip #929
 
 ## [0.5.1] (March 7, 2024)
 
