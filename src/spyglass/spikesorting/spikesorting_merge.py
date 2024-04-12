@@ -16,6 +16,7 @@ from spyglass.spikesorting.v1 import (  # noqa: F401
 )
 from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.logging import logger
 
 schema = dj.schema("spikesorting_merge")
 
@@ -60,7 +61,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         self,
         key: dict,
         sources: list = ["v0", "v1"],
-        v1_artifact: bool = True,
+        restrict_by_artifact: bool = True,
         as_dict: bool = False,
     ):
         """Helper function to get merge ids for a given interpretable key
@@ -71,8 +72,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             restriction for any stage of the spikesorting pipeline
         sources : list, optional
             list of sources to restrict to
-        v1_artifact : bool, optional
-            whether to restrict to v1 artifact intervals, by default True
+        restrict_by_artifact : bool, optional
+            whether to restrict by artifact rather than original interval name. Relevant to v1 pipeline, by default True
         as_dict : bool, optional
             whether to return merge_ids as a list of dictionaries, by default False
 
@@ -87,7 +88,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             key_v1 = key.copy()
             # Recording restriction
             table = SpikeSortingRecordingSelection() & key_v1
-            if v1_artifact:
+            if restrict_by_artifact:
                 # Artifact restriction
                 table_artifact = ArtifactDetectionSelection * table & key_v1
                 artifact_restrict = table_artifact.proj(
@@ -119,11 +120,14 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             merge_ids.extend(table.fetch("merge_id", as_dict=as_dict))
 
         if "v0" in sources:
+            if restrict_by_artifact:
+                logger.warning(
+                    'V0 requires artifact restrict. Ignoring "restrict_by_artifact" flag.'
+                )
             key_v0 = key.copy()
-            if "sort_interval" not in key_v0:
-                if "interval_list_name" in key_v0:
-                    key_v0["sort_interval"] = key_v0["interval_list_name"]
-                    key_v0.pop("interval_list_name")
+            if "sort_interval" not in key_v0 and "interval_list_name" in key_v0:
+                key_v0["sort_interval"] = key_v0["interval_list_name"]
+                _ = key_v0.pop("interval_list_name")
             merge_ids.extend(
                 (SpikeSortingOutput.CuratedSpikeSorting() & key_v0).fetch(
                     "merge_id", as_dict=as_dict
