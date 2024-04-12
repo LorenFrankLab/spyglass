@@ -1052,10 +1052,10 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
             Table with information about the sort groups
         """
         electrode_restrict_list = []
-        for x in cls & key:
+        for entry in cls & key:
             # Just take one electrode entry per sort group
             electrode_restrict_list.extend(
-                ((SortGroup.SortGroupElectrode() & x) * Electrode).fetch(
+                ((SortGroup.SortGroupElectrode() & entry) * Electrode).fetch(
                     limit=1
                 )
             )

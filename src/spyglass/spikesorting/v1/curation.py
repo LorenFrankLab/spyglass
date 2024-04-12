@@ -286,10 +286,10 @@ class CurationV1(SpyglassMixin, dj.Manual):
             "recording_id", "sort_group_id"
         )
         electrode_restrict_list = []
-        for x in table:
+        for entry in table:
             # pull just one electrode from each sort group for info
             electrode_restrict_list.extend(
-                ((SortGroup.SortGroupElectrode() & x) * Electrode).fetch(
+                ((SortGroup.SortGroupElectrode() & entry) * Electrode).fetch(
                     limit=1
                 )
             )
