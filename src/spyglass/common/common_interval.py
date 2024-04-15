@@ -139,7 +139,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
                 ax.text(
                     interval[0] + np.diff(interval)[0] / 2,
                     interval_y,
-                    epoch.strip(" valid times"),
+                    epoch.replace(" valid times", ""),
                     ha="center",
                     va="bottom",
                 )
