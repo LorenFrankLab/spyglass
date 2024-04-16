@@ -3,12 +3,13 @@
 NOTE: read `ft` as FreeTable and `restr` as restriction.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Union
 
 from datajoint import FreeTable
 from datajoint.condition import make_condition
 from datajoint.table import Table
 
+from spyglass.common import AnalysisNwbfile
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import unique_dicts
 
@@ -49,6 +50,7 @@ class RestrGraph:
         self.ancestors = set()
         self.visited = set()
         self.leaves = set()
+        self.analysis_pk = AnalysisNwbfile().primary_key
 
         if table_name and restriction:
             self.add_leaf(table_name, restriction)
@@ -57,7 +59,7 @@ class RestrGraph:
 
     def __repr__(self):
         l_str = ",\n\t".join(self.leaves) + "\n" if self.leaves else ""
-        processed = "Processed" if self.cascaded else "Unprocessed"
+        processed = "Cascaded" if self.cascaded else "Uncascaded"
         return f"{processed} RestrictionGraph(\n\t{l_str})"
 
     @property
@@ -81,7 +83,7 @@ class RestrGraph:
         return node
 
     def _set_node(self, table, attr="ft", value=None):
-        """Set attribute on graph node."""
+        """Set attribute on node. General helper for various attributes."""
         _ = self._get_node(table)  # Ensure node exists
         self.graph.nodes[table][attr] = value
 
@@ -98,6 +100,16 @@ class RestrGraph:
         """Get restriction from graph node."""
         table = table if isinstance(table, str) else table.full_table_name
         return self._get_node(table).get("restr")
+
+    def _set_files(self, table, ft, restr):
+        """Set node attribute for analysis files."""
+        if not set(self.analysis_pk).issubset(ft.heading.names):
+            return
+        self._set_node(table, "files", (ft & restr).fetch(*self.analysis_pk))
+
+    def _get_files(self, table):
+        """Get analysis files from graph node."""
+        return self._get_node(table).get("files", [])
 
     def _set_restr(self, table, restriction):
         """Add restriction to graph node. If one exists, merge with new."""
@@ -117,11 +129,22 @@ class RestrGraph:
                 ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
             )
 
-        if not isinstance(restriction, str):
-            self._log_truncate(
-                f"Set Restr {table}: {type(restriction)} {restriction}"
-            )
         self._set_node(table, "restr", restriction)
+        self._set_files(table, ft, restriction)
+
+    def get_restr_ft(self, table: Union[int, str]):
+        """Get restricted FreeTable from graph node.
+
+        Currently used. May be useful for debugging.
+
+        Parameters
+        ----------
+        table : Union[int, str]
+            Table name or index in visited set
+        """
+        if isinstance(table, int):
+            table = list(self.visited)[table]
+        return self._get_ft(table) & self._get_restr(table)
 
     def _log_truncate(self, log_str, max_len=80):
         """Truncate log lines to max_len and print if verbose."""
@@ -286,4 +309,39 @@ class RestrGraph:
             {"table_name": table, "restriction": self._get_restr(table)}
             for table in self.ancestors
             if self._get_restr(table)
+        ]
+
+    @property
+    def file_dict(self) -> Dict[str, List[str]]:
+        """Return dictionary of analysis files from all visited nodes.
+
+        Currently unused, but could be useful for debugging.
+        """
+        if not self.cascaded:
+            logger.warning("Uncascaded graph. Using leaves only.")
+            table_list = self.leaves
+        else:
+            table_list = self.visited
+
+        return {
+            table: self._get_files(table)
+            for table in table_list
+            if any(self._get_files(table))
+        }
+
+    @property
+    def file_paths(self) -> List[str]:
+        """Return list of unique analysis files from all visited nodes.
+
+        This covers intermediate analysis files that may not have been fetched
+        directly by the user.
+        """
+        self.cascade()
+        unique_files = set(
+            [file for table in self.visited for file in self._get_files(table)]
+        )
+        return [
+            {"file_path": AnalysisNwbfile().get_abs_path(file)}
+            for file in unique_files
+            if file is not None
         ]

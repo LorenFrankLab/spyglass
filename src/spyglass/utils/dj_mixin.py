@@ -5,7 +5,7 @@ from functools import cached_property
 from inspect import stack as inspect_stack
 from os import environ
 from time import time
-from typing import Dict, Iterable, List, Union
+from typing import Dict, List, Union
 
 import datajoint as dj
 from datajoint.condition import make_condition
@@ -136,11 +136,11 @@ class SpyglassMixin:
         """
         table, tbl_attr = self._nwb_table_tuple
         if self.export_id and "analysis" in tbl_attr:
-            logger.debug(
-                f"Export {self.export_id}: fetch_nwb {self.table_name}"
-            )
             tbl_pk = "analysis_file_name"
             fnames = (self * table).fetch(tbl_pk)
+            logger.debug(
+                f"Export {self.export_id}: fetch_nwb {self.table_name}, {fnames}"
+            )
             self._export_table.File.insert(
                 [
                     {"export_id": self.export_id, tbl_pk: fname}
@@ -643,41 +643,44 @@ class SpyglassMixin:
         if not self.export_id or self.database == "common_usage":
             return
 
+        banned = [
+            "head",  # Prevents on Table().head() call
+            "tail",  # Prevents on Table().tail() call
+            "preview",  # Prevents on Table() call
+            "_repr_html_",  # Prevents on Table() call in notebook
+            "cautious_delete",  # Prevents add on permission check during delete
+            "get_abs_path",  # Assumes that fetch_nwb will catch file/table
+        ]
         called = [i.function for i in inspect_stack()]
-        banned = ["head", "tail", "preview", "_repr_html_"]
         if set(banned) & set(called):  # if called by any in banned, return
             return
 
         logger.debug(f"Export {self.export_id}: fetch()   {self.table_name}")
 
-        restrictions = self.restriction or True
+        restr = self.restriction or True
         limit = kwargs.get("limit")
         offset = kwargs.get("offset")
         if limit or offset:  # Use result as restr if limit/offset
-            restrictions = self.restrict(restrictions).fetch(
+            restr = self.restrict(restr).fetch(
                 log_fetch=False, as_dict=True, limit=limit, offset=offset
             )
 
-        if not isinstance(restrictions, Iterable):
-            restrictions = [restrictions]
+        restr_str = make_condition(self, restr, set())
 
-        table_inserts = []
-        for restr in restrictions:
-            restr_str = make_condition(self, restr, set())
-            if isinstance(restr_str, str) and len(restr_str) > 2048:
-                raise RuntimeError(
-                    "Export cannot handle restrictions > 2048.\n\t"
-                    + "If required, please open an issue on GitHub.\n\t"
-                    + f"Restriction: {restr_str}"
-                )
-            table_inserts.append(
-                dict(
-                    export_id=self.export_id,
-                    table_name=self.full_table_name,
-                    restriction=restr_str,
-                )
+        if isinstance(restr_str, str) and len(restr_str) > 2048:
+            raise RuntimeError(
+                "Export cannot handle restrictions > 2048.\n\t"
+                + "If required, please open an issue on GitHub.\n\t"
+                + f"Restriction: {restr_str}"
             )
-        self._export_table.Table.insert(table_inserts, skip_duplicates=True)
+        self._export_table.Table.insert1(
+            dict(
+                export_id=self.export_id,
+                table_name=self.full_table_name,
+                restriction=restr_str,
+            ),
+            skip_duplicates=True,
+        )
 
     def fetch(self, *args, log_fetch=True, **kwargs):
         """Log fetch for export."""

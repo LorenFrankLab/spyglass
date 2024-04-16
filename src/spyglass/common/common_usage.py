@@ -75,6 +75,12 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             key = self._auto_increment(key, pk="table_id")
             super().insert1(key, **kwargs)
 
+        def insert(self, keys: List[dict], **kwargs):
+            if not isinstance(keys[0], dict):
+                raise TypeError("Pass Table Keys as list of dict")
+            keys = [self._auto_increment(k, pk="table_id") for k in keys]
+            super().insert(keys, **kwargs)
+
     class File(SpyglassMixin, dj.Part):
         definition = """
         -> master
@@ -110,8 +116,12 @@ class ExportSelection(SpyglassMixin, dj.Manual):
     #       Selection
 
     def list_file_paths(self, key: dict) -> list[str]:
-        """Return a list of unique file paths for a given restriction/key."""
-        file_table = self.File & key
+        """Return a list of unique file paths for a given restriction/key.
+
+        Note: This list reflects files fetched during the export process. For
+        upstream files, use RestrGraph.file_paths.
+        """
+        file_table = self * self.File & key
         analysis_fp = [
             AnalysisNwbfile().get_abs_path(fname)
             for fname in file_table.fetch("analysis_file_name")
@@ -128,7 +138,9 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         Ignores duplicate entries.
         """
         leaves = unique_dicts(
-            (self.Table & key).fetch("table_name", "restriction", as_dict=True)
+            (self * self.Table & key).fetch(
+                "table_name", "restriction", as_dict=True
+            )
         )
         return RestrGraph(seed_table=self, leaves=leaves, verbose=False)
 
@@ -215,7 +227,9 @@ class Export(SpyglassMixin, dj.Computed):
                 (self.Table & id_dict).delete_quick()
 
         restr_graph = query.get_restr_graph(paper_key)
-        file_paths = query.list_file_paths(paper_key)
+        file_paths = unique_dicts(  # Original plus upstream files
+            query.list_file_paths(paper_key) + restr_graph.file_paths
+        )
 
         table_inserts = [
             {**key, **rd, "table_id": i}
