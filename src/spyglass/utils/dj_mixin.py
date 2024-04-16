@@ -5,7 +5,7 @@ from functools import cached_property
 from inspect import stack as inspect_stack
 from os import environ
 from time import time
-from typing import Dict, List, Union
+from typing import Dict, Iterable, List, Union
 
 import datajoint as dj
 from datajoint.condition import make_condition
@@ -650,38 +650,43 @@ class SpyglassMixin:
 
         logger.debug(f"Export {self.export_id}: fetch()   {self.table_name}")
 
-        restr = self.restriction or True
+        restrictions = self.restriction or True
         limit = kwargs.get("limit")
         offset = kwargs.get("offset")
         if limit or offset:  # Use result as restr if limit/offset
-            restr = self.restrict(restr).fetch(
+            restrictions = self.restrict(restrictions).fetch(
                 log_fetch=False, as_dict=True, limit=limit, offset=offset
             )
-        restr_str = make_condition(self, restr, set())
 
-        if isinstance(restr_str, str) and len(restr_str) > 2048:
-            raise RuntimeError(
-                "Export cannot handle restrictions > 2048.\n\t"
-                + "If required, please open an issue on GitHub.\n\t"
-                + f"Restriction: {restr_str}"
+        if not isinstance(restrictions, Iterable):
+            restrictions = [restrictions]
+
+        table_inserts = []
+        for restr in restrictions:
+            restr_str = make_condition(self, restr, set())
+            if isinstance(restr_str, str) and len(restr_str) > 2048:
+                raise RuntimeError(
+                    "Export cannot handle restrictions > 2048.\n\t"
+                    + "If required, please open an issue on GitHub.\n\t"
+                    + f"Restriction: {restr_str}"
+                )
+            table_inserts.append(
+                dict(
+                    export_id=self.export_id,
+                    table_name=self.full_table_name,
+                    restriction=restr_str,
+                )
             )
-        self._export_table.Table.insert1(
-            dict(
-                export_id=self.export_id,
-                table_name=self.full_table_name,
-                restriction=make_condition(self, restr_str, set()),
-            ),
-            skip_duplicates=True,
-        )
+        self._export_table.Table.insert(table_inserts, skip_duplicates=True)
 
-    def fetch(self, log_fetch=True, *args, **kwargs):
+    def fetch(self, *args, log_fetch=True, **kwargs):
         """Log fetch for export."""
         ret = super().fetch(*args, **kwargs)
         if log_fetch:
             self._log_fetch(*args, **kwargs)
         return ret
 
-    def fetch1(self, log_fetch=True, *args, **kwargs):
+    def fetch1(self, *args, log_fetch=True, **kwargs):
         """Log fetch1 for export."""
         ret = super().fetch1(*args, **kwargs)
         if log_fetch:
