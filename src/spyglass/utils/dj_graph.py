@@ -101,12 +101,6 @@ class RestrGraph:
         table = table if isinstance(table, str) else table.full_table_name
         return self._get_node(table).get("restr")
 
-    def _set_files(self, table, ft, restr):
-        """Set node attribute for analysis files."""
-        if not set(self.analysis_pk).issubset(ft.heading.names):
-            return
-        self._set_node(table, "files", (ft & restr).fetch(*self.analysis_pk))
-
     def _get_files(self, table):
         """Get analysis files from graph node."""
         return self._get_node(table).get("files", [])
@@ -130,7 +124,6 @@ class RestrGraph:
             )
 
         self._set_node(table, "restr", restriction)
-        self._set_files(table, ft, restriction)
 
     def get_restr_ft(self, table: Union[int, str]):
         """Get restricted FreeTable from graph node.
@@ -210,6 +203,15 @@ class RestrGraph:
 
         return ret
 
+    def cascade_files(self):
+        """Set node attribute for analysis files."""
+        for table in self.visited:
+            ft = self._get_ft(table)
+            if not set(self.analysis_pk).issubset(ft.heading.names):
+                continue
+            files = (ft & self._get_restr(table)).fetch(*self.analysis_pk)
+            self._set_node(table, "files", files)
+
     def cascade1(self, table, restriction):
         """Cascade a restriction up the graph, recursively on parents.
 
@@ -250,6 +252,7 @@ class RestrGraph:
         if not self.visited == self.ancestors:
             raise RuntimeError("Cascade: FAIL - incomplete cascade")
 
+        self.cascade_files()
         self.cascaded = True
 
     def add_leaf(self, table_name, restriction, cascade=False) -> None:
@@ -271,6 +274,7 @@ class RestrGraph:
 
         if cascade:
             self.cascade1(table_name, restriction)
+            self.cascade_files()
             self.cascaded = True
 
     def add_leaves(self, leaves: List[Dict[str, str]], cascade=False) -> None:
@@ -300,6 +304,7 @@ class RestrGraph:
             self.add_leaf(table_name, restriction, cascade=False)
         if cascade:
             self.cascade()
+            self.cascade_files()
 
     @property
     def as_dict(self) -> List[Dict[str, str]]:
