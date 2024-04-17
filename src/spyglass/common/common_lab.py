@@ -289,16 +289,13 @@ class Lab(SpyglassMixin, dj.Manual):
         lab_name : string
             The name of the lab found in the NWB or config file, or None.
         """
-        if "Lab" in config and len(config["Lab"]) > 1:
+        lab_list = config.get("Lab", [{}])
+        if len(lab_list) > 1:
             logger.info(
                 "Multiple lab entries not allowed. Using the first entry only.\n"
             )
-
-        if "Lab" in config and "lab_name" in config["Lab"][0]:
-            lab_name = config["Lab"][0]["lab_name"]
-        elif nwbf.lab is not None:
-            lab_name = nwbf.lab
-        else:
+        lab_name = lab_list[0].get("lab_name") or getattr(nwbf, "lab", None)
+        if not lab_name:
             logger.info("No lab metadata found.\n")
             return None
 

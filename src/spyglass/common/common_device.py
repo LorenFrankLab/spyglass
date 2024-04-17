@@ -286,29 +286,20 @@ class CameraDevice(SpyglassMixin, dj.Manual):
                 cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict["camera_name"])
         # Append devices from config file
-        if "CameraDevice" in config:
-            for conf in config["CameraDevice"]:
-                device_dict = dict()
-                device_dict = {
-                    "camera_id": (
-                        conf["camera_id"] if "camera_id" in conf else -1
-                    ),
-                    "camera_name": (
-                        conf["camera_name"] if "camera_name" in conf else None
-                    ),
-                    "manufacturer": (
-                        conf["manufacturer"] if "manufacturer" in conf else None
-                    ),
-                    "model": conf["model"] if "model" in conf else None,
-                    "lens": conf["lens"] if "lens" in conf else None,
-                    "meters_per_pixel": (
-                        conf["meters_per_pixel"]
-                        if "meters_per_pixel" in conf
-                        else 0
-                    ),
+        if device_list := config.get("CameraDevice"):
+            device_inserts = [
+                {
+                    "camera_id": device.get("camera_id", -1),
+                    "camera_name": device.get("camera_name"),
+                    "manufacturer": device.get("manufacturer"),
+                    "model": device.get("model"),
+                    "lens": device.get("lens"),
+                    "meters_per_pixel": device.get("meters_per_pixel", 0),
                 }
-                cls.insert1(device_dict, skip_duplicates=True)
-                device_name_list.append(device_dict["camera_name"])
+                for device in device_list
+            ]
+            cls.insert(device_inserts, skip_duplicates=True)
+            device_name_list.extend([d["camera_name"] for d in device_inserts])
         if device_name_list:
             logger.info(f"Inserted camera devices {device_name_list}")
         else:
