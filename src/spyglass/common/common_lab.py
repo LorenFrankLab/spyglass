@@ -246,19 +246,15 @@ class Institution(SpyglassMixin, dj.Manual):
         institution_name : string
             The name of the institution found in the NWB or config file, or None.
         """
-        if "Institution" in config and len(config["Institution"]) > 1:
+        inst_list = config.get("Institution", [{}])
+        if len(inst_list) > 1:
             logger.info(
                 "Multiple institution entries not allowed. Using the first entry only.\n"
             )
-
-        if (
-            "Institution" in config
-            and "institution_name" in config["Institution"][0]
-        ):
-            inst_name = config["Institution"][0]["institution_name"]
-        elif nwbf.institution is not None:
-            inst_name = nwbf.institution
-        else:
+        inst_name = inst_list[0].get("institution_name") or getattr(
+            nwbf, "institution", None
+        )
+        if not inst_name:
             logger.info("No institution metadata found.\n")
             return None
 

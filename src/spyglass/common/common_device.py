@@ -271,7 +271,6 @@ class CameraDevice(SpyglassMixin, dj.Manual):
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.CameraDevice):
-                device_dict = dict()
                 # TODO ideally the ID is not encoded in the name formatted in a
                 # particular way device.name must have the form "[any string
                 # without a space, usually camera] [int]"
