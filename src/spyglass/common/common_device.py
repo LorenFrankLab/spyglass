@@ -252,13 +252,16 @@ class CameraDevice(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert camera devices from an NWB file
 
         Parameters
         ----------
         nwbf : pynwb.NWBFile
             The source NWB file object.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to
+            replace in the NWB file.
 
         Returns
         -------
@@ -279,6 +282,20 @@ class CameraDevice(SpyglassMixin, dj.Manual):
                     "model": device.model,
                     "lens": device.lens,
                     "meters_per_pixel": device.meters_per_pixel,
+                }
+                cls.insert1(device_dict, skip_duplicates=True)
+                device_name_list.append(device_dict["camera_name"])
+        # Append devices from config file
+        if "CameraDevice" in config:
+            for conf in config["CameraDevice"]:
+                device_dict = dict()
+                device_dict = {
+                    "camera_id": conf["camera_id"] if "camera_id" in conf else -1,
+                    "camera_name": conf["camera_name"] if "camera_name" in conf else None,
+                    "manufacturer": conf["manufacturer"] if "manufacturer" in conf else None,
+                    "model": conf["model"] if "model" in conf else None,
+                    "lens": conf["lens"] if "lens" in conf else None,
+                    "meters_per_pixel": conf["meters_per_pixel"] if "meters_per_pixel" in conf else 0,
                 }
                 cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict["camera_name"])

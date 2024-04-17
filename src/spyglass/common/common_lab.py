@@ -42,23 +42,30 @@ class LabMember(SpyglassMixin, dj.Manual):
     _admin = []
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert lab member information from an NWB file.
 
         Parameters
         ----------
         nwbf: pynwb.NWBFile
             The NWB file with experimenter information.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to
+            replace in the NWB file.
         """
         if isinstance(nwbf, str):
             nwb_file_abspath = Nwbfile.get_abs_path(nwbf, new_file=True)
             nwbf = get_nwb_file(nwb_file_abspath)
 
-        if nwbf.experimenter is None:
+        if "LabMember" in config:
+            experimenter_list = [member_dict["lab_member_name"] for member_dict in config["LabMember"]]
+        elif nwbf.experimenter is not None:
+            experimenter_list = nwbf.experimenter
+        else:
             logger.info("No experimenter metadata found.\n")
             return
 
-        for experimenter in nwbf.experimenter:
+        for experimenter in experimenter_list:
             cls.insert_from_name(experimenter)
 
             # each person is by default the member of their own LabTeam
@@ -220,21 +227,37 @@ class Institution(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert institution information from an NWB file.
 
         Parameters
         ----------
         nwbf : pynwb.NWBFile
             The NWB file with institution information.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to
+            replace in the NWB file.
+
+        Returns
+        -------
+        institution_name : string
+            The name of the institution found in the NWB or config file, or None.
         """
-        if nwbf.institution is None:
+        if "Institution" in config and len(config["Institution"]) > 1:
+            logger.info("Multiple institution entries not allowed. Using the first entry only.\n")
+        
+        if "Institution" in config and "institution_name" in config["Institution"][0]:
+            inst_name = config["Institution"][0]["institution_name"]
+        elif nwbf.institution is not None:
+            inst_name = nwbf.institution
+        else:
             logger.info("No institution metadata found.\n")
-            return
+            return None
 
         cls.insert1(
-            dict(institution_name=nwbf.institution), skip_duplicates=True
+            dict(institution_name=inst_name), skip_duplicates=True
         )
+        return inst_name
 
 
 @schema
@@ -244,18 +267,38 @@ class Lab(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config):
         """Insert lab name information from an NWB file.
 
         Parameters
         ----------
         nwbf : pynwb.NWBFile
             The NWB file with lab name information.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to
+            replace in the NWB file.
+
+        Returns
+        -------
+        lab_name : string
+            The name of the lab found in the NWB or config file, or None.
         """
-        if nwbf.lab is None:
+        if "Lab" in config and len(config["Lab"]) > 1:
+            logger.info("Multiple lab entries not allowed. Using the first entry only.\n")
+        
+        if "Lab" in config and "lab_name" in config["Lab"][0]:
+            lab_name = config["Lab"][0]["lab_name"]
+        elif nwbf.lab is not None:
+            lab_name = nwbf.lab
+        else:
             logger.info("No lab metadata found.\n")
-            return
-        cls.insert1(dict(lab_name=nwbf.lab), skip_duplicates=True)
+            return None
+
+        cls.insert1(
+            dict(lab_name=lab_name), skip_duplicates=True
+        )
+        return lab_name
+
 
 
 def decompose_name(full_name: str) -> tuple:
