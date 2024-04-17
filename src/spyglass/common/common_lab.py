@@ -58,7 +58,10 @@ class LabMember(SpyglassMixin, dj.Manual):
             nwbf = get_nwb_file(nwb_file_abspath)
 
         if "LabMember" in config:
-            experimenter_list = [member_dict["lab_member_name"] for member_dict in config["LabMember"]]
+            experimenter_list = [
+                member_dict["lab_member_name"]
+                for member_dict in config["LabMember"]
+            ]
         elif nwbf.experimenter is not None:
             experimenter_list = nwbf.experimenter
         else:
@@ -244,9 +247,14 @@ class Institution(SpyglassMixin, dj.Manual):
             The name of the institution found in the NWB or config file, or None.
         """
         if "Institution" in config and len(config["Institution"]) > 1:
-            logger.info("Multiple institution entries not allowed. Using the first entry only.\n")
-        
-        if "Institution" in config and "institution_name" in config["Institution"][0]:
+            logger.info(
+                "Multiple institution entries not allowed. Using the first entry only.\n"
+            )
+
+        if (
+            "Institution" in config
+            and "institution_name" in config["Institution"][0]
+        ):
             inst_name = config["Institution"][0]["institution_name"]
         elif nwbf.institution is not None:
             inst_name = nwbf.institution
@@ -254,9 +262,7 @@ class Institution(SpyglassMixin, dj.Manual):
             logger.info("No institution metadata found.\n")
             return None
 
-        cls.insert1(
-            dict(institution_name=inst_name), skip_duplicates=True
-        )
+        cls.insert1(dict(institution_name=inst_name), skip_duplicates=True)
         return inst_name
 
 
@@ -284,8 +290,10 @@ class Lab(SpyglassMixin, dj.Manual):
             The name of the lab found in the NWB or config file, or None.
         """
         if "Lab" in config and len(config["Lab"]) > 1:
-            logger.info("Multiple lab entries not allowed. Using the first entry only.\n")
-        
+            logger.info(
+                "Multiple lab entries not allowed. Using the first entry only.\n"
+            )
+
         if "Lab" in config and "lab_name" in config["Lab"][0]:
             lab_name = config["Lab"][0]["lab_name"]
         elif nwbf.lab is not None:
@@ -294,11 +302,8 @@ class Lab(SpyglassMixin, dj.Manual):
             logger.info("No lab metadata found.\n")
             return None
 
-        cls.insert1(
-            dict(lab_name=lab_name), skip_duplicates=True
-        )
+        cls.insert1(dict(lab_name=lab_name), skip_duplicates=True)
         return lab_name
-
 
 
 def decompose_name(full_name: str) -> tuple:

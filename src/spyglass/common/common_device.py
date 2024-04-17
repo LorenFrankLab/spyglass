@@ -290,12 +290,22 @@ class CameraDevice(SpyglassMixin, dj.Manual):
             for conf in config["CameraDevice"]:
                 device_dict = dict()
                 device_dict = {
-                    "camera_id": conf["camera_id"] if "camera_id" in conf else -1,
-                    "camera_name": conf["camera_name"] if "camera_name" in conf else None,
-                    "manufacturer": conf["manufacturer"] if "manufacturer" in conf else None,
+                    "camera_id": (
+                        conf["camera_id"] if "camera_id" in conf else -1
+                    ),
+                    "camera_name": (
+                        conf["camera_name"] if "camera_name" in conf else None
+                    ),
+                    "manufacturer": (
+                        conf["manufacturer"] if "manufacturer" in conf else None
+                    ),
                     "model": conf["model"] if "model" in conf else None,
                     "lens": conf["lens"] if "lens" in conf else None,
-                    "meters_per_pixel": conf["meters_per_pixel"] if "meters_per_pixel" in conf else 0,
+                    "meters_per_pixel": (
+                        conf["meters_per_pixel"]
+                        if "meters_per_pixel" in conf
+                        else 0
+                    ),
                 }
                 cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict["camera_name"])

@@ -151,7 +151,10 @@ class Session(SpyglassMixin, dj.Imported):
     def _add_experimenter_part(self, nwb_file_name, nwbf, config):
         # Use config file over nwb file
         if "LabMember" in config:
-            experimenter_list = [member_dict["lab_member_name"] for member_dict in config["LabMember"]]
+            experimenter_list = [
+                member_dict["lab_member_name"]
+                for member_dict in config["LabMember"]
+            ]
         elif nwbf.experimenter is not None:
             experimenter_list = nwbf.experimenter
         else:
