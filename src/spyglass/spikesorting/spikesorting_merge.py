@@ -113,7 +113,11 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 # use the supplied interval to restrict
                 table = (SpikeSortingSelection() * table.proj()) & key_v1
             # Metric Curation restriction
-            table = (MetricCurationSelection() * table) & key_v1
+            headings = MetricCurationSelection.heading.names
+            headings.pop(
+                headings.index("curation_id")
+            )  # this is the parent curation id of the final entry. dont restrict by this name here
+            table = (MetricCurationSelection().proj(*headings) * table) & key_v1
             # get curations
             table = (CurationV1() * table) & key_v1
             table = SpikeSortingOutput().CurationV1() & table
