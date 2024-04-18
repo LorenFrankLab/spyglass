@@ -178,6 +178,8 @@ class ExportSelection(SpyglassMixin, dj.Manual):
 class Export(SpyglassMixin, dj.Computed):
     definition = """
     -> ExportSelection
+    ---
+    paper_id: varchar(32)
     """
 
     # In order to get a many-to-one relationship btwn Selection and Export,
@@ -191,7 +193,7 @@ class Export(SpyglassMixin, dj.Computed):
         ---
         table_name: varchar(128)
         restriction: mediumblob
-        unique index (table_name)
+        unique index (export_id, table_name)
         """
 
     class File(SpyglassMixin, dj.Part):
@@ -252,7 +254,7 @@ class Export(SpyglassMixin, dj.Computed):
             free_tables=restr_graph.all_ft, **paper_key, **version_key
         )
 
-        self.insert1(key)
+        self.insert1({**key, **paper_key})
         self.Table().insert(table_inserts)
         self.File().insert(file_inserts)
 
