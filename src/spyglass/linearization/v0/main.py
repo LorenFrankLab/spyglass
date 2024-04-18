@@ -121,7 +121,7 @@ class IntervalLinearizedPosition(SpyglassMixin, dj.Computed):
     def make(self, key):
         logger.info(f"Computing linear position for: {key}")
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
 
@@ -183,6 +183,8 @@ class IntervalLinearizedPosition(SpyglassMixin, dj.Computed):
         )
 
         self.insert1(key)
+
+        AnalysisNwbfile().log(key)
 
     def fetch1_dataframe(self):
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")

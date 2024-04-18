@@ -282,7 +282,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     part_df, pos_time=pos_time, video_time=video_time
                 )
                 key["bodypart"] = body_part
-                key["analysis_file_name"] = AnalysisNwbfile().create(
+                key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
                     key["nwb_file_name"]
                 )
                 position = pynwb.behavior.Position()
@@ -330,6 +330,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     analysis_file_name=key["analysis_file_name"],
                 )
                 self.BodyPart.insert1(key)
+                AnalysisNwbfile().log(key)
 
     def fetch_dataframe(self, *attrs, **kwargs):
         entries = (self.BodyPart & self).fetch("KEY")

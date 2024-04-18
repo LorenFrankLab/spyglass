@@ -299,7 +299,9 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                 comments="no comments",
             )
             # Add to Analysis NWB file
-            analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+            analysis_file_name = AnalysisNwbfile().create(  # logged
+                key["nwb_file_name"]
+            )
             nwb_analysis_file = AnalysisNwbfile()
             key.update(
                 {
@@ -319,6 +321,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             )
             self.insert1(key)
             logger.logger.info("inserted entry into DLCCentroid")
+            AnalysisNwbfile().log(key)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]

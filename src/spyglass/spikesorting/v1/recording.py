@@ -617,7 +617,7 @@ def _write_recording_to_nwb(
         name of analysis NWB file containing the preprocessed recording
     """
 
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)  # logged
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,
@@ -649,6 +649,7 @@ def _write_recording_to_nwb(
             "ProcessedElectricalSeries"
         ].object_id
         io.write(nwbfile)
+    AnalysisNwbfile().log(analysis_nwb_file)
     return analysis_nwb_file, recording_object_id
 
 

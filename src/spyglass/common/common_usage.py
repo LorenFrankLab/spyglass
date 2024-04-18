@@ -37,3 +37,16 @@ class InsertError(dj.Manual):
     error_message: varchar(255)
     error_raw = null: blob
     """
+
+
+@schema
+class AnalysisNwbfileLog(dj.manual):
+    definition = """
+    id: int auto_increment
+    ---
+    dj_user: varchar(64)
+    analysis_file_name: varchar(64)
+    timestamp = CURRENT_TIMESTAMP : timestamp
+    creation_time=null: float
+    file_size=null: float
+    """

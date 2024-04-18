@@ -445,7 +445,7 @@ class SpyglassMixin:
 
         return CautiousDelete()
 
-    def _log_use(self, start, merge_deletes=None, super_delete=False):
+    def _log_delete(self, start, merge_deletes=None, super_delete=False):
         """Log use of cautious_delete."""
         if isinstance(merge_deletes, QueryExpression):
             merge_deletes = merge_deletes.fetch(as_dict=True)
@@ -515,12 +515,12 @@ class SpyglassMixin:
                 self._commit_merge_deletes(merge_deletes, **kwargs)
             else:
                 logger.info("Delete aborted.")
-                self._log_use(start)
+                self._log_delete(start)
                 return
 
         super().delete(*args, **kwargs)  # Additional confirm here
 
-        self._log_use(start=start, merge_deletes=merge_deletes)
+        self._log_delete(start=start, merge_deletes=merge_deletes)
 
     def cdel(self, force_permission=False, *args, **kwargs):
         """Alias for cautious_delete."""
@@ -533,5 +533,5 @@ class SpyglassMixin:
     def super_delete(self, *args, **kwargs):
         """Alias for datajoint.table.Table.delete."""
         logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
-        self._log_use(start=time(), super_delete=True)
+        self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)

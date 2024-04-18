@@ -360,7 +360,7 @@ def _write_waveform_features_to_nwb(
     unit_ids = [int(i) for i in waveforms.sorting.get_unit_ids()]
 
     # create new analysis nwb file
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)  # logged
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,
@@ -389,5 +389,7 @@ def _write_waveform_features_to_nwb(
 
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
+
+    AnalysisNwbfile().log(analysis_nwb_file)
 
     return analysis_nwb_file, units_object_id

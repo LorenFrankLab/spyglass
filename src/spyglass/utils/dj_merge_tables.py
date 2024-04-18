@@ -793,7 +793,7 @@ class Merge(dj.Manual):
         Added to support MRO of SpyglassMixin"""
         logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
 
-        self._log_use(start=time(), super_delete=True)
+        self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
 

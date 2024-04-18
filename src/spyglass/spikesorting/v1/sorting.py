@@ -1,3 +1,4 @@
+import os
 import tempfile
 import time
 import uuid
@@ -22,7 +23,6 @@ from spyglass.spikesorting.v1.recording import (  # noqa: F401
     _consolidate_intervals,
 )
 from spyglass.utils import SpyglassMixin, logger
-import os
 
 schema = dj.schema("spikesorting_v1_sorting")
 
@@ -368,7 +368,7 @@ def _write_sorting_to_nwb(
         Name of analysis NWB file containing the sorting
     """
 
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)  # logged
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,
@@ -400,4 +400,5 @@ def _write_sorting_to_nwb(
                 )
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
+    AnalysisNwbfile().log(analysis_nwb_file)
     return analysis_nwb_file, units_object_id

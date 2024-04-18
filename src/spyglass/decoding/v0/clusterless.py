@@ -208,7 +208,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
             )
 
         # create a new AnalysisNwbfile and a timeseries for the marks and save
-        key["analysis_file_name"] = AnalysisNwbfile().create(
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
         nwb_object = pynwb.TimeSeries(
@@ -222,6 +222,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
             key["analysis_file_name"], nwb_object
         )
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+        AnalysisNwbfile().log(key)
         self.insert1(key)
 
     def fetch1_dataframe(self) -> pd.DataFrame:

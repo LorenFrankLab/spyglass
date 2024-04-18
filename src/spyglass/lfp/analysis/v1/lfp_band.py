@@ -277,7 +277,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             return None
 
         # create the analysis nwb file to store the results.
-        lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        lfp_band_file_name = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(
             lfp_band_file_name
         )
@@ -362,6 +364,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "previously saved lfp band times do not match current times"
             )
 
+        AnalysisNwbfile().log(key)
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs):

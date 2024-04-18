@@ -111,7 +111,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         )
 
         # Add to Analysis NWB file
-        key["analysis_file_name"] = AnalysisNwbfile().create(
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
         nwb_analysis_file = AnalysisNwbfile()
@@ -138,6 +138,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         PositionOutput._merge_insert(
             [orig_key], part_name=part_name, skip_duplicates=True
         )
+        AnalysisNwbfile().log(key)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]

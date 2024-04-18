@@ -224,7 +224,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
                 .fetch_nwb()[0]["dlc_pose_estimation_position"]
                 .get_spatial_series()
             )
-            key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
                 key["nwb_file_name"]
             )
             # Add dataframe to AnalysisNwbfile
@@ -267,6 +267,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             )
             self.insert1(key)
             logger.logger.info("inserted entry into DLCSmoothInterp")
+            AnalysisNwbfile().log(key)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]

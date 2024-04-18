@@ -465,7 +465,7 @@ class LFP(SpyglassMixin, dj.Imported):
         electrode_id_list = list(k["electrode_id"] for k in electrode_keys)
         electrode_id_list.sort()
 
-        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
 
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         (
@@ -502,6 +502,7 @@ class LFP(SpyglassMixin, dj.Imported):
             },
             replace=True,
         )
+        AnalysisNwbfile().log(key)
         self.insert1(key)
 
     def nwb_object(self, key):
@@ -775,7 +776,9 @@ class LFPBand(SpyglassMixin, dj.Computed):
             return None
 
         # create the analysis nwb file to store the results.
-        lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        lfp_band_file_name = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(
             lfp_band_file_name
         )
@@ -853,6 +856,7 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 "previously saved lfp band times do not match current times"
             )
 
+        AnalysisNwbfile().log(lfp_band_file_name)
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs):

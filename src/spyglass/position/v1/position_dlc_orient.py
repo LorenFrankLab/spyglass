@@ -130,7 +130,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         final_df = pd.DataFrame(
             orientation, columns=["orientation"], index=pos_df.index
         )
-        key["analysis_file_name"] = AnalysisNwbfile().create(
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
         spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
@@ -155,6 +155,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         )
 
         self.insert1(key)
+        AnalysisNwbfile().log(key)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]

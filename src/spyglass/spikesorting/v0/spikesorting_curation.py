@@ -6,11 +6,11 @@ import uuid
 import warnings
 from pathlib import Path
 from typing import List
-from packaging import version
 
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
+from packaging import version
 
 if version.parse(si.__version__) < version.parse("0.99.1"):
     raise ImportError(
@@ -246,7 +246,9 @@ class Curation(SpyglassMixin, dj.Manual):
             units_valid_times[unit_id] = sort_interval_valid_times
             units_sort_interval[unit_id] = [sort_interval]
 
-        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        analysis_file_name = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         object_ids = AnalysisNwbfile().add_units(
             analysis_file_name,
             units,
@@ -266,6 +268,7 @@ class Curation(SpyglassMixin, dj.Manual):
         else:
             units_object_id = object_ids[0]
 
+        AnalysisNwbfile().log(analysis_file_name)
         return analysis_file_name, units_object_id
 
 
@@ -349,7 +352,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
             **waveform_params,
         )
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
         object_id = AnalysisNwbfile().add_units_waveforms(
@@ -358,6 +361,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         key["waveforms_object_id"] = object_id
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
 
+        AnalysisNwbfile().log(key)
         self.insert1(key)
 
     def load_waveforms(self, key: dict):
@@ -526,13 +530,14 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
         logger.info(f"Computed all metrics: {qm}")
         self._dump_to_json(qm, key["quality_metrics_path"])
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
         key["object_id"] = AnalysisNwbfile().add_units_metrics(
             key["analysis_file_name"], metrics=qm
         )
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+        AnalysisNwbfile().log(key)
 
         self.insert1(key)
 
