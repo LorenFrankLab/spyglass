@@ -345,11 +345,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         except IndexError:
             filled_variable = np.full((n_video_time,), np.nan)
 
-        # CODE REVIEW: does this look right?
-        try:
-            filled_variable[video_ind] = variable
-        except ValueError:  # if variable is longer than video_time
-            filled_variable[video_ind[: len(variable)]] = variable
+        filled_variable[video_ind] = variable
 
         return filled_variable
 
