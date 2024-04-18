@@ -132,17 +132,24 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         ]
         return [{"file_path": p} for p in list({*analysis_fp, *nwbfile_fp})]
 
-    def get_restr_graph(self, key: dict) -> RestrGraph:
+    def get_restr_graph(self, key: dict, verbose=False) -> RestrGraph:
         """Return a RestrGraph for a restriction/key's tables/restrictions.
 
         Ignores duplicate entries.
+
+        Parameters
+        ----------
+        key : dict
+            Any valid restriction key for ExportSelection.Table
+        verbose : bool, optional
+            Turn on RestrGraph verbosity. Default False.
         """
         leaves = unique_dicts(
             (self * self.Table & key).fetch(
                 "table_name", "restriction", as_dict=True
             )
         )
-        return RestrGraph(seed_table=self, leaves=leaves, verbose=False)
+        return RestrGraph(seed_table=self, leaves=leaves, verbose=verbose)
 
     def preview_tables(self, **kwargs) -> list[dj.FreeTable]:
         """Return a list of restricted FreeTables for a given restriction/key.
@@ -183,7 +190,7 @@ class Export(SpyglassMixin, dj.Computed):
         table_id: int
         ---
         table_name: varchar(128)
-        restriction: varchar(2048)
+        restriction: mediumblob
         unique index (table_name)
         """
 
@@ -194,7 +201,6 @@ class Export(SpyglassMixin, dj.Computed):
         ---
         file_path: varchar(255)
         """
-        # What's needed? full path? relative path?
 
     def populate_paper(self, paper_id: Union[str, dict]):
         if isinstance(paper_id, dict):
@@ -214,6 +220,7 @@ class Export(SpyglassMixin, dj.Computed):
             )
             self.insert1(key)
             return
+
         # If lesser ids are present, delete parts yielding null entries
         processed_ids = set(
             list(self.Table.fetch("export_id"))

@@ -8,6 +8,7 @@ from typing import Dict, List, Union
 from datajoint import FreeTable
 from datajoint.condition import make_condition
 from datajoint.table import Table
+from tqdm import tqdm
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.utils import logger
@@ -55,7 +56,7 @@ class RestrGraph:
         if table_name and restriction:
             self.add_leaf(table_name, restriction)
         if leaves:
-            self.add_leaves(leaves)
+            self.add_leaves(leaves, show_progress=verbose)
 
     def __repr__(self):
         l_str = ",\n\t".join(self.leaves) + "\n" if self.leaves else ""
@@ -89,6 +90,7 @@ class RestrGraph:
 
     def _get_ft(self, table, with_restr=False):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
+        table = table if isinstance(table, str) else table.full_table_name
         restr = self._get_restr(table) if with_restr else True
         if ft := self._get_node(table).get("ft"):
             return ft & restr
@@ -99,7 +101,7 @@ class RestrGraph:
     def _get_restr(self, table):
         """Get restriction from graph node."""
         table = table if isinstance(table, str) else table.full_table_name
-        return self._get_node(table).get("restr")
+        return self._get_node(table).get("restr", "False")
 
     def _get_files(self, table):
         """Get analysis files from graph node."""
@@ -113,6 +115,7 @@ class RestrGraph:
             if not isinstance(restriction, str)
             else restriction
         )
+        # orig_restr = restriction
         if existing := self._get_restr(table):
             if existing == restriction:
                 return
@@ -122,6 +125,9 @@ class RestrGraph:
             restriction = make_condition(
                 ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
             )
+
+        # if table == "`spikesorting_merge`.`spike_sorting_output`":
+        #     __import__("pdb").set_trace()
 
         self._set_node(table, "restr", restriction)
 
@@ -137,7 +143,7 @@ class RestrGraph:
         """
         if isinstance(table, int):
             table = list(self.visited)[table]
-        return self._get_ft(table) & self._get_restr(table)
+        return self._get_ft(table, with_restr=True)
 
     def _log_truncate(self, log_str, max_len=80):
         """Truncate log lines to max_len and print if verbose."""
@@ -183,8 +189,8 @@ class RestrGraph:
         """
 
         # Need to flip attr_map to respect parent's fields
-        attr_map = (
-            {v: k for k, v in attr_map.items() if k != k} if attr_map else {}
+        attr_reverse = (
+            {v: k for k, v in attr_map.items() if k != v} if attr_map else {}
         )
         child_ft = self._get_ft(child)
         parent_ft = self._get_ft(parent).proj()
@@ -192,9 +198,9 @@ class RestrGraph:
         restr_child = child_ft & restr
 
         if primary:  # Project only primary key fields to avoid collisions
-            join = restr_child.proj(**attr_map) * parent_ft
+            join = restr_child.proj(**attr_reverse) * parent_ft
         else:  # Include all fields
-            join = restr_child.proj(..., **attr_map) * parent_ft
+            join = restr_child.proj(..., **attr_reverse) * parent_ft
 
         ret = unique_dicts(join.fetch(*parent_ft.primary_key, as_dict=True))
 
@@ -241,16 +247,30 @@ class RestrGraph:
 
             self.cascade1(parent, parent_restr)  # Parent set on recursion
 
-    def cascade(self) -> None:
-        """Cascade all restrictions up the graph."""
+    def cascade(self, show_progress=None) -> None:
+        """Cascade all restrictions up the graph.
+
+        Parameters
+        ----------
+        show_progress : bool, optional
+            Show tqdm progress bar. Default to verbose setting.
+        """
         if self.cascaded:
             return
-        for table in self.leaves - self.visited:
+        to_visit = self.leaves - self.visited
+        for table in tqdm(
+            to_visit,
+            desc="RestrGraph: cascading restrictions",
+            total=len(to_visit),
+            disable=not (show_progress or self.verbose),
+        ):
             restr = self._get_restr(table)
             self._log_truncate(f"Start     {table}: {restr}")
             self.cascade1(table, restr)
         if not self.visited == self.ancestors:
-            raise RuntimeError("Cascade: FAIL - incomplete cascade")
+            raise RuntimeError(
+                "Cascade: FAIL - incomplete cascade. Please post issue."
+            )
 
         self.cascade_files()
         self.cascaded = True
@@ -277,7 +297,9 @@ class RestrGraph:
             self.cascade_files()
             self.cascaded = True
 
-    def add_leaves(self, leaves: List[Dict[str, str]], cascade=False) -> None:
+    def add_leaves(
+        self, leaves: List[Dict[str, str]], cascade=False, show_progress=None
+    ) -> None:
         """Add leaves to graph and cascade if requested.
 
         Parameters
@@ -286,6 +308,8 @@ class RestrGraph:
             list of dictionaries containing table_name and restriction
         cascade : bool, optional
             Whether to cascade the restrictions up the graph. Default False
+        show_progress : bool, optional
+            Show tqdm progress bar. Default to verbose setting.
         """
 
         if not leaves:
@@ -293,7 +317,12 @@ class RestrGraph:
         if not isinstance(leaves, list):
             leaves = [leaves]
         leaves = unique_dicts(leaves)
-        for leaf in leaves:
+        for leaf in tqdm(
+            leaves,
+            desc="RestrGraph: adding leaves",
+            total=len(leaves),
+            disable=not (show_progress or self.verbose),
+        ):
             if not (
                 (table_name := leaf.get("table_name"))
                 and (restriction := leaf.get("restriction"))
