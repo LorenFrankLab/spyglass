@@ -199,7 +199,7 @@ key = {
 sgs.MetricCurationSelection.insert_selection(key)
 sgs.MetricCurationSelection() & key
 
-sgs.MetricCuration.populate()
+sgs.MetricCuration.populate(key)
 sgs.MetricCuration() & key
 
 # to do another round of curation, fetch the relevant info and insert back into CurationV1 using `insert_curation`
@@ -227,7 +227,7 @@ sgs.CurationV1.insert_curation(
 
 sgs.CurationV1()
 
-# ## Manual Curation
+# ## Manual Curation (Optional)
 
 # Next we will do manual curation. this is done with figurl. to incorporate info from other stages of processing (e.g. metrics) we have to store that with kachery cloud and get curation uri referring to it. it can be done with `generate_curation_uri`.
 #
@@ -297,8 +297,9 @@ sgs.CurationV1.insert_curation(
 
 sgs.CurationV1()
 
-# We now insert the curated spike sorting to a `Merge` table for feeding into downstream processing pipelines.
+# ## Downstream usage (Merge table)
 #
+# Regardless of Curation method used, to make use of spikeorting results in downstream pipelines like Decoding, we will need to insert it into the `SpikeSortingOutput` merge table.
 
 # +
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -306,7 +307,27 @@ from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 SpikeSortingOutput()
 # -
 
-SpikeSortingOutput.insert([key], part_name="CurationV1")
+# insert the automatic curation spikesorting results
+curation_key = sss_pk.fetch1("KEY")
+curation_key["curation_id"] = 1
+merge_insert_key = (sgs.CurationV1 & curation_key).fetch("KEY", as_dict=True)
+SpikeSortingOutput.insert(merge_insert_key, part_name="CurationV1")
 SpikeSortingOutput.merge_view()
 
-SpikeSortingOutput.CurationV1()
+# Finding the merge id's corresponding to an interpretable restriction such as `merge_id` or `interval_list` can require several join steps with upstream tables.  To simplify this process we can use the included helper function `SpikeSortingOutput().get_restricted_merge_ids()` to perform the necessary joins and return the matching merge id's
+
+selection_key = {
+    "nwb_file_name": nwb_file_name2,
+    "sorter": "mountainsort4",
+    "interval_list_name": "01_s1",
+    "curation_id": 0,
+}  # this function can use restrictions from throughout the spikesorting pipeline
+spikesorting_merge_ids = SpikeSortingOutput().get_restricted_merge_ids(
+    selection_key, as_dict=True
+)
+spikesorting_merge_ids
+
+# With the spikesorting merge_ids we want we can also use the method `get_sort_group_info` to get a table linking the merge id to the electrode group it is sourced from.  This can be helpful for restricting to just electrodes from a brain area of interest
+
+merge_keys = [{"merge_id": str(id)} for id in spikesorting_merge_ids]
+SpikeSortingOutput().get_sort_group_info(merge_keys)
