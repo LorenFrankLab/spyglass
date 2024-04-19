@@ -297,7 +297,7 @@ sgs.CurationV1.insert_curation(
 
 sgs.CurationV1()
 
-# ## Down stream usage (Merge table)
+# ## Downstream usage (Merge table)
 #
 # Regardless of Curation method used, to make use of spikeorting results in downstream pipelines like Decoding, we will need to insert it into the `SpikeSortingOutput` merge table.
 
