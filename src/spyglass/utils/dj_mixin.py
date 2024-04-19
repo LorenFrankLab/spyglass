@@ -9,12 +9,14 @@ from datajoint.expression import QueryExpression
 from datajoint.logging import logger as dj_logger
 from datajoint.table import Table
 from datajoint.utils import get_master, user_choice
+from networkx import NetworkXError
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_chains import TableChain, TableChains
 from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
+from spyglass.utils.dj_merge_tables import Merge, is_merge_table
 from spyglass.utils.logging import logger
 
 try:
@@ -67,19 +69,21 @@ class SpyglassMixin:
 
         Checks that schema prefix is in SHARED_MODULES.
         """
-        if (
-            self.database  # Connected to a database
-            and not self.is_declared  # New table
-            and self.database.split("_")[0]  # Prefix
-            not in [
-                *SHARED_MODULES,  # Shared modules
-                dj.config["database.user"],  # User schema
-                "temp",
-                "test",
-            ]
-        ):
+        if self.is_declared:
+            return
+        if self.database and self.database.split("_")[0] not in [
+            *SHARED_MODULES,
+            dj.config["database.user"],
+            "temp",
+            "test",
+        ]:
             logger.error(
                 f"Schema prefix not in SHARED_MODULES: {self.database}"
+            )
+        if is_merge_table(self) and not isinstance(self, Merge):
+            raise TypeError(
+                "Table definition matches Merge but does not inherit class: "
+                + self.full_table_name
             )
 
     # ------------------------------- fetch_nwb -------------------------------
@@ -175,6 +179,7 @@ class SpyglassMixin:
         """
         self.connection.dependencies.load()
         merge_tables = {}
+        visited = set()
 
         def search_descendants(parent):
             for desc in parent.descendants(as_objects=True):
@@ -184,12 +189,18 @@ class SpyglassMixin:
                     or master_name in merge_tables
                 ):
                     continue
-                master = dj.FreeTable(self.connection, master_name)
-                if MERGE_PK in master.heading.names:
-                    merge_tables[master_name] = master
-                    search_descendants(master)
+                master_ft = dj.FreeTable(self.connection, master_name)
+                if is_merge_table(master_ft):
+                    merge_tables[master_name] = master_ft
+                if master_name not in visited:
+                    visited.add(master_name)
+                    search_descendants(master_ft)
 
-        _ = search_descendants(self)
+        try:
+            _ = search_descendants(self)
+        except NetworkXError as e:
+            table_name = "".join(e.args[0].split("`")[1:4])
+            raise ValueError(f"Please import {table_name} and try again.")
 
         logger.info(
             f"Building merge cache for {self.table_name}.\n\t"
@@ -231,6 +242,7 @@ class SpyglassMixin:
         for name, chain in self._merge_chains.items():
             if substring.lower() in name:
                 return chain
+        raise ValueError(f"No chain found with '{substring}' in name.")
 
     def _commit_merge_deletes(
         self, merge_join_dict: Dict[str, List[QueryExpression]], **kwargs
@@ -355,14 +367,19 @@ class SpyglassMixin:
         str
             Summary of experimenters for session(s).
         """
+
         Session = self._delete_deps[-1]
         SesExp = Session.Experimenter
-        empty_pk = {self._member_pk: "NULL"}
 
+        # Not called in delete permission check, only bare _get_exp_summary
+        if self._member_pk in self.heading.names:
+            return self * SesExp
+
+        empty_pk = {self._member_pk: "NULL"}
         format = dj.U(self._session_pk, self._member_pk)
-        sess_link = self._session_connection.join(
-            self.restriction, reverse_order=True
-        )
+
+        restr = self.restriction or True
+        sess_link = self._session_connection.join(restr, reverse_order=True)
 
         exp_missing = format & (sess_link - SesExp).proj(**empty_pk)
         exp_present = format & (sess_link * SesExp - exp_missing).proj()
@@ -404,7 +421,10 @@ class SpyglassMixin:
         if dj_user in LabMember().admin:  # bypass permission check for admin
             return
 
-        if not self._session_connection:
+        if (
+            not self._session_connection  # Table has no session
+            or self._member_pk in self.heading.names  # Table has experimenter
+        ):
             logger.warn(  # Permit delete if no session connection
                 "Could not find lab team associated with "
                 + f"{self.__class__.__name__}."
@@ -415,7 +435,6 @@ class SpyglassMixin:
         sess_summary = self._get_exp_summary()
         experimenters = sess_summary.fetch(self._member_pk)
         if None in experimenters:
-            # TODO: Check if allow delete of remainder?
             raise PermissionError(
                 "Please ensure all Sessions have an experimenter in "
                 + f"SessionExperimenter:\n{sess_summary}"

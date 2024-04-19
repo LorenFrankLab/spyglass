@@ -288,8 +288,13 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             f"{current_dir.as_posix()}/{nwb_base_filename}_"
             f"{epoch:02d}_{key['trodes_pos_params_name']}.mp4"
         )
+        red_cols = (
+            ["xloc", "yloc"]
+            if "xloc" in raw_position_df.columns
+            else ["xloc1", "yloc1"]
+        )
         centroids = {
-            "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
+            "red": np.asarray(raw_position_df[red_cols]),
             "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
         }
         position_mean = np.asarray(
@@ -330,6 +335,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def fill_nan(variable, video_time, variable_time):
+        # TODO: Reduce duplication across dlc_utils and common_position
         video_ind = np.digitize(variable_time, video_time[1:])
 
         n_video_time = len(video_time)
@@ -338,6 +344,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             filled_variable = np.full((n_video_time, n_variable_dims), np.nan)
         except IndexError:
             filled_variable = np.full((n_video_time,), np.nan)
+
         filled_variable[video_ind] = variable
 
         return filled_variable
@@ -450,4 +457,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
 
         video.release()
         out.release()
-        cv2.destroyAllWindows()
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:  # if cv is already closed or does not have func
+            pass
