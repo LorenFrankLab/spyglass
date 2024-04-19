@@ -282,7 +282,10 @@ class TableChain:
             if table.isnumeric():  # get proj() attribute map for alias node
                 if not prev_table:
                     raise ValueError("Alias node found without prev table.")
-                attr_map = self.graph[table][prev_table]["attr_map"]
+                try:
+                    attr_map = self.graph[table][prev_table]["attr_map"]
+                except KeyError:  # Why is this only DLCCentroid??
+                    attr_map = self.graph[prev_table][table]["attr_map"]
                 ret[prev_table]["attr_map"] = attr_map
             else:
                 free_table = dj.FreeTable(self._connection, table)

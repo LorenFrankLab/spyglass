@@ -45,7 +45,7 @@ By convention, an individual pipeline has one or more the following table types:
 - Parameters table
 - Selection table
 - Data table
-- Merge Table (see also [doc](./misc/merge_tables.md)
+- Merge Table (see also [doc](./misc/merge_tables.md))
 
 ### Common/Multi-pipeline
 
@@ -226,16 +226,8 @@ faulty connection.
 
 - During development, we suggest using a Docker container. See
     [example](./notebooks/00_Setup.ipynb).
-- DataJoint is unable to set delete permissions on a per-table basis. If a user
-    is able to delete entries in a given table, she can delete entries in any
-    table in the schema. The `SpikeSorting` table extends the built-in `delete`
-    method to check if the username matches a list of allowed users when
-    `delete` is called. Issues #226 and #586 track the progress of generalizing
-    this feature.
 - `numpy` style docstrings will be interpreted by API docs. To check for
     compliance, monitor the std out when building docs (see `docs/README.md`)
-- `fetch_nwb` is currently reperated across many tables. For progress on a fix,
-    follow issue #530
 
 ## Making a release
 
