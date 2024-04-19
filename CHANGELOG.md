@@ -11,6 +11,7 @@
 - Refactor `TableChain` to include `_searched` attribute. #867
 - Fix errors in config import #882
 - Save current spyglass version in analysis nwb files to aid diagnosis #897
+- Add functionality to export vertical slice of database. #875
 - Add pynapple support #898
 - Update PR template checklist to include db changes. #903
 - Avoid permission check on personnel tables. #903

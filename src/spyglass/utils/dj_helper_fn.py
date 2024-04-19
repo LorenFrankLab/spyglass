@@ -11,6 +11,11 @@ from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 
+def unique_dicts(list_of_dict):
+    """Remove duplicate dictionaries from a list."""
+    return [dict(t) for t in {tuple(d.items()) for d in list_of_dict}]
+
+
 def deprecated_factory(classes: list, old_module: str = "") -> list:
     """Creates a list of classes and logs a warning when instantiated
 
@@ -182,8 +187,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     )
     for file_name in nwb_files:
         file_path = file_path_fn(file_name)
-        if not os.path.exists(file_path):
-            # retrieve the file from kachery. This also opens the file and stores the file object
+        if not os.path.exists(file_path):  # retrieve the file from kachery.
+            # This also opens the file and stores the file object
             get_nwb_file(file_path)
 
     rec_dicts = (
