@@ -8,9 +8,11 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 import pynwb
+import h5py
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
+from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
@@ -181,6 +183,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of the new NWB file.
         """
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        alter_source_script = False
         with pynwb.NWBHDF5IO(
             path=nwb_file_abspath, mode="r", load_namespaces=True
         ) as io:
@@ -193,6 +196,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                     if isinstance(nwb_object, pynwb.core.LabelledDict):
                         for module in list(nwb_object.keys()):
                             nwb_object.pop(module)
+            # add the version of spyglass that created this file
+            if nwbf.source_script is None:
+                nwbf.source_script = f"spyglass={sg_version}"
+            else:
+                alter_source_script = True
 
             analysis_file_name = self.__get_new_file_name(nwb_file_name)
             # write the new file
@@ -205,12 +213,20 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 path=analysis_file_abs_path, mode="w", manager=io.manager
             ) as export_io:
                 export_io.export(io, nwbf)
+        if alter_source_script:
+            self._alter_spyglass_version(analysis_file_abs_path)
 
         # change the permissions to only allow owner to write
         permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
         os.chmod(analysis_file_abs_path, permissions)
 
         return analysis_file_name
+
+    @staticmethod
+    def _alter_spyglass_version(nwb_file_path):
+        """Change the source script to the current version of spyglass"""
+        with h5py.File(nwb_file_path, "a") as f:
+            f["/general/source_script"][()] = f"spyglass={sg_version}"
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
@@ -293,8 +309,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         )
         self.insert1(key)
 
-    @staticmethod
-    def get_abs_path(analysis_nwb_file_name):
+    @classmethod
+    def get_abs_path(cls, analysis_nwb_file_name):
         """Return the absolute path for a stored analysis NWB file given just the file name.
 
         The spyglass config from settings.py must be set.
@@ -309,6 +325,18 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
+        # If an entry exists in the database get the stored datajoint filepath
+        file_key = {"analysis_file_name": analysis_nwb_file_name}
+        if cls & file_key:
+            try:
+                # runs if file exists locally
+                return (cls & file_key).fetch1("analysis_file_abs_path")
+            except FileNotFoundError as e:
+                # file exists in database but not locally
+                # parse the intended path from the error message
+                return str(e).split(": ")[1].replace("'", "")
+
+        # File not in database, define what it should be
         # see if the file exists and is stored in the base analysis dir
         test_path = f"{analysis_dir}/{analysis_nwb_file_name}"
 
@@ -640,41 +668,3 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         AnalysisNwbfile.cleanup(True)
 
         # also check to see whether there are directories in the spikesorting folder with this
-
-
-@schema
-class NwbfileKachery(SpyglassMixin, dj.Computed):
-    definition = """
-    -> Nwbfile
-    ---
-    nwb_file_uri: varchar(200)  # the uri the NWB file for kachery
-    """
-
-    def make(self, key):
-        import kachery_client as kc
-
-        logger.info(f'Linking {key["nwb_file_name"]} and storing in kachery...')
-        key["nwb_file_uri"] = kc.link_file(
-            Nwbfile().get_abs_path(key["nwb_file_name"])
-        )
-        self.insert1(key)
-
-
-@schema
-class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
-    definition = """
-    -> AnalysisNwbfile
-    ---
-    analysis_file_uri: varchar(200)  # the uri of the file
-    """
-
-    def make(self, key):
-        import kachery_client as kc
-
-        logger.info(
-            f'Linking {key["analysis_file_name"]} and storing in kachery...'
-        )
-        key["analysis_file_uri"] = kc.link_file(
-            AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
-        )
-        self.insert1(key)

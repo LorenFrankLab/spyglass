@@ -85,11 +85,12 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # If you haven't already done so, add yourself to `LabTeam`
 #
 
+# +
 # Full name, Google email address, DataJoint username, admin
 name, email, dj_user, admin = (
-    "Firstname Lastname",
-    "example@gmail.com",
-    "user",
+    "Firstname_spikesv0 Lastname_spikesv0",
+    "example_spikesv0@gmail.com",
+    dj.config["database.user"],  # use the same username as the database
     0,
 )
 sgc.LabMember.insert_from_name(name)
@@ -102,10 +103,25 @@ sgc.LabMember.LabMemberInfo.insert1(
     ],
     skip_duplicates=True,
 )
+
+# Make a lab team if doesn't already exist, otherwise insert yourself into team
+team_name = "My Team"
+if not sgc.LabTeam() & {"team_name": team_name}:
+    sgc.LabTeam().create_new_team(
+        team_name=team_name,  # Should be unique
+        team_members=[name],
+        team_description="test",  # Optional
+    )
+else:
+    sgc.LabTeam.LabTeamMember().insert1(
+        {"team_name": team_name, "lab_member_name": name}, skip_duplicates=True
+    )
+
 sgc.LabMember.LabMemberInfo() & {
     "team_name": "My Team",
-    "lab_member_name": "Firstname Lastname",
+    "lab_member_name": "Firstname_spikesv0 Lastname_spikesv0",
 }
+# -
 
 # We can try `fetch` to confirm.
 #
@@ -479,6 +495,7 @@ sgs.Curation() & ss_key
 
 # Parameters used for waveform extraction from the recording
 waveform_params_name = "default_whitened"
+sgs.WaveformParameters().insert_default()  # insert default parameter sets if not already in database
 (
     sgs.WaveformParameters() & {"waveform_params_name": waveform_params_name}
 ).fetch(as_dict=True)[0]
@@ -497,6 +514,7 @@ sgs.Waveforms.populate(ss_key)
 
 # parameters which define what quality metrics are calculated and how
 metric_params_name = "franklab_default3"
+sgs.MetricParameters().insert_default()  # insert default parameter sets if not already in database
 (sgs.MetricParameters() & {"metric_params_name": metric_params_name}).fetch(
     "metric_params"
 )[0]
@@ -518,6 +536,7 @@ sgs.QualityMetrics() & ss_key
 
 # We can select our criteria for unit labeling here
 auto_curation_params_name = "default"
+sgs.AutomaticCurationParameters().insert_default()
 (
     sgs.AutomaticCurationParameters()
     & {"auto_curation_params_name": auto_curation_params_name}
