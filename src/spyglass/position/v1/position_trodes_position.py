@@ -203,7 +203,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         PositionOutput._merge_insert(
             [orig_key], part_name=part_name, skip_duplicates=True
         )
-        AnalysisNwbfile().log(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     @staticmethod
     def generate_pos_components(*args, **kwargs):

@@ -57,6 +57,10 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         orig_key = copy.deepcopy(key)
+        # Add to Analysis NWB file
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         key["pose_eval_result"] = self.evaluate_pose_estimation(key)
 
         pos_nwb = (DLCCentroid & key).fetch_nwb()[0]
@@ -110,10 +114,6 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             comments=vid_frame_obj.comments,
         )
 
-        # Add to Analysis NWB file
-        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
         nwb_analysis_file = AnalysisNwbfile()
         key["orientation_object_id"] = nwb_analysis_file.add_nwb_object(
             key["analysis_file_name"], orientation
@@ -138,7 +138,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         PositionOutput._merge_insert(
             [orig_key], part_name=part_name, skip_duplicates=True
         )
-        AnalysisNwbfile().log(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]

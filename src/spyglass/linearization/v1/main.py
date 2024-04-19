@@ -181,7 +181,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
             [orig_key], part_name=part_name, skip_duplicates=True
         )
 
-        AnalysisNwbfile().log(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self):
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")

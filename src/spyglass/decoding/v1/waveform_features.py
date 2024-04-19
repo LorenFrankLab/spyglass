@@ -390,6 +390,9 @@ def _write_waveform_features_to_nwb(
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
 
-    AnalysisNwbfile().log(analysis_nwb_file)
+    AnalysisNwbfile().log(
+        analysis_nwb_file,
+        table="`decoding_waveform_features`.`__unit_waveform_features`",
+    )
 
     return analysis_nwb_file, units_object_id

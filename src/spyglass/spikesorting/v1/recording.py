@@ -649,7 +649,10 @@ def _write_recording_to_nwb(
             "ProcessedElectricalSeries"
         ].object_id
         io.write(nwbfile)
-    AnalysisNwbfile().log(analysis_nwb_file)
+    AnalysisNwbfile().log(
+        analysis_nwb_file,
+        table="`spikesorting_v1_sorting`.`__spike_sorting_recording`",
+    )
     return analysis_nwb_file, recording_object_id
 
 

@@ -135,6 +135,10 @@ class UnitMarks(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        # create a new AnalysisNwbfile and a timeseries for the marks and save
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         # get the list of mark parameters
         mark_param = (MarkParameters & key).fetch1()
 
@@ -207,10 +211,6 @@ class UnitMarks(SpyglassMixin, dj.Computed):
                 timestamps, marks, mark_param["mark_param_dict"]
             )
 
-        # create a new AnalysisNwbfile and a timeseries for the marks and save
-        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
         nwb_object = pynwb.TimeSeries(
             name="marks",
             data=marks,
@@ -222,7 +222,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
             key["analysis_file_name"], nwb_object
         )
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
-        AnalysisNwbfile().log(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     def fetch1_dataframe(self) -> pd.DataFrame:

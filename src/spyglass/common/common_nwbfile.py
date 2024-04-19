@@ -225,7 +225,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
         os.chmod(analysis_file_abs_path, permissions)
 
-        self._file_creation_times[analysis_file_name] = creation_time
+        self._creation_times[analysis_file_name] = creation_time
 
         return analysis_file_name
 
@@ -678,14 +678,19 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         # during times when no other transactions are in progress.
         AnalysisNwbfile.cleanup(True)
 
-    def log(self, analysis_file_name):
+    def log(self, analysis_file_name, table=None):
         """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
         if isinstance(analysis_file_name, dict):
             analysis_file_name = analysis_file_name["analysis_file_name"]
         time_delta = time() - self._creation_times[analysis_file_name]
         file_size = os.path.getsize(self.get_abs_path(analysis_file_name))
 
-        AnalysisNwbfileLog().log(analysis_file_name, time_delta, file_size)
+        AnalysisNwbfileLog().log(
+            analysis_file_name=analysis_file_name,
+            time_delta=time_delta,
+            file_size=file_size,
+            table=table,
+        )
 
 
 @schema
@@ -701,7 +706,7 @@ class AnalysisNwbfileLog(dj.Manual):
     file_size=null: float
     """
 
-    def log(self, analysis_file_name, time_delta, file_size):
+    def log(self, analysis_file_name, time_delta, file_size, table=None):
         """Log the creation of an analysis NWB file.
 
         Parameters
@@ -715,5 +720,6 @@ class AnalysisNwbfileLog(dj.Manual):
                 "analysis_file_name": analysis_file_name,
                 "time_delta": time_delta,
                 "file_size": file_size,
+                "table": table,
             }
         )

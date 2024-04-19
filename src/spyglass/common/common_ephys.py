@@ -411,6 +411,7 @@ class LFP(SpyglassMixin, dj.Imported):
     def make(self, key):
         # get the NWB object with the data; FIX: change to fetch with
         # additional infrastructure
+        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
 
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_list_name = (Raw() & key).fetch1(
@@ -465,8 +466,6 @@ class LFP(SpyglassMixin, dj.Imported):
         electrode_id_list = list(k["electrode_id"] for k in electrode_keys)
         electrode_id_list.sort()
 
-        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
-
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         (
             lfp_object_id,
@@ -502,7 +501,7 @@ class LFP(SpyglassMixin, dj.Imported):
             },
             replace=True,
         )
-        AnalysisNwbfile().log(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     def nwb_object(self, key):
@@ -667,6 +666,10 @@ class LFPBand(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        # create the analysis nwb file to store the results.
+        lfp_band_file_name = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
         lfp_object = (
             LFP() & {"nwb_file_name": key["nwb_file_name"]}
@@ -775,10 +778,6 @@ class LFPBand(SpyglassMixin, dj.Computed):
             )
             return None
 
-        # create the analysis nwb file to store the results.
-        lfp_band_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(
             lfp_band_file_name
         )
@@ -856,7 +855,7 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 "previously saved lfp band times do not match current times"
             )
 
-        AnalysisNwbfile().log(lfp_band_file_name)
+        AnalysisNwbfile().log(lfp_band_file_name, table=self.full_table_name)
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs):

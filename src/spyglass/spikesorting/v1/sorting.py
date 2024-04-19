@@ -400,5 +400,7 @@ def _write_sorting_to_nwb(
                 )
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
-    AnalysisNwbfile().log(analysis_nwb_file)
+    AnalysisNwbfile().log(
+        analysis_nwb_file, table="`spikesorting_v1_curation`.`curation_v1`"
+    )
     return analysis_nwb_file, units_object_id

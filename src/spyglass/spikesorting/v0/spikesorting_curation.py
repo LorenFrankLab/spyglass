@@ -226,6 +226,9 @@ class Curation(SpyglassMixin, dj.Manual):
         units_object_id : str
 
         """
+        analysis_file_name = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
 
         sort_interval_valid_times = (
             IntervalList & {"interval_list_name": sort_interval_list_name}
@@ -246,9 +249,6 @@ class Curation(SpyglassMixin, dj.Manual):
             units_valid_times[unit_id] = sort_interval_valid_times
             units_sort_interval[unit_id] = [sort_interval]
 
-        analysis_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
         object_ids = AnalysisNwbfile().add_units(
             analysis_file_name,
             units,
@@ -268,7 +268,9 @@ class Curation(SpyglassMixin, dj.Manual):
         else:
             units_object_id = object_ids[0]
 
-        AnalysisNwbfile().log(analysis_file_name)
+        AnalysisNwbfile().log(
+            analysis_file_name, table="`spikesorting_curation`.`curation`"
+        )
         return analysis_file_name, units_object_id
 
 
@@ -327,6 +329,9 @@ class Waveforms(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         recording = Curation.get_recording(key)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
@@ -352,16 +357,13 @@ class Waveforms(SpyglassMixin, dj.Computed):
             **waveform_params,
         )
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
         object_id = AnalysisNwbfile().add_units_waveforms(
             key["analysis_file_name"], waveform_extractor=waveforms
         )
         key["waveforms_object_id"] = object_id
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
 
-        AnalysisNwbfile().log(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     def load_waveforms(self, key: dict):
@@ -514,6 +516,9 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         waveform_extractor = Waveforms().load_waveforms(key)
         qm = {}
         params = (MetricParameters & key).fetch1("metric_params")
@@ -530,14 +535,11 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
         logger.info(f"Computed all metrics: {qm}")
         self._dump_to_json(qm, key["quality_metrics_path"])
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
         key["object_id"] = AnalysisNwbfile().add_units_metrics(
             key["analysis_file_name"], metrics=qm
         )
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
-        AnalysisNwbfile().log(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
         self.insert1(key)
 

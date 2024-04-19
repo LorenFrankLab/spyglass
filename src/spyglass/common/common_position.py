@@ -120,7 +120,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
 
         AnalysisNwbfile().add(key["nwb_file_name"], analysis_file_name)
 
-        AnalysisNwbfile().log(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
         self.insert1(key)
 

@@ -17,8 +17,10 @@
 - Avoid permission check on personnel tables. #903
 - Add documentation for `SpyglassMixin`. #903
 - Add helper to identify merge table by definition. #903
-- Prioritize datajoint filepath entry for defining abs_path of analysis nwbfile #918
+- Prioritize datajoint filepath entry for defining abs_path of analysis nwbfile
+    #918
 - Fix potential duplicate entries in Merge part tables #922
+- Add logging of AnalysisNwbfile creation time and size #937
 
 ### Pipelines
 

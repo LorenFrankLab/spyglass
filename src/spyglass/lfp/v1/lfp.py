@@ -58,6 +58,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
         # get the NWB object with the data
         nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
         rawdata = (Raw & nwbf_key).fetch_nwb()[0]["raw"]
@@ -127,8 +128,6 @@ class LFPV1(SpyglassMixin, dj.Computed):
         electrode_id_list = list(k["electrode_id"] for k in electrode_keys)
         electrode_id_list.sort()
 
-        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
-
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         (
             lfp_object_id,
@@ -193,7 +192,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
         orig_key["analysis_file_name"] = lfp_file_name
         orig_key["lfp_object_id"] = lfp_object_id
         LFPOutput.insert1(orig_key)
-        AnalysisNwbfile().log(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self, *attrs, **kwargs):
         nwb_lfp = self.fetch_nwb()[0]
