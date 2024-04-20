@@ -152,6 +152,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         # - information about the recording
         # - artifact free intervals
         # - spike sorter and sorter params
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time.time()
 
         recording_key = (
             SpikeSortingRecording * SpikeSortingSelection & key
@@ -368,7 +369,7 @@ def _write_sorting_to_nwb(
         Name of analysis NWB file containing the sorting
     """
 
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)  # logged
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,

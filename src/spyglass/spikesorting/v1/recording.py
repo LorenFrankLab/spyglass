@@ -1,4 +1,5 @@
 import uuid
+from time import time
 from typing import Iterable, List, Optional, Tuple, Union
 
 import datajoint as dj
@@ -250,6 +251,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # DO:
         # - get valid times for sort interval
         # - proprocess recording
@@ -617,7 +619,7 @@ def _write_recording_to_nwb(
         name of analysis NWB file containing the preprocessed recording
     """
 
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)  # logged
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,

@@ -226,9 +226,7 @@ class Curation(SpyglassMixin, dj.Manual):
         units_object_id : str
 
         """
-        analysis_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         sort_interval_valid_times = (
             IntervalList & {"interval_list_name": sort_interval_list_name}
@@ -933,17 +931,21 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time.time()
         unit_labels_to_remove = ["reject"]
         # check that the Curation has metrics
         metrics = (Curation & key).fetch1("quality_metrics")
         if metrics == {}:
-            Warning(
-                f"Metrics for Curation {key} should normally be calculated before insertion here"
+            logger.warning(
+                f"Metrics for Curation {key} should normally be calculated "
+                + "before insertion here"
             )
 
         sorting = Curation.get_curated_sorting(key)
         unit_ids = sorting.get_unit_ids()
-        # Get the labels for the units, add only those units that do not have 'reject' or 'noise' labels
+
+        # Get the labels for the units, add only those units that do not have
+        # 'reject' or 'noise' labels
         unit_labels = (Curation & key).fetch1("curation_labels")
         accepted_units = []
         for unit_id in unit_ids:

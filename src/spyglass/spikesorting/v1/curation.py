@@ -1,3 +1,4 @@
+from time import time
 from typing import Dict, List, Union
 
 import datajoint as dj
@@ -74,6 +75,8 @@ class CurationV1(SpyglassMixin, dj.Manual):
         -------
         curation_key : dict
         """
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
+
         sort_query = cls & {"sorting_id": sorting_id}
         parent_curation_id = max(parent_curation_id, -1)
         if parent_curation_id == -1:
@@ -296,7 +299,7 @@ def _write_sorting_to_nwb_with_curation(
     nwb_file_name = (SpikeSortingSelection & {"sorting_id": sorting_id}).fetch1(
         "nwb_file_name"
     )
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)  # logged
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
 
     # get sorting
     sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(

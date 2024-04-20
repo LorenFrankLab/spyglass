@@ -1,5 +1,6 @@
 import os
 import uuid
+from time import time
 from typing import Any, Dict, List, Union
 
 import datajoint as dj
@@ -203,6 +204,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # FETCH
         nwb_file_name = (
             SpikeSortingSelection * MetricCurationSelection & key
@@ -524,7 +526,7 @@ def _write_metric_curation_to_nwb(
         object_id of the units table in the analysis NWB file
     """
     # create new analysis nwb file
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)  # logged
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
 
     unit_ids = [int(i) for i in waveforms.sorting.get_unit_ids()]

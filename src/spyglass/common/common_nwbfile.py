@@ -185,7 +185,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_file_name : str
             The name of the new NWB file.
         """
-        creation_time = time()
+        # To allow some times to occur before create
+        creation_time = self._creation_times.get("pre_create_time", time())
 
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         alter_source_script = False
@@ -683,7 +684,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         if isinstance(analysis_file_name, dict):
             analysis_file_name = analysis_file_name["analysis_file_name"]
         time_delta = time() - self._creation_times[analysis_file_name]
-        file_size = os.path.getsize(self.get_abs_path(analysis_file_name))
+        file_size = Path(self.get_abs_path(analysis_file_name)).stat().st_size
 
         AnalysisNwbfileLog().log(
             analysis_file_name=analysis_file_name,
