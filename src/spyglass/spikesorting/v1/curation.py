@@ -1,3 +1,4 @@
+from time import time
 from typing import Dict, List, Union
 
 import datajoint as dj
@@ -79,6 +80,8 @@ class CurationV1(SpyglassMixin, dj.Manual):
         -------
         curation_key : dict
         """
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
+
         sort_query = cls & {"sorting_id": sorting_id}
         parent_curation_id = max(parent_curation_id, -1)
         if parent_curation_id == -1:
@@ -337,6 +340,7 @@ def _write_sorting_to_nwb_with_curation(
     nwb_file_name = (SpikeSortingSelection & {"sorting_id": sorting_id}).fetch1(
         "nwb_file_name"
     )
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
 
     # get sorting
     sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
@@ -365,7 +369,6 @@ def _write_sorting_to_nwb_with_curation(
     unit_ids = list(units_dict.keys())
 
     # create new analysis nwb file
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,
@@ -422,6 +425,9 @@ def _write_sorting_to_nwb_with_curation(
 
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
+    AnalysisNwbfile().log(
+        analysis_nwb_file, table="`spikesorting_v1_sorting`.`__spike_sorting`"
+    )
     return analysis_nwb_file, units_object_id
 
 

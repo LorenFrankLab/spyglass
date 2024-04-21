@@ -1,3 +1,4 @@
+import os
 import tempfile
 import time
 import uuid
@@ -22,7 +23,6 @@ from spyglass.spikesorting.v1.recording import (  # noqa: F401
     _consolidate_intervals,
 )
 from spyglass.utils import SpyglassMixin, logger
-import os
 
 schema = dj.schema("spikesorting_v1_sorting")
 
@@ -152,6 +152,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         # - information about the recording
         # - artifact free intervals
         # - spike sorter and sorter params
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time.time()
 
         recording_key = (
             SpikeSortingRecording * SpikeSortingSelection & key
@@ -404,4 +405,7 @@ def _write_sorting_to_nwb(
                 )
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
+    AnalysisNwbfile().log(
+        analysis_nwb_file, table="`spikesorting_v1_curation`.`curation_v1`"
+    )
     return analysis_nwb_file, units_object_id
