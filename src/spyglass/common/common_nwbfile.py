@@ -186,8 +186,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of the new NWB file.
         """
         # To allow some times to occur before create
-        creation_time = self._creation_times.get("pre_create_time", time())
-        del self._creation_times["pre_create_time"]
+        creation_time = self._creation_times.pop("pre_create_time", time())
 
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         alter_source_script = False
