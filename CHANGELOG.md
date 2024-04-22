@@ -16,6 +16,8 @@
 - Prioritize datajoint filepath entry for defining abs_path of analysis nwbfile
     #918
 - Fix potential duplicate entries in Merge part tables #922
+- Add logging of AnalysisNwbfile creation time and size #937
+- Fix error on empty delete call in merge table. #940
 - Add log of AnalysisNwbfile creation time, size, and access count #937, #941
 
 ### Pipelines

@@ -799,11 +799,16 @@ class Merge(dj.Manual):
 
     def delete(self, force_permission=False, *args, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
-        for part in self.merge_get_part(
-            restriction=self.restriction,
-            multi_source=True,
-            return_empties=False,
+        if not (
+            parts := self.merge_get_part(
+                restriction=self.restriction,
+                multi_source=True,
+                return_empties=False,
+            )
         ):
+            return
+
+        for part in parts:
             part.delete(force_permission=force_permission, *args, **kwargs)
 
     def super_delete(self, warn=True, *args, **kwargs):
