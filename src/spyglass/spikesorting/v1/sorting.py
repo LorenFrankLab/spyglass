@@ -233,6 +233,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             sorter_params.pop("tempdir", None)
             sorter_params.pop("whiten", None)
             sorter_params.pop("outputs", None)
+            if "local_radius_um" in sorter_params:
+                sorter_params["radius_um"] = sorter_params.pop(
+                    "local_radius_um"
+                )  # correct existing parameter sets for spikeinterface>=0.99.1
 
             # Detect peaks for clusterless decoding
             detected_spikes = detect_peaks(recording, **sorter_params)
