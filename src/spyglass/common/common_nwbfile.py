@@ -693,21 +693,37 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             table=table,
         )
 
+    def increment_access(self, keys, table=None):
+        """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
+        if not isinstance(keys, list):
+            key = [keys]
+
+        for key in keys:
+            AnalysisNwbfileLog().increment_access(key, table=table)
+
 
 @schema
 class AnalysisNwbfileLog(dj.Manual):
     definition = """
     id: int auto_increment
     ---
-    dj_user: varchar(64)
     -> AnalysisNwbfile
-    table=null: varchar(64)
-    timestamp = CURRENT_TIMESTAMP : timestamp
-    time_delta=null: float
-    file_size=null: float
+    dj_user                       : varchar(64) # user who created the file
+    timestamp = CURRENT_TIMESTAMP : timestamp   # when the file was created
+    table = null                  : varchar(64) # creating table
+    time_delta = null             : float       # how long it took to create
+    file_size = null              : float       # size of the file in bytes
+    accessed = 0                  : int         # n times accessed
+    unique index (analysis_file_name)
     """
 
-    def log(self, analysis_file_name, time_delta, file_size, table=None):
+    def log(
+        self,
+        analysis_file_name=None,
+        time_delta=None,
+        file_size=None,
+        table=None,
+    ):
         """Log the creation of an analysis NWB file.
 
         Parameters
@@ -724,3 +740,29 @@ class AnalysisNwbfileLog(dj.Manual):
                 "table": table,
             }
         )
+
+    def increment_access(self, key, table=None):
+        """Increment the accessed field for the given analysis file name.
+
+        Parameters
+        ----------
+        key : Union[str, dict]
+            The name of the analysis NWB file, or a key to the table.
+        table : str, optional
+            The table that created the file.
+        """
+        if isinstance(key, str):
+            key = {"analysis_file_name": key}
+
+        if not (query := self & key):
+            self.log(**key, table=table)
+        entries = query.fetch(as_dict=True)
+
+        inserts = []
+        for entry in entries:
+            entry["accessed"] += 1
+            if table and not entry["table"]:
+                entry["table"] = table
+            inserts.append(entry)
+
+        self.insert(inserts, replace=True)

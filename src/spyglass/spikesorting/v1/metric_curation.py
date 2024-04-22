@@ -276,6 +276,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
             nwb_file_name,
             key["analysis_file_name"],
         )
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     @classmethod
@@ -586,8 +587,4 @@ def _write_metric_curation_to_nwb(
 
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
-    AnalysisNwbfile().log(
-        analysis_nwb_file,
-        table="`spikesorting_v1_metric_curation`.`__metric_curation`",
-    )
     return analysis_nwb_file, units_object_id

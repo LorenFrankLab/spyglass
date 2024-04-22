@@ -284,6 +284,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
             key["analysis_file_name"],
         )
+        AnalysisNwbfile().log(
+            recording_nwb_file_name, table=self.full_table_name
+        )
         self.insert1(key)
 
     @classmethod
@@ -651,10 +654,6 @@ def _write_recording_to_nwb(
             "ProcessedElectricalSeries"
         ].object_id
         io.write(nwbfile)
-    AnalysisNwbfile().log(
-        analysis_nwb_file,
-        table="`spikesorting_v1_sorting`.`__spike_sorting_recording`",
-    )
     return analysis_nwb_file, recording_object_id
 
 

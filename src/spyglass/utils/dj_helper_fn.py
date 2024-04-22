@@ -6,7 +6,9 @@ from typing import Type
 
 import datajoint as dj
 import numpy as np
+from datajoint.user_tables import UserTable
 
+from spyglass.utils.dj_chains import PERIPHERAL_TABLES
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
@@ -110,6 +112,26 @@ def dj_replace(original_table, new_values, key_column, replace_column):
     return original_table
 
 
+def get_fetching_table_from_stack(stack):
+    """Get all classes from a stack of tables."""
+    classes = set()
+    for frame_info in stack:
+        locals_dict = frame_info.frame.f_locals
+        for obj in locals_dict.values():
+            if not isinstance(obj, UserTable):
+                continue  # skip non-tables
+            if (name := obj.full_table_name) in PERIPHERAL_TABLES:
+                continue  # skip common_nwbfile tables
+            classes.add(name)
+    if len(classes) > 1:
+        logger.warn(
+            f"Multiple classes found in stack: {classes}. "
+            "Please submit a bug report with the snippet used."
+        )
+        classes = None  # predict only one but not sure, so return None
+    return next(iter(classes)) if classes else None
+
+
 def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     """Get the NWB file name and path from the given DataJoint query.
 
@@ -150,6 +172,11 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
         query_expression * tbl.proj(nwb2load_filepath=attr_name)
     ).fetch(file_name_str)
 
+    if which == "analysis":
+        AnalysisNwbfile().increment_access(
+            nwb_files, table=get_fetching_table_from_stack(inspect.stack())
+        )
+
     return nwb_files, file_path_fn
 
 
@@ -185,6 +212,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_files, file_path_fn = get_nwb_table(
         query_expression, tbl, attr_name, *attrs, **kwargs
     )
+
     for file_name in nwb_files:
         file_path = file_path_fn(file_name)
         if not os.path.exists(file_path):  # retrieve the file from kachery.
