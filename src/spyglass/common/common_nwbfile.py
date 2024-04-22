@@ -761,7 +761,7 @@ class AnalysisNwbfileLog(dj.Manual):
         inserts = []
         for entry in entries:
             entry["accessed"] += 1
-            if table and not entry["table"]:
+            if table and not entry.get("table"):
                 entry["table"] = table
             inserts.append(entry)
 
