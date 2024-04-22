@@ -21,7 +21,7 @@
     #918
 - Fix potential duplicate entries in Merge part tables #922
 - Add logging of AnalysisNwbfile creation time and size #937
-- Fix error on emty delete call in merge table. #940
+- Fix error on empty delete call in merge table. #940
 
 ### Pipelines
 
