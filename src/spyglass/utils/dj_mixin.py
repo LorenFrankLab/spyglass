@@ -139,6 +139,7 @@ class SpyglassMixin:
         Additional logic support Export table logging.
         """
         table, tbl_attr = self._nwb_table_tuple
+
         if self.export_id and "analysis" in tbl_attr:
             tbl_pk = "analysis_file_name"
             fnames = (self * table).fetch(tbl_pk)

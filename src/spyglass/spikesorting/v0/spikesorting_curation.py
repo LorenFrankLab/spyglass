@@ -268,9 +268,6 @@ class Curation(SpyglassMixin, dj.Manual):
         else:
             units_object_id = object_ids[0]
 
-        AnalysisNwbfile().log(
-            analysis_file_name, table="`spikesorting_curation`.`curation`"
-        )
         return analysis_file_name, units_object_id
 
 
@@ -1003,6 +1000,8 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
             unit_ids=accepted_units,
             labels=labels,
         )
+
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
         # now add the units
