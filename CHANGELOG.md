@@ -1,10 +1,6 @@
 # Change Log
 
-## [0.5.2] (Unreleased)
-
-### Release Notes
-
-<!-- Running draft to be removed immediately prior to release. -->
+## [0.5.2] (April 22, 2024)
 
 ### Infrastructure
 
@@ -22,13 +18,15 @@
 - Fix potential duplicate entries in Merge part tables #922
 - Add logging of AnalysisNwbfile creation time and size #937
 - Fix error on empty delete call in merge table. #940
+- Add log of AnalysisNwbfile creation time, size, and access count #937, #941
 
 ### Pipelines
 
 - Spikesorting
     - Update calls in v0 pipeline for spikeinterface>=0.99 #893
     - Fix method type of `get_spike_times` #904
-    - Add helper functions for restricting spikesorting results and linking to probe info #910
+    - Add helper functions for restricting spikesorting results and linking to
+        probe info #910
 - Decoding
     - Handle dimensions of clusterless `get_ahead_behind_distance` #904
     - Fix improper handling of nwb file names with .strip #929
