@@ -128,6 +128,7 @@ class CurationV1(SpyglassMixin, dj.Manual):
             key,
             skip_duplicates=True,
         )
+        AnalysisNwbfile().log(analysis_file_name, table=cls.full_table_name)
 
         return key
 
@@ -425,9 +426,6 @@ def _write_sorting_to_nwb_with_curation(
 
         units_object_id = nwbf.units.object_id
         io.write(nwbf)
-    AnalysisNwbfile().log(
-        analysis_nwb_file, table="`spikesorting_v1_sorting`.`__spike_sorting`"
-    )
     return analysis_nwb_file, units_object_id
 
 
