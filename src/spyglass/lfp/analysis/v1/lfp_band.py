@@ -333,36 +333,16 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             + str(lfp_band_sampling_rate)
             + "Hz"
         )
-        tmp_valid_times = (
-            IntervalList
-            & {
+        interval_key = IntervalList().cautious_insert1(
+            key={
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
-            }
-        ).fetch("valid_times")
-        if len(tmp_valid_times) == 0:
-            lfp_band_valid_times = interval_list_censor(
-                lfp_band_valid_times, new_timestamps
-            )
-            # add an interval list for the LFP valid times
-            IntervalList.insert1(
-                {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "interval_list_name": key["interval_list_name"],
-                    "valid_times": lfp_band_valid_times,
-                    "pipeline": "lfp band",
-                }
-            )
-        else:
-            lfp_band_valid_times = interval_list_censor(
-                lfp_band_valid_times, new_timestamps
-            )
-            # check that the valid times are the same
-            assert np.isclose(
-                tmp_valid_times[0], lfp_band_valid_times
-            ).all(), (
-                "previously saved lfp band times do not match current times"
-            )
+                "valid_times": lfp_band_valid_times,
+                "pipeline": "lfp band",
+            },
+            approx_name="lfp band%Hz",
+        )
+        key.update(interval_key)
 
         AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)

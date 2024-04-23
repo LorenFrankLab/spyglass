@@ -179,31 +179,35 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
             referencing=ref,
         )
 
+        # name for no-artifact time name using recording id
+        interval_list_name = "_".join(
+            [
+                key["nwb_file_name"],
+                key["target_interval_list_name"],
+                "LFP",
+                key["artifact_params_name"],
+            ]
+        )
+        interval_key = IntervalList().cautious_insert1(
+            key={
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": interval_list_name,
+                "valid_times": artifact_removed_valid_times,
+                "pipeline": "lfp_artifact",
+            },
+            approx_name=key["artifact_params_name"],
+        )  # removed repleace=True 2024-04-22
         key.update(
             dict(
                 artifact_times=artifact_times,
                 artifact_removed_valid_times=artifact_removed_valid_times,
-                # name for no-artifact time name using recording id
-                artifact_removed_interval_list_name="_".join(
-                    [
-                        key["nwb_file_name"],
-                        key["target_interval_list_name"],
-                        "LFP",
-                        key["artifact_params_name"],
-                    ]
-                ),
+                artifact_removed_interval_list_name=interval_key[
+                    "interval_list_name"
+                ],
             )
         )
 
-        interval_key = {  # also insert into IntervalList
-            "nwb_file_name": key["nwb_file_name"],
-            "interval_list_name": key["artifact_removed_interval_list_name"],
-            "valid_times": key["artifact_removed_valid_times"],
-            "pipeline": "lfp_artifact",
-        }
-
         LFPArtifactRemovedIntervalList.insert1(key, replace=True)
-        IntervalList.insert1(interval_key, replace=True)
         self.insert1(key)
 
 
