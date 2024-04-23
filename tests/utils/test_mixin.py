@@ -20,7 +20,7 @@ def Mixin():
 
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_bad_prefix(caplog, dj_conn, Mixin):
-    schema_bad = dj.Schema("badprefix", {}, connection=dj_conn)
+    schema_bad = dj.Schema("badprefix_", {}, connection=dj_conn)
     schema_bad(Mixin)
     assert "Schema prefix not in SHARED_MODULES" in caplog.text
 
@@ -33,6 +33,8 @@ def test_nwb_table_missing(schema_test, Mixin):
 
 def test_merge_detect(Nwbfile, pos_merge_tables):
     """Test that the mixin can detect merge children of merge."""
+    from spyglass.lfp.lfp_merge import LFPOutput
+
     merges_found = set(Nwbfile._merge_chains.keys())
     merges_expected = set([t.full_table_name for t in pos_merge_tables])
     assert merges_expected.issubset(
