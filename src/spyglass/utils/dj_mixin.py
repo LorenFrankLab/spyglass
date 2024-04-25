@@ -749,4 +749,3 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
         """Delete master and part entries."""
         restriction = self.restriction or True  # for (tbl & restr).delete()
         (self.master & restriction).delete(*args, **kwargs)
-
