@@ -60,6 +60,7 @@ class SpyglassConfig:
 
         self.relative_dirs = {
             # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
+            # NOTE: Adding new dir requires edit to HHMI hub
             "spyglass": {
                 "raw": "raw",
                 "analysis": "analysis",
@@ -68,6 +69,7 @@ class SpyglassConfig:
                 "waveforms": "waveforms",
                 "temp": "tmp",
                 "video": "video",
+                "export": "export",
             },
             "kachery": {
                 "cloud": ".kachery-cloud",
@@ -459,6 +461,7 @@ class SpyglassConfig:
                     "waveforms": self.waveforms_dir,
                     "temp": self.temp_dir,
                     "video": self.video_dir,
+                    "export": self.export_dir,
                 },
                 "kachery_dirs": {
                     "cloud": self.config.get(
@@ -517,6 +520,10 @@ class SpyglassConfig:
         return self.config.get(self.dir_to_var("video"))
 
     @property
+    def export_dir(self) -> str:
+        return self.config.get(self.dir_to_var("export"))
+
+    @property
     def debug_mode(self) -> bool:
         """Returns True if debug_mode is set.
 
@@ -560,6 +567,7 @@ if sg_config.load_failed:  # Failed to load
     sorting_dir = None
     waveforms_dir = None
     video_dir = None
+    export_dir = None
     dlc_project_dir = None
     dlc_video_dir = None
     dlc_output_dir = None
@@ -573,6 +581,7 @@ else:
     sorting_dir = sg_config.sorting_dir
     waveforms_dir = sg_config.waveforms_dir
     video_dir = sg_config.video_dir
+    export_dir = sg_config.export_dir
     debug_mode = sg_config.debug_mode
     test_mode = sg_config.test_mode
     prepopulate = config.get("prepopulate", False)

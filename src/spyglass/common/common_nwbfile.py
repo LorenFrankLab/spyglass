@@ -3,14 +3,17 @@ import random
 import stat
 import string
 from pathlib import Path
+from time import time
 
 import datajoint as dj
+import h5py
 import numpy as np
 import pandas as pd
 import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 
+from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
@@ -151,7 +154,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
 class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     definition = """
     # Table for holding the NWB files that contain results of analysis, such as spike sorting.
-    analysis_file_name: varchar(64)               # name of the file
+    analysis_file_name: varchar(64)                # name of the file
     ---
     -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
     analysis_file_abs_path: filepath@analysis      # the full path to the file
@@ -160,10 +163,12 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                                                    # that span multiple NWB files
     INDEX (analysis_file_abs_path)
     """
-    # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
-    # so that alter() can work
+    # NOTE the INDEX above is implicit from filepath@...
+    # above but needs to be explicit so that alter() can work
 
     # See #630, #664. Excessive key length.
+
+    _creation_times = {}
 
     def create(self, nwb_file_name):
         """Open the NWB file, create a copy, write the copy to disk and return the name of the new file.
@@ -180,7 +185,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_file_name : str
             The name of the new NWB file.
         """
+        # To allow some times to occur before create
+        creation_time = self._creation_times.pop("pre_create_time", time())
+
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        alter_source_script = False
         with pynwb.NWBHDF5IO(
             path=nwb_file_abspath, mode="r", load_namespaces=True
         ) as io:
@@ -193,6 +202,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                     if isinstance(nwb_object, pynwb.core.LabelledDict):
                         for module in list(nwb_object.keys()):
                             nwb_object.pop(module)
+            # add the version of spyglass that created this file
+            if nwbf.source_script is None:
+                nwbf.source_script = f"spyglass={sg_version}"
+            else:
+                alter_source_script = True
 
             analysis_file_name = self.__get_new_file_name(nwb_file_name)
             # write the new file
@@ -205,12 +219,22 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 path=analysis_file_abs_path, mode="w", manager=io.manager
             ) as export_io:
                 export_io.export(io, nwbf)
+        if alter_source_script:
+            self._alter_spyglass_version(analysis_file_abs_path)
 
         # change the permissions to only allow owner to write
         permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
         os.chmod(analysis_file_abs_path, permissions)
 
+        self._creation_times[analysis_file_name] = creation_time
+
         return analysis_file_name
+
+    @staticmethod
+    def _alter_spyglass_version(nwb_file_path):
+        """Change the source script to the current version of spyglass"""
+        with h5py.File(nwb_file_path, "a") as f:
+            f["/general/source_script"][()] = f"spyglass={sg_version}"
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name):
@@ -284,17 +308,18 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_file_name : str
             The name of the analysis NWB file that was created.
         """
-        key = dict()
-        key["nwb_file_name"] = nwb_file_name
-        key["analysis_file_name"] = analysis_file_name
-        key["analysis_file_description"] = ""
-        key["analysis_file_abs_path"] = AnalysisNwbfile.get_abs_path(
-            analysis_file_name
-        )
+        key = {
+            "nwb_file_name": nwb_file_name,
+            "analysis_file_name": analysis_file_name,
+            "analysis_file_description": "",
+            "analysis_file_abs_path": AnalysisNwbfile.get_abs_path(
+                analysis_file_name
+            ),
+        }
         self.insert1(key)
 
-    @staticmethod
-    def get_abs_path(analysis_nwb_file_name):
+    @classmethod
+    def get_abs_path(cls, analysis_nwb_file_name):
         """Return the absolute path for a stored analysis NWB file given just the file name.
 
         The spyglass config from settings.py must be set.
@@ -309,6 +334,18 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
+        # If an entry exists in the database get the stored datajoint filepath
+        file_key = {"analysis_file_name": analysis_nwb_file_name}
+        if cls & file_key:
+            try:
+                # runs if file exists locally
+                return (cls & file_key).fetch1("analysis_file_abs_path")
+            except FileNotFoundError as e:
+                # file exists in database but not locally
+                # parse the intended path from the error message
+                return str(e).split(": ")[1].replace("'", "")
+
+        # File not in database, define what it should be
         # see if the file exists and is stored in the base analysis dir
         test_path = f"{analysis_dir}/{analysis_nwb_file_name}"
 
@@ -326,8 +363,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     def add_nwb_object(
         self, analysis_file_name, nwb_object, table_name="pandas_table"
     ):
-        # TODO: change to add_object with checks for object type and a name parameter, which should be specified if
-        # it is not an NWB container
+        # TODO: change to add_object with checks for object type and a name
+        # parameter, which should be specified if it is not an NWB container
         """Add an NWB object to the analysis file in the scratch area and returns the NWB object ID
 
         Parameters
@@ -427,7 +464,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                             metric_values = np.array(
                                 list(metrics[metric].values())
                             )
-                            # sort by unit_ids and apply that sorting to values to ensure that things go in the right order
+
+                            # sort by unit_ids and apply that sorting to values
+                            # to ensure that things go in the right order
+
                             metric_values = metric_values[np.argsort(unit_ids)]
                             logger.info(
                                 f"Adding metric {metric} : {metric_values}"
@@ -639,42 +679,90 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         # during times when no other transactions are in progress.
         AnalysisNwbfile.cleanup(True)
 
-        # also check to see whether there are directories in the spikesorting folder with this
+    def log(self, analysis_file_name, table=None):
+        """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
+        if isinstance(analysis_file_name, dict):
+            analysis_file_name = analysis_file_name["analysis_file_name"]
+        time_delta = time() - self._creation_times[analysis_file_name]
+        file_size = Path(self.get_abs_path(analysis_file_name)).stat().st_size
 
-
-@schema
-class NwbfileKachery(SpyglassMixin, dj.Computed):
-    definition = """
-    -> Nwbfile
-    ---
-    nwb_file_uri: varchar(200)  # the uri the NWB file for kachery
-    """
-
-    def make(self, key):
-        import kachery_client as kc
-
-        logger.info(f'Linking {key["nwb_file_name"]} and storing in kachery...')
-        key["nwb_file_uri"] = kc.link_file(
-            Nwbfile().get_abs_path(key["nwb_file_name"])
+        AnalysisNwbfileLog().log(
+            analysis_file_name=analysis_file_name,
+            time_delta=time_delta,
+            file_size=file_size,
+            table=table,
         )
-        self.insert1(key)
+
+    def increment_access(self, keys, table=None):
+        """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
+        if not isinstance(keys, list):
+            key = [keys]
+
+        for key in keys:
+            AnalysisNwbfileLog().increment_access(key, table=table)
 
 
 @schema
-class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
+class AnalysisNwbfileLog(dj.Manual):
     definition = """
+    id: int auto_increment
+    ---
     -> AnalysisNwbfile
-    ---
-    analysis_file_uri: varchar(200)  # the uri of the file
+    dj_user                       : varchar(64) # user who created the file
+    timestamp = CURRENT_TIMESTAMP : timestamp   # when the file was created
+    table = null                  : varchar(64) # creating table
+    time_delta = null             : float       # how long it took to create
+    file_size = null              : float       # size of the file in bytes
+    accessed = 0                  : int         # n times accessed
+    unique index (analysis_file_name)
     """
 
-    def make(self, key):
-        import kachery_client as kc
+    def log(
+        self,
+        analysis_file_name=None,
+        time_delta=None,
+        file_size=None,
+        table=None,
+    ):
+        """Log the creation of an analysis NWB file.
 
-        logger.info(
-            f'Linking {key["analysis_file_name"]} and storing in kachery...'
+        Parameters
+        ----------
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        """
+        self.insert1(
+            {
+                "dj_user": dj.config["database.user"],
+                "analysis_file_name": analysis_file_name,
+                "time_delta": time_delta,
+                "file_size": file_size,
+                "table": table,
+            }
         )
-        key["analysis_file_uri"] = kc.link_file(
-            AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
-        )
-        self.insert1(key)
+
+    def increment_access(self, key, table=None):
+        """Increment the accessed field for the given analysis file name.
+
+        Parameters
+        ----------
+        key : Union[str, dict]
+            The name of the analysis NWB file, or a key to the table.
+        table : str, optional
+            The table that created the file.
+        """
+        if isinstance(key, str):
+            key = {"analysis_file_name": key}
+
+        if not (query := self & key):
+            self.log(**key, table=table)
+        entries = query.fetch(as_dict=True)
+
+        inserts = []
+        for entry in entries:
+            entry["accessed"] += 1
+            if table and not entry.get("table"):
+                entry["table"] = table
+            inserts.append(entry)
+
+        self.insert(inserts, replace=True)

@@ -18,6 +18,30 @@ from spyglass.utils.logging import logger
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
 RESERVED_SK_LENGTH = 32
+MERGE_DEFINITION = (
+    f"\n    {RESERVED_PRIMARY_KEY}: uuid\n    ---\n"
+    + f"    {RESERVED_SECONDARY_KEY}: varchar({RESERVED_SK_LENGTH})\n    "
+)
+
+
+def is_merge_table(table):
+    """Return True if table definition matches the default Merge table.
+
+    Regex removes comments and blank lines before comparison.
+    """
+    if not isinstance(table, dj.Table):
+        return False
+    if isinstance(table, dj.FreeTable):
+        fields, pk = table.heading.names, table.primary_key
+        return fields == [
+            RESERVED_PRIMARY_KEY,
+            RESERVED_SECONDARY_KEY,
+        ] and pk == [RESERVED_PRIMARY_KEY]
+    return MERGE_DEFINITION == re.sub(
+        r"\n\s*\n",
+        "\n",
+        re.sub(r"#.*\n", "\n", getattr(table, "definition", "")),
+    )
 
 
 class Merge(dj.Manual):
@@ -34,21 +58,16 @@ class Merge(dj.Manual):
         super().__init__()
         self._reserved_pk = RESERVED_PRIMARY_KEY
         self._reserved_sk = RESERVED_SECONDARY_KEY
-        merge_def = (
-            f"\n    {self._reserved_pk}: uuid\n    ---\n"
-            + f"    {self._reserved_sk}: varchar({RESERVED_SK_LENGTH})\n    "
-        )
         if not self.is_declared:
-            # remove comments after # from each line of definition
-            if self._remove_comments(self.definition) != merge_def:
+            if not is_merge_table(self):  # Check definition
                 logger.warn(
-                    "Merge table with non-default definition\n\t"
-                    + f"Expected: {merge_def.strip()}\n\t"
+                    "Merge table with non-default definition\n"
+                    + f"Expected: {MERGE_DEFINITION.strip()}\n"
                     + f"Actual  : {self.definition.strip()}"
                 )
             for part in self.parts(as_objects=True):
                 if part.primary_key != self.primary_key:
-                    logger.warn(
+                    logger.warn(  # PK is only 'merge_id' in parts, no others
                         f"Unexpected primary key in {part.table_name}"
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
@@ -332,6 +351,9 @@ class Merge(dj.Manual):
                             + f"{part_name}:\n\tData:{row}\n\t{keys}"
                         )
                     key = keys[0]
+                    if part & key:
+                        print(f"Key already in part {part_name}: {key}")
+                        continue
                     master_sk = {cls()._reserved_sk: part_name}
                     uuid = dj.hash.key_hash(key | master_sk)
                     master_pk = {cls()._reserved_pk: uuid}
@@ -777,20 +799,26 @@ class Merge(dj.Manual):
 
     def delete(self, force_permission=False, *args, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
-        for part in self.merge_get_part(
-            restriction=self.restriction,
-            multi_source=True,
-            return_empties=False,
+        if not (
+            parts := self.merge_get_part(
+                restriction=self.restriction,
+                multi_source=True,
+                return_empties=False,
+            )
         ):
+            return
+
+        for part in parts:
             part.delete(force_permission=force_permission, *args, **kwargs)
 
-    def super_delete(self, *args, **kwargs):
+    def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete.
 
-        Added to support MRO of SpyglassMixin"""
-        logger.warning("!! Using super_delete. Bypassing cautious_delete !!")
-
-        self._log_use(start=time(), super_delete=True)
+        Added to support MRO of SpyglassMixin
+        """
+        if warn:
+            logger.warning("!! Bypassing cautious_delete !!")
+            self._log_use(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
 

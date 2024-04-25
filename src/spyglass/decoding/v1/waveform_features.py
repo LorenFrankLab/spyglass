@@ -1,5 +1,6 @@
 import os
 from itertools import chain
+from time import time
 
 import datajoint as dj
 import numpy as np
@@ -102,6 +103,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # get the list of feature parameters
         params = (WaveformFeaturesParams & key).fetch1("params")
 
@@ -164,6 +166,8 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             nwb_file_name,
             key["analysis_file_name"],
         )
+        AnalysisNwbfile().log(key, table=self.full_table_name)
+
         self.insert1(key)
 
     @staticmethod
