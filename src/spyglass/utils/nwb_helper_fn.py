@@ -499,15 +499,15 @@ def get_all_spatial_series(nwbf, verbose=False, incl_times=True) -> dict:
     )
 
 
-def get_nwb_copy_filename(nwb_file_name):
+def get_nwb_copy_filename(nwb_file_name: str):
     """Get file name of copy of nwb file without the electrophys data"""
 
-    filename, file_extension = os.path.splitext(nwb_file_name)
-
-    if filename.endswith("_"):
-        logger.warning(f"File may already be a copy: {nwb_file_name}")
-
-    return f"{filename}_{file_extension}"
+    if nwb_file_name.endswith(".nwb"):
+        return f'{nwb_file_name[:-len(".nwb")]}_.nwb'
+    elif nwb_file_name.endswith(".nwb.lindi.json"):
+        return f'{nwb_file_name[:-len(".nwb.lindi.json")]}_.nwb.lindi.json'
+    else:
+        raise ValueError(f"Invalid file extension: {nwb_file_name}")
 
 
 def change_group_permissions(

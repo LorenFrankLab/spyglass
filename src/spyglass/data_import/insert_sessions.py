@@ -3,6 +3,7 @@ import stat
 import warnings
 from pathlib import Path
 from typing import List, Union
+import shutil
 
 import pynwb
 
@@ -64,7 +65,15 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         # Make a copy of the NWB file that ends with '_'.
         # This has everything except the raw data but has a link to
         # the raw data in the original file
-        copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
+        if nwb_file_name.endswith(".nwb"):
+            copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
+        elif nwb_file_name.endswith(".lindi.json"):
+            # but if this is a lindi file, we can just copy the whole file
+            shutil.copy(
+                raw_dir + "/" + nwb_file_name, raw_dir + "/" + out_nwb_file_name
+            )
+        else:
+            raise ValueError(f"Unexpected file extension for {nwb_file_name}. ")
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
         populate_all_common(out_nwb_file_name)
 
