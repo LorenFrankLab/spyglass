@@ -38,6 +38,8 @@ def chains(Nwbfile):
     )  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
 
+    _ = LFPOutput, LinearizedPositionOutput, PositionOutput
+
     yield Nwbfile._get_chain("linear")
 
 

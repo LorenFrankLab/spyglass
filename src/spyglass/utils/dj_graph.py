@@ -22,6 +22,7 @@ class RestrGraph:
         table_name: str = None,
         restriction: str = None,
         leaves: List[Dict[str, str]] = None,
+        cascade: bool = False,
         verbose: bool = False,
         **kwargs,
     ):
@@ -38,6 +39,9 @@ class RestrGraph:
         leaves : Dict[str, str], optional
             List of dictionaries with keys table_name and restriction. One
             entry per leaf node. Default None.
+        cascade : bool, optional
+            Whether to cascade restrictions up the graph on initialization.
+            Default False
         verbose : bool, optional
             Whether to print verbose output. Default False
         """
@@ -57,6 +61,9 @@ class RestrGraph:
             self.add_leaf(table_name, restriction)
         if leaves:
             self.add_leaves(leaves, show_progress=verbose)
+
+        if cascade:
+            self.cascade()
 
     def __repr__(self):
         l_str = ",\n\t".join(self.leaves) + "\n" if self.leaves else ""
@@ -125,9 +132,6 @@ class RestrGraph:
             restriction = make_condition(
                 ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
             )
-
-        # if table == "`spikesorting_merge`.`spike_sorting_output`":
-        #     __import__("pdb").set_trace()
 
         self._set_node(table, "restr", restriction)
 
@@ -285,6 +289,8 @@ class RestrGraph:
         restriction : str
             restriction to apply to leaf
         """
+        self.cascaded = False
+
         new_ancestors = set(self._get_ft(table_name).ancestors())
         self.ancestors |= new_ancestors  # Add to total ancestors
         self.visited -= new_ancestors  # Remove from visited to revisit
