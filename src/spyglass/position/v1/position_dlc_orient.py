@@ -85,6 +85,9 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         # Get labels to smooth from Parameters table
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         cohort_entries = DLCSmoothInterpCohort.BodyPart & key
         pos_df = pd.concat(
             {
@@ -130,9 +133,6 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         final_df = pd.DataFrame(
             orientation, columns=["orientation"], index=pos_df.index
         )
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
-        )
         spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
         orientation = pynwb.behavior.CompassDirection()
         orientation.create_spatial_series(
@@ -155,6 +155,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         )
 
         self.insert1(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]

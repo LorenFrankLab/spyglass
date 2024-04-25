@@ -90,7 +90,7 @@ jobs:
       url: https://pypi.org/p/spyglass-neuro
     permissions:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/download-artifact@v3
         with:
