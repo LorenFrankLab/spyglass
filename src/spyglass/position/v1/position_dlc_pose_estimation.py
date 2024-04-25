@@ -276,15 +276,15 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             idx = pd.IndexSlice
             for body_part, part_df in body_parts_df.items():
                 logger.logger.info("converting to cm")
+                key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+                    key["nwb_file_name"]
+                )
                 part_df = convert_to_cm(part_df, meters_per_pixel)
                 logger.logger.info("adding timestamps to DataFrame")
                 part_df = add_timestamps(
                     part_df, pos_time=pos_time, video_time=video_time
                 )
                 key["bodypart"] = body_part
-                key["analysis_file_name"] = AnalysisNwbfile().create(
-                    key["nwb_file_name"]
-                )
                 position = pynwb.behavior.Position()
                 likelihood = pynwb.behavior.BehavioralTimeSeries()
                 position.create_spatial_series(
@@ -330,6 +330,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     analysis_file_name=key["analysis_file_name"],
                 )
                 self.BodyPart.insert1(key)
+                AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch_dataframe(self, *attrs, **kwargs):
         entries = (self.BodyPart & self).fetch("KEY")
