@@ -10,6 +10,7 @@ import pynwb
 import yaml
 
 from spyglass.utils.logging import logger
+from spyglass.utils import H5pyFile
 
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
@@ -63,8 +64,9 @@ def get_nwb_file(nwb_file_path):
             ):
                 return None
         # now open the file
+        h5f = H5pyFile(nwb_file_path, "r")
         io = pynwb.NWBHDF5IO(
-            path=nwb_file_path, mode="r", load_namespaces=True
+            file=h5f, mode="r", load_namespaces=True
         )  # keep file open
         nwbfile = io.read()
         __open_nwb_files[nwb_file_path] = (io, nwbfile)
@@ -105,7 +107,13 @@ def get_config(nwb_file_path):
 
 def close_nwb_files():
     for io, _ in __open_nwb_files.values():
-        io.close()
+        try:
+            file = io._file
+            io.close()
+            if file:
+                file.close()
+        except Exception as e:
+            logger.warning(f"Error closing NWB file: {e}")
     __open_nwb_files.clear()
 
 

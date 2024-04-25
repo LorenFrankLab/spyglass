@@ -20,7 +20,7 @@ import pandas as pd
 from tqdm import tqdm as tqdm
 
 from spyglass.common.common_behav import VideoFile
-from spyglass.utils import logger
+from spyglass.utils import logger, H5pyFile
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
 
 
@@ -433,14 +433,15 @@ def get_video_path(key):
     video_info = video_query.fetch1()
     nwb_path = f"{raw_dir}/{video_info['nwb_file_name']}"
 
-    with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
-        nwb_file = in_out.read()
-        nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        video_filepath = VideoFile.get_abs_path(vf_key)
-        video_dir = os.path.dirname(video_filepath) + "/"
-        video_filename = video_filepath.split(video_dir)[-1]
-        meters_per_pixel = nwb_video.device.meters_per_pixel
-        timestamps = np.asarray(nwb_video.timestamps)
+    with H5pyFile(nwb_path, "r") as h5f:
+        with pynwb.NWBHDF5IO(file=h5f, mode="r") as in_out:
+            nwb_file = in_out.read()
+            nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
+            video_filepath = VideoFile.get_abs_path(vf_key)
+            video_dir = os.path.dirname(video_filepath) + "/"
+            video_filename = video_filepath.split(video_dir)[-1]
+            meters_per_pixel = nwb_video.device.meters_per_pixel
+            timestamps = np.asarray(nwb_video.timestamps)
 
     return video_dir, video_filename, meters_per_pixel, timestamps
 

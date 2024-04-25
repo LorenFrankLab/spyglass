@@ -9,7 +9,7 @@ import pynwb
 
 from spyglass.common import Nwbfile, get_raw_eseries, populate_all_common
 from spyglass.settings import debug_mode, raw_dir
-from spyglass.utils import logger
+from spyglass.utils import logger, H5pyFile
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
 
@@ -115,51 +115,55 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
             + "overwritten."
         )
 
-    with pynwb.NWBHDF5IO(
-        path=nwb_file_abs_path, mode="r", load_namespaces=True
-    ) as input_io:
-        nwbf = input_io.read()
-
-        # pop off acquisition electricalseries
-        eseries_list = get_raw_eseries(nwbf)
-        for eseries in eseries_list:
-            nwbf.acquisition.pop(eseries.name)
-
-        # pop off analog processing module
-        analog_processing = nwbf.processing.get("analog")
-        if analog_processing:
-            nwbf.processing.pop("analog")
-
-        # export the new NWB file
+    with H5pyFile(nwb_file_abs_path, "r") as h5f:
         with pynwb.NWBHDF5IO(
-            path=out_nwb_file_abs_path, mode="w", manager=input_io.manager
-        ) as export_io:
-            export_io.export(input_io, nwbf)
+            file=h5f, mode="r", load_namespaces=True
+        ) as input_io:
+            nwbf = input_io.read()
+
+            # pop off acquisition electricalseries
+            eseries_list = get_raw_eseries(nwbf)
+            for eseries in eseries_list:
+                nwbf.acquisition.pop(eseries.name)
+
+            # pop off analog processing module
+            analog_processing = nwbf.processing.get("analog")
+            if analog_processing:
+                nwbf.processing.pop("analog")
+
+            # export the new NWB file
+            with H5pyFile(out_nwb_file_abs_path, "w") as h5f_out:
+                with pynwb.NWBHDF5IO(
+                    file=h5f_out, mode="w", manager=input_io.manager
+                ) as export_io:
+                    export_io.export(input_io, nwbf)
 
     # add link from new file back to raw ephys data in raw data file using fresh build manager and container cache
     # where the acquisition electricalseries objects have not been removed
-    with pynwb.NWBHDF5IO(
-        path=nwb_file_abs_path, mode="r", load_namespaces=True
-    ) as input_io:
-        nwbf_raw = input_io.read()
-        eseries_list = get_raw_eseries(nwbf_raw)
-        analog_processing = nwbf_raw.processing.get("analog")
-
+    with H5pyFile(out_nwb_file_abs_path, "r") as h5f:
         with pynwb.NWBHDF5IO(
-            path=out_nwb_file_abs_path, mode="a", manager=input_io.manager
-        ) as export_io:
-            nwbf_export = export_io.read()
+            file=h5f, mode="r", load_namespaces=True
+        ) as input_io:
+            nwbf_raw = input_io.read()
+            eseries_list = get_raw_eseries(nwbf_raw)
+            analog_processing = nwbf_raw.processing.get("analog")
 
-            # add link to raw ephys ElectricalSeries in raw data file
-            for eseries in eseries_list:
-                nwbf_export.add_acquisition(eseries)
+            with H5pyFile(out_nwb_file_abs_path, "a") as h5f_out:
+                with pynwb.NWBHDF5IO(
+                    file=h5f_out, mode="a", manager=input_io.manager
+                ) as export_io:
+                    nwbf_export = export_io.read()
 
-            # add link to processing module in raw data file
-            if analog_processing:
-                nwbf_export.add_processing_module(analog_processing)
+                    # add link to raw ephys ElectricalSeries in raw data file
+                    for eseries in eseries_list:
+                        nwbf_export.add_acquisition(eseries)
 
-            nwbf_export.set_modified()
-            export_io.write(nwbf_export)
+                    # add link to processing module in raw data file
+                    if analog_processing:
+                        nwbf_export.add_processing_module(analog_processing)
+
+                    nwbf_export.set_modified()
+                    export_io.write(nwbf_export)
 
     # change the permissions to only allow owner to write
     permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH

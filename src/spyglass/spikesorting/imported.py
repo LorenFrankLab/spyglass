@@ -6,7 +6,7 @@ import pynwb
 
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, logger, H5pyFile
 
 schema = dj.schema("spikesorting_imported")
 
@@ -35,13 +35,14 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
 
         nwb_file_abs_path = Nwbfile.get_abs_path(key["nwb_file_name"])
 
-        with pynwb.NWBHDF5IO(
-            nwb_file_abs_path, "r", load_namespaces=True
-        ) as io:
-            nwbfile = io.read()
-            if not nwbfile.units:
-                logger.warn("No units found in NWB file")
-                return
+        with H5pyFile(nwb_file_abs_path, "r") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f, mode="r", load_namespaces=True
+            ) as io:
+                nwbfile = io.read()
+                if not nwbfile.units:
+                    logger.warn("No units found in NWB file")
+                    return
 
         from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
             SpikeSortingOutput,

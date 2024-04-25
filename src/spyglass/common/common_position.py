@@ -25,7 +25,7 @@ from spyglass.common.common_behav import RawPosition, VideoFile
 from spyglass.common.common_interval import IntervalList  # noqa F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import raw_dir, video_dir
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, logger, H5pyFile
 from spyglass.utils.dj_helper_fn import deprecated_factory
 
 try:
@@ -555,52 +555,53 @@ class PositionVideo(SpyglassMixin, dj.Computed):
             VideoFile()
             & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         ).fetch1()
-        io = pynwb.NWBHDF5IO(raw_dir + "/" + video_info["nwb_file_name"], "r")
-        nwb_file = io.read()
-        nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        video_filename = nwb_video.external_file[0]
+        with H5pyFile(raw_dir + "/" + video_info["nwb_file_name"], "r") as h5f:
+            io = pynwb.NWBHDF5IO(file=h5f, mode="r")
+            nwb_file = io.read()
+            nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
+            video_filename = nwb_video.external_file[0]
 
-        nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
-        output_video_filename = (
-            f"{nwb_base_filename}_{epoch:02d}_"
-            f'{key["position_info_param_name"]}.mp4'
-        )
-
-        # ensure standardized column names
-        raw_position_df = _fix_col_names(raw_position_df)
-        # if IntervalPositionInfo supersampled position, downsample to video
-        if position_info_df.shape[0] > raw_position_df.shape[0]:
-            ind = np.digitize(
-                raw_position_df.index, position_info_df.index, right=True
+            nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
+            output_video_filename = (
+                f"{nwb_base_filename}_{epoch:02d}_"
+                f'{key["position_info_param_name"]}.mp4'
             )
-            position_info_df = position_info_df.iloc[ind]
 
-        centroids = {
-            "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
-            "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
-        }
-        head_position_mean = np.asarray(
-            position_info_df[["head_position_x", "head_position_y"]]
-        )
-        head_orientation_mean = np.asarray(
-            position_info_df[["head_orientation"]]
-        )
-        video_time = np.asarray(nwb_video.timestamps)
-        position_time = np.asarray(position_info_df.index)
-        cm_per_pixel = nwb_video.device.meters_per_pixel * M_TO_CM
+            # ensure standardized column names
+            raw_position_df = _fix_col_names(raw_position_df)
+            # if IntervalPositionInfo supersampled position, downsample to video
+            if position_info_df.shape[0] > raw_position_df.shape[0]:
+                ind = np.digitize(
+                    raw_position_df.index, position_info_df.index, right=True
+                )
+                position_info_df = position_info_df.iloc[ind]
 
-        logger.info("Making video...")
-        self.make_video(
-            f"{video_dir}/{video_filename}",
-            centroids,
-            head_position_mean,
-            head_orientation_mean,
-            video_time,
-            position_time,
-            output_video_filename=output_video_filename,
-            cm_to_pixels=cm_per_pixel,
-            disable_progressbar=False,
-        )
+            centroids = {
+                "red": np.asarray(raw_position_df[["xloc", "yloc"]]),
+                "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
+            }
+            head_position_mean = np.asarray(
+                position_info_df[["head_position_x", "head_position_y"]]
+            )
+            head_orientation_mean = np.asarray(
+                position_info_df[["head_orientation"]]
+            )
+            video_time = np.asarray(nwb_video.timestamps)
+            position_time = np.asarray(position_info_df.index)
+            cm_per_pixel = nwb_video.device.meters_per_pixel * M_TO_CM
+
+            logger.info("Making video...")
+            self.make_video(
+                f"{video_dir}/{video_filename}",
+                centroids,
+                head_position_mean,
+                head_orientation_mean,
+                video_time,
+                position_time,
+                output_video_filename=output_video_filename,
+                cm_to_pixels=cm_per_pixel,
+                disable_progressbar=False,
+            )
 
     @staticmethod
     def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):

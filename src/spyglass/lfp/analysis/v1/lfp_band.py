@@ -15,7 +15,7 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.lfp.lfp_merge import LFPOutput
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, logger, H5pyFile
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("lfp_band_v1")
@@ -294,31 +294,32 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         )
 
         # now that the LFP is filtered, we create an electrical series for it and add it to the file
-        with pynwb.NWBHDF5IO(
-            path=lfp_band_file_abspath, mode="a", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
-            # get the indices of the electrodes in the electrode table of the file to get the right values
-            elect_index = get_electrode_indices(nwbf, lfp_band_elect_id)
-            electrode_table_region = nwbf.create_electrode_table_region(
-                elect_index, "filtered electrode table"
-            )
-            eseries_name = "filtered data"
-            # TODO: use datatype of data
-            es = pynwb.ecephys.ElectricalSeries(
-                name=eseries_name,
-                data=filtered_data,
-                electrodes=electrode_table_region,
-                timestamps=new_timestamps,
-            )
-            lfp = pynwb.ecephys.LFP(electrical_series=es)
-            ecephys_module = nwbf.create_processing_module(
-                name="ecephys",
-                description=f"LFP data processed with {filter_name}",
-            )
-            ecephys_module.add(lfp)
-            io.write(nwbf)
-            lfp_band_object_id = es.object_id
+        with H5pyFile(lfp_band_file_abspath, mode="a") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f, mode="a", load_namespaces=True
+            ) as io:
+                nwbf = io.read()
+                # get the indices of the electrodes in the electrode table of the file to get the right values
+                elect_index = get_electrode_indices(nwbf, lfp_band_elect_id)
+                electrode_table_region = nwbf.create_electrode_table_region(
+                    elect_index, "filtered electrode table"
+                )
+                eseries_name = "filtered data"
+                # TODO: use datatype of data
+                es = pynwb.ecephys.ElectricalSeries(
+                    name=eseries_name,
+                    data=filtered_data,
+                    electrodes=electrode_table_region,
+                    timestamps=new_timestamps,
+                )
+                lfp = pynwb.ecephys.LFP(electrical_series=es)
+                ecephys_module = nwbf.create_processing_module(
+                    name="ecephys",
+                    description=f"LFP data processed with {filter_name}",
+                )
+                ecephys_module.add(lfp)
+                io.write(nwbf)
+                lfp_band_object_id = es.object_id
         #
         # add the file to the AnalysisNwbfile table
         AnalysisNwbfile().add(key["nwb_file_name"], lfp_band_file_name)
