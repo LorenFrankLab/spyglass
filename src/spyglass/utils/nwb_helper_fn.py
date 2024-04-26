@@ -10,7 +10,7 @@ import pynwb
 import yaml
 
 from spyglass.utils.logging import logger
-from spyglass.utils import H5pyFile
+from spyglass.utils.h5pyfile import H5pyFile
 
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
